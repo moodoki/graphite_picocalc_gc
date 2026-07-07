@@ -41,6 +41,21 @@ add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
 )
 
+# ---- Vendored drivers (read-only, see drivers/README.md) ----
+add_subdirectory(drivers/i2ckbd)
+add_subdirectory(drivers/lcdspi)
+add_subdirectory(drivers/pwm_sound)
+add_subdirectory(drivers/rp2040-psram)
+
+# FatFs core. diskio (SD SPI glue) and get_fattime live in src/platform/.
+add_library(fatfs STATIC
+    drivers/fatfs/ff.c
+    drivers/fatfs/ffsystem.c
+    drivers/fatfs/ffunicode.c
+)
+target_include_directories(fatfs PUBLIC drivers/fatfs)
+target_link_libraries(fatfs PUBLIC pico_stdlib)
+
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
     src/main.cpp
@@ -52,16 +67,31 @@ target_include_directories(picocalc_graphcalc PRIVATE
     drivers/
 )
 
+# rp2040-psram is an INTERFACE library: its sources compile as part of
+# this target, so its pin configuration is set here (PicoCalc mainboard).
+target_compile_definitions(picocalc_graphcalc PRIVATE
+    PSRAM_MUTEX=1
+    PSRAM_ASYNC=0
+    PSRAM_PIN_CS=20
+    PSRAM_PIN_SCK=21
+    PSRAM_PIN_MOSI=2
+    PSRAM_PIN_MISO=3
+)
+
 target_link_libraries(picocalc_graphcalc
     pico_stdlib
     pico_multicore
-    # SDK libraries added as drivers come online:
-    # hardware_spi   (display, PSRAM, SD card)
-    # hardware_i2c   (keyboard)
-    # hardware_dma   (display refresh)
-    # hardware_pio   (display refresh)
-    # hardware_pwm   (audio, backlight)
-    # hardware_interp (softfloat acceleration on Pico 1)
+    hardware_spi
+    hardware_i2c
+    hardware_dma
+    hardware_pio
+    hardware_pwm
+    hardware_timer
+    i2ckbd
+    lcdspi
+    pwm_sound
+    rp2040-psram
+    fatfs
 )
 
 # Generate .uf2, .elf, .bin, .hex, .map alongside the binary.
