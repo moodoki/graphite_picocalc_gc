@@ -26,11 +26,13 @@ These live in `drivers/` as read-only copies. They are vendored (not git submodu
 
 | Directory | Source | Version (commit/release) | License | Notes |
 |-----------|--------|-------------------------|---------|-------|
-| `drivers/lcdspi/` | Coyote OS | TBD (record commit SHA when vendored) | TBD | ST7365P SPI display driver |
-| `drivers/i2ckbd/` | Coyote OS | TBD | TBD | STM32 I2C keyboard driver |
-| `drivers/rp2040-psram/` | Coyote OS | TBD | TBD | 8 MB PSRAM driver |
-| `drivers/pwm_sound/` | Coyote OS | TBD | TBD | PWM piezo buzzer driver |
-| `drivers/fatfs/` | http://elm-chan.org/fsw/ff/ | R0.15a (or current) | BSD-style (FatFs license) | SD card FAT32 filesystem |
+| `drivers/lcdspi/` | Coyote OS | `e86cf36d` (2026-02-05) | GPL-2.0 | ST7365P SPI display driver |
+| `drivers/i2ckbd/` | Coyote OS | `e86cf36d` | GPL-2.0 | STM32 I2C keyboard driver |
+| `drivers/rp2040-psram/` | Coyote OS (upstream polpo/rp2040-psram) | `e86cf36d` | MIT | 8 MB PSRAM driver |
+| `drivers/pwm_sound/` | Coyote OS | `e86cf36d` | GPL-2.0 | PWM piezo buzzer driver |
+| `drivers/fatfs/` | http://elm-chan.org/fsw/ff/ | R0.15a | BSD-style (FatFs license) | SD card FAT32 filesystem |
+
+Note: GPL-2.0 vendored drivers make the combined firmware GPL-2.0 when distributed. Fine for this personal-use project; revisit before any public release.
 
 ## Source dependencies (Phase 1)
 

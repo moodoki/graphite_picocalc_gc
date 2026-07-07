@@ -4,15 +4,16 @@
 
 ## Vendored sources
 
-Fill in commit SHAs and dates as drivers are vendored during Phase 0, task 0.3.
+Vendored 2026-07-08 from Coyote OS commit `e86cf36d26e90e4891615991c1689b76fb2f90b1` (2026-02-05).
 
 | Directory | Source | Commit / Version | License | Notes |
 |-----------|--------|------------------|---------|-------|
-| `lcdspi/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | TBD | TBD | ST7365P SPI display driver |
-| `i2ckbd/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | TBD | TBD | STM32 I2C keyboard driver |
-| `rp2040-psram/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | TBD | TBD | 8 MB PSRAM driver |
-| `pwm_sound/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | TBD | TBD | PWM piezo buzzer driver |
-| `fatfs/` | [elm-chan.org](http://elm-chan.org/fsw/ff/) | R0.15a | BSD-style | SD card FAT32 filesystem |
+| `lcdspi/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | `e86cf36d` | GPL-2.0 (`LICENSE.coyote-os`) | ST7365P SPI display driver; includes `fonts/font1.h`, `fonts/battery.h`; depends on `i2ckbd.h` |
+| `i2ckbd/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | `e86cf36d` | GPL-2.0 (`LICENSE.coyote-os`) | STM32 I2C keyboard driver |
+| `rp2040-psram/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) (upstream: [polpo/rp2040-psram](https://github.com/polpo/rp2040-psram)) | `e86cf36d` | MIT (`rp2040-psram/LICENSE`, © 2023 Ian Scott) | 8 MB PSRAM driver (PIO SPI); `examples/` and Doxyfile dropped |
+| `pwm_sound/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | `e86cf36d` | GPL-2.0 (`LICENSE.coyote-os`) | PWM piezo buzzer driver |
+| `coyote_reference/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | `e86cf36d` | GPL-2.0 (`LICENSE.coyote-os`) | Reference headers only (`config.h` SD pinout, `keyboard_definition.h` scan codes) — not compiled |
+| `fatfs/` | [elm-chan.org](http://elm-chan.org/fsw/ff/) | R0.15a | BSD-style (`fatfs/LICENSE.txt`) | SD card FAT32 filesystem; `diskio.c` is the stub template — SD SPI glue implemented in `src/platform/` (task 1.5) |
 
 ## Why vendor instead of submodule
 

@@ -458,33 +458,33 @@ The repo now has:
 
 Mark these off as you complete them:
 
-- [ ] **0.1.1** Host toolchain installed (cmake, ninja, python3, clang-format, clangd, llvm)
-- [ ] **0.1.2** ARM GNU Toolchain installed (Apple Silicon native)
-- [ ] **0.1.3** Environment variables set in `~/.zshrc`
-- [ ] **0.1.4** Pico SDK cloned with submodules
-- [ ] **0.1.5** Pico examples blink builds for both Pico 1 and Pico 2
-- [ ] **0.1.6** Hardware smoke test: blink runs on bare Pico 1 and Pico 2 modules
-- [ ] **0.2.1** Repo initialized
-- [ ] **0.2.2** Directory structure created
-- [ ] **0.2.3** `src/main.cpp` blink stub committed
-- [ ] **0.2.4** Top-level `CMakeLists.txt` committed
-- [ ] **0.2.5** `pico_sdk_import.cmake` committed
-- [ ] **0.2.6** Both `picocalc_graphcalc.uf2` files build successfully
-- [ ] **0.3.1** Coyote OS source obtained
-- [ ] **0.3.2** Drivers vendored to `drivers/`
-- [ ] **0.3.3** `drivers/README.md` documents sources, versions, licenses
-- [ ] **0.4.1** `.clang-format` committed
-- [ ] **0.4.2** `.clang-tidy` committed
-- [ ] **0.4.3** `.clangd/config.yaml` committed
-- [ ] **0.4.4** `.editorconfig` committed
-- [ ] **0.4.5** `scripts/` populated with build/format/lint/flash/setup-clangd helpers
-- [ ] **0.4.6** `.gitignore` committed
-- [ ] **0.4.7** CI workflow committed (if using GitHub Actions)
-- [ ] **0.5** Doc skeleton committed (architecture, hardware, dev-environment, dependencies)
-- [ ] **0.6.1** `AGENTS.md` reviewed and current
-- [ ] **0.6.2** `CLAUDE.md` points at `AGENTS.md`
-- [ ] **0.6.3** Personal `CLAUDE.local.md` created (gitignored)
-- [ ] **0.6.5** `scripts/validate_md.py` committed
-- [ ] **0.7** First commit pushed to remote (if using one)
+- [x] **0.1.1** Host toolchain installed (cmake, ninja, python3, clang-format, clangd, llvm)
+- [x] **0.1.2** ARM GNU Toolchain installed (Apple Silicon native — 15.2.rel1 via `gcc-arm-embedded` cask; see dev-environment.md for the Homebrew-formula newlib trap)
+- [x] **0.1.3** Environment variables set (documented in dev-environment.md §4; scripts take them from the environment)
+- [x] **0.1.4** Pico SDK cloned with submodules (2.2.0, in-repo at `./pico-sdk`, gitignored)
+- [x] **0.1.5** Pico examples build for both Pico 1 and Pico 2 (verified with `hello_serial`, 2026-07-08)
+- [ ] **0.1.6** Hardware smoke test: blink runs on bare Pico 1 and Pico 2 modules *(HW-PENDING — see worklog)*
+- [x] **0.2.1** Repo initialized
+- [x] **0.2.2** Directory structure created
+- [x] **0.2.3** `src/main.cpp` blink stub committed
+- [x] **0.2.4** Top-level `CMakeLists.txt` committed
+- [x] **0.2.5** `pico_sdk_import.cmake` committed
+- [x] **0.2.6** Both `picocalc_graphcalc.uf2` files build successfully
+- [x] **0.3.1** Coyote OS source obtained (commit `e86cf36d`, 2026-02-05)
+- [x] **0.3.2** Drivers vendored to `drivers/` (lcdspi, i2ckbd, rp2040-psram, pwm_sound, fatfs R0.15a, coyote_reference headers)
+- [x] **0.3.3** `drivers/README.md` documents sources, versions, licenses
+- [x] **0.4.1** `.clang-format` committed
+- [x] **0.4.2** `.clang-tidy` committed
+- [x] **0.4.3** `.clangd/config.yaml` committed
+- [x] **0.4.4** `.editorconfig` committed
+- [x] **0.4.5** `scripts/` populated with build/format/lint/flash/setup-clangd helpers
+- [x] **0.4.6** `.gitignore` committed
+- [x] **0.4.7** CI workflow committed (SDK pinned to 2.2.0)
+- [x] **0.5** Doc skeleton committed (architecture, hardware, dev-environment, dependencies)
+- [x] **0.6.1** `AGENTS.md` reviewed and current
+- [x] **0.6.2** `CLAUDE.md` points at `AGENTS.md`
+- [s] **0.6.3** Personal `CLAUDE.local.md` created — skipped, developer's personal call; template in §0.6.3
+- [x] **0.6.5** `scripts/validate_md.py` committed
+- [s] **0.7** First commit pushed to remote — local commit `f76d10c` exists; no remote configured yet
 
 Once everything is checked, proceed to [phase1-plan.md](phase1-plan.md).
