@@ -1,0 +1,80 @@
+# clang-format configuration for PicoCalc Graphing Calculator
+# Based on Google style with project-specific tweaks for embedded C++.
+
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+
+# Line length
+ColumnLimit: 100
+
+# Braces
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortLambdasOnASingleLine: All
+
+# Pointers and references
+PointerAlignment: Left           # int* x, not int *x
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+# Spaces
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceAfterCStyleCast: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpacesInAngles: false
+
+# Includes
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex:           '^"platform/.*"'
+    Priority:        2
+  - Regex:           '^"gfx/.*"'
+    Priority:        3
+  - Regex:           '^"ui/.*"'
+    Priority:        4
+  - Regex:           '^"math/.*"'
+    Priority:        5
+  - Regex:           '^"render/.*"'
+    Priority:        6
+  - Regex:           '^"apps/.*"'
+    Priority:        7
+  - Regex:           '^"[^/]*\.hpp"'
+    Priority:        1
+  - Regex:           '^<.*>'
+    Priority:        10
+  - Regex:           '.*'
+    Priority:        20
+
+# Comments
+ReflowComments: true
+SpacesBeforeTrailingComments: 2
+
+# Misc
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
+NamespaceIndentation: None
+FixNamespaceComments: true
+SortUsingDeclarations: true
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+BinPackArguments: true
+BinPackParameters: true
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+Cpp11BracedListStyle: true

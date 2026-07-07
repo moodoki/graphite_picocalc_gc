@@ -1,0 +1,48 @@
+# Local checkouts of the Pico SDK and examples (not part of this repo)
+pico-sdk/
+pico-examples/
+
+# Build artifacts
+build/
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+*.dis
+
+# clangd / language server
+compile_commands.json
+.cache/
+.clangd/.clangd-state/
+
+# Editor / IDE
+.vscode/*.local.json
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Personal/agent state (per-developer, not committed)
+CLAUDE.local.md
+.claude/memory/
+.claude/state/
+.agent/state/
+.agent/cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.python-version
+
+# Logs and temporary files
+*.log
+tmp/
+.tmp/

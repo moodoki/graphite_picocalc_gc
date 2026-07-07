@@ -1,0 +1,45 @@
+# clangd configuration for PicoCalc Graphing Calculator
+#
+# Project-wide settings. Per-developer settings (e.g., editor-specific
+# arguments) belong in your editor's clangd configuration, not here.
+#
+# The `--query-driver` argument MUST be set in your editor's clangd
+# arguments — it cannot be set from this file. See docs/dev-environment.md.
+
+CompileFlags:
+  # Strip Pico SDK flags that confuse upstream clang's parser
+  Remove:
+    - -mcpu=*
+    - -mfpu=*
+    - -mfloat-abi=*
+    - -mthumb
+    - --specs=*
+    - -fno-threadsafe-statics
+  # Add flags that help clang's parser understand the codebase
+  Add:
+    - -Wno-unknown-attributes
+    - -Wno-unknown-pragmas
+    - -ferror-limit=0
+
+Diagnostics:
+  # Suppress noisy diagnostics from vendored code
+  Suppress:
+    - 'unused-includes'
+  ClangTidy:
+    # Don't run clang-tidy automatically in the editor; it's run
+    # explicitly by ./scripts/lint.sh. Keeping it off here makes
+    # editing snappier.
+    Remove: ['*']
+
+# Per-directory overrides
+---
+If:
+  PathMatch: drivers/.*
+Diagnostics:
+  Suppress: '*'  # Don't lint vendored C drivers
+
+---
+If:
+  PathMatch: build/.*
+Diagnostics:
+  Suppress: '*'  # Don't analyze build artifacts

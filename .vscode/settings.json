@@ -1,0 +1,50 @@
+{
+  "//": "VS Code workspace settings. Per-developer overrides go in .local.json (gitignored).",
+
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.path": "/opt/homebrew/opt/llvm/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--clang-tidy=false",
+    "--header-insertion=never",
+    "--query-driver=/Applications/ArmGNUToolchain/**/bin/arm-none-eabi-*",
+    "--completion-style=detailed",
+    "--function-arg-placeholders=true"
+  ],
+  "clangd.fallbackFlags": [
+    "-std=c++17",
+    "-Wall",
+    "-Wextra"
+  ],
+
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+  "editor.rulers": [100],
+
+  "files.associations": {
+    "*.tpp": "cpp",
+    "*.inc": "cpp"
+  },
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.trimTrailingWhitespace": true,
+
+  "[markdown]": {
+    "files.trimTrailingWhitespace": false
+  },
+
+  "cmake.generator": "Ninja",
+  "cmake.configureArgs": [
+    "-DPICO_BOARD=pico"
+  ],
+  "cmake.buildDirectory": "${workspaceFolder}/build/${variant:board}",
+
+  "search.exclude": {
+    "build/**": true,
+    "drivers/**": true,
+    ".cache/**": true
+  }
+}

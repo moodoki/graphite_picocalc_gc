@@ -1,0 +1,91 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [pico, pico2]
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake ninja-build python3 git \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+
+      - name: Cache Pico SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ~/pico-sdk
+          key: pico-sdk-2.2.0-${{ runner.os }}
+
+      - name: Clone Pico SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          git clone -b 2.2.0 --depth 1 --recurse-submodules \
+            https://github.com/raspberrypi/pico-sdk.git ~/pico-sdk
+
+      - name: Configure
+        run: |
+          cmake -G Ninja \
+            -DPICO_BOARD=${{ matrix.board }} \
+            -DPICO_SDK_PATH=$HOME/pico-sdk \
+            -B build/${{ matrix.board }} \
+            -S .
+
+      - name: Build
+        run: cmake --build build/${{ matrix.board }}
+
+      - name: Upload UF2
+        uses: actions/upload-artifact@v4
+        with:
+          name: picocalc_graphcalc-${{ matrix.board }}
+          path: build/${{ matrix.board }}/picocalc_graphcalc.uf2
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: |
+          if [ -d src ] && [ -n "$(find src -name '*.cpp' -o -name '*.hpp' 2>/dev/null)" ]; then
+            find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \) \
+              | xargs clang-format --dry-run --Werror
+          else
+            echo "No source files yet, skipping format check."
+          fi
+
+  validate-docs:
+    name: Validate docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate markdown
+        run: python3 scripts/validate_md.py docs/ AGENTS.md README.md
