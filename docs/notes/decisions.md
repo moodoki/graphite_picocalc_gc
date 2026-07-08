@@ -30,6 +30,48 @@ Format:
 
 ---
 
+## D6: RGB565 framebuffers, RGB666 on the wire
+
+**Date**: 2026-07-08
+**Status**: Accepted
+**Context**: The Coyote OS panel init programs COLMOD 0x66 (18-bit color, 3 bytes/pixel over SPI) — the ILI9488-family serial interface does not accept RGB565. The spec assumed RGB565 end-to-end.
+**Decision**: Keep all render buffers RGB565 (as spec'd); convert to 3-byte RGB666 in `platform::Display` during push, using 5-to-8/6-to-8 bit LUTs, chunked through two 4-scanline staging buffers so conversion overlaps DMA.
+**Rationale**: Preserves the spec's memory budget (2 B/px buffers) and the proven panel init. Conversion is a few cycles/pixel on core 1, which is otherwise idle waiting on SPI.
+**Tradeoffs**: 50% more SPI traffic than true 565 (~98 ms/full frame @ 25 MHz — partial updates and/or a higher SPI clock are the perf levers; see worklog).
+**Revisit when**: Profiling (task 5.6) shows the panel accepts COLMOD 0x55 at speed, or SPI overclocking changes the math.
+
+## D7: Non-blocking keyboard poll state machine
+
+**Date**: 2026-07-08
+**Status**: Accepted
+**Context**: Vendored `read_i2c_kbd()` sleeps 16 ms between the FIFO register select and the data read — unacceptable in a per-frame poll loop.
+**Decision**: `platform::Keyboard::poll()` reimplements the same I2C protocol (reg 0x09, addr 0x1F) as a two-phase non-blocking state machine (select, then read at least 10 ms later). The vendored driver still provides bus init and scan-code reference.
+**Rationale**: Keeps the main loop responsive; drivers stay unmodified.
+**Tradeoffs**: Two places know the STM32 protocol (vendored driver + wrapper).
+**Revisit when**: STM32 firmware changes its register map, or an interrupt-driven design is needed.
+
+## D8: FatFs local config — LFN enabled, CP437
+
+**Date**: 2026-07-08
+**Status**: Accepted
+**Context**: Spec filenames (`variables.dat`) exceed 8.3; the FatFs default config has LFN off and Shift-JIS codepage tables (large flash cost).
+**Decision**: `ffconf.h`: `FF_USE_LFN=1` (static buffer), `FF_CODE_PAGE=437`. Documented as a local modification (ffconf.h is FatFs's designated user-config file).
+**Rationale**: Smallest change that supports the spec's file layout.
+**Tradeoffs**: LFN=1 is not thread-safe — fine, all file I/O happens on core 0.
+**Revisit when**: File I/O moves off core 0.
+
+## D9: Interim 8x12 font (Coyote font1) instead of 8x16
+
+**Date**: 2026-07-08
+**Status**: Accepted (interim)
+**Context**: Spec calls for an 8x16 font generated from a public-domain BDF; that conversion needs font tooling not yet in the repo.
+**Decision**: Ship milestone 1 with the vendored Coyote OS `font1` (8x12, UTFT layout) behind `gfx::Font`, which reads any UTFT-format header. Generate proper 8x16 + 6x8 fonts before milestone 5.
+**Rationale**: Unblocks all text rendering now; the Font abstraction makes the swap a data change.
+**Tradeoffs**: Slightly smaller glyphs than designed; layout metrics tuned later.
+**Revisit when**: Task 5.x polish, or when the math renderer needs multiple sizes (milestone 3).
+
+---
+
 <!-- New decisions go above this line. Below: pre-Phase-0 decisions captured retrospectively from the spec & feasibility report. -->
 
 ## D-prelude-3: Use C++17 with the Pico SDK

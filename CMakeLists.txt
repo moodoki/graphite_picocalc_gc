@@ -59,7 +59,17 @@ target_link_libraries(fatfs PUBLIC pico_stdlib)
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
     src/main.cpp
-    # More sources added in Phase 1 tasks.
+    src/platform/display.cpp
+    src/platform/keyboard.cpp
+    src/platform/platform.cpp
+    src/platform/psram.cpp
+    src/platform/sd_card.cpp
+    src/platform/sd_diskio.cpp
+    src/platform/storage.cpp
+    src/platform/system.cpp
+    src/gfx/font.cpp
+    src/gfx/framebuffer.cpp
+    src/ui/screen_manager.cpp
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE

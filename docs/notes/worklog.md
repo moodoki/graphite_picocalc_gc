@@ -18,15 +18,23 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 0 complete (except HW smoke test) → Phase 1 milestone 1 (bootstrap) starting
-- **Next up**: task 1.2 (driver CMake integration), then 1.3 Display wrapper
-- **Both boards build**: yes (`./scripts/build-all.sh`, blink stub)
+- **Phase**: 1, milestone 1 (bootstrap) CODE COMPLETE → milestone 2 (calculator core) next
+- **Next up**: task 2.1 — vendor tinyexpr++, `math::Engine`
+- **Both boards build**: yes (`./scripts/build-all.sh` → diagnostics-screen firmware)
 
 ## HW-PENDING verification queue
 
+Flash `build/pico/picocalc_graphcalc.uf2` (or `build/pico2/...`) — it boots to a
+diagnostics screen that exercises everything below at once.
+
 | Item | Since | What to check on hardware |
 |------|-------|---------------------------|
-| 0.1.6 blink smoke test | 2026-07-08 | Flash `build/pico/picocalc_graphcalc.uf2` (and pico2) to bare Pico modules; LED blinks |
+| 1.3 Display | 2026-07-08 | Text + RGBW color bars render; bar colors in R,G,B,W order (checks 565→666 conversion + BGR order) |
+| 1.4 Keyboard | 2026-07-08 | Typing updates "Keys seen"/"Last key"; events also on USB serial |
+| 1.5 SD card | 2026-07-08 | With FAT32 card inserted: "SD card: OK (file r/w verified)" |
+| 1.6 PSRAM | 2026-07-08 | "PSRAM: OK (1KB r/w verified)" |
+| 1.7 Renderer/DMA | 2026-07-08 | Frame counter ticks smoothly; no tearing/hangs (dual-core FIFO + DMA) |
+| Backlight | 2026-07-08 | Screen visibly lit (set_backlight(200) via STM32 reg 0x05 — unverified register) |
 
 ---
 
@@ -63,3 +71,31 @@ vendor FatFs R0.15a, record SHAs + licenses.
   integrated incrementally in tasks 1.3–1.6.
 - Useful discovery: Coyote OS uses tinyexpr (C) and pico-vfs as submodules; we'll use
   tinyexpr++ per spec (task 2.1) and plain FatFs instead of pico-vfs.
+
+### Checkpoint: Milestone 1 (bootstrap) code complete (2026-07-08)
+
+Tasks 1.1–1.9 all [x] in phase1-plan.md; both boards build the diagnostics firmware.
+Decisions D6–D9 recorded (RGB666 wire format, async keyboard, FatFs LFN, interim font).
+
+Layer map as built:
+- `src/platform/`: display (565→666 push, DMA), keyboard (async poll SM), sd_card
+  (own SD SPI driver) + sd_diskio (FatFs glue) + storage (FatFs API), psram (bump
+  allocator over PSRAM addresses), system (battery via STM32), platform::init().
+- `src/gfx/`: framebuffer (strip ping-pong on Pico 1 / full FB on Pico 2, clipped
+  primitives, core-1 display service over multicore FIFO), font (UTFT-format).
+- `src/ui/`: Screen base + fixed-depth ScreenManager.
+- `src/main.cpp`: core dispatch + DiagScreen (self-tests for SD/PSRAM, key echo).
+
+Notes / known limitations:
+- **Full-frame push is ~98 ms @ 25 MHz SPI** (3 B/px wire format) → ~10 fps if the
+  whole screen redraws every frame. Fine for milestone-1 accept ("text visible"),
+  but the spec's 30 fps target needs dirty-rect updates and/or SPI overclock —
+  planned lever for task 5.6. Milestone 2+ UI should avoid full-screen redraws.
+- Overclock constant (`config::kOverclockHz`) intentionally NOT applied yet.
+- `set_backlight` uses STM32 reg 0x05 (standard PicoCalc fw) — not in the vendored
+  driver, needs HW confirmation.
+- lint.sh not run: clang-tidy unavailable (Homebrew `llvm` not installed — ~1.5 GB;
+  developer's call). clang-format installed (v22) and applied; line width 100.
+- Vendored driver C files emit warnings under our -Wall/-Wextra/-Wpedantic (they
+  compile as part of our target via INTERFACE libs). Cosmetic; suppress later if
+  it drowns signal.

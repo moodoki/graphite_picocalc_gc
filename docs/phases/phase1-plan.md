@@ -26,15 +26,15 @@ This is the active working document for Phase 1 — task list, status tracking, 
 
 | # | Task | Est. hrs | Status | Notes |
 |---|------|---|---|---|
-| 1.1 | Repo + dual-board CMake build | 3 | [ ] | |
-| 1.2 | Vendor Coyote OS C drivers | 2 | [ ] | Done in Phase 0; verify CMake integration here |
-| 1.3 | `platform::Display` wrapper | 8 | [ ] | |
-| 1.4 | `platform::Keyboard` wrapper | 6 | [ ] | |
-| 1.5 | `platform::Storage` wrapper (FatFs) | 4 | [ ] | |
-| 1.6 | `platform::Psram` wrapper | 3 | [ ] | |
-| 1.7 | Line-buffer renderer + DMA on core 1 | 8 | [ ] | |
-| 1.8 | `gfx::Font` with 8$\times$16 font | 4 | [ ] | |
-| 1.9 | Basic `ScreenManager` | 3 | [ ] | |
+| 1.1 | Repo + dual-board CMake build | 3 | [x] | 2026-07-08, commits `f76d10c`..`d62d539` |
+| 1.2 | Vendor Coyote OS C drivers | 2 | [x] | Vendored `e86cf36d`; CMake integration in `d62d539` |
+| 1.3 | `platform::Display` wrapper | 8 | [x] | RGB666 wire format — see D6. HW-PENDING |
+| 1.4 | `platform::Keyboard` wrapper | 6 | [x] | Non-blocking poll — see D7. HW-PENDING |
+| 1.5 | `platform::Storage` wrapper (FatFs) | 4 | [x] | Own SD SPI driver + diskio glue; LFN — see D8. HW-PENDING |
+| 1.6 | `platform::Psram` wrapper | 3 | [x] | Bump allocator over PSRAM addresses (not pointers). HW-PENDING |
+| 1.7 | Line-buffer renderer + DMA on core 1 | 8 | [x] | Strip ping-pong on Pico 1, full FB on Pico 2. HW-PENDING |
+| 1.8 | `gfx::Font` with 8$\times$16 font | 4 | [x] | Interim 8x12 font1 — see D9 |
+| 1.9 | Basic `ScreenManager` | 3 | [x] | Fixed-depth stack; DiagScreen demo in main.cpp |
 
 **Acceptance**: PicoCalc boots, shows text, responds to keyboard, reads/writes SD card. Both `.uf2` files functional on hardware.
 
@@ -123,8 +123,8 @@ This is the active working document for Phase 1 — task list, status tracking, 
 
 | Week range | Subtotal | Cumulative | Status |
 |------------|---------|------------|--------|
-| Phase 0 (prep) | ~12 hrs | 12 | [ ] |
-| Week 1–2: Bootstrap | ~41 hrs | 53 | [ ] |
+| Phase 0 (prep) | ~12 hrs | 12 | [x] |
+| Week 1–2: Bootstrap | ~41 hrs | 53 | [x] (code complete; HW verification pending) |
 | Week 3–4: Calculator core | ~34 hrs | 87 | [ ] |
 | Week 5–6: Math renderer | ~32 hrs | 119 | [ ] |
 | Week 7–8: Graphing | ~39 hrs | 158 | [ ] |
