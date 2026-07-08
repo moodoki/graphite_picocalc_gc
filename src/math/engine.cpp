@@ -107,30 +107,26 @@ calc_t& Variables::operator[](char name) {
     return vars[kAns];
 }
 
-Engine::Engine() = default;
+namespace {
 
-EvalResult Engine::eval_internal(const char* expr) {
-    EvalResult res;
+// Build the variable + function binding table. Names a-z bind to
+// vars.vars[] (stable addresses); the extended library shadows tinyexpr
+// builtins where semantics differ (log = base 10, angle-aware trig).
+// The lookup array is only needed during te_compile — the pointers it
+// captures (into vars and static function code) outlive it. Returns the
+// number of entries written; `lookup` must hold at least kLookupCount.
+constexpr int kLookupCount = 26 + 2 + 17;
 
-    char processed[kMaxExpr];
-    if (!preprocess(expr, processed, sizeof(processed))) {
-        res.error = "Expression too long";
-        return res;
-    }
-
-    // Variable + function bindings. Single-letter names a-z map into
-    // vars_; user lookups shadow tinyexpr builtins (trig, log).
-    static const char* kNames = "abcdefghijklmnopqrstuvwxyz";
-    te_variable lookup[26 + 2 + 17];
-    int li = 0;
+int build_lookup(Variables& vars, te_variable* lookup) {
     static char names[26][2];
+    int li = 0;
     for (int i = 0; i < 26; ++i) {
-        names[i][0] = kNames[i];
+        names[i][0] = static_cast<char>('a' + i);
         names[i][1] = 0;
-        lookup[li++] = {names[i], &vars_.vars[i], TE_VARIABLE, nullptr};
+        lookup[li++] = {names[i], &vars.vars[i], TE_VARIABLE, nullptr};
     }
-    lookup[li++] = {"theta", &vars_.vars[Variables::kTheta], TE_VARIABLE, nullptr};
-    lookup[li++] = {"ans", &vars_.vars[Variables::kAns], TE_VARIABLE, nullptr};
+    lookup[li++] = {"theta", &vars.vars[Variables::kTheta], TE_VARIABLE, nullptr};
+    lookup[li++] = {"ans", &vars.vars[Variables::kAns], TE_VARIABLE, nullptr};
 
     lookup[li++] = {"sin", reinterpret_cast<const void*>(fn::sin_am), TE_FUNCTION1, nullptr};
     lookup[li++] = {"cos", reinterpret_cast<const void*>(fn::cos_am), TE_FUNCTION1, nullptr};
@@ -149,6 +145,24 @@ EvalResult Engine::eval_internal(const char* expr) {
     lookup[li++] = {"max", reinterpret_cast<const void*>(fn::max2), TE_FUNCTION2, nullptr};
     lookup[li++] = {"deg", reinterpret_cast<const void*>(fn::deg), TE_FUNCTION1, nullptr};
     lookup[li++] = {"rad", reinterpret_cast<const void*>(fn::rad), TE_FUNCTION1, nullptr};
+    return li;
+}
+
+}  // namespace
+
+Engine::Engine() = default;
+
+EvalResult Engine::eval_internal(const char* expr) {
+    EvalResult res;
+
+    char processed[kMaxExpr];
+    if (!preprocess(expr, processed, sizeof(processed))) {
+        res.error = "Expression too long";
+        return res;
+    }
+
+    te_variable lookup[kLookupCount];
+    const int li = build_lookup(vars_, lookup);
 
     int err = 0;
     te_expr* compiled = te_compile(processed, lookup, li, &err);
@@ -160,6 +174,31 @@ EvalResult Engine::eval_internal(const char* expr) {
     te_free(compiled);
     res.ok = true;
     return res;
+}
+
+void* Engine::compile(const char* expr) {
+    char processed[kMaxExpr];
+    if (!preprocess(expr, processed, sizeof(processed))) {
+        return nullptr;
+    }
+    te_variable lookup[kLookupCount];
+    const int li = build_lookup(vars_, lookup);
+    int err = 0;
+    return te_compile(processed, lookup, li, &err);
+}
+
+calc_t Engine::eval_compiled(void* handle, calc_t x_val) {
+    if (handle == nullptr) {
+        return 0.0 / 0.0;  // NaN
+    }
+    vars_.vars['x' - 'a'] = x_val;
+    return te_eval(static_cast<te_expr*>(handle));
+}
+
+void Engine::free_compiled(void* handle) {
+    if (handle != nullptr) {
+        te_free(static_cast<te_expr*>(handle));
+    }
 }
 
 EvalResult Engine::evaluate(const char* expr) {

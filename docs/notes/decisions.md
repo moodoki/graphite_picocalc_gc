@@ -30,6 +30,26 @@ Format:
 
 ---
 
+## D3: Trace coordinate readout at the bottom of the viewport
+
+**Date**: 2026-07-08
+**Status**: Accepted
+**Context**: Open decision — show the trace `(x, y)` at the top or bottom of the graph? Top risks overlapping the plotted curves near the peak; bottom risks the softkey bar.
+**Decision**: Bottom of the viewport, in a dark strip just above the softkey bar, matching the TI-84.
+**Rationale**: Curves cluster around the top/middle more often than the very bottom edge; TI users expect it there.
+**Tradeoffs**: A curve that dips to the bottom edge is briefly obscured by the readout. Acceptable.
+**Revisit when**: A cleaner overlay (semi-transparent, or auto-repositioning away from the cursor) is worth the code.
+
+## D5: Keep `double` for graph evaluation (float deferred)
+
+**Date**: 2026-07-08
+**Status**: Deferred (revisit after hardware profiling)
+**Context**: Open decision — use `float` instead of `double` for graph point evaluation on Pico 1 (no FPU) to roughly halve softfloat cost?
+**Decision**: Keep `double` (`math::calc_t`) everywhere for now, including the graph sweep. The compile-once/eval-many path already removes the dominant cost (re-parsing per point), so evaluation is 320 `te_eval`s per function, not 320 compiles.
+**Rationale**: Correctness first; can't profile without hardware. `calc_t` is a single typedef, so a `float` graph-eval variant is a localized change if profiling shows plotting is too slow.
+**Tradeoffs**: Softfloat `double` is ~2x slower than `float` on RP2040; may matter with 7 functions. Measured lever, not a guess.
+**Revisit when**: Task 5.6 profiling on real Pico 1 hardware shows graph render missing the <50 ms target.
+
 ## D2: Fractions stack only for "simple" operands
 
 **Date**: 2026-07-08

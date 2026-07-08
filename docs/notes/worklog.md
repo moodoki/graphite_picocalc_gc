@@ -18,10 +18,11 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1, milestone 3 (math renderer) CODE COMPLETE → milestone 4 (graphing) next
-- **Next up**: task 4.1 — `YEditorScreen` (Y1..Y7 function list)
-- **Both boards build**: yes (`./scripts/build-all.sh` → calculator firmware, boots to HomeScreen)
-- **Host tests**: `./scripts/host-tests.sh` → 53 math + 21 layout = 74 checks, 0 failures
+- **Phase**: 1, milestone 4 (graphing) CODE COMPLETE → milestone 5 (polish) next
+- **Next up**: task 5.1 — status bar (mode indicators, title). This is the LAST milestone.
+- **Both boards build**: yes (`./scripts/build-all.sh` → full graphing-calculator firmware)
+- **Host tests**: `./scripts/host-tests.sh` → 60 math + 21 layout = 81 checks, 0 failures
+- **Phase 1 is now feature-complete** pending polish (M5) + hardware verification.
 
 ## HW-PENDING verification queue
 
@@ -40,6 +41,8 @@ diagnostics screen that exercises everything below at once.
 | 2.7 Persistence | 2026-07-08 | History + variables survive power cycle (needs FAT32 SD card) |
 | Store op | 2026-07-08 | `2->A` stores; `A+1` → 3 (D1). Verified in host tests, but confirm on-device keyboard can type `-` and `>` |
 | 3.6 Pretty math | 2026-07-08 | Enter `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → history shows stacked fractions, raised exponents, scaled parens; check vertical alignment/legibility at 8x12 |
+| 4.x Graphing | 2026-07-08 | HomeScreen F1=Y=, F2=WIN, F3=GRAPH. In Y= enter `x^2-3`, `sin(x)`; F4→graph plots in distinct colors with axes+grid. Graph: F1 trace (L/R, U/D switch fn, x/y readout), F2/F3 zoom, S/T presets. WindowScreen edits ranges → replot. All survive power cycle (SD) |
+| Graph perf | 2026-07-08 | Measure full 7-function replot time on Pico 1 (spec target <50 ms; D5 float fallback is the lever if over) |
 
 ---
 
@@ -173,3 +176,37 @@ Known limitations / deferred:
 - SqrtNode deferred to Phase 2 per spec (sqrt renders as "sqrt(x)" text for now).
 - Rebuilding history trees every strip (~20x/frame) is wasteful but cheap for short
   strings; optimize with dirty-rects / cached measurement in task 5.6 if needed.
+
+### Checkpoint: Milestone 4 (graphing) code complete (2026-07-08)
+
+Tasks 4.1-4.9 all [x]; both boards build; 81/81 host tests pass. Decisions D3 (trace
+readout at bottom) and D5 (keep double, float deferred) recorded. **Phase 1 is now
+feature-complete** — only milestone 5 (polish) and hardware verification remain.
+
+New:
+- `math::Engine` gained a compile-once/eval-many path (`compile` / `eval_compiled` /
+  `free_compiled`) so graphing does 320 evals per function, not 320 re-parses. Shared
+  `build_lookup()` helper. GraphScreen saves/restores the user's X around the sweep.
+- `src/apps/graph_model`: Y1..Y7 + GraphWindow singletons, 7-color palette, SD
+  persistence (yfuncs.txt TSV, window.dat binary), zoom presets/ops.
+- `src/apps/y_editor`: Y= list editor (navigate, inline edit via InputLine, enable
+  checkbox, clear, jump to graph).
+- `src/apps/graph_screen`: column-cached plotting (recompute on dirty), axes+grid,
+  discontinuity detection, trace cursor, zoom. Softkeys F1 trace / F2,F3 zoom /
+  F5 Y=; keys S,T = standard/trig presets.
+- `src/apps/window_screen`: 6-field editor; ESC replots and returns to graph.
+- HomeScreen softkeys now F1=Y=, F2=WINDOW, F3=GRAPH, F4=MODE; main loads graph
+  state at boot.
+
+Host tests: added compile/eval_compiled coverage to test_math (60 checks now).
+The plotting/axes/trace geometry is not host-tested (needs the framebuffer) — that's
+the largest HW-PENDING surface this milestone.
+
+Known limitations / deferred:
+- **ZoomFit (F4 in spec) not implemented** — needs a y-range auto-scan over enabled
+  functions. Left as a small follow-up; F2/F3/S/T cover the common cases.
+- **Axis tick numeric labels not drawn** (grid lines are). Deferred to M5 polish;
+  needs careful label placement to avoid clutter at 8x12.
+- Graph coordinate coloring/labels and the "no functions" hint are basic; refine in M5.
+- Trace steps by pixel column (reads the cache), not by evaluating at sub-pixel x —
+  fine for a 320px viewport.

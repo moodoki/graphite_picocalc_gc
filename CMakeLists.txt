@@ -83,6 +83,10 @@ add_executable(picocalc_graphcalc
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
     src/apps/home_screen.cpp
+    src/apps/graph_model.cpp
+    src/apps/y_editor.cpp
+    src/apps/graph_screen.cpp
+    src/apps/window_screen.cpp
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE

@@ -40,6 +40,14 @@ public:
     // no Ans update, no store).
     EvalResult evaluate_at(const char* expr, calc_t x_val);
 
+    // Compile once, evaluate many (graphing): returns an opaque handle
+    // (nullptr on parse error). eval_compiled binds X then evaluates;
+    // caller must free_compiled() when done. Not reentrant across the
+    // shared X variable — evaluate one function's columns at a time.
+    void* compile(const char* expr);
+    calc_t eval_compiled(void* handle, calc_t x_val);
+    void free_compiled(void* handle);
+
     Variables& vars() { return vars_; }
 
 private:

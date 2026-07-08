@@ -5,10 +5,14 @@
 
 #include "platform/storage.hpp"
 #include "gfx/font.hpp"
+#include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
+#include "apps/graph_screen.hpp"
+#include "apps/window_screen.hpp"
+#include "apps/y_editor.hpp"
 
 namespace apps {
 
@@ -153,6 +157,15 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kEscape:
             input_.clear();
             return true;
+        case Key::kF1:
+            ui::screen_manager().push(&y_editor_screen());
+            return true;
+        case Key::kF2:
+            ui::screen_manager().push(&window_screen());
+            return true;
+        case Key::kF3:
+            ui::screen_manager().push(&graph_screen());
+            return true;
         case Key::kF4:
             math::set_angle_mode(math::angle_mode() == math::AngleMode::kRadians
                                      ? math::AngleMode::kDegrees
@@ -209,7 +222,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     // Softkey bar placeholder (full integration in task 5.2)
     fb.fill_rect(0, kSoftkeyY, platform::kScreenW, platform::kScreenH - kSoftkeyY,
                  platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, kSoftkeyY + 6, "F4:MODE           F6:DIAG", kGrayLine);
+    font.draw_string(fb, 4, kSoftkeyY + 6, "F1:Y= F2:WIN F3:GRPH F4:MODE", kGrayLine);
 }
 
 HomeScreen& home_screen() {

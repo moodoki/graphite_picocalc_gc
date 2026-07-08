@@ -18,6 +18,7 @@
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
 #include "ui/screen_manager.hpp"
+#include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
 namespace {
@@ -160,6 +161,7 @@ int main() {
     platform::display().set_backlight(200);
 
     apps::home_screen().load_state();
+    apps::load_graph_state();
 
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());

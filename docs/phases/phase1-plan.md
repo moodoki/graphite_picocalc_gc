@@ -83,15 +83,15 @@ This is the active working document for Phase 1 — task list, status tracking, 
 
 | # | Task | Est. hrs | Status | Notes |
 |---|------|---|---|---|
-| 4.1 | `YEditorScreen` | 6 | [ ] | |
-| 4.2 | `GraphScreen` — basic plot | 8 | [ ] | |
-| 4.3 | Multi-function graphing with color palette | 3 | [ ] | |
-| 4.4 | Grid lines and axis labeling | 4 | [ ] | |
-| 4.5 | Discontinuity detection | 2 | [ ] | |
-| 4.6 | Trace cursor | 6 | [ ] | |
-| 4.7 | Zoom in/out/fit/standard/trig presets | 4 | [ ] | |
-| 4.8 | `WindowScreen` | 4 | [ ] | |
-| 4.9 | Persist Y-functions and window to SD | 2 | [ ] | |
+| 4.1 | `YEditorScreen` | 6 | [x] | Y1..Y7 list, inline edit, enable checkbox, auto-enable on entry |
+| 4.2 | `GraphScreen` — basic plot | 8 | [x] | Column cache via compile-once/eval-many (engine.compile). HW-PENDING |
+| 4.3 | Multi-function graphing with color palette | 3 | [x] | 7-color palette in graph_model; all enabled slots plotted |
+| 4.4 | Grid lines and axis labeling | 4 | [x] | Grid at Xscl/Yscl; solid axes. Numeric tick labels deferred to 5.x |
+| 4.5 | Discontinuity detection | 2 | [x] | Skip line joins jumping >50% of viewport height |
+| 4.6 | Trace cursor | 6 | [x] | L/R moves 1px, U/D switches function, (x,y) at bottom (D3). HW-PENDING |
+| 4.7 | Zoom in/out/fit/standard/trig presets | 4 | [x] | F2/F3 in/out; S/T = standard/trig presets. ZFit deferred (needs y-range scan) |
+| 4.8 | `WindowScreen` | 4 | [x] | 6 editable fields; changes replot on ESC. HW-PENDING |
+| 4.9 | Persist Y-functions and window to SD | 2 | [x] | yfuncs.txt (TSV) + window.dat (binary). HW-PENDING |
 
 **Acceptance**: full function graphing with trace and zoom.
 
@@ -127,7 +127,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 | Week 1–2: Bootstrap | ~41 hrs | 53 | [x] (code complete; HW verification pending) |
 | Week 3–4: Calculator core | ~34 hrs | 87 | [x] (code complete; host tests green; HW verification pending) |
 | Week 5–6: Math renderer | ~32 hrs | 119 | [x] (code complete; host tests green; HW verification pending) |
-| Week 7–8: Graphing | ~39 hrs | 158 | [ ] |
+| Week 7–8: Graphing | ~39 hrs | 158 | [x] (code complete; host tests green; HW verification pending) |
 | Week 9–10: Polish | ~26 hrs | 184 | [ ] |
 
 ---

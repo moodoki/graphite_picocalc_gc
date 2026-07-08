@@ -114,6 +114,39 @@ int main() {
     ++g_checks;
     check_near("x", 42);  // Restored
 
+    // compile/eval_compiled (fast graphing path): compile once, sweep X.
+    {
+        void* h = math::engine().compile("x^2 + 1");
+        ++g_checks;
+        if (h == nullptr) {
+            std::printf("FAIL: compile('x^2+1') returned null\n");
+            ++g_failures;
+        } else {
+            const double vals[] = {-2, 0, 3, 5};
+            const double want[] = {5, 1, 10, 26};
+            for (int i = 0; i < 4; ++i) {
+                ++g_checks;
+                const double got = math::engine().eval_compiled(h, vals[i]);
+                if (std::fabs(got - want[i]) > 1e-9) {
+                    std::printf("FAIL: eval_compiled @%g -> %g (want %g)\n",
+                                vals[i], got, want[i]);
+                    ++g_failures;
+                }
+            }
+            math::engine().free_compiled(h);
+        }
+        // Bad expression compiles to null.
+        ++g_checks;
+        if (math::engine().compile("x^") != nullptr) {
+            std::printf("FAIL: compile('x^') should be null\n");
+            ++g_failures;
+        }
+    }
+    // eval_compiled leaves X bound to its last argument (the graphing
+    // caller owns save/restore); a fresh store re-establishes X.
+    math::engine().evaluate("42->x");
+    check_near("x", 42);
+
     // ---- 2.4 format_number ----
     check_fmt(5, "5");
     check_fmt(-17, "-17");
