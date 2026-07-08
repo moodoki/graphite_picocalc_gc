@@ -7,6 +7,8 @@
 #include "gfx/font.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "render/layout_builder.hpp"
+#include "render/layout_render.hpp"
 
 namespace apps {
 
@@ -174,19 +176,28 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     font.draw_string(fb, platform::kScreenW - 4 * font.width() - 4, 2,
                      math::angle_mode() == math::AngleMode::kRadians ? " RAD" : " DEG", kGreen);
 
-    // History: newest at the bottom, right-aligned results under
-    // left-aligned expressions.
+    // History: newest at the bottom. Expressions render as 2D typeset
+    // math (task 3.6); results stay as plain right-aligned text (a
+    // number or error string is already display-ready).
+    const render::Metrics metrics{font.width(), font.height()};
     int y = kInputY - 4;
     for (int n = scroll_; y > kStatusH + lh; ++n) {
         const Entry* e = entry_from_newest(n);
         if (e == nullptr) {
             break;
         }
+        // Result line (plain text).
         y -= lh;
         const int rx = platform::kScreenW - font.text_width(e->result) - 4;
         font.draw_string(fb, rx, y, e->result, e->error ? kRed : kWhite);
-        y -= lh;
-        font.draw_string(fb, 4, y, e->expr, kGrayLine);
+
+        // Expression line(s), pretty-printed. Build to learn the height,
+        // then render immediately (the pool is reset on the next build).
+        render::LayoutNode* root = render::build_layout(e->expr, metrics);
+        const int eh = root != nullptr ? root->height : lh;
+        y -= eh + 2;
+        render::render_node(root, fb, 4, y, font, kGrayLine);
+        y -= 2;
     }
 
     // Input area

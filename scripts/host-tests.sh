@@ -25,5 +25,15 @@ echo "== Compiling + linking test_math =="
     src/math/format.cpp "$OUT/tinyexpr.o" \
     -o "$OUT/test_math"
 
-echo "== Running =="
+echo "== Compiling + linking test_layout =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_layout.cpp src/render/layout_builder.cpp \
+    src/render/pool.cpp \
+    -o "$OUT/test_layout"
+
+echo "== Running test_math =="
 "$OUT/test_math"
+
+echo "== Running test_layout =="
+"$OUT/test_layout"

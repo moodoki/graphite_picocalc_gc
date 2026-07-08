@@ -18,10 +18,10 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1, milestone 2 (calculator core) CODE COMPLETE → milestone 3 (math renderer) next
-- **Next up**: task 3.1 — layout nodes (`TextNode`, `HBoxNode`)
+- **Phase**: 1, milestone 3 (math renderer) CODE COMPLETE → milestone 4 (graphing) next
+- **Next up**: task 4.1 — `YEditorScreen` (Y1..Y7 function list)
 - **Both boards build**: yes (`./scripts/build-all.sh` → calculator firmware, boots to HomeScreen)
-- **Host tests**: `./scripts/host-tests.sh` → 53 checks, 0 failures (math engine)
+- **Host tests**: `./scripts/host-tests.sh` → 53 math + 21 layout = 74 checks, 0 failures
 
 ## HW-PENDING verification queue
 
@@ -39,6 +39,7 @@ diagnostics screen that exercises everything below at once.
 | 2.5 HomeScreen | 2026-07-08 | Type `2+3*sin(pi/4)`, ENTER → result shows; history scrolls (UP/DN); F4 toggles RAD/DEG; F6 = diag overlay |
 | 2.7 Persistence | 2026-07-08 | History + variables survive power cycle (needs FAT32 SD card) |
 | Store op | 2026-07-08 | `2->A` stores; `A+1` → 3 (D1). Verified in host tests, but confirm on-device keyboard can type `-` and `>` |
+| 3.6 Pretty math | 2026-07-08 | Enter `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → history shows stacked fractions, raised exponents, scaled parens; check vertical alignment/legibility at 8x12 |
 
 ---
 
@@ -137,3 +138,38 @@ Known limitations / deferred:
 - Softkey bar is a static label placeholder; real softkey dispatch is task 5.2.
 - rand() uses libc rand() unseeded — deterministic across boots. Seed from an ADC
   noise source or uptime at first use during polish.
+
+### Checkpoint: Milestone 3 (natural math renderer) code complete (2026-07-08)
+
+Tasks 3.1–3.7 all [x]; both boards build; 74/74 host tests pass (53 math + 21 layout).
+Decision D2 (simple-operand fraction heuristic) recorded.
+
+Design:
+- `src/render/layout_node.hpp`: one fixed-size tagged-union `LayoutNode`
+  (Text/HBox/Fraction/Superscript/Paren). **No virtual functions** — a plain
+  `NodeType` tag + switch, so it's RTTI-free (-fno-rtti) and pool-friendly.
+- `src/render/pool.{hpp,cpp}`: 8 KB bump allocator, `pool_new<T>()` placement-new,
+  reset per build. On exhaustion, builders degrade to plain text (never crash).
+- `src/render/layout_builder.cpp`: recursive-descent parser producing sized nodes.
+  Grammar: expr(+/-) → term(*,/) → power(^ right-assoc) → unary(-) → atom
+  (number | ident | ident(args) | (expr)). Fractions only for simple operands (D2).
+- `src/render/layout_render.cpp`: `render_node()` walks the tree; strip-clipped;
+  stroked auto-scaling parens for tall content.
+- HomeScreen history now renders **expressions** as 2D math (`render_node`); results
+  stay plain text (a formatted number is already display-ready, and the layout parser
+  would choke on result annotations like "5>A" / error strings).
+
+Testing: NEW `tests/host/test_layout.cpp` asserts node types + sizes for the Phase 1
+constructs (fractions, superscripts, parens, function calls, nesting, right-assoc `^`).
+This is how the renderer is verified without a screen; the visual/alignment quality
+still needs the HW-PENDING check.
+
+Known limitations / deferred:
+- Single font size → superscripts are same-size-but-raised, not 75%-shrunk. Fine at
+  8x12; revisit if a smaller font is added (would also help nested exponents).
+- Fraction vertical centering is approximate (bar sits at the math baseline; adjacent
+  inline text aligns to the bar, so it reads slightly "numerator-high"). Cosmetic;
+  tune after seeing it on HW.
+- SqrtNode deferred to Phase 2 per spec (sqrt renders as "sqrt(x)" text for now).
+- Rebuilding history trees every strip (~20x/frame) is wasteful but cheap for short
+  strings; optimize with dirty-rects / cached measurement in task 5.6 if needed.

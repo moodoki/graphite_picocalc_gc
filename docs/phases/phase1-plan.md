@@ -65,13 +65,13 @@ This is the active working document for Phase 1 — task list, status tracking, 
 
 | # | Task | Est. hrs | Status | Notes |
 |---|------|---|---|---|
-| 3.1 | `TextNode`, `HBoxNode` | 4 | [ ] | |
-| 3.2 | `FractionNode` (stacked fraction) | 6 | [ ] | |
-| 3.3 | `SuperscriptNode` | 4 | [ ] | |
-| 3.4 | `ParenNode` with auto-scaling | 4 | [ ] | |
-| 3.5 | `LayoutBuilder` parser | 8 | [ ] | |
-| 3.6 | Integrate renderer into `HomeScreen` | 4 | [ ] | |
-| 3.7 | Pool allocator for layout nodes | 2 | [ ] | |
+| 3.1 | `TextNode`, `HBoxNode` | 4 | [x] | Baseline-aligned HBox; tagged-union nodes (no vtables, RTTI-free) |
+| 3.2 | `FractionNode` (stacked fraction) | 6 | [x] | Simple-operand heuristic (D2). Host tests assert structure/size |
+| 3.3 | `SuperscriptNode` | 4 | [x] | Right-assoc; raised by base_h/2 (single font size — no 75% shrink) |
+| 3.4 | `ParenNode` with auto-scaling | 4 | [x] | Glyph parens for <=1 line; stroked tall parens otherwise |
+| 3.5 | `LayoutBuilder` parser | 8 | [x] | Recursive descent; 21 host structural tests. SqrtNode deferred per spec |
+| 3.6 | Integrate renderer into `HomeScreen` | 4 | [x] | History exprs render 2D; results stay plain text. HW-PENDING |
+| 3.7 | Pool allocator for layout nodes | 2 | [x] | 8 KB bump pool; graceful text fallback on exhaustion |
 
 **Acceptance**: expressions in history render as 2D typeset math.
 
@@ -126,7 +126,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 | Phase 0 (prep) | ~12 hrs | 12 | [x] |
 | Week 1–2: Bootstrap | ~41 hrs | 53 | [x] (code complete; HW verification pending) |
 | Week 3–4: Calculator core | ~34 hrs | 87 | [x] (code complete; host tests green; HW verification pending) |
-| Week 5–6: Math renderer | ~32 hrs | 119 | [ ] |
+| Week 5–6: Math renderer | ~32 hrs | 119 | [x] (code complete; host tests green; HW verification pending) |
 | Week 7–8: Graphing | ~39 hrs | 158 | [ ] |
 | Week 9–10: Polish | ~26 hrs | 184 | [ ] |
 

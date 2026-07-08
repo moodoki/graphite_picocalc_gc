@@ -79,6 +79,9 @@ add_executable(picocalc_graphcalc
     src/math/engine.cpp
     src/math/functions.cpp
     src/math/format.cpp
+    src/render/pool.cpp
+    src/render/layout_builder.cpp
+    src/render/layout_render.cpp
     src/apps/home_screen.cpp
 )
 
