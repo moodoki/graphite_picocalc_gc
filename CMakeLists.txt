@@ -76,6 +76,7 @@ add_executable(picocalc_graphcalc
     src/gfx/framebuffer.cpp
     src/ui/screen_manager.cpp
     src/ui/input_line.cpp
+    src/ui/chrome.cpp
     src/math/engine.cpp
     src/math/functions.cpp
     src/math/format.cpp
@@ -87,6 +88,7 @@ add_executable(picocalc_graphcalc
     src/apps/y_editor.cpp
     src/apps/graph_screen.cpp
     src/apps/window_screen.cpp
+    src/apps/mode_screen.cpp
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE

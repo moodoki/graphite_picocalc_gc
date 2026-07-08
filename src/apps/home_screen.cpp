@@ -5,12 +5,14 @@
 
 #include "platform/storage.hpp"
 #include "gfx/font.hpp"
+#include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/graph_screen.hpp"
+#include "apps/mode_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "apps/y_editor.hpp"
 
@@ -145,7 +147,14 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             evaluate_input();
             return true;
         case Key::kUp:
-            if (history_count_ > 0 && scroll_ < history_count_ - 1) {
+            // Expression recall (task 5.5): UP on an empty input line
+            // brings back the most recent expression; otherwise scroll.
+            if (input_.empty() && history_count_ > 0) {
+                const Entry* e = entry_from_newest(0);
+                if (e != nullptr) {
+                    input_.set_text(e->expr);
+                }
+            } else if (scroll_ < history_count_ - 1) {
                 ++scroll_;
             }
             return true;
@@ -167,9 +176,7 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             ui::screen_manager().push(&graph_screen());
             return true;
         case Key::kF4:
-            math::set_angle_mode(math::angle_mode() == math::AngleMode::kRadians
-                                     ? math::AngleMode::kDegrees
-                                     : math::AngleMode::kRadians);
+            ui::screen_manager().push(&mode_screen());
             return true;
         default:
             return input_.on_key(ev);
@@ -183,11 +190,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
 
     fb.clear(kBlack);
 
-    // Status bar
-    fb.fill_rect(0, 0, platform::kScreenW, kStatusH, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, 2, "HOME", kGrayLine);
-    font.draw_string(fb, platform::kScreenW - 4 * font.width() - 4, 2,
-                     math::angle_mode() == math::AngleMode::kRadians ? " RAD" : " DEG", kGreen);
+    ui::draw_status_bar(fb, "HOME");
 
     // History: newest at the bottom. Expressions render as 2D typeset
     // math (task 3.6); results stay as plain right-aligned text (a
@@ -219,10 +222,8 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     input_.render(fb, 2 + font.width() + 2, kInputY + 8, platform::kScreenW - font.width() - 8,
                   font, true);
 
-    // Softkey bar placeholder (full integration in task 5.2)
-    fb.fill_rect(0, kSoftkeyY, platform::kScreenW, platform::kScreenH - kSoftkeyY,
-                 platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, kSoftkeyY + 6, "F1:Y= F2:WIN F3:GRPH F4:MODE", kGrayLine);
+    const char* keys[6] = {"Y=", "WIN", "GRPH", "MODE", "", "DIAG"};
+    ui::draw_softkeys(fb, keys);
 }
 
 HomeScreen& home_screen() {

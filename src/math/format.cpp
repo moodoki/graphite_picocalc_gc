@@ -37,7 +37,23 @@ int strip_zeros(char* buf) {
     return static_cast<int>(std::strlen(buf));
 }
 
+DisplayMode g_mode = DisplayMode::kFloat;
+int g_fix_digits = 2;
+
 }  // namespace
+
+DisplayMode display_mode() {
+    return g_mode;
+}
+void set_display_mode(DisplayMode m) {
+    g_mode = m;
+}
+int fix_digits() {
+    return g_fix_digits;
+}
+void set_fix_digits(int n) {
+    g_fix_digits = n < 0 ? 0 : (n > 9 ? 9 : n);
+}
 
 int format_number(calc_t x, char* buf, size_t buf_len) {
     if (buf_len == 0) {
@@ -48,6 +64,21 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
     }
     if (std::isinf(x)) {
         return std::snprintf(buf, buf_len, x > 0 ? "Inf" : "-Inf");
+    }
+
+    if (g_mode == DisplayMode::kFix) {
+        return std::snprintf(buf, buf_len, "%.*f", g_fix_digits, x);
+    }
+    if (g_mode == DisplayMode::kSci) {
+        char tmp[40];
+        std::snprintf(tmp, sizeof(tmp), "%.*e", g_fix_digits, x);
+        char* e = std::strchr(tmp, 'e');
+        int exponent = 0;
+        if (e != nullptr) {
+            exponent = std::atoi(e + 1);
+            *e = 0;
+        }
+        return std::snprintf(buf, buf_len, "%se%d", tmp, exponent);
     }
 
     const double ax = std::fabs(x);

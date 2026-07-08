@@ -37,6 +37,9 @@ private:
     int trace_func_ = 0;
     int trace_px_ = kWidth / 2;
 
+    // Last replot time in microseconds (task 5.6 profiling hook).
+    uint32_t last_recompute_us_ = 0;
+
     void recompute();
     int value_to_py(double y) const;
 

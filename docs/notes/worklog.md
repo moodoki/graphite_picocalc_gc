@@ -18,11 +18,12 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1, milestone 4 (graphing) CODE COMPLETE → milestone 5 (polish) next
-- **Next up**: task 5.1 — status bar (mode indicators, title). This is the LAST milestone.
+- **Phase**: 1 CODE COMPLETE (all 5 milestones). Only hardware verification remains.
+- **Next up (needs a real PicoCalc)**: flash both boards, run the HW-PENDING checklist
+  below, capture 5.6 graph-profiling numbers, then write `docs/notes/phase1-retro.md`
+  and start `docs/phases/phase2-spec.md`.
 - **Both boards build**: yes (`./scripts/build-all.sh` → full graphing-calculator firmware)
-- **Host tests**: `./scripts/host-tests.sh` → 60 math + 21 layout = 81 checks, 0 failures
-- **Phase 1 is now feature-complete** pending polish (M5) + hardware verification.
+- **Host tests**: `./scripts/host-tests.sh` → 69 math + 21 layout = 90 checks, 0 failures
 
 ## HW-PENDING verification queue
 
@@ -42,7 +43,9 @@ diagnostics screen that exercises everything below at once.
 | Store op | 2026-07-08 | `2->A` stores; `A+1` → 3 (D1). Verified in host tests, but confirm on-device keyboard can type `-` and `>` |
 | 3.6 Pretty math | 2026-07-08 | Enter `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → history shows stacked fractions, raised exponents, scaled parens; check vertical alignment/legibility at 8x12 |
 | 4.x Graphing | 2026-07-08 | HomeScreen F1=Y=, F2=WIN, F3=GRAPH. In Y= enter `x^2-3`, `sin(x)`; F4→graph plots in distinct colors with axes+grid. Graph: F1 trace (L/R, U/D switch fn, x/y readout), F2/F3 zoom, S/T presets. WindowScreen edits ranges → replot. All survive power cycle (SD) |
-| Graph perf | 2026-07-08 | Measure full 7-function replot time on Pico 1 (spec target <50 ms; D5 float fallback is the lever if over) |
+| Graph perf | 2026-07-08 | Measure full 7-function replot time on Pico 1 (spec target <50 ms; D5 float fallback is the lever if over). Firmware prints "graph recompute: N us" to USB serial on each replot |
+| 5.3 Mode/reboot | 2026-07-08 | Home F4→MODE: toggle RAD/DEG, FLOAT/FIX/SCI, fix digits; "Reboot to bootloader"+ENTER drops to BOOTSEL (reset_usb_boot) — confirm it mounts RPI-RP2 |
+| 5.7 Full HW test | 2026-07-08 | Phase-1 exit test: power-cycle → Home → `2+3*sin(pi/4)` correct → F3 graph `sin(x)` with trace+zoom → persistence across power cycle |
 
 ---
 
@@ -210,3 +213,36 @@ Known limitations / deferred:
 - Graph coordinate coloring/labels and the "no functions" hint are basic; refine in M5.
 - Trace steps by pixel column (reads the cache), not by evaluating at sub-pixel x —
   fine for a 320px viewport.
+
+### Checkpoint: Milestone 5 (polish) code complete — PHASE 1 CODE COMPLETE (2026-07-08)
+
+Tasks 5.1-5.5, 5.8, 5.9 [x]; 5.6 [~] (profiling hook in, numbers need HW); 5.7 [!]
+(HW test, no PicoCalc attached). Both boards build; 90/90 host tests pass.
+
+New:
+- `src/ui/chrome`: shared `draw_status_bar` (title + RAD/DEG + FLT/FIX/SCI + 2nd/A
+  indicators) and `draw_softkeys` (6 cells). HomeScreen/GraphScreen/ModeScreen use them.
+- `src/apps/mode_screen`: angle mode, display format (FLOAT/FIX/SCI), fix digits, and
+  "Reboot to bootloader" → `reset_usb_boot(0,0)` for flashing without the BOOTSEL button
+  (task 5.8). Reached via Home F4.
+- `math::format_number` gained FIX/SCI modes (global `DisplayMode` + fix digits),
+  host-tested.
+- Expression recall: UP on an empty Home input line restores the last expression (5.5).
+- Graph `recompute()` times itself and prints "graph recompute: N us" to USB serial +
+  stores `last_recompute_us_` (5.6 profiling hook).
+- Error handling verified by host tests: 1/0→Inf, 0/0→NaN, syntax→"Syntax error"
+  (shown in red), no crashes (5.4).
+- README rewritten: feature list, host-tests section, per-screen usage, flash-from-
+  firmware note.
+
+**Phase 1 is code-complete.** The only remaining work is on real hardware (see the
+HW-PENDING queue above): boot both boards, run the exit test, confirm SD persistence,
+record graph-render timing, then write `docs/notes/phase1-retro.md` and begin
+`docs/phases/phase2-spec.md`.
+
+Deferred within M5:
+- clang-tidy not run (Homebrew `llvm`/`clang-tidy` not installed — ~1.5 GB; developer's
+  call). clang-format IS applied repo-wide each checkpoint.
+- ZoomFit (4.7) and axis numeric tick labels (4.4) still deferred from M4.
+- 2nd/Alpha status indicators are plumbed through `StatusFlags` but not yet driven by a
+  real 2nd/Alpha key mode (the STM32 reports ASCII directly). Wire when those modes land.

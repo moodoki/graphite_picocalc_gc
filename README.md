@@ -2,11 +2,21 @@
 
 TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](https://www.clockworkpi.com/picocalc), written in C++17 using the Raspberry Pi Pico SDK. Targets both the Pico 1 H (RP2040) and Pico 2 H (RP2350) modules. Personal-use project.
 
-> **Status**: Phase 0 (project setup). Not yet functional. See [project status](#project-status).
+> **Status**: Phase 1 feature-complete (code). Both boards build; the math engine
+> and layout builder pass host unit tests. Hardware verification is pending — see
+> [`docs/notes/worklog.md`](docs/notes/worklog.md) for the HW-PENDING checklist.
 
-## Features (planned)
+## Features
 
-- **Phase 1**: Scientific calculator with natural math display, single-function graphing, $Y_1 \ldots Y_n$ editor, window settings, trace/zoom.
+- **Phase 1 (implemented)**: Scientific calculator with natural math display
+  (stacked fractions, raised exponents, auto-scaling parens), variables A–Z + Ans +
+  theta with a `->` store operator, expression history with recall, degree/radian
+  modes, FLOAT/FIX/SCI display formats, a $Y_1 \ldots Y_7$ function editor, function
+  graphing with axes/grid, multi-function color plots, discontinuity handling, trace,
+  and zoom (in/out, standard, trig). History, variables, Y-functions, and the graph
+  window persist to the SD card.
+- **Phase 2+ (planned)**: parametric/polar modes, table view, lists & statistics,
+  matrices, symbolic math (CAS), MicroPython.
 - **Phase 2**: Multi-function graphing, parametric and polar modes, table view.
 - **Phase 3**: Lists, statistics, regression, distributions, statistical plots.
 - **Phase 4**: Matrix operations, symbolic math (CAS — differentiation, simplification, factoring, equation solving, basic integration), MicroPython programming environment.
@@ -52,9 +62,36 @@ export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eab
 # Hold BOOTSEL on the PicoCalc, plug in USB-C
 cp build/pico/picocalc_graphcalc.uf2 /Volumes/RPI-RP2/
 # Or drop the .uf2 onto the SD card if uf2loader is installed
+# (From the running firmware: Home → F4 MODE → "Reboot to bootloader" → ENTER.)
 ```
 
 See [docs/dev-environment.md](docs/dev-environment.md) for detailed setup instructions.
+
+## Host tests
+
+The math engine and the natural-math layout builder have host-side unit tests that
+run on your development machine (no Pico hardware or cross-toolchain needed):
+
+```bash
+./scripts/host-tests.sh   # builds + runs test_math and test_layout with the host compiler
+```
+
+These cover expression evaluation, the extended function library, angle modes,
+number formatting (FLOAT/FIX/SCI), variables/store, the compiled graph-eval path,
+and layout-tree structure/sizing. They are the primary correctness check while
+on-device verification is pending.
+
+## Using the calculator
+
+- **Home**: type an expression, `ENTER` to evaluate. `UP` on an empty line recalls the
+  last expression; `UP`/`DOWN` otherwise scroll history. Store with `2->A`. Softkeys:
+  `F1` Y= editor, `F2` window, `F3` graph, `F4` mode, `F6` hardware diagnostics.
+- **Y= editor**: `UP`/`DOWN` select a slot, `ENTER`/`F1` edit, `F2` toggle enable,
+  `F3` clear, `F4` graph.
+- **Graph**: `F1` trace (`LEFT`/`RIGHT` move, `UP`/`DOWN` switch function), `F2`/`F3`
+  zoom in/out, `S`/`T` standard/trig presets, `F5` Y= editor.
+- **Mode**: angle (RAD/DEG), display format (FLOAT/FIX/SCI), fix digits, and reboot to
+  the USB bootloader for flashing.
 
 ## Repository layout
 
@@ -107,8 +144,8 @@ Background research:
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 0: Prep | In progress | Environment setup, repo bootstrap |
-| 1: HAL + calculator + basic graphing | Not started | ~10 weeks part-time |
+| 0: Prep | Complete | Environment, repo, vendored drivers |
+| 1: HAL + calculator + basic graphing | Code complete | Both boards build; host tests green; HW verification pending |
 | 2: Full graphing + table | Not started | Spec pending |
 | 3: Statistics | Not started | Spec pending |
 | 4: CAS + matrix + MicroPython | Specced, not started | ~10 weeks part-time |
@@ -120,7 +157,7 @@ Background research:
 - [Delta Pico](https://github.com/AaronC81/delta-pico) by Aaron Christiansen — `rbop` natural math renderer architecture, design reference
 - [DB48X](https://github.com/c3d/db48x) by Christophe de Dinechin — embedded CAS reference architecture
 - [ClockworkPi](https://www.clockworkpi.com/) — the PicoCalc hardware
-- [tinyexpr++](https://github.com/Blake-Madden/tinyexpr-plus-plus) — expression parser/evaluator
+- [tinyexpr](https://github.com/codeplea/tinyexpr) by Lewis Van Winkle — expression parser/evaluator
 
 ## License
 

@@ -103,15 +103,15 @@ This is the active working document for Phase 1 — task list, status tracking, 
 
 | # | Task | Est. hrs | Status | Notes |
 |---|------|---|---|---|
-| 5.1 | Status bar (mode indicators, title) | 3 | [ ] | |
-| 5.2 | Softkey bar integration across all screens | 3 | [ ] | |
-| 5.3 | Mode screen (angle, display format) | 3 | [ ] | |
-| 5.4 | Error handling (division by zero, syntax) | 3 | [ ] | |
-| 5.5 | Expression recall (UP key on empty input) | 2 | [ ] | |
-| 5.6 | Performance profiling + optimization | 4 | [ ] | |
-| 5.7 | Test on both Pico 1 and Pico 2 hardware | 4 | [ ] | |
-| 5.8 | UF2 loader compatibility (clean reboot) | 2 | [ ] | |
-| 5.9 | README, build instructions update | 2 | [ ] | |
+| 5.1 | Status bar (mode indicators, title) | 3 | [x] | Shared `ui::draw_status_bar` (title + RAD/DEG + FLT/FIX/SCI + 2nd/A). Used on all screens |
+| 5.2 | Softkey bar integration across all screens | 3 | [x] | Shared `ui::draw_softkeys` (6 cells). Home/graph/mode use it |
+| 5.3 | Mode screen (angle, display format) | 3 | [x] | `ModeScreen`: angle, FLOAT/FIX/SCI, fix digits, reboot-to-bootloader. F4 from Home |
+| 5.4 | Error handling (division by zero, syntax) | 3 | [x] | 1/0→Inf, 0/0→NaN, syntax→"Syntax error" in red; host-tested. No crashes |
+| 5.5 | Expression recall (UP key on empty input) | 2 | [x] | UP on empty input recalls last expr; else scrolls history |
+| 5.6 | Performance profiling + optimization | 4 | [~] | Timing hook in recompute (prints us to serial + `last_recompute_us_`). Actual numbers + tuning HW-PENDING (D5 lever ready) |
+| 5.7 | Test on both Pico 1 and Pico 2 hardware | 4 | [!] | HW-PENDING — no PicoCalc attached to this session. Full checklist in worklog |
+| 5.8 | UF2 loader compatibility (clean reboot) | 2 | [x] | Mode screen "Reboot to bootloader" → `reset_usb_boot` (BOOTSEL) |
+| 5.9 | README, build instructions update | 2 | [x] | Features, host-tests, usage, flashing-from-firmware documented |
 
 **Acceptance**: release-quality Phase 1 firmware.
 
@@ -128,7 +128,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 | Week 3–4: Calculator core | ~34 hrs | 87 | [x] (code complete; host tests green; HW verification pending) |
 | Week 5–6: Math renderer | ~32 hrs | 119 | [x] (code complete; host tests green; HW verification pending) |
 | Week 7–8: Graphing | ~39 hrs | 158 | [x] (code complete; host tests green; HW verification pending) |
-| Week 9–10: Polish | ~26 hrs | 184 | [ ] |
+| Week 9–10: Polish | ~26 hrs | 184 | [x] (code complete; 5.7 HW test + 5.6 profiling numbers pending hardware) |
 
 ---
 
@@ -176,12 +176,14 @@ For each task:
 
 Before declaring Phase 1 complete:
 
-- [ ] All week 1–10 tasks are `[x]` complete or `[s]` explicitly deferred (with reason).
-- [ ] `./scripts/build-all.sh` produces working `.uf2` files for both Pico 1 and Pico 2.
-- [ ] Lint (`./scripts/lint.sh`) returns clean.
-- [ ] Hardware test: power-cycle the PicoCalc → home screen appears → enter `2+3*sin(pi/4)` → result displays correctly. Press `F3` (graph) → `sin(x)` plots correctly with trace and zoom working.
-- [ ] History, variables, and Y-functions survive a power cycle.
-- [ ] Phase 2 spec exists in `docs/phases/phase2-spec.md`.
-- [ ] Decisions D1–D5 recorded in `docs/notes/decisions.md`.
+- [x] All week 1–10 tasks are `[x]` complete or `[~]`/`[!]` explicitly deferred (5.6 profiling numbers, 5.7 HW test — both need hardware).
+- [x] `./scripts/build-all.sh` produces `.uf2` files for both Pico 1 and Pico 2. *(Boot-on-hardware verification still pending — see worklog.)*
+- [~] Lint (`./scripts/lint.sh`) — clang-format applied repo-wide; clang-tidy not run (Homebrew `llvm` not installed on this host — developer's call).
+- [ ] Hardware test: power-cycle → home screen → `2+3*sin(pi/4)` → `F3` graph `sin(x)` with trace/zoom. **HW-PENDING.**
+- [ ] History, variables, and Y-functions survive a power cycle. **HW-PENDING** (logic done + host-adjacent; needs a real SD card).
+- [ ] Phase 2 spec exists in `docs/phases/phase2-spec.md`. *(Not started — next after HW bring-up.)*
+- [x] Decisions D1–D5 recorded in `docs/notes/decisions.md` (plus D6–D9 for implementation choices).
 
-Once exit criteria are met, write a short retrospective in `docs/notes/phase1-retro.md`: what went well, what didn't, calibration adjustments for Phase 2 estimates.
+Remaining before Phase 1 can be declared *done* (not just code-complete): flash both
+boards, run the hardware test above, confirm persistence, capture 5.6 profiling numbers,
+then write `docs/notes/phase1-retro.md`. Everything up to the hardware gate is complete.

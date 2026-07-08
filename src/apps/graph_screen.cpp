@@ -3,7 +3,10 @@
 #include <cmath>
 #include <cstdio>
 
+#include "pico/time.h"
+
 #include "gfx/font.hpp"
+#include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
@@ -34,6 +37,7 @@ void GraphScreen::recompute() {
     // Graphing sweeps the shared X variable; preserve any value the user
     // stored in X on the home screen.
     const math::calc_t saved_x = eng.vars()['x'];
+    const uint64_t t0 = time_us_64();
 
     for (int fi = 0; fi < kNumFuncs; ++fi) {
         active_[fi] = fns.enabled[fi] && fns.expr[fi][0] != 0;
@@ -61,6 +65,8 @@ void GraphScreen::recompute() {
         eng.free_compiled(compiled);
     }
     eng.vars()['x'] = saved_x;
+    last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
+    printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
     dirty_ = false;
 }
 
@@ -235,13 +241,12 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
         draw_trace(fb);
     }
 
-    // Softkey bar
-    const int sk = platform::kScreenH - 20;
-    fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4, "F1:TRC F2:Z+ F3:Z- F5:Y= (S/T presets)", kGrayLine);
     if (!y_functions().any_enabled()) {
         font.draw_string(fb, 40, kTop + kHeight / 2, "No functions. Press F5 for Y=.", kGrayLine);
     }
+
+    const char* keys[6] = {"TRC", "Z+", "Z-", "", "Y=", "Y="};
+    ui::draw_softkeys(fb, keys);
 }
 
 GraphScreen& graph_screen() {

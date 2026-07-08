@@ -164,6 +164,40 @@ int main() {
     check_fmt(0, "0");
     check_fmt(0.70710678118654752, "0.7071067812");
 
+    // ---- 5.3 display modes (FIX / SCI) ----
+    math::set_display_mode(math::DisplayMode::kFix);
+    math::set_fix_digits(2);
+    check_fmt(3.14159, "3.14");
+    check_fmt(5, "5.00");
+    check_fmt(-0.5, "-0.50");
+    math::set_fix_digits(0);
+    check_fmt(3.7, "4");
+    math::set_display_mode(math::DisplayMode::kSci);
+    math::set_fix_digits(2);
+    check_fmt(12345, "1.23e4");
+    check_fmt(0.005, "5.00e-3");
+    check_fmt(INFINITY, "Inf");  // Specials still apply in FIX/SCI
+    math::set_display_mode(math::DisplayMode::kFloat);
+    math::set_fix_digits(2);
+
+    // ---- 5.4 error handling: division by zero yields Inf/NaN, no crash ----
+    {
+        const auto dz = math::engine().evaluate("1/0");
+        ++g_checks;
+        if (!dz.ok || !std::isinf(dz.value)) {
+            std::printf("FAIL: 1/0 -> ok=%d val=%g (want Inf)\n", dz.ok,
+                        dz.value);
+            ++g_failures;
+        }
+        const auto zz = math::engine().evaluate("0/0");
+        ++g_checks;
+        if (!zz.ok || !std::isnan(zz.value)) {
+            std::printf("FAIL: 0/0 -> ok=%d val=%g (want NaN)\n", zz.ok,
+                        zz.value);
+            ++g_failures;
+        }
+    }
+
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
