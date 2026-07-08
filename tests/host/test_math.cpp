@@ -1,0 +1,136 @@
+// Host-side unit tests for the math engine (no hardware required).
+// Built and run by scripts/host-tests.sh with the host compiler.
+
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+#include "math/engine.hpp"
+#include "math/format.hpp"
+#include "math/types.hpp"
+
+namespace {
+
+int g_failures = 0;
+int g_checks = 0;
+
+void check_near(const char* expr, double expected, double tol = 1e-9) {
+    ++g_checks;
+    const auto r = math::engine().evaluate(expr);
+    if (!r.ok) {
+        std::printf("FAIL: '%s' -> error: %s (expected %g)\n", expr, r.error,
+                    expected);
+        ++g_failures;
+        return;
+    }
+    if (std::fabs(r.value - expected) > tol) {
+        std::printf("FAIL: '%s' -> %.12g (expected %.12g)\n", expr, r.value,
+                    expected);
+        ++g_failures;
+    }
+}
+
+void check_error(const char* expr) {
+    ++g_checks;
+    const auto r = math::engine().evaluate(expr);
+    if (r.ok) {
+        std::printf("FAIL: '%s' evaluated to %g, expected an error\n", expr,
+                    r.value);
+        ++g_failures;
+    }
+}
+
+void check_fmt(double x, const char* expected) {
+    ++g_checks;
+    char buf[40];
+    math::format_number(x, buf, sizeof(buf));
+    if (std::strcmp(buf, expected) != 0) {
+        std::printf("FAIL: format(%.12g) -> '%s' (expected '%s')\n", x, buf,
+                    expected);
+        ++g_failures;
+    }
+}
+
+}  // namespace
+
+int main() {
+    using math::AngleMode;
+
+    // ---- 2.1 basics ----
+    check_near("2+3", 5);
+    check_near("2+3*4", 14);
+    check_near("(2+3)*4", 20);
+    check_near("7/2", 3.5);
+    check_near("2^10", 1024);
+    check_near("2^3^2", 512);  // Right-associative (TE_POW_FROM_RIGHT)
+    check_near("-3^2", -9);    // TI convention
+    check_near("sqrt(16)", 4);
+    check_near("abs(-5)", 5);
+    check_near("pi", 3.14159265358979, 1e-10);
+    check_error("2+");
+    check_error("(2+3");
+
+    // ---- 2.2 extended functions ----
+    check_near("ncr(10,3)", 120);
+    check_near("npr(5,2)", 20);
+    check_near("5!", 120);
+    check_near("(3+2)!", 120);
+    check_near("3!!", 720);  // (3!)! = 6! = 720
+    check_near("ln(exp(1))", 1);
+    check_near("log(1000)", 3);  // TI: log = base 10
+    check_near("min(3,7)+max(3,7)", 10);
+    check_near("round(3.14159,2)", 3.14);
+    check_near("deg(pi)", 180);
+    check_near("rad(180)", 3.14159265358979, 1e-10);
+
+    // ---- 2.3 angle mode ----
+    math::set_angle_mode(AngleMode::kDegrees);
+    check_near("sin(90)", 1);
+    check_near("cos(180)", -1);
+    check_near("asin(1)", 90);
+    math::set_angle_mode(AngleMode::kRadians);
+    check_near("sin(pi/2)", 1);
+    check_near("2+3*sin(pi/4)", 2 + 3 * std::sin(3.14159265358979323846 / 4),
+               1e-9);
+
+    // ---- 2.6 variables + Ans + store ----
+    check_near("2->a", 2);
+    check_near("a+1", 3);
+    check_near("ans+1", 4);  // Ans was 3
+    check_near("a*a->b", 4);
+    check_near("b", 4);
+    check_near("10->theta", 10);
+    check_near("theta/2", 5);
+    // Case-insensitive entry
+    check_near("A+B", 6);
+
+    // evaluate_at (graphing path) must not clobber Ans or X
+    math::engine().evaluate("42->x");
+    const auto at = math::engine().evaluate_at("x^2+1", 3.0);
+    if (!at.ok || std::fabs(at.value - 10.0) > 1e-12) {
+        std::printf("FAIL: evaluate_at x^2+1 @3 -> %g\n", at.value);
+        ++g_failures;
+    }
+    ++g_checks;
+    check_near("x", 42);  // Restored
+
+    // ---- 2.4 format_number ----
+    check_fmt(5, "5");
+    check_fmt(-17, "-17");
+    check_fmt(3.5, "3.5");
+    check_fmt(0.5, "0.5");
+    check_fmt(1.0 / 3.0, "0.3333333333");
+    check_fmt(1e10, "1e10");
+    check_fmt(1.5e-7, "1.5e-7");
+    check_fmt(0.0001, "0.0001");
+    check_fmt(0.00009999, "9.999e-5");
+    check_fmt(123456789.5, "123456789.5");
+    check_fmt(NAN, "NaN");
+    check_fmt(INFINITY, "Inf");
+    check_fmt(-INFINITY, "-Inf");
+    check_fmt(0, "0");
+    check_fmt(0.70710678118654752, "0.7071067812");
+
+    std::printf("%d checks, %d failures\n", g_checks, g_failures);
+    return g_failures == 0 ? 0 : 1;
+}

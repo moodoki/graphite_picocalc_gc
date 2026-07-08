@@ -13,7 +13,8 @@ Vendored 2026-07-08 from Coyote OS commit `e86cf36d26e90e4891615991c1689b76fb2f9
 | `rp2040-psram/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) (upstream: [polpo/rp2040-psram](https://github.com/polpo/rp2040-psram)) | `e86cf36d` | MIT (`rp2040-psram/LICENSE`, © 2023 Ian Scott) | 8 MB PSRAM driver (PIO SPI); `examples/` and Doxyfile dropped |
 | `pwm_sound/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | `e86cf36d` | GPL-2.0 (`LICENSE.coyote-os`) | PWM piezo buzzer driver |
 | `coyote_reference/` | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) | `e86cf36d` | GPL-2.0 (`LICENSE.coyote-os`) | Reference headers only (`config.h` SD pinout, `keyboard_definition.h` scan codes) — not compiled |
-| `fatfs/` | [elm-chan.org](http://elm-chan.org/fsw/ff/) | R0.15a | BSD-style (`fatfs/LICENSE.txt`) | SD card FAT32 filesystem; `diskio.c` is the stub template — SD SPI glue implemented in `src/platform/` (task 1.5) |
+| `fatfs/` | [elm-chan.org](http://elm-chan.org/fsw/ff/) | R0.15a | BSD-style (`fatfs/LICENSE.txt`) | SD card FAT32 filesystem; `diskio.c` is the stub template — SD SPI glue implemented in `src/platform/` (task 1.5). Local edit: `ffconf.h` LFN=1, CP437 (D8) |
+| `tinyexpr/` | [codeplea/tinyexpr](https://github.com/codeplea/tinyexpr) | `4a7456e` (2025-12-12) | Zlib | C expression parser (task 2.1). Built `-DTE_POW_FROM_RIGHT` |
 
 ## Why vendor instead of submodule
 

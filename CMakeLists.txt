@@ -56,6 +56,11 @@ add_library(fatfs STATIC
 target_include_directories(fatfs PUBLIC drivers/fatfs)
 target_link_libraries(fatfs PUBLIC pico_stdlib)
 
+# tinyexpr (C99). TE_POW_FROM_RIGHT: TI-style right-associative '^'.
+add_library(tinyexpr STATIC drivers/tinyexpr/tinyexpr.c)
+target_include_directories(tinyexpr PUBLIC drivers/tinyexpr)
+target_compile_definitions(tinyexpr PUBLIC TE_POW_FROM_RIGHT)
+
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
     src/main.cpp
@@ -70,6 +75,11 @@ add_executable(picocalc_graphcalc
     src/gfx/font.cpp
     src/gfx/framebuffer.cpp
     src/ui/screen_manager.cpp
+    src/ui/input_line.cpp
+    src/math/engine.cpp
+    src/math/functions.cpp
+    src/math/format.cpp
+    src/apps/home_screen.cpp
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE
@@ -102,6 +112,7 @@ target_link_libraries(picocalc_graphcalc
     pwm_sound
     rp2040-psram
     fatfs
+    tinyexpr
 )
 
 # Generate .uf2, .elf, .bin, .hex, .map alongside the binary.

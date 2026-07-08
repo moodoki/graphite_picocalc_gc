@@ -18,6 +18,7 @@
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
 #include "ui/screen_manager.hpp"
+#include "apps/home_screen.hpp"
 
 namespace {
 
@@ -158,13 +159,24 @@ int main() {
 
     platform::display().set_backlight(200);
 
+    apps::home_screen().load_state();
+
     auto& mgr = ui::screen_manager();
-    mgr.push(&g_diag_screen);
+    mgr.push(&apps::home_screen());
 
     while (true) {
         const platform::KeyEvent ev = platform::keyboard().poll();
         if (ev.key != platform::Key::kNone) {
-            mgr.handle_key(ev);
+            // F6 toggles the hardware diagnostics overlay from any screen.
+            if (ev.pressed && ev.key == platform::Key::kF6) {
+                if (mgr.current() == &g_diag_screen) {
+                    mgr.pop();
+                } else {
+                    mgr.push(&g_diag_screen);
+                }
+            } else {
+                mgr.handle_key(ev);
+            }
         }
         mgr.render_frame();
     }

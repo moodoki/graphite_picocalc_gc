@@ -38,7 +38,14 @@ Note: GPL-2.0 vendored drivers make the combined firmware GPL-2.0 when distribut
 
 | Library | Version | License | Source | Used for |
 |---------|---------|---------|--------|----------|
-| tinyexpr++ | TBD | zlib | https://github.com/Blake-Madden/tinyexpr-plus-plus | Numeric expression parsing & evaluation |
+| tinyexpr (C) | `4a7456e` (2025-12-12) | Zlib | https://github.com/codeplea/tinyexpr | Numeric expression parsing & evaluation |
+
+Chose the original C `tinyexpr` over `tinyexpr++`: the C version is a single ~900-line
+`.c`/`.h` pair with a plain C ABI (no exceptions/STL — a natural fit for `-fno-exceptions`
+`-fno-rtti`), and the extended function library the spec wants is registered from our C++
+side anyway (`src/math/functions.cpp`). tinyexpr++ pulls in `std::` machinery and 68+
+`throw` sites we'd have to compile around. Vendored to `drivers/tinyexpr/`; built with
+`-DTE_POW_FROM_RIGHT` for TI-style right-associative `^`.
 
 ## Source dependencies (Phase 4 — planned)
 

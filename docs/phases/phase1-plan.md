@@ -46,14 +46,14 @@ This is the active working document for Phase 1 — task list, status tracking, 
 
 | # | Task | Est. hrs | Status | Notes |
 |---|------|---|---|---|
-| 2.1 | Integrate tinyexpr++ into `math::Engine` | 4 | [ ] | |
-| 2.2 | Register extended functions (trig, log, nCr, etc.) | 4 | [ ] | |
-| 2.3 | Angle mode (degree/radian) | 2 | [ ] | |
-| 2.4 | `format_number()` | 3 | [ ] | |
-| 2.5 | `HomeScreen` with input line + history | 10 | [ ] | |
-| 2.6 | Variables A–Z + Ans | 3 | [ ] | |
-| 2.7 | Persist history + variables to SD card | 3 | [ ] | |
-| 2.8 | Input line editing (cursor, insert, delete) | 5 | [ ] | |
+| 2.1 | Integrate tinyexpr++ into `math::Engine` | 4 | [x] | Used C tinyexpr `4a7456e` (zlib), not ++; simpler C ABI, `TE_POW_FROM_RIGHT`. Host tests green |
+| 2.2 | Register extended functions (trig, log, nCr, etc.) | 4 | [x] | ln/log10/nCr/nPr/fac/rand/round/min/max/deg/rad; `!` rewritten to `fac()` in preprocess |
+| 2.3 | Angle mode (degree/radian) | 2 | [x] | `math::set_angle_mode`; F4 toggles; trig wrappers convert |
+| 2.4 | `format_number()` | 3 | [x] | int / 10-sig-fig / sci; host tests cover edge cases |
+| 2.5 | `HomeScreen` with input line + history | 10 | [x] | Ring buffer 50, right-aligned results. HW-PENDING |
+| 2.6 | Variables A–Z + Ans | 3 | [x] | +theta; store op `->` (D1); case-insensitive |
+| 2.7 | Persist history + variables to SD card | 3 | [x] | Plaintext TSV + binary vars (D4). HW-PENDING |
+| 2.8 | Input line editing (cursor, insert, delete) | 5 | [x] | `ui::InputLine`: cursor, backspace, del, home, h-scroll |
 
 **Acceptance**: a working scientific calculator. Type expressions, get results, use variables.
 
@@ -125,7 +125,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 |------------|---------|------------|--------|
 | Phase 0 (prep) | ~12 hrs | 12 | [x] |
 | Week 1–2: Bootstrap | ~41 hrs | 53 | [x] (code complete; HW verification pending) |
-| Week 3–4: Calculator core | ~34 hrs | 87 | [ ] |
+| Week 3–4: Calculator core | ~34 hrs | 87 | [x] (code complete; host tests green; HW verification pending) |
 | Week 5–6: Math renderer | ~32 hrs | 119 | [ ] |
 | Week 7–8: Graphing | ~39 hrs | 158 | [ ] |
 | Week 9–10: Polish | ~26 hrs | 184 | [ ] |

@@ -30,6 +30,26 @@ Format:
 
 ---
 
+## D1: Variable store operator is `->` (arrow)
+
+**Date**: 2026-07-08
+**Status**: Accepted
+**Context**: Open decision from the spec — how to store a value into A-Z/theta. Options: TI `→`, `=`, `:=`, or a dedicated STO key.
+**Decision**: Use ASCII `->` typed as two chars (e.g. `2->A`, `x^2->B`). The engine splits on the last `->` whose right side is a bare variable name; `=` stays free for future comparison/equation use.
+**Rationale**: No special key mapping or font glyph needed now; reads clearly; avoids the `=` ambiguity the spec flagged. A dedicated STO key can emit `->` later without changing the engine.
+**Tradeoffs**: Two keystrokes vs. one; `->` can't appear elsewhere in an expression (fine — it has no other meaning).
+**Revisit when**: A physical STO/→ key is added, or equation solving needs `=`.
+
+## D4: History persisted as plaintext TSV
+
+**Date**: 2026-07-08
+**Status**: Accepted
+**Context**: Open decision — history storage format: plaintext vs binary.
+**Decision**: Append `expr\tresult\n` lines to `/picocalc/history.txt`. On boot, read the last 8 KB and parse backwards into the ring buffer. Variables persist separately as a binary blob (`variables.dat`, 28 doubles).
+**Rationale**: Plaintext history is debuggable and hand-editable; parsing cost is trivial at 50 entries. Variables are fixed-size binary because they're not meant to be edited and round-trip exactly.
+**Tradeoffs**: History file grows unbounded (append-only) — a compaction pass is a future cleanup; 8 KB tail read caps what's loaded regardless.
+**Revisit when**: History file size becomes a concern, or results need structured metadata.
+
 ## D6: RGB565 framebuffers, RGB666 on the wire
 
 **Date**: 2026-07-08

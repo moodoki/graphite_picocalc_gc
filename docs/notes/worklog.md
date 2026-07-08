@@ -18,9 +18,10 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1, milestone 1 (bootstrap) CODE COMPLETE → milestone 2 (calculator core) next
-- **Next up**: task 2.1 — vendor tinyexpr++, `math::Engine`
-- **Both boards build**: yes (`./scripts/build-all.sh` → diagnostics-screen firmware)
+- **Phase**: 1, milestone 2 (calculator core) CODE COMPLETE → milestone 3 (math renderer) next
+- **Next up**: task 3.1 — layout nodes (`TextNode`, `HBoxNode`)
+- **Both boards build**: yes (`./scripts/build-all.sh` → calculator firmware, boots to HomeScreen)
+- **Host tests**: `./scripts/host-tests.sh` → 53 checks, 0 failures (math engine)
 
 ## HW-PENDING verification queue
 
@@ -35,6 +36,9 @@ diagnostics screen that exercises everything below at once.
 | 1.6 PSRAM | 2026-07-08 | "PSRAM: OK (1KB r/w verified)" |
 | 1.7 Renderer/DMA | 2026-07-08 | Frame counter ticks smoothly; no tearing/hangs (dual-core FIFO + DMA) |
 | Backlight | 2026-07-08 | Screen visibly lit (set_backlight(200) via STM32 reg 0x05 — unverified register) |
+| 2.5 HomeScreen | 2026-07-08 | Type `2+3*sin(pi/4)`, ENTER → result shows; history scrolls (UP/DN); F4 toggles RAD/DEG; F6 = diag overlay |
+| 2.7 Persistence | 2026-07-08 | History + variables survive power cycle (needs FAT32 SD card) |
+| Store op | 2026-07-08 | `2->A` stores; `A+1` → 3 (D1). Verified in host tests, but confirm on-device keyboard can type `-` and `>` |
 
 ---
 
@@ -99,3 +103,37 @@ Notes / known limitations:
 - Vendored driver C files emit warnings under our -Wall/-Wextra/-Wpedantic (they
   compile as part of our target via INTERFACE libs). Cosmetic; suppress later if
   it drowns signal.
+
+### Checkpoint: Milestone 2 (calculator core) code complete (2026-07-08)
+
+Tasks 2.1–2.8 all [x]; both boards build the calculator firmware; 53/53 host tests pass.
+Decisions D1 (store op `->`) and D4 (plaintext history) recorded.
+
+What's new:
+- `src/math/`: `Engine` (tinyexpr wrapper + `->` store op + `!`→`fac()` preprocess),
+  `functions` (angle-aware trig, ln/log10, nCr/nPr, fac, rand, round, min/max, deg/rad),
+  `format_number` (int / 10-sig-fig / scientific), `types` (calc_t=double, AngleMode).
+- `src/ui/input_line`: cursor editing (insert/backspace/del/home, horizontal scroll).
+- `src/apps/home_screen`: input line + 50-entry ring-buffer history (right-aligned
+  results, pretty via format_number), UP/DOWN scroll, F4 angle toggle, SD persistence
+  of history (TSV) and variables (binary). main.cpp now boots to HomeScreen; F6 opens
+  the milestone-1 diagnostics overlay.
+
+Testing approach (NEW — matters for session continuity):
+- `tests/host/test_math.cpp` + `scripts/host-tests.sh` compile the math layer with the
+  **host** compiler and assert real values (2.1–2.4, 2.6 acceptance criteria). This is
+  how we verify calculator correctness without a PicoCalc. Extend this suite as the
+  math/renderer grows. Cross-compile + host-test + doc-update is now the per-milestone
+  loop.
+
+Decision worth remembering: used **C tinyexpr** (not tinyexpr++) — see dependencies.md
+for rationale (C ABI fits -fno-exceptions/-fno-rtti; extended fns live in our C++).
+
+Known limitations / deferred:
+- Results in history are plain text (format_number), NOT yet 2D-typeset — that's
+  milestone 3 (the renderer replaces the result string with a layout tree).
+- HomeScreen redraws the full frame each key/frame (~10 fps ceiling, see M1 note).
+  Acceptable for text entry; revisit with dirty-rects if it feels laggy on HW.
+- Softkey bar is a static label placeholder; real softkey dispatch is task 5.2.
+- rand() uses libc rand() unseeded — deterministic across boots. Seed from an ADC
+  noise source or uptime at first use during polish.
