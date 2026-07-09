@@ -23,6 +23,14 @@ public:
     uint32_t alloc(size_t bytes, size_t alignment = 4);
     void reset();
 
+    // Single-word access (verified working on hardware 2026-07-10).
+    void write_word(uint32_t addr, uint32_t value);
+    uint32_t read_word(uint32_t addr);
+
+    // Bulk access. WARNING: the vendored bulk transfer path hangs on
+    // PicoCalc hardware (2026-07-10) — do NOT use until fixed. Phase 1
+    // does not need it (framebuffer is line-buffered in SRAM). See D10 /
+    // worklog. Left declared for the future statistics/matrix use cases.
     void write(uint32_t addr, const uint8_t* data, size_t len);
     void read(uint32_t addr, uint8_t* data, size_t len);
 

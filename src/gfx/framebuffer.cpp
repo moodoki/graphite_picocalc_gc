@@ -2,85 +2,52 @@
 
 #include <cstring>
 
-#include "pico/multicore.h"
+#include "pico/stdlib.h"
 
 namespace gfx {
 
 namespace {
 
-struct PushJob {
-    const uint16_t* px;
-    int x, y, w, h;
-};
-
-// Strip mode: two ping-pong strip buffers. Full mode: one whole frame.
+// Render buffers. Full mode (Pico 2): one whole frame. Strip mode
+// (Pico 1): one strip at a time, pushed synchronously.
 #if PICOCALC_PICO2
 uint16_t frame_buf[platform::kScreenW * platform::kScreenH];
 #endif
-uint16_t strip_buf[2][platform::kScreenW * config::kStripHeight];
-PushJob jobs[2];
-
-// Number of jobs handed to core 1 that have not been acknowledged.
-int outstanding = 0;
-
-void submit(PushJob* job) {
-    multicore_fifo_push_blocking(reinterpret_cast<uintptr_t>(job));
-    ++outstanding;
-}
-
-void wait_one_ack() {
-    (void)multicore_fifo_pop_blocking();
-    --outstanding;
-}
-
-void drain_acks() {
-    while (outstanding > 0) {
-        wait_one_ack();
-    }
-}
+uint16_t strip_buf[platform::kScreenW * config::kStripHeight];
 
 }  // namespace
 
+// Reserved for a future dual-core display service. The core-1 handshake
+// was found to hang on hardware (2026-07-10); rendering is synchronous on
+// core 0 for now (matches the known-good vendored path). See D10 / worklog.
 void display_service_main() {
     while (true) {
-        auto* job = reinterpret_cast<PushJob*>(multicore_fifo_pop_blocking());
-        platform::display().push_rect_dma(job->x, job->y, job->w, job->h, job->px);
-        multicore_fifo_push_blocking(1);  // Ack
+        tight_loop_contents();
     }
 }
 
 void Framebuffer::render_frame(RenderFn render, void* ctx) {
     if (config::kUseFullFramebuffer) {
 #if PICOCALC_PICO2
-        drain_acks();  // Single buffer: previous frame must be on the wire
         buf_ = frame_buf;
         clip_y0_ = 0;
         clip_y1_ = platform::kScreenH;
         render(*this, ctx);
-        jobs[0] = {frame_buf, 0, 0, platform::kScreenW, platform::kScreenH};
-        submit(&jobs[0]);
+        platform::display().push_rect(0, 0, platform::kScreenW, platform::kScreenH, frame_buf);
 #endif
         return;
     }
 
-    // Strip mode
-    int slot = 0;
+    // Strip mode: render each strip and push it synchronously (core 0).
     for (int y0 = 0; y0 < platform::kScreenH; y0 += config::kStripHeight) {
-        // Reuse of a strip buffer requires its previous push to be done.
-        if (outstanding >= 2) {
-            wait_one_ack();
-        }
-        buf_ = strip_buf[slot];
+        buf_ = strip_buf;
         clip_y0_ = y0;
         const int h = (y0 + config::kStripHeight <= platform::kScreenH) ? config::kStripHeight
                                                                         : platform::kScreenH - y0;
         clip_y1_ = y0 + h;
         render(*this, ctx);
-        jobs[slot] = {strip_buf[slot], 0, y0, platform::kScreenW, h};
-        submit(&jobs[slot]);
-        slot ^= 1;
+        platform::display().push_rect(0, y0, platform::kScreenW, h, strip_buf);
     }
-    drain_acks();
 }
 
 void Framebuffer::clear(Color c) {

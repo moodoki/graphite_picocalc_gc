@@ -130,3 +130,20 @@ pico_add_extra_outputs(picocalc_graphcalc)
 # Enable USB stdio for printf debugging during development.
 pico_enable_stdio_usb(picocalc_graphcalc  1)
 pico_enable_stdio_uart(picocalc_graphcalc 0)
+
+# ---- Hardware bring-up diagnostic (vendored blocking display path only) ----
+# Minimal firmware that bypasses our gfx pipeline entirely, to isolate
+# display bugs. Build with: cmake --build <dir> --target picocalc_diag
+add_executable(picocalc_diag src/diag_main.cpp)
+target_include_directories(picocalc_diag PRIVATE src/ drivers/)
+target_link_libraries(picocalc_diag
+    pico_stdlib
+    pico_multicore
+    hardware_spi
+    hardware_i2c
+    i2ckbd
+    lcdspi
+)
+pico_add_extra_outputs(picocalc_diag)
+pico_enable_stdio_usb(picocalc_diag  1)
+pico_enable_stdio_uart(picocalc_diag 0)

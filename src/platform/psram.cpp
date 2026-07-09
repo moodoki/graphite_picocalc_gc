@@ -37,6 +37,14 @@ void Psram::reset() {
     next_ = 0;
 }
 
+void Psram::write_word(uint32_t addr, uint32_t value) {
+    psram_write32(&g_psram, addr, value);
+}
+
+uint32_t Psram::read_word(uint32_t addr) {
+    return psram_read32(&g_psram, addr);
+}
+
 void Psram::write(uint32_t addr, const uint8_t* data, size_t len) {
     psram_write(&g_psram, addr, data, len);
 }

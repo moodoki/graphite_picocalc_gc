@@ -30,6 +30,23 @@ Format:
 
 ---
 
+## D10: Synchronous core-0 rendering; PSRAM bulk path and dual-core display deferred
+
+**Date**: 2026-07-10
+**Status**: Accepted (from first hardware bring-up)
+**Context**: First flash to real PicoCalc (Pico 1) showed a screen of random colors and a dead keyboard. Bisecting on hardware (vendored-only diagnostic + USB-serial boot tracing) found three distinct bugs:
+1. **Boot hang** — `run_self_tests()` called the vendored *bulk* PSRAM transfer (`psram_read`/`psram_write`, 1 KB), which hangs on this hardware, even though single-word `psram_read32`/`write32` work. Boot froze after display init but before the first draw, so the panel showed power-on noise ("random colors").
+2. **Dual-core display stall** — routing strip pushes through a core-1 service over the multicore FIFO stalled on the first frame.
+3. **Dead keyboard** — the I2C read/write timeouts (2 ms) were shorter than a 2-byte transfer on the 10 kHz keyboard bus (~3.5 ms), so every read timed out.
+**Decision**:
+- Render **synchronously on core 0** using the vendored blocking `spi_write_fast` path (proven good by the diagnostic). Core 1 is left idle; `display_service_main` and `push_rect_dma` are retained but unused, as the basis for a future revisit.
+- Quarantine the **bulk PSRAM** API (`Psram::read`/`write`) as known-hanging; expose and use only single-word `read_word`/`write_word`. Phase 1 needs no bulk PSRAM (framebuffer is line-buffered in SRAM).
+- Set the keyboard I2C timeout to 100 ms (`kI2cTimeoutUs`), comfortably above the 10 kHz transfer time.
+- Rendering is **event-driven**: a full-frame push is ~200 ms (5 fps), so redraw only after a key press, not every loop.
+**Rationale**: Get a correct, working calculator on hardware first. The DMA push, dual-core split, and bulk PSRAM are all optimizations/future-phase needs, not Phase 1 requirements; each is a separate investigation.
+**Tradeoffs**: ~200 ms full-screen redraw latency per keypress (single-threaded, full-frame). Acceptable for a calculator; the fix is dirty-rectangle / partial updates (and possibly a faster SPI clock or revisiting DMA), tracked for task 5.6.
+**Revisit when**: task 5.6 performance work — profile, then add partial updates and re-evaluate DMA/dual-core and the bulk PSRAM transfer (needed for Phase 3 statistics / Phase 4 matrices).
+
 ## D3: Trace coordinate readout at the bottom of the viewport
 
 **Date**: 2026-07-08

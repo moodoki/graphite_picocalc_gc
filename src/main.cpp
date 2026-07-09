@@ -10,7 +10,6 @@
 #include <cstdio>
 #include <cstring>
 
-#include "pico/multicore.h"
 #include "pico/stdlib.h"
 
 #include "config.hpp"
@@ -49,16 +48,20 @@ void run_self_tests() {
 
     if (g_init_status.psram) {
         auto& ps = platform::psram();
-        const uint32_t addr = ps.alloc(1024);
+        // Word-based r/w test (the vendored bulk path hangs on HW — D10).
+        const uint32_t addr = ps.alloc(256);
         if (addr != platform::Psram::kInvalid) {
-            uint8_t pattern[1024];
-            uint8_t readback[1024];
-            for (int i = 0; i < 1024; ++i) {
-                pattern[i] = static_cast<uint8_t>(i * 7 + 13);
+            bool ok = true;
+            for (uint32_t i = 0; i < 64; ++i) {
+                ps.write_word(addr + i * 4, 0xA5A50000u + i);
             }
-            ps.write(addr, pattern, sizeof(pattern));
-            ps.read(addr, readback, sizeof(readback));
-            g_psram_alloc_ok = std::memcmp(pattern, readback, sizeof(pattern)) == 0;
+            for (uint32_t i = 0; i < 64; ++i) {
+                if (ps.read_word(addr + i * 4) != 0xA5A50000u + i) {
+                    ok = false;
+                    break;
+                }
+            }
+            g_psram_alloc_ok = ok;
         }
     }
 }
@@ -156,8 +159,8 @@ int main() {
     g_init_status = platform::init();
     run_self_tests();
 
-    multicore_launch_core1(gfx::display_service_main);
-
+    // Display rendering is synchronous on core 0 (the dual-core display
+    // handshake hangs on hardware — see D10). Core 1 is left idle.
     platform::display().set_backlight(200);
 
     apps::home_screen().load_state();
@@ -166,11 +169,14 @@ int main() {
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());
 
+    // Event-driven rendering: a full-frame push is ~200 ms, so redraw only
+    // after input (or the initial frame) instead of every loop iteration.
+    bool dirty = true;
     while (true) {
         const platform::KeyEvent ev = platform::keyboard().poll();
-        if (ev.key != platform::Key::kNone) {
+        if (ev.key != platform::Key::kNone && ev.pressed) {
             // F6 toggles the hardware diagnostics overlay from any screen.
-            if (ev.pressed && ev.key == platform::Key::kF6) {
+            if (ev.key == platform::Key::kF6) {
                 if (mgr.current() == &g_diag_screen) {
                     mgr.pop();
                 } else {
@@ -179,7 +185,11 @@ int main() {
             } else {
                 mgr.handle_key(ev);
             }
+            dirty = true;
         }
-        mgr.render_frame();
+        if (dirty) {
+            mgr.render_frame();
+            dirty = false;
+        }
     }
 }

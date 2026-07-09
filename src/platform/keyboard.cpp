@@ -40,6 +40,12 @@ constexpr uint8_t kCodeDel = 0xD4;
 // acceptable when polled at frame rate.
 constexpr uint64_t kReadDelayUs = 10000;
 
+// I2C transfer timeout. The keyboard bus runs at 10 kHz, so a 2-byte
+// read takes ~3.5 ms and the register-select write ~2.5 ms — the
+// timeout must comfortably exceed those. It only blocks for the full
+// duration on failure (the STM32 keyboard is normally present).
+constexpr uint32_t kI2cTimeoutUs = 100000;
+
 Key key_from_char(char c) {
     if (c >= '0' && c <= '9') {
         return static_cast<Key>(static_cast<int>(Key::k0) + (c - '0'));
@@ -178,7 +184,8 @@ KeyEvent Keyboard::poll() {
 
     if (phase_ == Phase::kIdle) {
         uint8_t reg = kRegFifo;
-        const int rc = i2c_write_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, &reg, 1, false, 2000);
+        const int rc =
+            i2c_write_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, &reg, 1, false, kI2cTimeoutUs);
         if (rc < 0) {
             return none;
         }
@@ -194,7 +201,7 @@ KeyEvent Keyboard::poll() {
     phase_ = Phase::kIdle;
 
     uint8_t buf[2] = {0, 0};
-    const int rc = i2c_read_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, buf, 2, false, 2000);
+    const int rc = i2c_read_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, buf, 2, false, kI2cTimeoutUs);
     if (rc < 0 || (buf[0] == 0 && buf[1] == 0)) {
         return none;
     }

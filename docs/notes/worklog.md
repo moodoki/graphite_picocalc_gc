@@ -18,34 +18,72 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1 CODE COMPLETE (all 5 milestones). Only hardware verification remains.
-- **Next up (needs a real PicoCalc)**: flash both boards, run the HW-PENDING checklist
-  below, capture 5.6 graph-profiling numbers, then write `docs/notes/phase1-retro.md`
-  and start `docs/phases/phase2-spec.md`.
-- **Both boards build**: yes (`./scripts/build-all.sh` → full graphing-calculator firmware)
+- **Phase**: 1 code complete + **first hardware bring-up done on Pico 1** (2026-07-10).
+  Boots to the home screen; display and keyboard verified on real hardware.
+- **Next up**: exercise the full calculator on-device (evaluate/graph/persist), get a
+  FAT32 SD card in to verify persistence (boot showed sd=0), capture 5.6 graph-profiling
+  numbers, then `docs/notes/phase1-retro.md` and `docs/phases/phase2-spec.md`.
+- **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 69 math + 21 layout = 90 checks, 0 failures
+
+### Hardware bring-up debugging kit (learned 2026-07-10)
+
+- Flash without touching the board: from running firmware, `stty -f /dev/cu.usbmodem* 1200`
+  triggers the RP2040 1200-baud reset into BOOTSEL, then `cp build/pico/*.uf2 /Volumes/RPI-RP2/`.
+- USB serial: `cat /dev/cu.usbmodem*` (pico_enable_stdio_usb is on). printf boot-tracing
+  was how the boot hang was located.
+- `picocalc_diag` (src/diag_main.cpp) is a vendored-only display test — the bisection tool
+  that proved the panel/driver work, isolating bugs to our code.
 
 ## HW-PENDING verification queue
 
-Flash `build/pico/picocalc_graphcalc.uf2` (or `build/pico2/...`) — it boots to a
-diagnostics screen that exercises everything below at once.
+Firmware now boots to the **home screen**; the diagnostics screen is the F6 overlay.
 
-| Item | Since | What to check on hardware |
-|------|-------|---------------------------|
-| 1.3 Display | 2026-07-08 | Text + RGBW color bars render; bar colors in R,G,B,W order (checks 565→666 conversion + BGR order) |
-| 1.4 Keyboard | 2026-07-08 | Typing updates "Keys seen"/"Last key"; events also on USB serial |
-| 1.5 SD card | 2026-07-08 | With FAT32 card inserted: "SD card: OK (file r/w verified)" |
-| 1.6 PSRAM | 2026-07-08 | "PSRAM: OK (1KB r/w verified)" |
-| 1.7 Renderer/DMA | 2026-07-08 | Frame counter ticks smoothly; no tearing/hangs (dual-core FIFO + DMA) |
-| Backlight | 2026-07-08 | Screen visibly lit (set_backlight(200) via STM32 reg 0x05 — unverified register) |
-| 2.5 HomeScreen | 2026-07-08 | Type `2+3*sin(pi/4)`, ENTER → result shows; history scrolls (UP/DN); F4 toggles RAD/DEG; F6 = diag overlay |
-| 2.7 Persistence | 2026-07-08 | History + variables survive power cycle (needs FAT32 SD card) |
-| Store op | 2026-07-08 | `2->A` stores; `A+1` → 3 (D1). Verified in host tests, but confirm on-device keyboard can type `-` and `>` |
-| 3.6 Pretty math | 2026-07-08 | Enter `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → history shows stacked fractions, raised exponents, scaled parens; check vertical alignment/legibility at 8x12 |
-| 4.x Graphing | 2026-07-08 | HomeScreen F1=Y=, F2=WIN, F3=GRAPH. In Y= enter `x^2-3`, `sin(x)`; F4→graph plots in distinct colors with axes+grid. Graph: F1 trace (L/R, U/D switch fn, x/y readout), F2/F3 zoom, S/T presets. WindowScreen edits ranges → replot. All survive power cycle (SD) |
-| Graph perf | 2026-07-08 | Measure full 7-function replot time on Pico 1 (spec target <50 ms; D5 float fallback is the lever if over). Firmware prints "graph recompute: N us" to USB serial on each replot |
-| 5.3 Mode/reboot | 2026-07-08 | Home F4→MODE: toggle RAD/DEG, FLOAT/FIX/SCI, fix digits; "Reboot to bootloader"+ENTER drops to BOOTSEL (reset_usb_boot) — confirm it mounts RPI-RP2 |
-| 5.7 Full HW test | 2026-07-08 | Phase-1 exit test: power-cycle → Home → `2+3*sin(pi/4)` correct → F3 graph `sin(x)` with trace+zoom → persistence across power cycle |
+**Verified on Pico 1 hardware 2026-07-10:** display (home screen renders, text + colors
+correct), keyboard (keys read with correct ASCII over I2C), PSRAM word r/w, backlight,
+boot to a usable home screen. Bugs found & fixed: bulk-PSRAM boot hang, dual-core
+display stall, keyboard I2C timeout — all in D10.
+
+Still to verify on hardware:
+
+| Item | What to check on hardware |
+|------|---------------------------|
+| SD card (sd=0 at boot) | Insert a FAT32 card → `/picocalc` created, self-test file r/w OK, persistence works |
+| 2.5 HomeScreen eval | `2+3*sin(pi/4)` ENTER → correct result; history scroll (UP/DN); UP-on-empty recalls |
+| Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
+| 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
+| 4.x Graphing | F1 Y= enter `x^2-3`, `sin(x)`; graph plots w/ axes+grid; trace, F2/F3 zoom, S/T presets |
+| Graph perf (5.6) | Full replot time (firmware prints "graph recompute: N us" to serial); target <50 ms |
+| 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
+| 5.7 Full exit test | Power-cycle → Home → `2+3*sin(pi/4)` → F3 graph `sin(x)` trace+zoom → persistence |
+| Perf latency | ~200 ms full-screen redraw per keypress (D10) — confirm acceptable or prioritize dirty-rects |
+
+---
+
+## 2026-07-10 — Session 2: first hardware bring-up (Pico 1)
+
+First flash to a real PicoCalc. Initial symptom: screen of random colors + dead keyboard.
+Diagnosed on-device by bisection (vendored-only `picocalc_diag` proved the panel works →
+bug is ours) and USB-serial boot tracing. Found and fixed three bugs, all in **D10**:
+
+1. **Boot hang** → the "random colors". `run_self_tests()` used the vendored *bulk* PSRAM
+   transfer, which hangs on hardware (single-word PSRAM works). Froze after display init
+   but before first draw, leaving power-on noise on the panel. Fix: word-based self-test;
+   bulk `Psram::read/write` quarantined (added `read_word`/`write_word`).
+2. **Dual-core display stall**. Pushing strips through a core-1 FIFO service stalled on
+   frame 1. Fix: render synchronously on core 0 via the vendored blocking `spi_write_fast`
+   path (the diagnostic's known-good mechanism). Core 1 idle; DMA/dual-core deferred.
+3. **Dead keyboard**. I2C timeouts were 2 ms but a 2-byte read on the 10 kHz keyboard bus
+   takes ~3.5 ms, so every read timed out. Fix: `kI2cTimeoutUs = 100 ms`.
+
+Result: **boots to the home screen; display + keyboard confirmed working on hardware.**
+Also made rendering event-driven (redraw only after a keypress) since a full-frame push is
+~200 ms (5 fps) — removes idle redraws. Removed the debug instrumentation afterward.
+
+Follow-ups: verify the rest of the calculator on-device (needs a FAT32 SD card for
+persistence — boot showed sd=0), capture graph-profiling numbers, then the ~200 ms redraw
+latency is the main perf item (dirty-rectangle partial updates — task 5.6). See the
+HW-PENDING queue above.
 
 ---
 

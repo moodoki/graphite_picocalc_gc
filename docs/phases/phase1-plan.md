@@ -28,11 +28,11 @@ This is the active working document for Phase 1 — task list, status tracking, 
 |---|------|---|---|---|
 | 1.1 | Repo + dual-board CMake build | 3 | [x] | 2026-07-08, commits `f76d10c`..`d62d539` |
 | 1.2 | Vendor Coyote OS C drivers | 2 | [x] | Vendored `e86cf36d`; CMake integration in `d62d539` |
-| 1.3 | `platform::Display` wrapper | 8 | [x] | RGB666 wire format — see D6. HW-PENDING |
-| 1.4 | `platform::Keyboard` wrapper | 6 | [x] | Non-blocking poll — see D7. HW-PENDING |
-| 1.5 | `platform::Storage` wrapper (FatFs) | 4 | [x] | Own SD SPI driver + diskio glue; LFN — see D8. HW-PENDING |
-| 1.6 | `platform::Psram` wrapper | 3 | [x] | Bump allocator over PSRAM addresses (not pointers). HW-PENDING |
-| 1.7 | Line-buffer renderer + DMA on core 1 | 8 | [x] | Strip ping-pong on Pico 1, full FB on Pico 2. HW-PENDING |
+| 1.3 | `platform::Display` wrapper | 8 | [x] | RGB666 wire format (D6). **HW-verified 2026-07-10** (sync core-0 push, D10) |
+| 1.4 | `platform::Keyboard` wrapper | 6 | [x] | Non-blocking poll (D7). **HW-verified 2026-07-10** (I2C timeout fix, D10) |
+| 1.5 | `platform::Storage` wrapper (FatFs) | 4 | [x] | Own SD SPI driver + diskio glue; LFN (D8). HW-PENDING (needs FAT32 card) |
+| 1.6 | `platform::Psram` wrapper | 3 | [x] | Word r/w **HW-verified**; bulk path hangs on HW, quarantined (D10) |
+| 1.7 | Line-buffer renderer + DMA on core 1 | 8 | [x] | Strip render **HW-verified**; runs synchronously on core 0, dual-core/DMA deferred (D10) |
 | 1.8 | `gfx::Font` with 8$\times$16 font | 4 | [x] | Interim 8x12 font1 — see D9 |
 | 1.9 | Basic `ScreenManager` | 3 | [x] | Fixed-depth stack; DiagScreen demo in main.cpp |
 
