@@ -22,9 +22,13 @@ Conventions:
   Boots to the home screen; display and keyboard verified on real hardware.
 - **Next up**: exercise the full calculator on-device (evaluate/graph/persist), get a
   FAT32 SD card in to verify persistence (boot showed sd=0), capture 5.6 graph-profiling
-  numbers, then `docs/notes/phase1-retro.md` and `docs/phases/phase2-spec.md`.
+  numbers, then `docs/notes/phase1-retro.md`. Phase 2/3 specs are now in the tree
+  (imported + reconciled 2026-07-11); phase roadmap is weeks 11–16 / 17–25 / 26–35.
+- **Test-drive feedback logged 2026-07-11** (see entry below): all five actionable
+  items **implemented in Session 3** (D11, D12) — on-device verification pending, see
+  the polish rows in the HW-PENDING queue. KIV: F-key layout rethink (item 7).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 69 math + 21 layout = 90 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 75 math + 21 layout = 96 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -49,7 +53,13 @@ Still to verify on hardware:
 | Item | What to check on hardware |
 |------|---------------------------|
 | SD card (sd=0 at boot) | Insert a FAT32 card → `/picocalc` created, self-test file r/w OK, persistence works |
-| 2.5 HomeScreen eval | `2+3*sin(pi/4)` ENTER → correct result; history scroll (UP/DN); UP-on-empty recalls |
+| 2.5 HomeScreen eval | `2+3*sin(pi/4)` ENTER → correct result; UP/DOWN walk past inputs (D12) |
+| Polish: graph colors | Grid now dark gray (`kGridLine`), axes white, Y7 yellow — legible on the panel? |
+| Polish: diag exit | ESC exits the F6 overlay. Also check whether a 2nd F6 press exits (original report said it didn't — HW quirk?) |
+| Polish: history nav | Shift+UP/DOWN scroll the view — confirm the STM32 reports shift+arrow as arrow code with shift held (D12 revisit trigger) |
+| Polish: HOME key | From graph/window/mode/diag → home screen; on home with text → cursor-to-start |
+| Polish: e constant | `e` → 2.718281828; `5->E` → "E is reserved"; `2e3` → 2000 |
+| F7-F10 scan codes | Press Shift+F2..F5 in the diag key echo → expect codes 0x87-0x8A (135-138); decode assumes the 0x81+n pattern |
 | Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
 | 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
 | 4.x Graphing | F1 Y= enter `x^2-3`, `sin(x)`; graph plots w/ axes+grid; trace, F2/F3 zoom, S/T presets |
@@ -57,6 +67,121 @@ Still to verify on hardware:
 | 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
 | 5.7 Full exit test | Power-cycle → Home → `2+3*sin(pi/4)` → F3 graph `sin(x)` trace+zoom → persistence |
 | Perf latency | ~200 ms full-screen redraw per keypress (D10) — confirm acceptable or prioritize dirty-rects |
+
+---
+
+## 2026-07-11 — Session 3: Phase 1 polish from test-drive feedback
+
+Implemented all five actionable items from the Session-2 feedback entry (decisions
+D11, D12). Both boards build; host tests 96/96 (6 new `e` checks); clang-format run.
+
+1. **Graph colors** — new `colors::kGridLine` rgb(60,60,60) for grid lines (axes stay
+   white); Y7 palette slot dark green → yellow rgb(250,220,40).
+2. **Diag screen exit** — ESC now pops the overlay (F6 already toggled); added an
+   on-screen "F6 or ESC exits." hint. Removed `GraphScreen`'s unreachable F6 handler
+   and fixed its softkey label (F6 said "Y=", now "DIAG").
+3. **Input history (D12)** — UP/DOWN walk past inputs shell-style (in-progress line
+   stashed and restored); Shift+UP/DOWN scroll the history view. Supersedes 5.5's
+   UP-on-empty single recall.
+4. **`e` constant (D11)** — `build_lookup()` no longer binds letter 'e', so tinyexpr's
+   builtin Euler constant resolves; `->e`/`->E` store returns "E is reserved".
+5. **HOME key** — global intercept in `main.cpp` (like F6): pops to the home screen
+   from any screen via new `ScreenManager::pop_to_root()`; on the home screen it
+   falls through to the input line's cursor-to-start.
+
+README per-screen usage updated. On-device verification for all five queued in the
+HW-PENDING table (the shift+arrow reporting is the one real HW unknown — D12 names
+the fallback). KIV: F-key layout rethink (feedback item 7).
+
+**Addendum (same day)**: developer corrected the F-key picture — F1-F5 are physical,
+F6-F10 are Shift+F1-F5 *translated by the STM32 into distinct scan codes* (that's how
+F6 opened diagnostics). Extended `Key` to kF10 and decode to 0x8A (0x87-0x8A assumed
+from the 0x81-0x86 pattern; HW-PENDING). This translation behavior cuts both ways for
+D12: the STM32 demonstrably remaps shifted non-printables, so Shift+UP/DOWN may well
+arrive as something other than arrow-plus-shift-flag — verify early.
+
+---
+
+## 2026-07-11 — Session 2: Phase 2/3 specs imported + consistency pass
+
+Imported the developer's drafts of `phase2-spec.md` and `phase3-spec.md` (from
+`picogc_phase2_3.zip`) into `docs/phases/` and reconciled them against the Phase 1
+code and the committed Phase 4 spec.
+
+**Added**: built-in help planned into Phase 2 (new §10; tasks 2.26–2.28, ~9 hrs;
+total now ~110 hrs). `HelpScreen` with Functions/Keys/Syntax tabs, entry Home F5
+(unassigned in Phase 1). Function catalog driven by a `math::catalog` descriptor
+table that `build_lookup()` also consumes — one source of truth so help can't drift
+from the parser. Motivated by test-drive feedback item 6 (entry below).
+
+**Consistency fixes applied to the drafts**:
+
+- phase2 §5.3/§6.1: corrected engine claims — `eval_compiled` hardcodes X (task 2.4
+  parameterizes the swept slot), and `theta` is its own variable slot (`kTheta`),
+  which the polar sweep drives (draft claimed theta would be aliased to `t`).
+- phase2 §8.1/§14: framebuffer clips strip-only (vertical); split-screen needs a real
+  clip-rect — added to task 2.19 (draft assumed clipped rendering already sufficed).
+- phase2 §12: removed unmeasured "~400K evals/sec benchmarked" figure (5.6 is still
+  HW-PENDING); replaced with a pessimistic bound.
+- phase2: `TableConfig` moved `apps::` → `graph::` to keep apps→graph layering;
+  header/total hours fixed (~120 vs ~101 → both ~110 incl. help).
+- phase3: header hours 160→170 (matches task tables); dropped "reuse Phase 1's
+  numeric solver" (none exists — the solver is Phase 4 §3.4; 3C uses a local
+  bisection); `extern` globals → singleton accessors per project convention; noted
+  tinyexpr is fixed-arity (no default args) for parser registration (3C.7).
+- phase4-spec: weeks renumbered 16–25 → 26–35 (it predates Phase 3's existence;
+  Phase 3 occupies weeks 17–25).
+- README Phase 2 line updated ("multi-function graphing" already shipped in Phase 1).
+
+**Left as-is (deliberate)**: Phase 2 `GraphState` sizes slots at `kMaxExprLen` (256)
+vs Phase 1's 96-char `YFunctions` — persisted struct grows to ~6.4 KB, fine; the
+Matrix-vs-Array reconciliation stays deferred to Phase 4 start (phase3 §10 records it).
+
+---
+
+## 2026-07-11 — Test-drive feedback (on-device, Pico 1)
+
+Developer used the calculator for a while on hardware. Observations, each diagnosed in
+code this session. No fixes applied yet — several need a design decision first.
+
+1. **Graph grid too bright.** Grid lines use `colors::kGrayLine` = rgb(200,200,200) —
+   near-white on the panel (`graph_screen.cpp draw_axes`). Proposal: add a dedicated
+   dark-gray `kGridLine` (~rgb 60,60,60) for the grid; axes stay white. Don't darken
+   `kGrayLine` itself — it's also the history-expression text color and hint text.
+   Palette on black bg: Y7 dark green rgb(0,120,0) is the dim one; consider yellow.
+2. **Can't exit the F6 diagnostics screen.** F6 is a global toggle in `main.cpp` — a
+   second F6 press *should* pop it. DiagScreen swallows every other key incl. ESC, so
+   the natural exit key does nothing. Fix: ESC pops; draw an "F6/ESC exits" hint line.
+   HW question: confirm whether the second F6 press really never arrives (STM32 quirk)
+   or the tester only tried ESC. Related dead code found: `GraphScreen::on_key` has a
+   kF6 case (unreachable — main intercepts F6 first) and the graph softkey bar labels
+   F6 as "Y=" — mislabeled, should be DIAG.
+3. **Input history navigation.** Today: UP on empty input recalls only the newest
+   expression (5.5); any further UP scrolls the output view. Wanted: shell-style —
+   repeated UP/DOWN walks back/forward through past inputs; a separate control scrolls
+   the view. Keyboard has no PgUp/PgDn (coyote scan codes), but shift state is tracked.
+   Proposal: UP/DOWN = input-history recall, Shift+UP/DOWN = scroll output.
+4. **`e` is not Euler's number.** `build_lookup` binds all 26 letters as variables and
+   tinyexpr checks the user lookup *before* its builtins (tinyexpr.c base()), so `e`
+   resolves to variable E (0.0). `pi` works because it's two letters — never collides.
+   Current convention: single letters = variables (case-folded by preprocess),
+   multi-letter names = builtins + pi/theta/ans. Workaround today: `exp(1)`.
+   Decision needed: reserve `e` as the constant and drop variable E (TI users rarely
+   use E; recommended), vs. case-sensitivity (e=const, E=var — needs preprocess rework).
+5. **Home key does nothing.** It decodes fine (0xD2 → `Key::kHome`) but only InputLine
+   consumes it (cursor-to-start — invisible on an empty line; other screens ignore it).
+   Proposal: global intercept in main.cpp like F6 — pop to the root (home) screen from
+   anywhere; when already on Home with text in the input, keep cursor-to-start.
+6. **Built-in help**: not planned in any written spec (phase 2/3 specs don't exist yet;
+   phase 4 is CAS/matrix/MicroPython). Candidate for `phase2-spec.md`: a catalog/help
+   screen — function list with signatures + key map. Cheap and high-value on a device
+   with no manual.
+7. **F-key mapping (KIV).** Corrected 2026-07-11: F1-F5 are direct physical keys;
+   F6-F10 arrive via Shift+F1-F5 (the STM32 translates them to their own scan codes).
+   That's exactly TI's five top-row keys on the direct layer — a TI-order remap
+   (Y=/WINDOW/ZOOM/TRACE/GRAPH) with secondary functions (DIAG, HELP) on the shifted
+   layer is the obvious candidate. Watch what feels natural during the next test
+   drive before committing.
 
 ---
 

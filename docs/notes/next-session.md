@@ -1,39 +1,48 @@
 # Start here — next session
 
-**Last session:** 2026-07-10. First hardware bring-up on Pico 1 done — firmware boots to
-the home screen with working display and keyboard. Phase 1 is code-complete (all 5
-milestones); both boards build; 90 host tests pass. HW bring-up fixes in commit `a6f4bc3`.
+**Last session:** 2026-07-11 (three sessions: test-drive triage → phase 2/3 spec import +
+consistency pass → phase 1 polish fixes). Phase 1 is code-complete *including* polish from
+the first test drive; both boards build; 96 host tests pass.
 
-Read `docs/notes/worklog.md` (top entry + HW-PENDING queue) and `docs/notes/decisions.md`
-(D10) for the full story. This file is just the short "what to do next".
+Read `docs/notes/worklog.md` (top entries + HW-PENDING queue) and `docs/notes/decisions.md`
+(D11, D12) for the full story. This file is just the short "what to do next".
 
 ## Current state
 
 - **On Pico 1 hardware, verified:** boot → home screen, display, keyboard, PSRAM word r/w,
   backlight.
-- **The user is driving the calculator around** to shake out on-device behavior — expect
-  observations/bugs to come back from that.
-- Rendering is synchronous on core 0, event-driven (redraw only after a keypress).
-  Full-screen redraw is ~200 ms (5 fps).
+- **Test-drive feedback all addressed in code** (2026-07-11): dark grid + yellow Y7,
+  ESC exits diagnostics, shell-style input recall (UP/DOWN) with Shift+UP/DOWN view scroll
+  (D12), `e` = Euler's constant / variable E reserved (D11), HOME pops to home screen.
+  None of it re-verified on hardware yet — see the "Polish:" rows in the HW-PENDING queue.
+- **Phase 2/3 specs are in `docs/phases/`** (imported from developer drafts, reconciled
+  against the code; built-in help planned as phase 2 §10; phase 4 renumbered to weeks
+  26–35). Phase 2 starts with task 2.1 (extract `graph/` subsystem).
+- Rendering is synchronous on core 0, event-driven; full-screen redraw ~200 ms (5 fps).
+- **Keyboard correction (2026-07-11):** F1-F5 are physical; F6-F10 = Shift+F1-F5,
+  translated by the STM32 into distinct scan codes (decode extended to 0x8A, F7-F10
+  codes assumed — HW check queued). Because the STM32 remaps its shift layer, the
+  Shift+UP/DOWN view-scroll (D12) may not arrive as arrow+shift — verify early.
+- **Session protocol:** read this file first when starting fresh; update it before
+  ending a session (developer convention, 2026-07-11).
 
 ## Next tasks (in priority order)
 
-1. **Triage whatever the user found** while driving the calculator around (may reprioritize
-   the rest).
-2. **SD card / persistence.** Boot showed `sd=0`. With a FAT32 card inserted, confirm
-   `/picocalc` is created and history/vars/Y-funcs survive a power cycle. If it still fails
-   *with* a card, that's a live bug in the SD SPI init/mount path.
-3. **Full on-device exercise** (currently only display+keyboard confirmed): evaluate
-   `2+3*sin(pi/4)`; check pretty-printed fractions/exponents/parens; Y= editor → graph
-   `sin(x)`/`x^2-3` with trace, zoom, window edits; mode screen; reboot-to-bootloader;
-   store op `2->A` (confirm the keyboard can type `-` and `>`).
-4. **Graph profiling (task 5.6 part 1).** Firmware prints `graph recompute: N us` to USB
-   serial — capture it against the <50 ms target.
-5. **Dirty-rectangle / partial rendering (task 5.6 part 2).** The biggest quality item:
-   only repaint changed regions instead of the whole 320x320 each keypress (~200 ms, snappier).
-6. **Pico 2 (RP2350) bring-up.** Never flashed. Note it uses `kUseFullFramebuffer = true` —
-   a completely different, untested display path (200 KB SRAM framebuffer, not strips).
-7. **Phase 1 wrap-up:** `docs/notes/phase1-retro.md`, then `docs/phases/phase2-spec.md`.
+1. **HW verification queue** (table in worklog): SD card/persistence (`sd=0` at boot —
+   FAT32 card needed), full on-device exercise, the five "Polish:" rows — especially
+   whether Shift+arrow reaches us as arrow-plus-shift (D12's revisit trigger) and whether
+   a 2nd F6 press exits diagnostics (original report said it didn't) — and graph
+   profiling numbers (5.6, `graph recompute: N us` on USB serial, target <50 ms).
+2. **Dirty-rectangle / partial rendering (task 5.6 part 2).** Biggest remaining *code*
+   item and worth doing before the next test drive: ~200 ms full-frame redraw per
+   keypress dominates the feel of the device.
+3. **Pico 2 (RP2350) bring-up.** Never flashed. Uses `kUseFullFramebuffer = true` — a
+   completely different, untested display path (200 KB SRAM framebuffer, not strips).
+4. **Phase 1 wrap-up:** `docs/notes/phase1-retro.md` after HW verification closes.
+5. **KIV during next test drive:** F-key layout rethink (feedback item 7). Corrected
+   picture: F1-F5 are physical, F6-F10 = Shift+F1-F5 (STM32-translated scan codes) —
+   the direct layer matches TI's five top-row keys exactly, so a TI-order remap with
+   secondary functions on the shift layer is the leading candidate.
 
 ## Backlog (not blocking, but tracked)
 

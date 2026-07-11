@@ -14,9 +14,9 @@ Phase 4 is the largest and most varied phase. It splits into three sub-phases th
 
 | Sub-phase | Weeks | Content |
 |-----------|-------|---------|
-| 4A: Matrix operations | 16–17 | Matrix editor, arithmetic, det, inverse, rref, eigenvalues |
-| 4B: CAS engine | 18–22 | Symbolic expression trees, differentiation, simplification, factoring, equation solving, basic integration |
-| 4C: MicroPython | 23–25 | Embedded interpreter, calculator API bindings, on-device editor, SD card script execution |
+| 4A: Matrix operations | 26–27 | Matrix editor, arithmetic, det, inverse, rref, eigenvalues |
+| 4B: CAS engine | 28–32 | Symbolic expression trees, differentiation, simplification, factoring, equation solving, basic integration |
+| 4C: MicroPython | 33–35 | Embedded interpreter, calculator API bindings, on-device editor, SD card script execution |
 
 **Total estimated effort**: ~10 weeks part-time (~200 hours).
 
@@ -57,7 +57,7 @@ src/
 
 ---
 
-## 3. Sub-phase 4A: Matrix operations (weeks 16–17)
+## 3. Sub-phase 4A: Matrix operations (weeks 26–27)
 
 ### 3.1 Matrix data structure
 
@@ -203,7 +203,7 @@ The solver screen prompts for: the equation (e.g., `x^3 - 2*x - 5 = 0`), the var
 
 ---
 
-## 4. Sub-phase 4B: CAS engine (weeks 18–22)
+## 4. Sub-phase 4B: CAS engine (weeks 28–32)
 
 This is the core of Phase 4. The CAS operates on a new symbolic expression tree (`ExprTree`) that is distinct from the numerical evaluation path. The numerical evaluator (tinyexpr++) remains for graphing and immediate numeric results. The CAS is invoked explicitly — when the user types an expression and presses a CAS-specific key or selects a CAS operation from a menu.
 
@@ -599,7 +599,7 @@ These CAS functions are registered in the expression parser alongside the numeri
 
 ---
 
-## 5. Sub-phase 4C: MicroPython programming (weeks 23–25)
+## 5. Sub-phase 4C: MicroPython programming (weeks 33–35)
 
 ### 5.1 Embedding strategy
 
@@ -755,7 +755,7 @@ On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus ~200 
 
 ## 6. Task breakdown
 
-### Sub-phase 4A: Matrix operations (weeks 16–17)
+### Sub-phase 4A: Matrix operations (weeks 26–27)
 
 | # | Task | Est. hours | Acceptance criteria |
 |---|------|-----------|-------------------|
@@ -770,7 +770,7 @@ On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus ~200 
 | 4A.9 | Numeric equation solver + solver screen | 6 | Solve $x^3 - 2x - 5 = 0$ yields $x \approx 2.0946$ |
 | | **Subtotal** | **~46 hrs** | |
 
-### Sub-phase 4B: CAS engine (weeks 18–22)
+### Sub-phase 4B: CAS engine (weeks 28–32)
 
 | # | Task | Est. hours | Acceptance criteria |
 |---|------|-----------|-------------------|
@@ -797,7 +797,7 @@ On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus ~200 
 | 4B.21 | Stress testing + edge cases | 6 | Nested expressions, chain rule depth, zero-division guards |
 | | **Subtotal** | **~118 hrs** | |
 
-### Sub-phase 4C: MicroPython programming (weeks 23–25)
+### Sub-phase 4C: MicroPython programming (weeks 33–35)
 
 | # | Task | Est. hours | Acceptance criteria |
 |---|------|-----------|-------------------|
@@ -819,9 +819,9 @@ On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus ~200 
 
 | Sub-phase | Weeks | Hours | Deliverable |
 |-----------|-------|-------|-------------|
-| 4A: Matrix operations | 16–17 | ~46 | Matrix editor, arithmetic, rref, det, inverse, eigenvalues, numeric solver |
-| 4B: CAS engine | 18–22 | ~118 | Symbolic differentiation, simplification, factoring, solving, integration |
-| 4C: MicroPython | 23–25 | ~54 | Embedded interpreter, `calc` module, on-device editor, SD card scripts |
+| 4A: Matrix operations | 26–27 | ~46 | Matrix editor, arithmetic, rref, det, inverse, eigenvalues, numeric solver |
+| 4B: CAS engine | 28–32 | ~118 | Symbolic differentiation, simplification, factoring, solving, integration |
+| 4C: MicroPython | 33–35 | ~54 | Embedded interpreter, `calc` module, on-device editor, SD card scripts |
 | **Total Phase 4** | **~10 weeks** | **~218 hrs** | |
 
 ---
@@ -891,7 +891,7 @@ Large matrices ($>$ 20$\times$20) will feel slow on Pico 1. This is acceptable �
 
 **Problem**: MicroPython's embed port may have build quirks specific to each ARM architecture (Cortex-M0+ vs Cortex-M33).
 
-**Mitigation**: MicroPython officially supports both RP2040 and RP2350. The `micropython-embed` build produces a static library (`.a`) that links into the firmware. Build the library as a separate CMake external project with the appropriate compiler flags for each board target. Test early — build the embed library in week 23 before writing any bindings.
+**Mitigation**: MicroPython officially supports both RP2040 and RP2350. The `micropython-embed` build produces a static library (`.a`) that links into the firmware. Build the library as a separate CMake external project with the appropriate compiler flags for each board target. Test early — build the embed library in week 33 before writing any bindings.
 
 ---
 
@@ -899,11 +899,11 @@ Large matrices ($>$ 20$\times$20) will feel slow on Pico 1. This is acceptable �
 
 | Question | Options | When to decide |
 |----------|---------|---------------|
-| Should CAS results be stored in history alongside numeric results? | Yes (unified history) vs. separate CAS history | Week 18, during CAS UI design |
-| How to represent symbolic results in variables? `A = x^2 + 1` (symbolic) vs. `A = 5` (numeric only) | Allow both (expression objects in variable slots) vs. numeric-only variables | Week 18 |
-| Implicit multiplication in CAS mode only, or globally? | CAS-only (safer) vs. global (more natural) | Week 18, during CAS parser |
-| Python heap: static allocation at boot or lazy allocation on first use? | Lazy saves ~56 KB SRAM when not using Python; static simplifies code | Week 23 |
-| Should `calc.plot()` from Python immediately switch to graph screen, or buffer for later? | Immediate (simpler) vs. buffered (more flexible) | Week 24 |
+| Should CAS results be stored in history alongside numeric results? | Yes (unified history) vs. separate CAS history | Week 28, during CAS UI design |
+| How to represent symbolic results in variables? `A = x^2 + 1` (symbolic) vs. `A = 5` (numeric only) | Allow both (expression objects in variable slots) vs. numeric-only variables | Week 28 |
+| Implicit multiplication in CAS mode only, or globally? | CAS-only (safer) vs. global (more natural) | Week 28, during CAS parser |
+| Python heap: static allocation at boot or lazy allocation on first use? | Lazy saves ~56 KB SRAM when not using Python; static simplifies code | Week 33 |
+| Should `calc.plot()` from Python immediately switch to graph screen, or buffer for later? | Immediate (simpler) vs. buffered (more flexible) | Week 34 |
 
 ---
 
