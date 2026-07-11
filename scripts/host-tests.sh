@@ -32,8 +32,17 @@ echo "== Compiling + linking test_layout =="
     src/render/pool.cpp \
     -o "$OUT/test_layout"
 
+echo "== Compiling + linking test_graph =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_graph.cpp src/graph/viewport.cpp \
+    -o "$OUT/test_graph"
+
 echo "== Running test_math =="
 "$OUT/test_math"
 
 echo "== Running test_layout =="
 "$OUT/test_layout"
+
+echo "== Running test_graph =="
+"$OUT/test_graph"

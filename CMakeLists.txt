@@ -83,6 +83,8 @@ add_executable(picocalc_graphcalc
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
+    src/graph/viewport.cpp
+    src/graph/plotter.cpp
     src/apps/home_screen.cpp
     src/apps/graph_model.cpp
     src/apps/y_editor.cpp

@@ -13,25 +13,30 @@
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/y_editor.hpp"
+#include "graph/plotter.hpp"
 
 namespace apps {
-
-namespace {
-constexpr double kDiscontinuityFrac = 0.5;  // Skip lines jumping >50% of h
-}  // namespace
 
 void GraphScreen::on_activate() {
     dirty_ = true;
 }
 
-int GraphScreen::value_to_py(double y) const {
+graph::Viewport GraphScreen::viewport() const {
     const auto& w = graph_window();
-    const double frac = (w.y_max - y) / (w.y_max - w.y_min);
-    return kTop + static_cast<int>(frac * kHeight);
+    graph::Viewport vp;
+    vp.x_min = w.x_min;
+    vp.x_max = w.x_max;
+    vp.y_min = w.y_min;
+    vp.y_max = w.y_max;
+    vp.left = 0;
+    vp.top = kTop;
+    vp.width = kWidth;
+    vp.height = kHeight;
+    return vp;
 }
 
 void GraphScreen::recompute() {
-    const auto& w = graph_window();
+    const graph::Viewport vp = viewport();
     auto& fns = y_functions();
     auto& eng = math::engine();
 
@@ -51,14 +56,15 @@ void GraphScreen::recompute() {
             continue;
         }
         for (int px = 0; px < kWidth; ++px) {
-            const double x = w.x_min + px * (w.x_max - w.x_min) / (kWidth - 1);
+            const double x = vp.data_x(px);
             const double y = eng.eval_compiled(compiled, x);
             if (std::isfinite(y)) {
-                const int py = value_to_py(y);
                 // Clamp far-offscreen values so line joins stay sane, but
                 // mark truly-NaN as offscreen.
+                const int py = vp.px_y(y);
+                constexpr int kClamp = graph::Plotter::kClampPy;
                 plot_y_[fi][px] =
-                    static_cast<int16_t>(py < -1000 ? -1000 : (py > 1000 ? 1000 : py));
+                    static_cast<int16_t>(py < -kClamp ? -kClamp : (py > kClamp ? kClamp : py));
             } else {
                 plot_y_[fi][px] = kOffscreen;
             }
@@ -74,64 +80,52 @@ void GraphScreen::recompute() {
 void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     using namespace platform::colors;
     const auto& w = graph_window();
+    const graph::Viewport vp = viewport();
 
     // Grid lines at x_scl / y_scl (dark gray — must recede behind plots).
     if (w.x_scl > 0) {
         const double start = std::ceil(w.x_min / w.x_scl) * w.x_scl;
         const auto nx = static_cast<int>(std::floor((w.x_max - start) / w.x_scl));
         for (int i = 0; i <= nx; ++i) {
-            const double gx = start + i * w.x_scl;
-            const int px = static_cast<int>((gx - w.x_min) / (w.x_max - w.x_min) * (kWidth - 1));
-            fb.draw_vline(px, kTop, kHeight, kGridLine);
+            fb.draw_vline(vp.px_x(start + i * w.x_scl), kTop, kHeight, kGridLine);
         }
     }
     if (w.y_scl > 0) {
         const double start = std::ceil(w.y_min / w.y_scl) * w.y_scl;
         const auto ny = static_cast<int>(std::floor((w.y_max - start) / w.y_scl));
         for (int i = 0; i <= ny; ++i) {
-            const int py = value_to_py(start + i * w.y_scl);
-            fb.draw_hline(0, py, kWidth, kGridLine);
+            fb.draw_hline(0, vp.px_y(start + i * w.y_scl), kWidth, kGridLine);
         }
     }
 
     // Axes (solid white) when in view.
     if (w.y_min <= 0 && w.y_max >= 0) {
-        const int py = value_to_py(0.0);
-        fb.draw_hline(0, py, kWidth, kWhite);
+        fb.draw_hline(0, vp.px_y(0.0), kWidth, kWhite);
     }
     if (w.x_min <= 0 && w.x_max >= 0) {
-        const int px = static_cast<int>((0.0 - w.x_min) / (w.x_max - w.x_min) * (kWidth - 1));
-        fb.draw_vline(px, kTop, kHeight, kWhite);
+        fb.draw_vline(vp.px_x(0.0), kTop, kHeight, kWhite);
     }
 }
 
 void GraphScreen::draw_function(gfx::Framebuffer& fb, int fi) const {
-    const platform::Color color = function_color(fi);
-    const int limit = static_cast<int>(kHeight * kDiscontinuityFrac);
-    int prev_py = kOffscreen;
+    // Replay the column cache through the shared segment logic.
+    const graph::PlotStyle style{function_color(fi), false};
+    graph::Plotter plotter;
+    plotter.begin();
     for (int px = 0; px < kWidth; ++px) {
         const int py = plot_y_[fi][px];
-        if (py == kOffscreen) {
-            prev_py = kOffscreen;
-            continue;
-        }
-        if (prev_py != kOffscreen && std::abs(py - prev_py) < limit) {
-            fb.draw_line(px - 1, prev_py, px, py, color);
-        } else {
-            fb.set_pixel(px, py, color);
-        }
-        prev_py = py;
+        plotter.point(fb, px, py, py != kOffscreen, style);
     }
 }
 
 void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     using namespace platform::colors;
     const auto& font = gfx::main_font();
-    const auto& w = graph_window();
 
+    const graph::Viewport vp = viewport();
     const int px = trace_px_;
     const int py = plot_y_[trace_func_][px];
-    const double x = w.x_min + px * (w.x_max - w.x_min) / (kWidth - 1);
+    const double x = vp.data_x(px);
 
     // Vertical trace line + cursor marker.
     fb.draw_vline(px, kTop, kHeight, kCursor);
@@ -140,8 +134,7 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     }
 
     // Coordinate readout at the bottom of the viewport (D3: bottom).
-    const double y =
-        w.y_min + (w.y_max - w.y_min) * (kTop + kHeight - py) / static_cast<double>(kHeight);
+    const double y = vp.data_y(py);
     char xb[24];
     char yb[24];
     math::format_number(x, xb, sizeof(xb));

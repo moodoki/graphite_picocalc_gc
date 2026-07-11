@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "ui/screen.hpp"
+#include "graph/viewport.hpp"
 
 namespace apps {
 
@@ -41,7 +42,7 @@ private:
     uint32_t last_recompute_us_ = 0;
 
     void recompute();
-    int value_to_py(double y) const;
+    graph::Viewport viewport() const;
 
     void draw_axes(gfx::Framebuffer& fb) const;
     void draw_function(gfx::Framebuffer& fb, int fi) const;
