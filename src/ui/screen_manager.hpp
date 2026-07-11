@@ -10,6 +10,8 @@ class ScreenManager {
 public:
     void push(Screen* screen);
     void pop();
+    // Pop everything above the root screen (global HOME key).
+    void pop_to_root();
     void replace(Screen* screen);
     Screen* current() const;
 

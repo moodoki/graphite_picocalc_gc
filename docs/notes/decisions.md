@@ -30,6 +30,26 @@ Format:
 
 ---
 
+## D12: Shell-style input recall on UP/DOWN; Shift+arrows scroll the view; HOME pops to root
+
+**Date**: 2026-07-11
+**Status**: Accepted (test-drive feedback)
+**Context**: On hardware, UP recalled only the newest expression once, then further UP scrolled the output view — no way to walk back through older inputs. The HOME key did nothing visible.
+**Decision**: Plain UP/DOWN walk backward/forward through past inputs (the in-progress line is stashed and restored); Shift+UP/DOWN scroll the history view. HOME pops to the home screen from any screen (global intercept in the main loop, like F6); on the home screen it falls through to the input line's cursor-to-start.
+**Rationale**: Shell-style recall is the behavior every terminal user expects, and the keyboard has no PgUp/PgDn — shift is the only spare modifier and its state is already tracked in `KeyEvent`.
+**Tradeoffs**: Editing a recalled entry then pressing UP discards the edit (bash-like, not zsh-like). View scrolling is now two-handed.
+**Revisit when**: HW test shows the STM32 doesn't report arrows with shift held. This is a live risk: the STM32 demonstrably translates its shift layer into distinct codes (Shift+F1-F5 arrive as F6-F10 scan codes, not F-key-plus-shift), so shifted arrows may be remapped too. If so, view-scroll needs another key.
+
+## D11: `e` is Euler's constant; variable E is reserved
+
+**Date**: 2026-07-11
+**Status**: Accepted (test-drive feedback)
+**Context**: `e` evaluated to 0 on the device. `build_lookup()` bound all 26 letters as variables, and tinyexpr consults the user lookup before its builtin table — so the variable E shadowed the builtin Euler constant (`pi`, being two letters, never collided).
+**Decision**: Do not bind the letter `e` as a variable; `e` reaches tinyexpr's builtin constant. Storing to E (`5->E`) returns "E is reserved (Euler's e)". Convention: single letters = variables, `pi`/`e`/`theta`/`ans` and function names = reserved words.
+**Rationale**: A calculator where `e` isn't 2.718... fails the least-surprise test; TI users rarely store to E (on TI it's the exponent token anyway). Case sensitivity (e vs E) was rejected — the preprocessor lowercases everything and the win isn't worth reworking that.
+**Tradeoffs**: 25 letter variables instead of 26. The E slot still exists in `Variables` storage (persisted file format unchanged).
+**Revisit when**: Someone actually misses variable E.
+
 ## D10: Synchronous core-0 rendering; PSRAM bulk path and dual-core display deferred
 
 **Date**: 2026-07-10

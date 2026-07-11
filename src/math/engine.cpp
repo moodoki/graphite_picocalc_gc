@@ -112,15 +112,21 @@ namespace {
 // Build the variable + function binding table. Names a-z bind to
 // vars.vars[] (stable addresses); the extended library shadows tinyexpr
 // builtins where semantics differ (log = base 10, angle-aware trig).
+// The letter 'e' is NOT bound: tinyexpr checks this lookup before its
+// builtins, so binding it would shadow Euler's constant (like `pi`,
+// `e` must reach the builtin table). Variable E is reserved.
 // The lookup array is only needed during te_compile — the pointers it
 // captures (into vars and static function code) outlive it. Returns the
 // number of entries written; `lookup` must hold at least kLookupCount.
-constexpr int kLookupCount = 26 + 2 + 17;
+constexpr int kLookupCount = 25 + 2 + 17;
 
 int build_lookup(Variables& vars, te_variable* lookup) {
     static char names[26][2];
     int li = 0;
     for (int i = 0; i < 26; ++i) {
+        if (i == 'e' - 'a') {
+            continue;  // 'e' = Euler's constant, not a variable
+        }
         names[i][0] = static_cast<char>('a' + i);
         names[i][1] = 0;
         lookup[li++] = {names[i], &vars.vars[i], TE_VARIABLE, nullptr};
@@ -234,6 +240,11 @@ EvalResult Engine::evaluate(const char* expr) {
             } else if (std::strcmp(name, "theta") == 0) {
                 store_index = Variables::kTheta;
             }
+        }
+        if (store_index == 'e' - 'a') {
+            EvalResult res;
+            res.error = "E is reserved (Euler's e)";
+            return res;
         }
         if (store_index >= 0) {
             *arrow = 0;  // Evaluate only the left side

@@ -151,7 +151,9 @@ KeyEvent Keyboard::decode(uint8_t state, uint8_t code) {
             ev.key = Key::kEnter;
             break;
         default:
-            if (code >= 0x81 && code <= 0x86) {
+            // 0x81-0x86 (F1-F6) are from the Coyote reference; 0x87-0x8A
+            // (F7-F10 = Shift+F2..F5) follow the pattern — confirm on HW.
+            if (code >= 0x81 && code <= 0x8A) {
                 ev.key = static_cast<Key>(static_cast<int>(Key::kF1) + (code - 0x81));
             } else if (code >= 0x20 && code < 0x7F) {
                 ev.key = key_from_char(static_cast<char>(code));

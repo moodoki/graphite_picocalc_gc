@@ -79,13 +79,18 @@ enum class Key : uint8_t {
     kHome,
     kInsert,
 
-    // Function keys
+    // Function keys. F1-F5 are physical; F6-F10 are Shift+F1-F5, which
+    // the STM32 translates into their own scan codes before we see them.
     kF1,
     kF2,
     kF3,
     kF4,
     kF5,
     kF6,
+    kF7,
+    kF8,
+    kF9,
+    kF10,
 
     // Modifiers (reported as their own press/release events)
     kShift,

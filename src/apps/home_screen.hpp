@@ -30,7 +30,13 @@ private:
     Entry history_[kMaxHistory] = {};
     int history_count_ = 0;  // Total entries (capped at kMaxHistory)
     int history_head_ = 0;   // Ring buffer next-write index
-    int scroll_ = 0;         // 0 = pinned to newest
+    int scroll_ = 0;         // View scroll, 0 = pinned to newest
+
+    // Shell-style input recall (UP/DOWN walk past inputs; Shift+UP/DOWN
+    // scroll the view). -1 = not browsing; otherwise entry_from_newest
+    // index currently shown in the input line.
+    int hist_nav_ = -1;
+    char pending_[ui::InputLine::kCapacity] = {};  // Stashed unsent input
 
     ui::InputLine input_;
 

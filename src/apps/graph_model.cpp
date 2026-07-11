@@ -33,7 +33,7 @@ platform::Color function_color(int index) {
         Color::from_rgb(220, 40, 220),  // magenta
         Color::from_rgb(255, 150, 0),   // orange
         Color::from_rgb(0, 200, 220),   // cyan
-        Color::from_rgb(0, 120, 0),     // dark green
+        Color::from_rgb(250, 220, 40),  // yellow (dark green was too dim on black)
     };
     return kPalette[index % kNumFuncs];
 }

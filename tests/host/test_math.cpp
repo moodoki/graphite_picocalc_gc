@@ -104,6 +104,15 @@ int main() {
     // Case-insensitive entry
     check_near("A+B", 6);
 
+    // 'e' is Euler's constant (not a variable — it would shadow the
+    // tinyexpr builtin); variable E is reserved and can't be stored to.
+    check_near("e", 2.71828182845904523536, 1e-12);
+    check_near("ln(e)", 1);
+    check_near("e^2", std::exp(2.0), 1e-9);
+    check_near("2e3", 2000);  // Scientific literals still parse
+    check_error("5->e");
+    check_error("5->E");
+
     // evaluate_at (graphing path) must not clobber Ans or X
     math::engine().evaluate("42->x");
     const auto at = math::engine().evaluate_at("x^2+1", 3.0);

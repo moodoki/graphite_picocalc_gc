@@ -74,6 +74,10 @@ public:
         if (ev.key == platform::Key::kNone || !ev.pressed) {
             return false;
         }
+        if (ev.key == platform::Key::kEscape) {
+            ui::screen_manager().pop();
+            return true;
+        }
         last_key_ = ev;
         ++key_count_;
         printf("key: code=%d ch='%c' shift=%d ctrl=%d\n", static_cast<int>(ev.key),
@@ -132,6 +136,8 @@ public:
 
         font.draw_string(fb, 8, y, "Type on the keyboard to test input.", kGrayLine, kBlack);
         y += lh;
+        font.draw_string(fb, 8, y, "F6 or ESC exits.", kGrayLine, kBlack);
+        y += lh;
         std::snprintf(line, sizeof(line), "Frame: %lu", static_cast<unsigned long>(frame_++));
         font.draw_string(fb, 8, y, line, kCursor, kBlack);
 
@@ -182,6 +188,11 @@ int main() {
                 } else {
                     mgr.push(&g_diag_screen);
                 }
+            } else if (ev.key == platform::Key::kHome && mgr.current() != &apps::home_screen()) {
+                // HOME returns to the home screen from anywhere. On the
+                // home screen itself it falls through to the input line
+                // (cursor-to-start).
+                mgr.pop_to_root();
             } else {
                 mgr.handle_key(ev);
             }

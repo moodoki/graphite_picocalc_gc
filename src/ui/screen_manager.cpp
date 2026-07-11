@@ -27,6 +27,16 @@ void ScreenManager::pop() {
     stack_[depth_ - 1]->on_activate();
 }
 
+void ScreenManager::pop_to_root() {
+    if (depth_ <= 1) {
+        return;
+    }
+    while (depth_ > 1) {
+        stack_[--depth_]->on_deactivate();
+    }
+    stack_[0]->on_activate();
+}
+
 void ScreenManager::replace(Screen* screen) {
     if (screen == nullptr || depth_ == 0) {
         push(screen);

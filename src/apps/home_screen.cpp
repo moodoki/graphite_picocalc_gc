@@ -135,6 +135,8 @@ void HomeScreen::evaluate_input() {
         save_variables();
     }
     input_.clear();
+    hist_nav_ = -1;
+    pending_[0] = 0;
 }
 
 bool HomeScreen::on_key(const platform::KeyEvent& ev) {
@@ -147,24 +149,39 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             evaluate_input();
             return true;
         case Key::kUp:
-            // Expression recall (task 5.5): UP on an empty input line
-            // brings back the most recent expression; otherwise scroll.
-            if (input_.empty() && history_count_ > 0) {
-                const Entry* e = entry_from_newest(0);
-                if (e != nullptr) {
-                    input_.set_text(e->expr);
+            // Shift+UP scrolls the history view; plain UP walks back
+            // through past inputs shell-style (supersedes task 5.5's
+            // single-recall).
+            if (ev.shift_held) {
+                if (scroll_ < history_count_ - 1) {
+                    ++scroll_;
                 }
-            } else if (scroll_ < history_count_ - 1) {
-                ++scroll_;
+            } else if (hist_nav_ < history_count_ - 1) {
+                if (hist_nav_ < 0) {
+                    // Stash whatever was being typed for DOWN to restore.
+                    std::strncpy(pending_, input_.text(), sizeof(pending_) - 1);
+                    pending_[sizeof(pending_) - 1] = 0;
+                }
+                ++hist_nav_;
+                input_.set_text(entry_from_newest(hist_nav_)->expr);
             }
             return true;
         case Key::kDown:
-            if (scroll_ > 0) {
-                --scroll_;
+            if (ev.shift_held) {
+                if (scroll_ > 0) {
+                    --scroll_;
+                }
+            } else if (hist_nav_ > 0) {
+                --hist_nav_;
+                input_.set_text(entry_from_newest(hist_nav_)->expr);
+            } else if (hist_nav_ == 0) {
+                hist_nav_ = -1;
+                input_.set_text(pending_);
             }
             return true;
         case Key::kEscape:
             input_.clear();
+            hist_nav_ = -1;
             return true;
         case Key::kF1:
             ui::screen_manager().push(&y_editor_screen());

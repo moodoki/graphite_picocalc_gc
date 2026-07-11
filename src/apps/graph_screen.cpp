@@ -74,19 +74,19 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     using namespace platform::colors;
     const auto& w = graph_window();
 
-    // Grid lines at x_scl / y_scl (light gray).
+    // Grid lines at x_scl / y_scl (dark gray — must recede behind plots).
     if (w.x_scl > 0) {
         const double start = std::ceil(w.x_min / w.x_scl) * w.x_scl;
         for (double gx = start; gx <= w.x_max; gx += w.x_scl) {
             const int px = static_cast<int>((gx - w.x_min) / (w.x_max - w.x_min) * (kWidth - 1));
-            fb.draw_vline(px, kTop, kHeight, kGrayLine);
+            fb.draw_vline(px, kTop, kHeight, kGridLine);
         }
     }
     if (w.y_scl > 0) {
         const double start = std::ceil(w.y_min / w.y_scl) * w.y_scl;
         for (double gy = start; gy <= w.y_max; gy += w.y_scl) {
             const int py = value_to_py(gy);
-            fb.draw_hline(0, py, kWidth, kGrayLine);
+            fb.draw_hline(0, py, kWidth, kGridLine);
         }
     }
 
@@ -179,9 +179,6 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kF5:
             ui::screen_manager().push(&y_editor_screen());
             return true;
-        case Key::kF6:
-            ui::screen_manager().push(&y_editor_screen());
-            return true;
         case Key::kLeft:
             if (trace_ && trace_px_ > 0) {
                 --trace_px_;
@@ -245,7 +242,7 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
         font.draw_string(fb, 40, kTop + kHeight / 2, "No functions. Press F5 for Y=.", kGrayLine);
     }
 
-    const char* keys[6] = {"TRC", "Z+", "Z-", "", "Y=", "Y="};
+    const char* keys[6] = {"TRC", "Z+", "Z-", "", "Y=", "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

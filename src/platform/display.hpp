@@ -24,6 +24,9 @@ constexpr Color kRed = Color::from_rgb(255, 0, 0);
 constexpr Color kGreen = Color::from_rgb(0, 200, 0);
 constexpr Color kGrayBg = Color::from_rgb(240, 240, 240);
 constexpr Color kGrayLine = Color::from_rgb(200, 200, 200);
+// Graph grid: dark enough to recede behind plots on the black background
+// (kGrayLine reads near-white on the panel — 2026-07-11 test drive).
+constexpr Color kGridLine = Color::from_rgb(60, 60, 60);
 constexpr Color kCursor = Color::from_rgb(0, 120, 215);
 }  // namespace colors
 

@@ -17,7 +17,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   window persist to the SD card.
 - **Phase 2+ (planned)**: parametric/polar modes, table view, lists & statistics,
   matrices, symbolic math (CAS), MicroPython.
-- **Phase 2**: Multi-function graphing, parametric and polar modes, table view.
+- **Phase 2**: Parametric and polar modes, table view, split-screen graph|table, built-in help.
 - **Phase 3**: Lists, statistics, regression, distributions, statistical plots.
 - **Phase 4**: Matrix operations, symbolic math (CAS — differentiation, simplification, factoring, equation solving, basic integration), MicroPython programming environment.
 - **Phase 5**: App framework, polish, release.
@@ -83,9 +83,11 @@ on-device verification is pending.
 
 ## Using the calculator
 
-- **Home**: type an expression, `ENTER` to evaluate. `UP` on an empty line recalls the
-  last expression; `UP`/`DOWN` otherwise scroll history. Store with `2->A`. Softkeys:
-  `F1` Y= editor, `F2` window, `F3` graph, `F4` mode, `F6` hardware diagnostics.
+- **Home**: type an expression, `ENTER` to evaluate. `UP`/`DOWN` walk back/forward
+  through past inputs (shell-style); `Shift+UP`/`Shift+DOWN` scroll the history view.
+  Store with `2->A` (`e` is Euler's constant; variable `E` is reserved). Softkeys:
+  `F1` Y= editor, `F2` window, `F3` graph, `F4` mode, `F6` (= `Shift+F1`) hardware
+  diagnostics. `HOME` returns to this screen from anywhere; `F6`/`ESC` exits diagnostics.
 - **Y= editor**: `UP`/`DOWN` select a slot, `ENTER`/`F1` edit, `F2` toggle enable,
   `F3` clear, `F4` graph.
 - **Graph**: `F1` trace (`LEFT`/`RIGHT` move, `UP`/`DOWN` switch function), `F2`/`F3`
