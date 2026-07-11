@@ -13,6 +13,7 @@
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/y_editor.hpp"
+#include "graph/function_source.hpp"
 #include "graph/plotter.hpp"
 
 namespace apps {
@@ -55,10 +56,13 @@ void GraphScreen::recompute() {
             active_[fi] = false;
             continue;
         }
-        for (int px = 0; px < kWidth; ++px) {
-            const double x = vp.data_x(px);
-            const double y = eng.eval_compiled(compiled, x);
-            if (std::isfinite(y)) {
+        graph::FunctionSource src(eng, compiled);
+        src.begin(vp);
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+        for (int px = 0; px < kWidth && src.next(&x, &y, &defined); ++px) {
+            if (defined) {
                 // Clamp far-offscreen values so line joins stay sane, but
                 // mark truly-NaN as offscreen.
                 const int py = vp.px_y(y);

@@ -33,10 +33,13 @@ echo "== Compiling + linking test_layout =="
     -o "$OUT/test_layout"
 
 echo "== Compiling + linking test_graph =="
-"$CXX" -std=c++17 -O1 -Wall -Wextra \
-    -Isrc \
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
     tests/host/test_graph.cpp src/graph/viewport.cpp \
     src/graph/graph_mode.cpp src/graph/graph_state.cpp \
+    src/graph/function_source.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    "$OUT/tinyexpr.o" \
     -o "$OUT/test_graph"
 
 echo "== Running test_math =="

@@ -5,9 +5,11 @@
 #include <cmath>
 #include <cstdio>
 
+#include "graph/function_source.hpp"
 #include "graph/graph_mode.hpp"
 #include "graph/graph_state.hpp"
 #include "graph/viewport.hpp"
+#include "math/engine.hpp"
 
 namespace {
 
@@ -148,6 +150,50 @@ int main() {
         st.y.enabled[2] = true;
         st.y.expr[2][0] = 'x';
         expect(st.y.any_enabled(), "any_enabled sees slot 3");
+    }
+
+    // FunctionSource (task 2.3): one evaluated point per pixel column.
+    {
+        auto& eng = math::engine();
+        const graph::Viewport vp = phase1_viewport();
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+
+        void* h = eng.compile("x^2");
+        expect(h != nullptr, "compile x^2");
+        graph::FunctionSource parabola(eng, h);
+        parabola.begin(vp);
+        int n = 0;
+        bool first_ok = false;
+        bool all_defined = true;
+        while (parabola.next(&x, &y, &defined)) {
+            if (n == 0) {
+                first_ok = defined && x == -10.0 && std::fabs(y - 100.0) < 1e-9;
+            }
+            all_defined = all_defined && defined;
+            ++n;
+        }
+        expect(n == 320, "one point per pixel column");
+        expect(first_ok, "first point is (-10, 100)");
+        expect(all_defined, "x^2 defined everywhere");
+        eng.free_compiled(h);
+
+        h = eng.compile("sqrt(x)");
+        expect(h != nullptr, "compile sqrt(x)");
+        graph::FunctionSource half(eng, h);
+        half.begin(vp);
+        n = 0;
+        int undefined = 0;
+        while (half.next(&x, &y, &defined)) {
+            if (!defined) {
+                ++undefined;
+            }
+            ++n;
+        }
+        expect(n == 320 && undefined > 100 && undefined < 200,
+               "sqrt(x) undefined on the negative half only");
+        eng.free_compiled(h);
     }
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
