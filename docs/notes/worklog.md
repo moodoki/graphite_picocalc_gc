@@ -18,17 +18,17 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1 code complete + **first hardware bring-up done on Pico 1** (2026-07-10).
-  Boots to the home screen; display and keyboard verified on real hardware.
-- **Next up**: exercise the full calculator on-device (evaluate/graph/persist), get a
-  FAT32 SD card in to verify persistence (boot showed sd=0), capture 5.6 graph-profiling
-  numbers, then `docs/notes/phase1-retro.md`. Phase 2/3 specs are now in the tree
-  (imported + reconciled 2026-07-11); phase roadmap is weeks 11–16 / 17–25 / 26–35.
-- **Test-drive feedback logged 2026-07-11** (see entry below): all five actionable
-  items **implemented in Session 3** (D11, D12) — on-device verification pending, see
-  the polish rows in the HW-PENDING queue. KIV: F-key layout rethink (item 7).
+- **Phase**: 1 code complete + **HW verification round 1 done on Pico 1** (2026-07-11).
+  All test-drive polish fixes verified on-device; graph recompute measured at 15-17 ms
+  (5.6 target met). Remaining HW items: SD card, store op, trace/presets, mode/reboot,
+  full exit test, Pico 2 bring-up.
+- **Next up**: finish the short HW-PENDING queue (needs a FAT32 card), then dirty-rect
+  rendering (5.6 part 2 — the ~200 ms full-frame push is the one real perf item), Pico 2
+  bring-up, `docs/notes/phase1-retro.md`. Phase 2/3 specs are in the tree (imported +
+  reconciled 2026-07-11); phase roadmap is weeks 11–16 / 17–25 / 26–35.
+- KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 75 math + 21 layout = 96 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 79 math + 27 layout = 106 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -48,27 +48,65 @@ correct), keyboard (keys read with correct ASCII over I2C), PSRAM word r/w, back
 boot to a usable home screen. Bugs found & fixed: bulk-PSRAM boot hang, dual-core
 display stall, keyboard I2C timeout — all in D10.
 
+**Verified on Pico 1 hardware 2026-07-11 (round 1, Session 5):** evaluation + history,
+input-history walk (UP/DOWN) and Alt/Ctrl+UP/DOWN view scroll (D12 revised), `e`
+constant + E-reserved error (D11), HOME-pops-to-root, ESC exits diagnostics, graph
+grid/palette colors, scientific-literal display (`1e10`), shifted F-keys F6-F9,
+graphing with zoom, **graph recompute 15.3-17.1 ms for 2 functions (<50 ms target —
+task 5.6 profiling done)**. Battery indicator: this unit's STM32 fw lacks the battery
+register — shows "--" by design (see Session 5 entry).
+
 Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
 | SD card (sd=0 at boot) | Insert a FAT32 card → `/picocalc` created, self-test file r/w OK, persistence works |
-| 2.5 HomeScreen eval | `2+3*sin(pi/4)` ENTER → correct result; UP/DOWN walk past inputs (D12) |
-| Polish: graph colors | Grid now dark gray (`kGridLine`), axes white, Y7 yellow — legible on the panel? |
-| Polish: diag exit | ESC exits the F6 overlay. Also check whether a 2nd F6 press exits (original report said it didn't — HW quirk?) |
-| Polish: history nav | Shift+UP/DOWN scroll the view — confirm the STM32 reports shift+arrow as arrow code with shift held (D12 revisit trigger) |
-| Polish: HOME key | From graph/window/mode/diag → home screen; on home with text → cursor-to-start |
-| Polish: e constant | `e` → 2.718281828; `5->E` → "E is reserved"; `2e3` → 2000 |
-| F7-F10 scan codes | Press Shift+F2..F5 in the diag key echo → expect codes 0x87-0x8A (135-138); decode assumes the 0x81+n pattern |
-| Battery indicator | Status-bar icon+% plausible vs. actual charge; cyan while charging; diag shows the same; type continuously past a 30 s refresh → no phantom keys (bus-idle guard) |
-| Serial capture | First attempt logged nothing during diag key tests — verify `cat /dev/cu.usbmodem*` actually receives the key echo before redoing the shifted-key tests |
 | Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
+| Battery % display | Only after a keyboard-firmware update (this unit's STM32 lacks reg 0x0B): %/cyan-charging correct, and no phantom keys typing past a 30 s refresh |
 | 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
-| 4.x Graphing | F1 Y= enter `x^2-3`, `sin(x)`; graph plots w/ axes+grid; trace, F2/F3 zoom, S/T presets |
-| Graph perf (5.6) | Full replot time (firmware prints "graph recompute: N us" to serial); target <50 ms |
+| Trace + S/T presets | Trace cursor readout + function switching; S/T zoom presets (zoom F2/F3 verified 2026-07-11) |
 | 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
 | 5.7 Full exit test | Power-cycle → Home → `2+3*sin(pi/4)` → F3 graph `sin(x)` trace+zoom → persistence |
 | Perf latency | ~200 ms full-screen redraw per keypress (D10) — confirm acceptable or prioritize dirty-rects |
+
+---
+
+## 2026-07-11 — Session 5: HW verification round 1 — all polish fixes verified
+
+Full flash-test-fix loop on Pico 1 with live USB-serial capture. Three flash cycles.
+
+**Verified working** (removed from the HW-PENDING queue): evaluation/history, input
+recall + view scroll, `e`/E-reserved, HOME key, ESC-exits-diag, graph colors, shifted
+F-keys, graphing with zoom, and the `1e10` display fixes from this session.
+
+**Graph profiling (5.6 part 1) DONE**: `graph recompute:` 15.3-17.1 ms for two enabled
+functions (sin(x), x^2-3) on Pico 1 — well under the 50 ms target. Evaluation is not
+the bottleneck; the ~200 ms full-frame display push is (dirty-rects = 5.6 part 2).
+
+**New bugs found on-device and fixed** (HW-found, host tests added where possible):
+
+1. **`1e10` displayed as "1" / result "10e9".** Two independent bugs: (a) the layout
+   builder had no scientific-literal support and silently rendered a *truncated* tree —
+   fixed by consuming `[eE][+-]?digits` after a number AND falling back to whole-string
+   plain text whenever input is left unconsumed (also un-breaks `2->A` and multi-arg
+   calls in history); (b) the Pico SDK's printf emits unnormalized `%e` mantissas at
+   exact powers of ten ("10.000000000e+09") — host libcs don't, so host tests couldn't
+   catch it; `normalize_mantissa()` fixes the output in both sci paths. +10 host checks.
+2. **STM32 keyboard-controller forensics** (diag key echo over serial):
+   - Shift on arrows is swallowed (STM32 emits shift-release, then a plain arrow) →
+     view-scroll rebound to **Alt/Ctrl+UP/DOWN** (both pass flags through; D12 revised).
+   - Shift+F1..F4 → scan codes 0x86-0x89 (F6-F9) confirmed. **Shift+F5 emits plain
+     F5** — F10 does not exist in this STM32 firmware (decode keeps 0x8A for future fw).
+   - **The battery register (0x0B) is unsupported by this unit's STM32 firmware**:
+     reg 0x01 answers, 0x0B times out (100 ms) at select or read. Indicator shows "--";
+     `battery_status()` stops after 5 consecutive failures until reboot.
+   - **Hammering the STM32 wedges it** (the Session-4 build's broken backoff retried
+     every strip): keyboard dead until a *physical power cycle* — the STM32 is not
+     reset by USB reflash. Rule: pace all STM32 traffic, never poll aggressively.
+
+Both boards build; 106 host checks (79 math + 27 layout). Battery debug instrumentation
+removed after verification. Remaining for phase 1 close-out: SD/persistence (FAT32 card),
+store-op typing, trace/S+T presets, mode/reboot 5.3, full exit test 5.7, Pico 2 bring-up.
 
 ---
 

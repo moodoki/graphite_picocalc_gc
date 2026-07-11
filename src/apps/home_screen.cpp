@@ -149,10 +149,12 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             evaluate_input();
             return true;
         case Key::kUp:
-            // Shift+UP scrolls the history view; plain UP walks back
+            // Modifier+UP scrolls the history view; plain UP walks back
             // through past inputs shell-style (supersedes task 5.5's
-            // single-recall).
-            if (ev.shift_held) {
+            // single-recall). Alt/Ctrl, because the STM32 swallows
+            // Shift on arrow keys (D12, HW-verified 2026-07-11); shift
+            // kept in case a future keyboard firmware reports it.
+            if (ev.alt_held || ev.ctrl_held || ev.shift_held) {
                 if (scroll_ < history_count_ - 1) {
                     ++scroll_;
                 }
@@ -167,7 +169,7 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             }
             return true;
         case Key::kDown:
-            if (ev.shift_held) {
+            if (ev.alt_held || ev.ctrl_held || ev.shift_held) {
                 if (scroll_ > 0) {
                     --scroll_;
                 }

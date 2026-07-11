@@ -30,12 +30,12 @@ Format:
 
 ---
 
-## D12: Shell-style input recall on UP/DOWN; Shift+arrows scroll the view; HOME pops to root
+## D12: Shell-style input recall on UP/DOWN; modifier+arrows scroll the view; HOME pops to root
 
-**Date**: 2026-07-11
-**Status**: Accepted (test-drive feedback)
+**Date**: 2026-07-11 (revised same day after HW verification)
+**Status**: Accepted; scroll modifier revised to Alt/Ctrl
 **Context**: On hardware, UP recalled only the newest expression once, then further UP scrolled the output view — no way to walk back through older inputs. The HOME key did nothing visible.
-**Decision**: Plain UP/DOWN walk backward/forward through past inputs (the in-progress line is stashed and restored); Shift+UP/DOWN scroll the history view. HOME pops to the home screen from any screen (global intercept in the main loop, like F6); on the home screen it falls through to the input line's cursor-to-start.
+**Decision**: Plain UP/DOWN walk backward/forward through past inputs (the in-progress line is stashed and restored); **Alt+UP/DOWN or Ctrl+UP/DOWN** scroll the history view. HOME pops to the home screen from any screen (global intercept in the main loop, like F6); on the home screen it falls through to the input line's cursor-to-start. *Revision:* Shift was the original scroll modifier, but HW verification (2026-07-11) showed the STM32 swallows Shift on arrow keys (it emits a shift-release then a plain arrow); Alt and Ctrl pass through with flags intact, so scroll moved to them. Shift is still accepted in case a future keyboard firmware reports it.
 **Rationale**: Shell-style recall is the behavior every terminal user expects, and the keyboard has no PgUp/PgDn — shift is the only spare modifier and its state is already tracked in `KeyEvent`.
 **Tradeoffs**: Editing a recalled entry then pressing UP discards the edit (bash-like, not zsh-like). View scrolling is now two-handed.
 **Revisit when**: HW test shows the STM32 doesn't report arrows with shift held. This is a live risk: the STM32 demonstrably translates its shift layer into distinct codes (Shift+F1-F5 arrive as F6-F10 scan codes, not F-key-plus-shift), so shifted arrows may be remapped too. If so, view-scroll needs another key.

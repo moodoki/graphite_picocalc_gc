@@ -115,6 +115,40 @@ int main() {
                "denominator paren wraps a superscript");
     }
 
+    // Scientific literal is one Text node (HW-found: "1e10" rendered "1")
+    {
+        auto* n = build("1e10");
+        expect(n != nullptr && n->type == NodeType::kText, "'1e10' is Text");
+        expect(n != nullptr && n->width == 4 * 8, "'1e10' width = 4 chars");
+    }
+    {
+        auto* n = build("2.5e-3");
+        expect(n != nullptr && n->type == NodeType::kText, "'2.5e-3' is Text");
+    }
+    // "2e" is 2 * Euler's e, not a truncated literal — but the grammar
+    // has no implicit multiplication, so it falls back to plain text.
+    {
+        auto* n = build("2e");
+        expect(n != nullptr && n->type == NodeType::kText &&
+                   std::strcmp(n->t.text, "2e") == 0,
+               "'2e' falls back to whole-string text");
+    }
+
+    // Unconsumed input falls back to the whole string as plain text
+    // rather than a silently truncated tree.
+    {
+        auto* n = build("2->A");
+        expect(n != nullptr && n->type == NodeType::kText &&
+                   std::strcmp(n->t.text, "2->A") == 0,
+               "'2->A' falls back to whole-string text");
+    }
+    {
+        auto* n = build("ncr(10,3)");
+        expect(n != nullptr && n->type == NodeType::kText &&
+                   std::strcmp(n->t.text, "ncr(10,3)") == 0,
+               "'ncr(10,3)' falls back (grammar has no comma support)");
+    }
+
     // Robustness: empty string
     expect(build("") == nullptr, "empty string -> nullptr");
 

@@ -140,6 +140,21 @@ struct Parser {
             while (std::isdigit(static_cast<unsigned char>(*p)) != 0 || *p == '.') {
                 ++p;
             }
+            // Scientific-notation suffix (1e10, 2.5e-3): consume only
+            // when a (optionally signed) digit follows the e/E, so a
+            // bare Euler's-e after a number ("2e") stays an identifier.
+            if (*p == 'e' || *p == 'E') {
+                const char* q = p + 1;
+                if (*q == '+' || *q == '-') {
+                    ++q;
+                }
+                if (std::isdigit(static_cast<unsigned char>(*q)) != 0) {
+                    p = q;
+                    while (std::isdigit(static_cast<unsigned char>(*p)) != 0) {
+                        ++p;
+                    }
+                }
+            }
             return make_text(start, static_cast<int>(p - start), m);
         }
 
@@ -264,8 +279,12 @@ LayoutNode* build_layout(const char* expr, const Metrics& m) {
     }
     Parser parser{expr, m};
     LayoutNode* root = parser.parse_expr();
-    if (root == nullptr) {
-        // Pool exhaustion: fall back to plain text of the whole string.
+    parser.skip_spaces();
+    if (root == nullptr || *parser.p != 0) {
+        // Pool exhaustion, or the grammar stopped before the end of the
+        // input (e.g. store "2->A", multi-arg calls): render the whole
+        // string as plain text rather than a silently-truncated tree
+        // (HW-found 2026-07-11: "1e10" displayed as just "1").
         pool_reset();
         root = make_text(expr, static_cast<int>(std::strlen(expr)), m);
     }

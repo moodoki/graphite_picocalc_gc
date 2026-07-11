@@ -15,7 +15,8 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   graphing with axes/grid, multi-function color plots, discontinuity handling, trace,
   and zoom (in/out, standard, trig). History, variables, Y-functions, and the graph
   window persist to the SD card. The status bar shows angle/display mode and battery
-  level (cached STM32 read, refreshed every 30 s; cyan while charging).
+  level (cached STM32 read, refreshed every 30 s; cyan while charging; shows `--` on
+  units whose STM32 keyboard firmware predates the battery register).
 - **Phase 2+ (planned)**: parametric/polar modes, table view, lists & statistics,
   matrices, symbolic math (CAS), MicroPython.
 - **Phase 2**: Parametric and polar modes, table view, split-screen graph|table, built-in help.
@@ -85,7 +86,8 @@ on-device verification is pending.
 ## Using the calculator
 
 - **Home**: type an expression, `ENTER` to evaluate. `UP`/`DOWN` walk back/forward
-  through past inputs (shell-style); `Shift+UP`/`Shift+DOWN` scroll the history view.
+  through past inputs (shell-style); `Alt+UP`/`Alt+DOWN` (or `Ctrl+`) scroll the
+  history view — the keyboard's STM32 swallows Shift on arrows.
   Store with `2->A` (`e` is Euler's constant; variable `E` is reserved). Softkeys:
   `F1` Y= editor, `F2` window, `F3` graph, `F4` mode, `F6` (= `Shift+F1`) hardware
   diagnostics. `HOME` returns to this screen from anywhere; `F6`/`ESC` exits diagnostics.

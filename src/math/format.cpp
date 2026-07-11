@@ -40,6 +40,23 @@ int strip_zeros(char* buf) {
 DisplayMode g_mode = DisplayMode::kFloat;
 int g_fix_digits = 2;
 
+// Renormalize a printf "%e" mantissa in place. The Pico SDK's printf
+// can emit an unnormalized mantissa at exact powers of ten (1e10 ->
+// "10.000000000e+09", seen on HW 2026-07-11); host libcs never do, so
+// host tests can't catch it. Shifts the decimal point left to leave
+// one digit before it, bumping `exponent` accordingly.
+void normalize_mantissa(char* mant, int& exponent) {
+    char* d = mant + (mant[0] == '-' ? 1 : 0);
+    char* dot = std::strchr(d, '.');
+    if (dot == nullptr || dot <= d + 1) {
+        return;  // Already one digit before the point (or no point)
+    }
+    const int shift = static_cast<int>(dot - d) - 1;
+    std::memmove(d + 2, d + 1, static_cast<size_t>(dot - (d + 1)));
+    d[1] = '.';
+    exponent += shift;
+}
+
 }  // namespace
 
 DisplayMode display_mode() {
@@ -78,6 +95,7 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
             exponent = std::atoi(e + 1);
             *e = 0;
         }
+        normalize_mantissa(tmp, exponent);
         return std::snprintf(buf, buf_len, "%se%d", tmp, exponent);
     }
 
@@ -100,6 +118,7 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
             exponent = std::atoi(e + 1);
             *e = 0;
         }
+        normalize_mantissa(tmp, exponent);
         strip_zeros(tmp);
         return std::snprintf(buf, buf_len, "%se%d", tmp, exponent);
     }

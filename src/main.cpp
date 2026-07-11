@@ -80,8 +80,8 @@ public:
         }
         last_key_ = ev;
         ++key_count_;
-        printf("key: code=%d ch='%c' shift=%d ctrl=%d\n", static_cast<int>(ev.key),
-               ev.ch != 0 ? ev.ch : ' ', ev.shift_held, ev.ctrl_held);
+        printf("key: code=%d ch='%c' shift=%d ctrl=%d alt=%d\n", static_cast<int>(ev.key),
+               ev.ch != 0 ? ev.ch : ' ', ev.shift_held, ev.ctrl_held, ev.alt_held);
         return true;
     }
 

@@ -110,8 +110,15 @@ int main() {
     check_near("ln(e)", 1);
     check_near("e^2", std::exp(2.0), 1e-9);
     check_near("2e3", 2000);  // Scientific literals still parse
+    check_near("1e10", 1e10);
     check_error("5->e");
     check_error("5->E");
+
+    // Scientific display formatting (HW-found: Pico printf %e can emit
+    // unnormalized mantissas; normalize_mantissa must fix them up).
+    check_fmt(1e10, "1e10");
+    check_fmt(1.5e12, "1.5e12");
+    check_fmt(2.5e-7, "2.5e-7");
 
     // evaluate_at (graphing path) must not clobber Ans or X
     math::engine().evaluate("42->x");
