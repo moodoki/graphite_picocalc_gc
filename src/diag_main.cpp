@@ -38,7 +38,8 @@ int main() {
         lcd_set_text_color(WHITE, c == WHITE ? BLACK : c);
         set_current_x(8);
         set_current_y(8);
-        lcd_print_string((char*)"PicoCalc vendored-path diag");
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast) vendored API takes char*
+        lcd_print_string(const_cast<char*>("PicoCalc vendored-path diag"));
         set_current_x(8);
         set_current_y(28);
         char line[32];

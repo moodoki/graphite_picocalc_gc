@@ -26,7 +26,7 @@ YFunctions& y_functions() {
 
 platform::Color function_color(int index) {
     using platform::Color;
-    static const Color kPalette[kNumFuncs] = {
+    static constexpr Color kPalette[kNumFuncs] = {
         Color::from_rgb(40, 100, 255),  // blue
         Color::from_rgb(230, 40, 40),   // red
         Color::from_rgb(0, 190, 0),     // green
@@ -86,7 +86,7 @@ void load_graph_state() {
         if (nl != nullptr) {
             *nl = 0;
         }
-        char* tab = std::strchr(line, '\t');
+        char const* tab = std::strchr(line, '\t');
         if (tab != nullptr) {
             g_funcs.enabled[slot] = (line[0] == '1');
             std::strncpy(g_funcs.expr[slot], tab + 1, sizeof(g_funcs.expr[slot]) - 1);

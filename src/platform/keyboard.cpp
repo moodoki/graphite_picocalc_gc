@@ -185,7 +185,7 @@ KeyEvent Keyboard::poll() {
     const uint64_t now = time_us_64();
 
     if (phase_ == Phase::kIdle) {
-        uint8_t reg = kRegFifo;
+        uint8_t const reg = kRegFifo;
         const int rc =
             i2c_write_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, &reg, 1, false, kI2cTimeoutUs);
         if (rc < 0) {

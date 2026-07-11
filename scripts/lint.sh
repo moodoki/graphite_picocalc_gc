@@ -11,6 +11,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Homebrew's llvm is keg-only; pick up its clang-tidy if none is on PATH.
+if ! command -v clang-tidy &>/dev/null && [[ -x /opt/homebrew/opt/llvm/bin/clang-tidy ]]; then
+  PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+fi
+
 EXIT=0
 
 # 1. clang-format check
@@ -40,20 +45,40 @@ fi
 # 2. clang-tidy
 if ! command -v clang-tidy &>/dev/null; then
   echo "WARNING: clang-tidy not found in PATH. Skipping static analysis." >&2
-  echo "  Install with: brew install llvm && brew link --force llvm" >&2
+  echo "  Install with: brew install llvm" >&2
 else
+  # Only .cpp/.c go to clang-tidy: headers have no compile_commands.json
+  # entry (clang-tidy would guess a bogus command) and are analyzed via
+  # HeaderFilterRegex when their including TU is processed.
+  SRC_FILES=$(echo "$FILES" | grep -E '\.(cpp|cc|c)$' || true)
+
+  # clang-tidy replays arm-none-eabi-g++ commands but doesn't know that
+  # toolchain's built-in include paths (newlib, libstdc++). Ask g++ for
+  # its search list and pass it along.
+  TIDY_ARGS=()
+  TOOLCHAIN="${PICO_TOOLCHAIN_PATH:-/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi}"
+  ARM_GXX="$TOOLCHAIN/bin/arm-none-eabi-g++"
+  if [[ -x "$ARM_GXX" ]]; then
+    while IFS= read -r dir; do
+      TIDY_ARGS+=("--extra-arg=-isystem$dir")
+    done < <("$ARM_GXX" -mcpu=cortex-m0plus -mthumb -E -x c++ - -v </dev/null 2>&1 \
+             | sed -n '/#include <...> search starts here:/,/End of search list./p' \
+             | sed '1d;$d;s/^ //')
+  else
+    echo "WARNING: $ARM_GXX not found; clang-tidy may miss system headers." >&2
+  fi
+
   if [[ ! -f compile_commands.json ]]; then
     echo "WARNING: compile_commands.json not found." >&2
     echo "  Run: ./scripts/setup-clangd.sh build/pico" >&2
     echo "  Skipping clang-tidy." >&2
-  elif [[ -z "$FILES" ]]; then
+  elif [[ -z "$SRC_FILES" ]]; then
     echo "Skipping clang-tidy (no source files)."
   else
     echo
     echo "=== clang-tidy ==="
-    # Run clang-tidy on src/ files. Vendored drivers/ are excluded
-    # by .clangd config and HeaderFilterRegex in .clang-tidy.
-    if ! echo "$FILES" | xargs clang-tidy -p . --quiet; then
+    # Vendored drivers/ are excluded by HeaderFilterRegex in .clang-tidy.
+    if ! echo "$SRC_FILES" | xargs clang-tidy -p . --quiet "${TIDY_ARGS[@]}"; then
       EXIT=1
     fi
   fi

@@ -58,13 +58,13 @@ Screen* ScreenManager::current() const {
     return depth_ > 0 ? stack_[depth_ - 1] : nullptr;
 }
 
-void ScreenManager::handle_key(const platform::KeyEvent& ev) {
+void ScreenManager::handle_key(const platform::KeyEvent& ev) const {
     if (Screen* s = current()) {
         s->on_key(ev);
     }
 }
 
-void ScreenManager::render_frame() {
+void ScreenManager::render_frame() const {
     Screen* s = current();
     if (s == nullptr) {
         return;

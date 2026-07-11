@@ -7,6 +7,7 @@
 // exercises display, keyboard, PSRAM, and SD card. Replaced by the
 // calculator home screen in milestone 2.
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -25,7 +26,7 @@ namespace {
 platform::InitStatus g_init_status;
 
 // SD read/write self-test result (task 1.5 acceptance).
-enum class SdTest { kNoCard, kFailed, kOk };
+enum class SdTest : std::uint8_t { kNoCard, kFailed, kOk };
 SdTest g_sd_test = SdTest::kNoCard;
 
 // PSRAM allocator self-test result (task 1.6 acceptance).

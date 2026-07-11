@@ -91,6 +91,8 @@ double npr(double n, double r) {
 }
 
 double rand01() {
+    // Unseeded rand() is deliberate for now (seeding is a tracked backlog item).
+    // NOLINTNEXTLINE(cert-msc30-c,cert-msc50-cpp,misc-predictable-rand)
     return static_cast<double>(std::rand()) / (static_cast<double>(RAND_MAX) + 1.0);
 }
 

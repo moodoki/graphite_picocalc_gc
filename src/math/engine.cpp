@@ -1,7 +1,9 @@
 #include "math/engine.hpp"
 
 #include <cctype>
+#include <cstdio>
 #include <cstring>
+#include <limits>
 
 #include "math/functions.hpp"
 
@@ -32,13 +34,13 @@ bool preprocess(const char* in, char* out, size_t out_len) {
 
     // Factorial rewrite, innermost-last: repeat until no '!' remains.
     while (true) {
-        char* bang = std::strchr(tmp, '!');
+        const char* bang = std::strchr(tmp, '!');
         if (bang == nullptr) {
             break;
         }
         // Find the start of the primary that precedes '!'.
-        char* end = bang;  // One past the primary's last char
-        char* s = bang - 1;
+        char const* end = bang;  // One past the primary's last char
+        char const* s = bang - 1;
         while (s >= tmp && *s == ' ') {
             --s;
         }
@@ -74,24 +76,21 @@ bool preprocess(const char* in, char* out, size_t out_len) {
 
         // Rebuild: [0,s) + "fac(" + [s,end) + ")" + [bang+1,...)
         char rebuilt[kMaxExpr];
-        const size_t head = static_cast<size_t>(s - tmp);
-        const size_t prim = static_cast<size_t>(end - s);
-        const size_t tail = std::strlen(bang + 1);
-        if (head + 4 + prim + 1 + tail + 1 >= sizeof(rebuilt)) {
+        const auto head = static_cast<int>(s - tmp);
+        const auto prim = static_cast<int>(end - s);
+        const int wrote = std::snprintf(rebuilt, sizeof(rebuilt), "%.*sfac(%.*s)%s", head, tmp,
+                                        prim, s, bang + 1);
+        if (wrote < 0 || wrote >= static_cast<int>(sizeof(rebuilt))) {
             return false;
         }
-        std::memcpy(rebuilt, tmp, head);
-        std::memcpy(rebuilt + head, "fac(", 4);
-        std::memcpy(rebuilt + head + 4, s, prim);
-        rebuilt[head + 4 + prim] = ')';
-        std::memcpy(rebuilt + head + 4 + prim + 1, bang + 1, tail + 1);
-        std::strcpy(tmp, rebuilt);
+        std::memcpy(tmp, rebuilt, static_cast<size_t>(wrote) + 1);
     }
 
-    if (std::strlen(tmp) >= out_len) {
+    const size_t len = std::strlen(tmp);
+    if (len >= out_len) {
         return false;
     }
-    std::strcpy(out, tmp);
+    std::memcpy(out, tmp, len + 1);
     return true;
 }
 
@@ -195,7 +194,7 @@ void* Engine::compile(const char* expr) {
 
 calc_t Engine::eval_compiled(void* handle, calc_t x_val) {
     if (handle == nullptr) {
-        return 0.0 / 0.0;  // NaN
+        return std::numeric_limits<calc_t>::quiet_NaN();
     }
     vars_.vars['x' - 'a'] = x_val;
     return te_eval(static_cast<te_expr*>(handle));

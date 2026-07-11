@@ -15,7 +15,7 @@ private:
     static constexpr int kNumRows = 4;
     int selected_ = 0;
 
-    void adjust(int dir);
+    void adjust(int dir) const;
 };
 
 ModeScreen& mode_screen();

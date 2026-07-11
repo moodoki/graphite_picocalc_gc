@@ -252,7 +252,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
 
         // Expression line(s), pretty-printed. Build to learn the height,
         // then render immediately (the pool is reset on the next build).
-        render::LayoutNode* root = render::build_layout(e->expr, metrics);
+        render::LayoutNode const* root = render::build_layout(e->expr, metrics);
         const int eh = root != nullptr ? root->height : lh;
         y -= eh + 2;
         render::render_node(root, fb, 4, y, font, kGrayLine);
@@ -265,7 +265,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     input_.render(fb, 2 + font.width() + 2, kInputY + 8, platform::kScreenW - font.width() - 8,
                   font, true);
 
-    const char* keys[6] = {"Y=", "WIN", "GRPH", "MODE", "", "DIAG"};
+    const char* const keys[6] = {"Y=", "WIN", "GRPH", "MODE", "", "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

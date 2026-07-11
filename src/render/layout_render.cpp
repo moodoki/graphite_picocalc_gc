@@ -89,7 +89,7 @@ void render_node(const LayoutNode* node, gfx::Framebuffer& fb, int x, int y, con
 int draw_expression(gfx::Framebuffer& fb, int x, int y, const char* expr, const gfx::Font& font,
                     platform::Color color) {
     const Metrics m{font.width(), font.height()};
-    LayoutNode* root = build_layout(expr, m);
+    LayoutNode const* root = build_layout(expr, m);
     if (root == nullptr) {
         return 0;
     }

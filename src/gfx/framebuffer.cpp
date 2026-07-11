@@ -1,5 +1,6 @@
 #include "gfx/framebuffer.hpp"
 
+#include <algorithm>
 #include <cstring>
 
 #include "pico/stdlib.h"
@@ -27,12 +28,8 @@ void display_service_main() {
 }
 
 void Framebuffer::render_frame(RenderFn render, void* ctx, int dirty_y0, int dirty_y1) {
-    if (dirty_y0 < 0) {
-        dirty_y0 = 0;
-    }
-    if (dirty_y1 > platform::kScreenH) {
-        dirty_y1 = platform::kScreenH;
-    }
+    dirty_y0 = std::max(dirty_y0, 0);
+    dirty_y1 = std::min(dirty_y1, platform::kScreenH);
     if (dirty_y0 >= dirty_y1) {
         return;
     }
@@ -81,10 +78,10 @@ void Framebuffer::set_pixel(int x, int y, Color c) {
 }
 
 void Framebuffer::fill_rect(int x, int y, int w, int h, Color c) {
-    int x0 = x < 0 ? 0 : x;
-    int x1 = x + w > platform::kScreenW ? platform::kScreenW : x + w;
-    int y0 = y < clip_y0_ ? clip_y0_ : y;
-    int y1 = y + h > clip_y1_ ? clip_y1_ : y + h;
+    int const x0 = x < 0 ? 0 : x;
+    int const x1 = x + w > platform::kScreenW ? platform::kScreenW : x + w;
+    int const y0 = y < clip_y0_ ? clip_y0_ : y;
+    int const y1 = y + h > clip_y1_ ? clip_y1_ : y + h;
     if (x0 >= x1 || y0 >= y1) {
         return;
     }

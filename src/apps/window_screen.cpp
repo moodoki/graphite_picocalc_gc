@@ -35,7 +35,8 @@ double* WindowScreen::field_ptr(int i) const {
 }
 
 const char* WindowScreen::field_name(int i) {
-    static const char* kNames[kNumFields] = {"Xmin", "Xmax", "Ymin", "Ymax", "Xscl", "Yscl"};
+    static constexpr const char* kNames[kNumFields] = {"Xmin", "Xmax", "Ymin",
+                                                       "Ymax", "Xscl", "Yscl"};
     return kNames[i];
 }
 
@@ -51,7 +52,7 @@ void WindowScreen::begin_edit() {
 }
 
 void WindowScreen::commit_edit() {
-    *field_ptr(selected_) = std::atof(input_.text());
+    *field_ptr(selected_) = std::strtod(input_.text(), nullptr);
     editing_ = false;
     save_window();
 }

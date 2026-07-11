@@ -17,10 +17,13 @@ constexpr int kTopY = 40;
 constexpr int kRowH = 36;
 
 // Row indices
-enum Row { kRowAngle = 0, kRowDisplay, kRowFixDigits, kRowReboot };
+constexpr int kRowAngle = 0;
+constexpr int kRowDisplay = 1;
+constexpr int kRowFixDigits = 2;
+constexpr int kRowReboot = 3;
 }  // namespace
 
-void ModeScreen::adjust(int dir) {
+void ModeScreen::adjust(int dir) const {
     switch (selected_) {
         case kRowAngle:
             math::set_angle_mode(math::angle_mode() == math::AngleMode::kRadians
@@ -92,7 +95,7 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     fb.clear(kBlack);
     ui::draw_status_bar(fb, "MODE");
 
-    const char* rows[kNumRows][2] = {
+    const char* const rows[kNumRows][2] = {
         {"Angle", nullptr},
         {"Display", nullptr},
         {"Fix digits", nullptr},
@@ -110,7 +113,7 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     char fix_val[8];
     std::snprintf(fix_val, sizeof(fix_val), "%d", math::fix_digits());
 
-    const char* values[kNumRows] = {angle_val, disp_val, fix_val, "[ENTER]"};
+    const char* const values[kNumRows] = {angle_val, disp_val, fix_val, "[ENTER]"};
 
     for (int i = 0; i < kNumRows; ++i) {
         const int y = kTopY + i * kRowH;
@@ -125,7 +128,7 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     font.draw_string(fb, 12, kTopY + kNumRows * kRowH + 8, "LEFT/RIGHT change   ESC back",
                      kGrayLine);
 
-    const char* keys[6] = {"", "", "", "", "", ""};
+    const char* const keys[6] = {"", "", "", "", "", ""};
     ui::draw_softkeys(fb, keys);
 }
 

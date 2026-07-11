@@ -1,5 +1,6 @@
 #include "render/layout_builder.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 
@@ -17,9 +18,7 @@ LayoutNode* make_text(const char* s, int len, const Metrics& m) {
         return nullptr;
     }
     n->type = NodeType::kText;
-    if (len > LayoutNode::kMaxText - 1) {
-        len = LayoutNode::kMaxText - 1;
-    }
+    len = std::min(len, LayoutNode::kMaxText - 1);
     std::memcpy(n->t.text, s, static_cast<size_t>(len));
     n->t.text[len] = 0;
     n->width = len * m.char_w;
@@ -106,13 +105,9 @@ LayoutNode* make_hbox(LayoutNode** items, int count) {
     int width = 0;
     for (int i = 0; i < count && i < LayoutNode::kMaxChildren; ++i) {
         n->h.items[n->h.count++] = items[i];
-        if (items[i]->baseline > ascent) {
-            ascent = items[i]->baseline;
-        }
+        ascent = std::max(items[i]->baseline, ascent);
         const int d = items[i]->height - items[i]->baseline;
-        if (d > descent) {
-            descent = d;
-        }
+        descent = std::max(d, descent);
         width += items[i]->width;
     }
     n->width = width;
@@ -125,6 +120,7 @@ LayoutNode* make_hbox(LayoutNode** items, int count) {
 
 struct Parser {
     const char* p;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) short-lived parser
     const Metrics& m;
 
     void skip_spaces() {

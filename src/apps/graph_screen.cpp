@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include "pico/time.h"
 
@@ -77,15 +78,18 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     // Grid lines at x_scl / y_scl (dark gray — must recede behind plots).
     if (w.x_scl > 0) {
         const double start = std::ceil(w.x_min / w.x_scl) * w.x_scl;
-        for (double gx = start; gx <= w.x_max; gx += w.x_scl) {
+        const auto nx = static_cast<int>(std::floor((w.x_max - start) / w.x_scl));
+        for (int i = 0; i <= nx; ++i) {
+            const double gx = start + i * w.x_scl;
             const int px = static_cast<int>((gx - w.x_min) / (w.x_max - w.x_min) * (kWidth - 1));
             fb.draw_vline(px, kTop, kHeight, kGridLine);
         }
     }
     if (w.y_scl > 0) {
         const double start = std::ceil(w.y_min / w.y_scl) * w.y_scl;
-        for (double gy = start; gy <= w.y_max; gy += w.y_scl) {
-            const int py = value_to_py(gy);
+        const auto ny = static_cast<int>(std::floor((w.y_max - start) / w.y_scl));
+        for (int i = 0; i <= ny; ++i) {
+            const int py = value_to_py(start + i * w.y_scl);
             fb.draw_hline(0, py, kWidth, kGridLine);
         }
     }
@@ -141,7 +145,8 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     char xb[24];
     char yb[24];
     math::format_number(x, xb, sizeof(xb));
-    math::format_number(py == kOffscreen ? (0.0 / 0.0) : y, yb, sizeof(yb));
+    math::format_number(py == kOffscreen ? std::numeric_limits<double>::quiet_NaN() : y, yb,
+                        sizeof(yb));
     char line[56];
     std::snprintf(line, sizeof(line), "Y%d  x=%s  y=%s", trace_func_ + 1, xb, yb);
     const int ty = kTop + kHeight - font.height() - 2;
@@ -242,7 +247,7 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
         font.draw_string(fb, 40, kTop + kHeight / 2, "No functions. Press F5 for Y=.", kGrayLine);
     }
 
-    const char* keys[6] = {"TRC", "Z+", "Z-", "", "Y=", "DIAG"};
+    const char* const keys[6] = {"TRC", "Z+", "Z-", "", "Y=", "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

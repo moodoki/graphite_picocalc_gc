@@ -26,7 +26,7 @@ bool Storage::init() {
     return true;
 }
 
-bool Storage::file_exists(const char* path) {
+bool Storage::file_exists(const char* path) const {
     if (!mounted_) {
         return false;
     }
@@ -34,7 +34,7 @@ bool Storage::file_exists(const char* path) {
     return f_stat(path, &info) == FR_OK && !(info.fattrib & AM_DIR);
 }
 
-int Storage::read_file(const char* path, uint8_t* buf, size_t max_len) {
+int Storage::read_file(const char* path, uint8_t* buf, size_t max_len) const {
     if (!mounted_) {
         return -1;
     }
@@ -48,7 +48,7 @@ int Storage::read_file(const char* path, uint8_t* buf, size_t max_len) {
     return rc == FR_OK ? static_cast<int>(read) : -1;
 }
 
-bool Storage::write_file(const char* path, const uint8_t* buf, size_t len) {
+bool Storage::write_file(const char* path, const uint8_t* buf, size_t len) const {
     if (!mounted_) {
         return false;
     }
@@ -62,7 +62,7 @@ bool Storage::write_file(const char* path, const uint8_t* buf, size_t len) {
     return rc == FR_OK && written == len;
 }
 
-bool Storage::append_file(const char* path, const uint8_t* buf, size_t len) {
+bool Storage::append_file(const char* path, const uint8_t* buf, size_t len) const {
     if (!mounted_) {
         return false;
     }
@@ -76,14 +76,14 @@ bool Storage::append_file(const char* path, const uint8_t* buf, size_t len) {
     return rc == FR_OK && written == len;
 }
 
-bool Storage::delete_file(const char* path) {
+bool Storage::delete_file(const char* path) const {
     if (!mounted_) {
         return false;
     }
     return f_unlink(path) == FR_OK;
 }
 
-bool Storage::ensure_dir(const char* path) {
+bool Storage::ensure_dir(const char* path) const {
     if (!mounted_) {
         return false;
     }
@@ -91,7 +91,7 @@ bool Storage::ensure_dir(const char* path) {
     return rc == FR_OK || rc == FR_EXIST;
 }
 
-int Storage::list_dir(const char* path, DirEntry* entries, int max_entries) {
+int Storage::list_dir(const char* path, DirEntry* entries, int max_entries) const {
     if (!mounted_) {
         return -1;
     }
@@ -112,7 +112,7 @@ int Storage::list_dir(const char* path, DirEntry* entries, int max_entries) {
     return n;
 }
 
-bool Storage::read_string(const char* path, char* buf, size_t max_len) {
+bool Storage::read_string(const char* path, char* buf, size_t max_len) const {
     if (max_len == 0) {
         return false;
     }
@@ -124,7 +124,7 @@ bool Storage::read_string(const char* path, char* buf, size_t max_len) {
     return true;
 }
 
-bool Storage::write_string(const char* path, const char* str) {
+bool Storage::write_string(const char* path, const char* str) const {
     return write_file(path, reinterpret_cast<const uint8_t*>(str), std::strlen(str));
 }
 

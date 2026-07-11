@@ -35,11 +35,11 @@ bool g_sdhc = false;  // Block (vs byte) addressing
 uint32_t g_sectors = 0;
 
 void cs_low() {
-    gpio_put(kPinCs, 0);
+    gpio_put(kPinCs, false);
 }
 void cs_high() {
-    gpio_put(kPinCs, 1);
-    uint8_t ff = 0xFF;  // Extra clocks so the card releases MISO
+    gpio_put(kPinCs, true);
+    uint8_t const ff = 0xFF;  // Extra clocks so the card releases MISO
     spi_write_blocking(kSpi, &ff, 1);
 }
 
@@ -130,7 +130,7 @@ bool init() {
 
     gpio_init(kPinCs);
     gpio_set_dir(kPinCs, GPIO_OUT);
-    gpio_put(kPinCs, 1);
+    gpio_put(kPinCs, true);
     gpio_init(kPinDet);
     gpio_set_dir(kPinDet, GPIO_IN);
     gpio_pull_up(kPinDet);

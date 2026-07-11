@@ -32,7 +32,8 @@ int strip_zeros(char* buf) {
     }
     *end = 0;
     if (exp_part[0] != 0) {
-        std::strcat(buf, exp_part);
+        // Reattaches at or before where the exponent originally sat, so it fits.
+        std::memcpy(end, exp_part, std::strlen(exp_part) + 1);
     }
     return static_cast<int>(std::strlen(buf));
 }
@@ -47,7 +48,7 @@ int g_fix_digits = 2;
 // one digit before it, bumping `exponent` accordingly.
 void normalize_mantissa(char* mant, int& exponent) {
     char* d = mant + (mant[0] == '-' ? 1 : 0);
-    char* dot = std::strchr(d, '.');
+    char const* dot = std::strchr(d, '.');
     if (dot == nullptr || dot <= d + 1) {
         return;  // Already one digit before the point (or no point)
     }
@@ -92,7 +93,7 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
         char* e = std::strchr(tmp, 'e');
         int exponent = 0;
         if (e != nullptr) {
-            exponent = std::atoi(e + 1);
+            exponent = static_cast<int>(std::strtol(e + 1, nullptr, 10));
             *e = 0;
         }
         normalize_mantissa(tmp, exponent);
@@ -115,7 +116,7 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
         char* e = std::strchr(tmp, 'e');
         int exponent = 0;
         if (e != nullptr) {
-            exponent = std::atoi(e + 1);
+            exponent = static_cast<int>(std::strtol(e + 1, nullptr, 10));
             *e = 0;
         }
         normalize_mantissa(tmp, exponent);
