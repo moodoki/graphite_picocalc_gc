@@ -30,6 +30,16 @@ Format:
 
 ---
 
+## D13: Opt-in dirty-band partial redraw (rows, not rectangles)
+
+**Date**: 2026-07-11
+**Status**: Accepted (HW verification pending)
+**Context**: With synchronous full-frame rendering (D10), every keypress cost ~200 ms — the SPI push dominates (recompute is only 15-17 ms), and push time is proportional to pixel count. Task 5.6 part 2.
+**Decision**: Screens track a dirty **row band** (`[y0, y1)`, full width); `ScreenManager::render_frame()` consumes it and `Framebuffer::render_frame()` renders/pushes only the strips inside the band. Tracking is **opt-in** per screen (`track_dirty()` in the constructor + `invalidate()` on every state change in `on_key`); non-tracking screens keep full-frame redraws. Any screen surfacing to top of the stack is fully invalidated by the manager. Opted in: home screen (typing = input band, ~28 of 320 rows; Enter = everything above the softkeys, which also keeps the battery/mode status fresh) and the Y= editor (per-row bands). An empty band skips the render+push entirely, so unconsumed keys cost nothing.
+**Rationale**: A y-band is enough — the hot regions (input line, editor rows) are full-width, so x-cropping would add a strided push path for no measurable win. Opt-in keeps the default safe: a screen that never calls `invalidate()` can't accidentally stop redrawing.
+**Tradeoffs**: Tracking screens must invalidate every band their key handler touches — a missed call shows as stale rows on the panel (visible, not corrupting). The battery indicator refreshes only on Enter/screen changes, not per keystroke. Renderers still run their full draw code per band (clipping discards out-of-band work), so CPU cost is unchanged — fine while push time dominates.
+**Revisit when**: Graph interactions need help (trace/zoom redraw the ~280-row plot area anyway, so bands don't win there — that wants a faster SPI clock, DMA, or plot-region caching); or a screen needs non-full-width updates.
+
 ## D12: Shell-style input recall on UP/DOWN; modifier+arrows scroll the view; HOME pops to root
 
 **Date**: 2026-07-11 (revised same day after HW verification)

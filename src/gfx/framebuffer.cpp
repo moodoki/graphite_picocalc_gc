@@ -26,24 +26,39 @@ void display_service_main() {
     }
 }
 
-void Framebuffer::render_frame(RenderFn render, void* ctx) {
+void Framebuffer::render_frame(RenderFn render, void* ctx, int dirty_y0, int dirty_y1) {
+    if (dirty_y0 < 0) {
+        dirty_y0 = 0;
+    }
+    if (dirty_y1 > platform::kScreenH) {
+        dirty_y1 = platform::kScreenH;
+    }
+    if (dirty_y0 >= dirty_y1) {
+        return;
+    }
+
     if (config::kUseFullFramebuffer) {
 #if PICOCALC_PICO2
+        // One buffer-sized "strip": the band renders at the top of
+        // frame_buf (row() offsets by clip_y0_), so the buffer is
+        // scratch, not a persistent frame image.
         buf_ = frame_buf;
-        clip_y0_ = 0;
-        clip_y1_ = platform::kScreenH;
+        clip_y0_ = dirty_y0;
+        clip_y1_ = dirty_y1;
         render(*this, ctx);
-        platform::display().push_rect(0, 0, platform::kScreenW, platform::kScreenH, frame_buf);
+        platform::display().push_rect(0, dirty_y0, platform::kScreenW, dirty_y1 - dirty_y0,
+                                      frame_buf);
 #endif
         return;
     }
 
-    // Strip mode: render each strip and push it synchronously (core 0).
-    for (int y0 = 0; y0 < platform::kScreenH; y0 += config::kStripHeight) {
+    // Strip mode: render each strip of the band and push it
+    // synchronously (core 0).
+    for (int y0 = dirty_y0; y0 < dirty_y1; y0 += config::kStripHeight) {
         buf_ = strip_buf;
         clip_y0_ = y0;
-        const int h = (y0 + config::kStripHeight <= platform::kScreenH) ? config::kStripHeight
-                                                                        : platform::kScreenH - y0;
+        const int h =
+            (y0 + config::kStripHeight <= dirty_y1) ? config::kStripHeight : dirty_y1 - y0;
         clip_y1_ = y0 + h;
         render(*this, ctx);
         platform::display().push_rect(0, y0, platform::kScreenW, h, strip_buf);

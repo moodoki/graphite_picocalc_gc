@@ -25,10 +25,12 @@ class Framebuffer {
 public:
     using RenderFn = void (*)(Framebuffer& fb, void* ctx);
 
-    // Render one full frame by invoking `render` (once per strip in
-    // strip mode) and hand the pixels to core 1. Blocks until the frame
-    // has been fully submitted (but overlaps render and push).
-    void render_frame(RenderFn render, void* ctx);
+    // Render rows [dirty_y0, dirty_y1) by invoking `render` (once per
+    // strip in strip mode) and push them to the LCD. Rows outside the
+    // band keep their current panel contents. Defaults to the full
+    // frame. Blocks until the pixels have been pushed.
+    void render_frame(RenderFn render, void* ctx, int dirty_y0 = 0,
+                      int dirty_y1 = platform::kScreenH);
 
     // ---- Primitives (clipped) ----
     void clear(Color c);

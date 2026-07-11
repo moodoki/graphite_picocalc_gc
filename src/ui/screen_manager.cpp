@@ -6,6 +6,13 @@ namespace {
 void render_trampoline(gfx::Framebuffer& fb, void* ctx) {
     static_cast<Screen*>(ctx)->render(fb);
 }
+
+// A screen surfacing to top of stack needs a full redraw regardless of
+// its own dirty tracking.
+void activate(Screen* screen) {
+    screen->invalidate_all();
+    screen->on_activate();
+}
 }  // namespace
 
 void ScreenManager::push(Screen* screen) {
@@ -16,7 +23,7 @@ void ScreenManager::push(Screen* screen) {
         stack_[depth_ - 1]->on_deactivate();
     }
     stack_[depth_++] = screen;
-    screen->on_activate();
+    activate(screen);
 }
 
 void ScreenManager::pop() {
@@ -24,7 +31,7 @@ void ScreenManager::pop() {
         return;  // Never pop the last screen
     }
     stack_[--depth_]->on_deactivate();
-    stack_[depth_ - 1]->on_activate();
+    activate(stack_[depth_ - 1]);
 }
 
 void ScreenManager::pop_to_root() {
@@ -34,7 +41,7 @@ void ScreenManager::pop_to_root() {
     while (depth_ > 1) {
         stack_[--depth_]->on_deactivate();
     }
-    stack_[0]->on_activate();
+    activate(stack_[0]);
 }
 
 void ScreenManager::replace(Screen* screen) {
@@ -44,7 +51,7 @@ void ScreenManager::replace(Screen* screen) {
     }
     stack_[depth_ - 1]->on_deactivate();
     stack_[depth_ - 1] = screen;
-    screen->on_activate();
+    activate(screen);
 }
 
 Screen* ScreenManager::current() const {
@@ -58,9 +65,17 @@ void ScreenManager::handle_key(const platform::KeyEvent& ev) {
 }
 
 void ScreenManager::render_frame() {
-    if (Screen* s = current()) {
-        gfx::framebuffer().render_frame(render_trampoline, s);
+    Screen* s = current();
+    if (s == nullptr) {
+        return;
     }
+    int y0 = 0;
+    int y1 = 0;
+    s->take_dirty(y0, y1);
+    if (y0 >= y1) {
+        return;  // Nothing changed — skip the render and push entirely
+    }
+    gfx::framebuffer().render_frame(render_trampoline, s, y0, y1);
 }
 
 ScreenManager& screen_manager() {

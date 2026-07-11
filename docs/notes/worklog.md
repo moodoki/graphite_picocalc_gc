@@ -18,13 +18,15 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1 code complete + **HW verification round 1 done on Pico 1** (2026-07-11).
-  All test-drive polish fixes verified on-device; graph recompute measured at 15-17 ms
-  (5.6 target met). Remaining HW items: SD card, store op, trace/presets, mode/reboot,
-  full exit test, Pico 2 bring-up.
-- **Next up**: finish the short HW-PENDING queue (needs a FAT32 card), then dirty-rect
-  rendering (5.6 part 2 — the ~200 ms full-frame push is the one real perf item), Pico 2
-  bring-up, `docs/notes/phase1-retro.md`. Phase 2/3 specs are in the tree (imported +
+- **Phase**: 1 code complete + HW verification round 1 done on Pico 1 (2026-07-11).
+  **STM32 keyboard firmware updated to v1.6 by the developer (2026-07-11) — battery
+  indicator now works on-device.** Dirty-band partial rendering (5.6 part 2, D13) is
+  implemented and building; HW verification pending. Remaining HW items: dirty-band
+  feel/artifacts, new-firmware checks (charging bit, Shift-on-arrows, F10), SD card,
+  store op, trace/presets, mode/reboot, full exit test, Pico 2 bring-up.
+- **Next up**: flash + verify dirty-band rendering and the rest of the HW-PENDING
+  queue (needs a FAT32 card for the SD rows), Pico 2 bring-up,
+  `docs/notes/phase1-retro.md`. Phase 2/3 specs are in the tree (imported +
   reconciled 2026-07-11); phase roadmap is weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
@@ -62,16 +64,42 @@ Still to verify on hardware:
 |------|---------------------------|
 | SD card (sd=0 at boot) | Insert a FAT32 card → `/picocalc` created, self-test file r/w OK, persistence works |
 | Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
-| Battery % display | Only after a keyboard-firmware update (this unit's STM32 lacks reg 0x0B): %/cyan-charging correct, and no phantom keys typing past a 30 s refresh |
+| Dirty-band rendering (D13) | Typing on home screen feels instant (~20 ms band vs 200 ms full frame); no stale rows/artifacts on home + Y= editor (scroll, recall, edit, checkbox); full redraws still correct on screen switches |
+| STM32 fw v1.6 checks | Battery % shows (confirmed 2026-07-11); still check: cyan-when-charging (charging = bit 7 of low byte is an unverified assumption), no phantom keys after a 30 s battery refresh, does v1.6 still swallow Shift on arrows (else D12 can revert to Shift), does F10 exist now |
 | 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
 | Trace + S/T presets | Trace cursor readout + function switching; S/T zoom presets (zoom F2/F3 verified 2026-07-11) |
 | 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
 | 5.7 Full exit test | Power-cycle → Home → `2+3*sin(pi/4)` → F3 graph `sin(x)` trace+zoom → persistence |
-| Perf latency | ~200 ms full-screen redraw per keypress (D10) — confirm acceptable or prioritize dirty-rects |
 
 ---
 
-## 2026-07-11 — Session 5: HW verification round 1 — all polish fixes verified
+## 2026-07-11 — Session 6: STM32 fw v1.6 (battery works) + dirty-band partial rendering
+
+**Developer hardware work**: updated the STM32 keyboard firmware to **v1.6** (not the
+v1.2 the notes suggested; `PicoCalc_BIOS_v1.6.bin` is in the repo root). **The battery
+indicator now works on-device** — the missing register 0x0B was indeed just old
+firmware; no code change was needed, as predicted. Still to check under v1.6: charging
+color/bit, phantom keys after a battery refresh, Shift-on-arrows, F10 (see the queue).
+
+**Dirty-band partial rendering** (task 5.6 part 2, decision **D13**) — the last big
+Phase 1 code item. The ~200 ms per-keypress latency is SPI push time, which scales
+with pixel count, so:
+
+- `ui::Screen` grows opt-in dirty-band tracking: `track_dirty()` + `invalidate(y0, y1)`
+  (row band, full width); `take_dirty()` consumed per frame. Non-tracking screens
+  keep full-frame redraws; `ScreenManager` fully invalidates any screen that surfaces
+  to top of stack.
+- `Framebuffer::render_frame()` takes the band and renders/pushes only those strips
+  (both strip mode and the Pico 2 full-buffer path, which now treats its buffer as
+  scratch). Empty band → render skipped entirely.
+- Home screen: typing/recall/ESC = input band (~28 of 320 rows → ~20 ms expected);
+  Enter = everything above the softkeys (also refreshes battery/mode status); history
+  scroll = history band. Y= editor: per-row bands (~26 rows) for edit/select/toggle.
+- Graph screen intentionally left full-frame (trace/zoom touch ~280 rows anyway — D13
+  "revisit when").
+
+Both boards build; 106 host checks green (host tests don't cover `ui/`). HW-PENDING:
+verify typing feel + no stale-row artifacts.
 
 Full flash-test-fix loop on Pico 1 with live USB-serial capture. Three flash cycles.
 

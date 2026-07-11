@@ -10,6 +10,8 @@ namespace apps {
 // F2 toggles enable; F3 clears; F4 jumps to the graph.
 class YEditorScreen : public ui::Screen {
 public:
+    YEditorScreen() { track_dirty(); }
+
     void on_activate() override;
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
@@ -21,6 +23,7 @@ private:
 
     void begin_edit();
     void commit_edit();
+    void invalidate_row(int i);
 };
 
 YEditorScreen& y_editor_screen();

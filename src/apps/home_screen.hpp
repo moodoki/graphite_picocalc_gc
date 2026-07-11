@@ -11,6 +11,8 @@ namespace apps {
 // scrollable history above, results via math::Engine.
 class HomeScreen : public ui::Screen {
 public:
+    HomeScreen() { track_dirty(); }
+
     void on_activate() override;
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
@@ -39,6 +41,9 @@ private:
     char pending_[ui::InputLine::kCapacity] = {};  // Stashed unsent input
 
     ui::InputLine input_;
+
+    void invalidate_input();
+    void invalidate_history();
 
     void evaluate_input();
     void push_entry(const char* expr, const char* result, bool error);

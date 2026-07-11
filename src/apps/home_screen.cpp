@@ -28,6 +28,17 @@ constexpr int kInputY = 268;
 constexpr int kSoftkeyY = 296;
 }  // namespace
 
+// Dirty bands for partial redraw (5.6 part 2). The input band is the
+// typing fast path (~28 of 320 rows). Enter includes the status bar so
+// the battery/mode indicators refresh at every evaluation.
+void HomeScreen::invalidate_input() {
+    invalidate(kInputY, kSoftkeyY);
+}
+
+void HomeScreen::invalidate_history() {
+    invalidate(kStatusH, kInputY);
+}
+
 void HomeScreen::on_activate() {}
 
 const HomeScreen::Entry* HomeScreen::entry_from_newest(int n) const {
@@ -146,7 +157,10 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
     }
     switch (ev.key) {
         case Key::kEnter:
-            evaluate_input();
+            if (!input_.empty()) {
+                evaluate_input();
+                invalidate(0, kSoftkeyY);  // History + input + status bar
+            }
             return true;
         case Key::kUp:
             // Modifier+UP scrolls the history view; plain UP walks back
@@ -157,6 +171,7 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             if (ev.alt_held || ev.ctrl_held || ev.shift_held) {
                 if (scroll_ < history_count_ - 1) {
                     ++scroll_;
+                    invalidate_history();
                 }
             } else if (hist_nav_ < history_count_ - 1) {
                 if (hist_nav_ < 0) {
@@ -166,24 +181,29 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
                 }
                 ++hist_nav_;
                 input_.set_text(entry_from_newest(hist_nav_)->expr);
+                invalidate_input();
             }
             return true;
         case Key::kDown:
             if (ev.alt_held || ev.ctrl_held || ev.shift_held) {
                 if (scroll_ > 0) {
                     --scroll_;
+                    invalidate_history();
                 }
             } else if (hist_nav_ > 0) {
                 --hist_nav_;
                 input_.set_text(entry_from_newest(hist_nav_)->expr);
+                invalidate_input();
             } else if (hist_nav_ == 0) {
                 hist_nav_ = -1;
                 input_.set_text(pending_);
+                invalidate_input();
             }
             return true;
         case Key::kEscape:
             input_.clear();
             hist_nav_ = -1;
+            invalidate_input();
             return true;
         case Key::kF1:
             ui::screen_manager().push(&y_editor_screen());
@@ -198,7 +218,11 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             ui::screen_manager().push(&mode_screen());
             return true;
         default:
-            return input_.on_key(ev);
+            if (input_.on_key(ev)) {
+                invalidate_input();
+                return true;
+            }
+            return false;
     }
 }
 
