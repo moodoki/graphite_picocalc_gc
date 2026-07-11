@@ -102,10 +102,11 @@ Format:
 **Date**: 2026-07-08
 **Status**: Accepted
 **Context**: Open decision — should `a/b` always render as a stacked fraction, or only when the operands are simple? Always-stacked is less code; a heuristic reads better for messy expressions.
-**Decision**: Stack `a/b` into a `FractionNode` only when both sides are "simple" — a number, a variable, a parenthesized group, or an already-built fraction. Otherwise render inline with a text `/`. Also require the division to be the first operator in its term (no chaining an inline `*` into a stacked fraction), so `a*b/c` stays inline.
+**Decision**: Stack `a/b` into a `FractionNode` only when both sides are "simple" — a number, a variable, a parenthesized group, an already-built fraction, **a function call, or a power** (the last two added 2026-07-11). Otherwise render inline with a text `/`. Also require the division to be the first operator in its term (no chaining an inline `*` into a stacked fraction), so `a*b/c` stays inline.
 **Rationale**: Matches the spec's section 6.2 guidance and TI behavior; `(x+1)/(x-1)` stacks (operands are parens) while `1+2/3+4` keeps `2/3` inline-sized within the sum. Keeps trees shallow and predictable.
 **Tradeoffs**: A few expressions a user might expect stacked stay inline; acceptable and consistent.
 **Revisit when**: User feedback, or when an equation editor needs full 2D editing (Phase 2+).
+**Revision (2026-07-11)**: HW test drive hit the tradeoff — `1/sqrt(2)` rendered inline because a function call parses to an HBox. Calls (recognized structurally: `HBox[alpha-name, paren]`, which excludes unary-minus HBoxes) and superscripts now count as simple, so `1/sqrt(2)` and `x^2/2` stack.
 
 ## D1: Variable store operator is `->` (arrow)
 

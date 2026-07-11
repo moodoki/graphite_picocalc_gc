@@ -105,6 +105,38 @@ int main() {
                "'sin(x)' = name + paren");
     }
 
+    // Function call in a fraction (HW-found 2026-07-11: rendered inline):
+    // 1/sqrt(2) stacks, denominator is the call HBox.
+    {
+        auto* n = build("1/sqrt(2)");
+        expect(n != nullptr && n->type == NodeType::kFraction,
+               "'1/sqrt(2)' is Fraction");
+        expect(n != nullptr && n->bin.b->type == NodeType::kHBox &&
+                   n->bin.b->h.count == 2 &&
+                   std::strcmp(n->bin.b->h.items[0]->t.text, "sqrt") == 0,
+               "denominator is the sqrt call");
+    }
+    {
+        auto* n = build("sin(x)/2");
+        expect(n != nullptr && n->type == NodeType::kFraction,
+               "'sin(x)/2' is Fraction");
+    }
+
+    // Power in a fraction: x^2/2 stacks with a Superscript numerator.
+    {
+        auto* n = build("x^2/2");
+        expect(n != nullptr && n->type == NodeType::kFraction,
+               "'x^2/2' is Fraction");
+        expect(n != nullptr && n->bin.a->type == NodeType::kSuperscript,
+               "numerator is Superscript");
+    }
+
+    // Unary minus is not a simple operand: 1/-2 stays inline.
+    {
+        auto* n = build("1/-2");
+        expect(n != nullptr && n->type == NodeType::kHBox, "'1/-2' stays inline");
+    }
+
     // Nested: (1+2)/(3^4) — fraction of two parens, den paren contains super
     {
         auto* n = build("(1+2)/(3^4)");

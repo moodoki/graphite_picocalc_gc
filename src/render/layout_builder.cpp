@@ -28,9 +28,21 @@ LayoutNode* make_text(const char* s, int len, const Metrics& m) {
     return n;
 }
 
+// A function call parses to HBox[name, paren-args]. Recognize that shape
+// structurally — the name check keeps unary-minus HBoxes ("-(x)") out.
+bool is_call(const LayoutNode* n) {
+    return n->type == NodeType::kHBox && n->h.count == 2 &&
+           n->h.items[0]->type == NodeType::kText &&
+           std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 &&
+           n->h.items[1]->type == NodeType::kParen;
+}
+
 bool is_simple(const LayoutNode* n) {
-    return n != nullptr && (n->type == NodeType::kText || n->type == NodeType::kParen ||
-                            n->type == NodeType::kFraction);
+    // Function calls and powers count as simple so 1/sqrt(2) and x^2/2
+    // stack (D2, revised on 2026-07-11 test-drive feedback).
+    return n != nullptr &&
+           (n->type == NodeType::kText || n->type == NodeType::kParen ||
+            n->type == NodeType::kFraction || n->type == NodeType::kSuperscript || is_call(n));
 }
 
 LayoutNode* make_fraction(LayoutNode* num, LayoutNode* den) {

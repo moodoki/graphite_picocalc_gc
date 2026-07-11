@@ -18,16 +18,15 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1 code complete; HW verification rounds 1–2 done on Pico 1 (2026-07-11).
-  STM32 keyboard fw **v1.6**; battery indicator works (incl. boot-grace fix, verified
-  after power cycle). **Dirty-band partial rendering (5.6 part 2, D13) verified
-  on-device** — typing feels instant, no stale-row artifacts; 5.6 is closed.
-  Remaining HW items: SD card, store op, pretty math, trace/presets, mode/reboot,
-  full exit test, charging color (needs battery <100%), Pico 2 bring-up.
-- **Next up**: remaining HW-PENDING queue (needs a FAT32 card for the SD rows),
-  Pico 2 bring-up, `docs/notes/phase1-retro.md`, then Phase 2 task 2.1. Phase 2/3
-  specs are in the tree (imported + reconciled 2026-07-11); phase roadmap is
-  weeks 11–16 / 17–25 / 26–35.
+- **Phase**: 1 code complete; **Pico 1 HW verification finished** (2026-07-11, three
+  rounds in one live session). STM32 keyboard fw v1.6; battery works (incl. boot-grace
+  fix); dirty-band rendering (D13) verified — typing instant; SD persistence, store
+  op, pretty math (D2 revised: calls/powers stack in fractions), trace + S/T presets,
+  mode toggles, reboot-to-bootloader all verified. Only open HW items: **Pico 2
+  bring-up** and the charging-color check (needs battery <95%).
+- **Next up**: Pico 2 bring-up, `docs/notes/phase1-retro.md`, then Phase 2 task 2.1.
+  Phase 2/3 specs are in the tree (imported + reconciled 2026-07-11); phase roadmap
+  is weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 27 layout = 106 checks, 0 failures
@@ -58,17 +57,18 @@ graphing with zoom, **graph recompute 15.3-17.1 ms for 2 functions (<50 ms targe
 task 5.6 profiling done)**. Battery indicator: this unit's STM32 fw lacks the battery
 register — shows "--" by design (see Session 5 entry).
 
+**Verified on Pico 1 hardware 2026-07-11 (rounds 2-3, Session 6):** dirty-band
+rendering (D13), battery % + cold-boot grace fix, SD card r/w self-test +
+persistence, store op `2->A`, pretty math incl. the D2 revision (`1/sqrt(2)`,
+`x^2/2` stack), trace + S/T presets, mode toggles, reboot-to-bootloader, full
+exit test. **Pico 1 verification is complete.**
+
 Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
-| SD card (sd=0 at boot) | Insert a FAT32 card → `/picocalc` created, self-test file r/w OK, persistence works |
-| Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
 | Charging color | Cyan battery icon while charging (bit 7 of low byte assumption) — inconclusive at 100% (charger idle when full); retest when battery <~95% |
-| 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
-| Trace + S/T presets | Trace cursor readout + function switching; S/T zoom presets (zoom F2/F3 verified 2026-07-11) |
-| 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
-| 5.7 Full exit test | Power-cycle → Home → `2+3*sin(pi/4)` → F3 graph `sin(x)` trace+zoom → persistence |
+| Pico 2 bring-up | Never flashed; full-framebuffer display path untested |
 
 ---
 
@@ -115,6 +115,18 @@ Both boards build; 106 host checks green (host tests don't cover `ui/`).
   a 40 s idle spanning a battery refresh.
 - **Charging color inconclusive**: at 100% the charger is idle, so the charging bit
   being 0 proves nothing. Retest when the battery is below ~95% (queue row).
+
+**HW verification round 3 (same session): rest of the queue cleared on Pico 1.**
+
+- **Pretty math**: mostly right on first look, but `1/sqrt(2)` rendered inline —
+  a function call parses to an HBox, which D2's is-simple check didn't accept.
+  Fixed: calls (recognized structurally, `HBox[alpha-name, paren]`) and
+  superscripts now count as simple operands, so `1/sqrt(2)` and `x^2/2` stack
+  (D2 revision; 6 new layout tests, 33 total). Re-verified on-device.
+- **Verified**: store op `2->A`/`A+1`→3 (`-` and `>` type fine), trace + S/T
+  presets, mode toggles (status bar follows), reboot-to-bootloader (mounted
+  RPI-RP2 — used it for the final reflash), SD card r/w self-test OK on the
+  diag screen + history persistence. That completes the 5.7 exit test on Pico 1.
 
 Full flash-test-fix loop on Pico 1 with live USB-serial capture. Three flash cycles.
 
