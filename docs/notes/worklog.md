@@ -28,11 +28,15 @@ Conventions:
   spot-check on Pico 2 (eval/graph/dirty-band feel — display + keyboard + PSRAM +
   SD + battery already verified there).
 - **Phase 1 declared done 2026-07-12** (retro: `docs/notes/phase1-retro.md`).
-- **Next up**: Phase 2 task 2.1 (extract `graph/`). Phase 2/3 specs are in the tree
-  (imported + reconciled 2026-07-11); roadmap weeks 11–16 / 17–25 / 26–35.
+- **Phase 2 started 2026-07-12** (Session 7): lint baseline is clean and gating
+  (clang-tidy installed + config fixed, `WarningsAsErrors: '*'`), and **task 2.1 is
+  done** — `src/graph/` now holds `Viewport` + `Plotter`/`PointSource`, GraphScreen
+  routes through them, behavior-preserving (viewport formulas locked by host test).
+- **Next up**: Phase 2 task 2.2 (`graph::Mode` + mode-aware `GraphState`), then 2.3
+  `FunctionSource`. Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 79 math + 27 layout = 106 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 18 graph = 130 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -72,6 +76,52 @@ Still to verify on hardware:
 |------|---------------------------|
 | Charging color | Cyan battery icon while charging (bit 7 of low byte assumption) — inconclusive at 100% (charger idle when full); retest when battery <~95% |
 | Pico 2 spot-check | Display/keyboard/battery/PSRAM/SD verified (incl. D14 cold boot). Still worth a quick functional sweep: eval + history, graph + trace, dirty-band typing feel, persistence across a cold cycle |
+| Graph after 2.1 refactor | Function mode should be pixel-identical post-extraction (Session 7). During the next graph test drive: plot 2-3 functions, trace, zoom — confirm nothing looks different |
+
+---
+
+## 2026-07-12 — Session 7: lint baseline clean + Phase 2 start (task 2.1 graph/ extraction)
+
+Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plotter`.
+
+**Lint cleanup (closed the "clang-tidy not installed" backlog item):**
+
+- clang-tidy was installed via Homebrew `llvm` (keg-only → `lint.sh` now prepends
+  `/opt/homebrew/opt/llvm/bin` when needed).
+- Two silent problems found: (1) every TU failed to find newlib/libstdc++ headers
+  (clang-tidy replays `arm-none-eabi-g++` commands but doesn't know GCC's built-in
+  include paths — `lint.sh` now queries g++ for its search list and passes
+  `--extra-arg=-isystem` per dir); (2) clang-tidy exits 0 on plain warnings, so lint
+  "passed" while reporting them — `.clang-tidy` now sets `WarningsAsErrors: '*'`.
+- Config was also backwards for this codebase (wanted `kmax_depth`-style constants,
+  UPPER_CASE enum constants, no `#pragma once`); fixed to kCamelCase + prefix-k and
+  dropped checks wrong for embedded (`.at()` needs exceptions; MMIO = fixed-address
+  derefs; unchecked printf returns; cognitive-complexity on key dispatchers).
+- ~50 mechanical fixes auto-applied (const-correctness, std::min/max, bool literals)
+  — **caution**: `--fix` corrupted 4 `const char* arr[]` declarations into invalid
+  `const char const*` and const-ified a written-through pointer in
+  `Framebuffer::fill_rect`; all caught by rebuild + rerun. `misc-const-correctness`
+  pointer analysis is now off (that FP class).
+- Real code fixes: `atof/atoi` → `strtod/strtol`; factorial rewrite + `strip_zeros`
+  use bounded copies (strcpy/strcat gone); grid-line loops use integer counters
+  (float accumulation); `quiet_NaN()` replaces `0.0/0.0`; `Storage::read/write_string`
+  const; `rand()` NOLINTed (seeding stays backlogged).
+
+**Phase 2 task 2.1 — `graph/` extraction (per phase2-spec §2/§4):**
+
+- New `src/graph/`: `viewport.{hpp,cpp}` (data↔pixel transform, Phase 1 formulas
+  verbatim incl. the width-1 x-spacing), `plotter.{hpp,cpp}` (`PlotStyle`,
+  `PointSource` interface, `Plotter` with the 140px discontinuity heuristic and
+  the +/-1000 py clamp).
+- Design call: GraphScreen **keeps its int16 column cache** (it's what makes trace
+  redraws cheap) and replays it through `Plotter`'s pixel-space `begin()/point()`
+  path; `Plotter::plot(PointSource&)` feeds the same path, so cached function mode
+  and the future evaluate-on-plot modes (parametric/polar) share one segment logic.
+- `value_to_py` and all duplicated transform math in recompute/draw_axes/draw_trace
+  deleted in favor of `Viewport`.
+- New host test `tests/host/test_graph.cpp` (18 checks) locks the transforms to the
+  Phase 1 formulas — the refactor is provably behavior-preserving on the math side;
+  a visual HW spot-check is queued above.
 
 ---
 
