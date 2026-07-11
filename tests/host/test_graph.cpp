@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 
+#include "graph/graph_mode.hpp"
+#include "graph/graph_state.hpp"
 #include "graph/viewport.hpp"
 
 namespace {
@@ -109,6 +111,43 @@ int main() {
         expect(vp.visible(-10.0, 10.0), "window corner visible (inclusive)");
         expect(!vp.visible(10.1, 0.0), "x beyond x_max not visible");
         expect(!vp.visible(0.0, -10.1), "y below y_min not visible");
+    }
+
+    // Mode descriptors (task 2.2, spec §1/§3).
+    {
+        using graph::Mode;
+        const auto& fd = graph::descriptor_for(Mode::kFunction);
+        expect(fd.mode == Mode::kFunction && fd.independent_var == 'x' && fd.slot_count == 7,
+               "function descriptor: x, 7 slots");
+        expect(fd.slot_prefix[0] == 'Y', "function slot prefix Y");
+        const auto& pd = graph::descriptor_for(Mode::kParametric);
+        expect(pd.mode == Mode::kParametric && pd.independent_var == 't' && pd.slot_count == 6,
+               "parametric descriptor: t, 6 pairs");
+        expect(pd.slot_prefix[0] == 0, "parametric has no slot prefix (X/Y pairs)");
+        const auto& od = graph::descriptor_for(Mode::kPolar);
+        expect(od.mode == Mode::kPolar && od.independent_var == 0 && od.slot_count == 6,
+               "polar descriptor: theta slot, 6 slots");
+        expect(od.slot_prefix[0] == 'r', "polar slot prefix r");
+    }
+
+    // GraphState defaults (task 2.2, spec §5.2/§6.2/§7.1/§9).
+    {
+        graph::GraphState st;
+        expect(st.mode == graph::Mode::kFunction, "default mode is function");
+        expect(st.window.x_min == -10.0 && st.window.x_max == 10.0 && st.window.x_scl == 1.0,
+               "default window is ZStandard");
+        expect(!st.y.any_enabled(), "no functions enabled by default");
+        expect(st.t_min == 0.0 && std::fabs(st.t_max - 2.0 * M_PI) < 1e-12,
+               "t range defaults to [0, 2pi]");
+        expect(std::fabs(st.t_step - 2.0 * M_PI / 63.0) < 1e-12, "t_step defaults to 2pi/63");
+        expect(st.theta_min == 0.0 && std::fabs(st.theta_max - 2.0 * M_PI) < 1e-12 &&
+                   st.theta_step == 0.05,
+               "theta range defaults to [0, 2pi] step 0.05");
+        expect(st.table.start == 0.0 && st.table.step == 1.0 && !st.table.ask_mode,
+               "table config defaults");
+        st.y.enabled[2] = true;
+        st.y.expr[2][0] = 'x';
+        expect(st.y.any_enabled(), "any_enabled sees slot 3");
     }
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

@@ -1,34 +1,18 @@
 #pragma once
 
 #include "platform/display.hpp"
+#include "graph/graph_state.hpp"
 
 namespace apps {
 
-constexpr int kNumFuncs = 7;  // Y1..Y7
+constexpr int kNumFuncs = graph::kFunctionSlots;  // Y1..Y7
 
-struct GraphWindow {
-    double x_min = -10.0;
-    double x_max = 10.0;
-    double y_min = -10.0;
-    double y_max = 10.0;
-    double x_scl = 1.0;
-    double y_scl = 1.0;
-};
+// The structs moved to graph/ with task 2.2 (GraphState is the single
+// source of truth); these aliases keep Phase 1 call sites unchanged.
+using GraphWindow = graph::GraphWindow;
+using YFunctions = graph::YFunctions;
 
-struct YFunctions {
-    char expr[kNumFuncs][96] = {};
-    bool enabled[kNumFuncs] = {};
-
-    bool any_enabled() const {
-        for (int i = 0; i < kNumFuncs; ++i) {
-            if (enabled[i] && expr[i][0] != 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-};
-
+// Live references into graph::state().
 GraphWindow& graph_window();
 YFunctions& y_functions();
 

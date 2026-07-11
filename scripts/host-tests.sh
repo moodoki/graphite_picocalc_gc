@@ -36,6 +36,7 @@ echo "== Compiling + linking test_graph =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra \
     -Isrc \
     tests/host/test_graph.cpp src/graph/viewport.cpp \
+    src/graph/graph_mode.cpp src/graph/graph_state.cpp \
     -o "$OUT/test_graph"
 
 echo "== Running test_math =="

@@ -11,8 +11,10 @@ namespace {
 constexpr const char* kFuncsPath = "/picocalc/yfuncs.txt";
 constexpr const char* kWindowPath = "/picocalc/window.dat";
 
-GraphWindow g_window;
-YFunctions g_funcs;
+// Function-mode slots and the shared window live in graph::state()
+// since task 2.2; these are just short names for them.
+GraphWindow& g_window = graph::state().window;
+YFunctions& g_funcs = graph::state().y;
 
 constexpr double kPi = 3.14159265358979323846;
 }  // namespace
