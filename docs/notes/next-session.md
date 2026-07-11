@@ -37,11 +37,14 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **Phase 2 task 2.2:** `graph::Mode` enum + descriptor and mode-aware
-   `GraphState` (spec §3, §9). Persistence migration from
-   `yfuncs.txt`/`window.dat` to unified `graphstate.dat` is task 2.23 — don't
-   pull it forward, but keep it in mind when shaping `GraphState`.
-2. **Phase 2 task 2.3:** `FunctionSource` wrapping Phase 1 recompute behavior.
+1. **Phase 2 task 2.3:** `FunctionSource` wrapping Phase 1 recompute behavior
+   (iterate pixel columns, eval via engine; GraphScreen's recompute should
+   populate its cache through it).
+2. **Phase 2 task 2.4:** parameterize the engine's swept variable
+   (`eval_compiled` hardcodes X — see spec §5.3/§14) + `ParametricSource`.
+3. **Note:** 2.2 is done — `GraphState` exists (nested structs, not spec-flat;
+   save/load deliberately deferred to 2.23 with the migration). Trace
+   generalization (spec §14 said within 2.1) was folded into 2.7.
 3. **KIV during next test drives:** function-mode visual check after the 2.1
    refactor (plot/trace/zoom should be pixel-identical); Pico 2 functional
    spot-check (eval/graph/dirty-band/persistence); charging color once battery

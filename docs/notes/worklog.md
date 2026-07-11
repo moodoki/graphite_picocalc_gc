@@ -32,8 +32,12 @@ Conventions:
   (clang-tidy installed + config fixed, `WarningsAsErrors: '*'`), and **task 2.1 is
   done** — `src/graph/` now holds `Viewport` + `Plotter`/`PointSource`, GraphScreen
   routes through them, behavior-preserving (viewport formulas locked by host test).
-- **Next up**: Phase 2 task 2.2 (`graph::Mode` + mode-aware `GraphState`), then 2.3
-  `FunctionSource`. Roadmap weeks 11–16 / 17–25 / 26–35.
+- **Task 2.2 also done** (same session): `graph::Mode` + `ModeDescriptor`,
+  `GraphState` holding all three modes' slots + windows + `TableConfig`;
+  `apps::graph_model` now delegates into `graph::state()` (aliases keep call
+  sites unchanged).
+- **Next up**: Phase 2 task 2.3 (`FunctionSource`), then 2.4 (engine swept-var
+  parameterization + `ParametricSource`). Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 18 graph = 130 checks, 0 failures
@@ -122,6 +126,27 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
 - New host test `tests/host/test_graph.cpp` (18 checks) locks the transforms to the
   Phase 1 formulas — the refactor is provably behavior-preserving on the math side;
   a visual HW spot-check is queued above.
+- **Deviation from spec §14**: trace was NOT generalized into `graph/trace.hpp` in
+  2.1 — today's trace is a pixel-column walk over the function cache, and there's no
+  second mode yet to generalize over. Folded into task 2.7 (parametric trace).
+
+**Phase 2 task 2.2 — `graph::Mode` + mode-aware `GraphState`:**
+
+- `graph/graph_mode.hpp`: `Mode` (kFunction/kParametric/kPolar — kCamelCase per
+  codebase+lint convention, not the spec's UPPER_CASE) + `ModeDescriptor`/
+  `descriptor_for()`. Slot counts 7/6/6 per §1/§9 (§3's "(function/polar)" comment
+  saying 7 read as a typo). Polar descriptor's `independent_var = 0` = engine theta
+  slot.
+- `graph/graph_state.hpp`: `GraphState` = mode + Y/parametric/polar slots + shared
+  x/y window + t/theta ranges (defaults §5.2/§6.2) + `TableConfig` (§7.1, lives in
+  graph/ for layering). **Nested structs, not the spec's flat list**, so Phase 1
+  screens keep their `GraphWindow&`/`YFunctions&`; save/load deferred to 2.23 with
+  the migration (no dead persistence code).
+- `apps::graph_model`: structs moved to graph/, apps keeps `using` aliases —
+  zero churn in screens; globals are now references into `graph::state()`.
+- Parametric/polar slots use `config::kMaxExprLen` (256) per §9; Y-slots stay 96
+  until 2.23 (yfuncs.txt buffers sized to it).
+- test_graph.cpp grew descriptor + defaults checks (host total now 144).
 
 ---
 
