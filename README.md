@@ -14,7 +14,8 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   modes, FLOAT/FIX/SCI display formats, a $Y_1 \ldots Y_7$ function editor, function
   graphing with axes/grid, multi-function color plots, discontinuity handling, trace,
   and zoom (in/out, standard, trig). History, variables, Y-functions, and the graph
-  window persist to the SD card.
+  window persist to the SD card. The status bar shows angle/display mode and battery
+  level (cached STM32 read, refreshed every 30 s; cyan while charging).
 - **Phase 2+ (planned)**: parametric/polar modes, table view, lists & statistics,
   matrices, symbolic math (CAS), MicroPython.
 - **Phase 2**: Parametric and polar modes, table view, split-screen graph|table, built-in help.

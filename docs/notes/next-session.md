@@ -1,8 +1,14 @@
 # Start here — next session
 
-**Last session:** 2026-07-11 (three sessions: test-drive triage → phase 2/3 spec import +
-consistency pass → phase 1 polish fixes). Phase 1 is code-complete *including* polish from
-the first test drive; both boards build; 96 host tests pass.
+**Last session:** 2026-07-11 (four sessions: test-drive triage → phase 2/3 spec import →
+phase 1 polish fixes → battery indicator + first HW-test attempt). Phase 1 is
+code-complete including polish; both boards build; 96 host tests pass.
+
+**Resume point:** HW verification was interrupted by a suspected flat battery. The
+on-device firmware is **one build behind** (it lacks the battery indicator) — reflash
+`build/pico/picocalc_graphcalc.uf2` first. The serial capture from the diag key tests
+came back **empty**; before redoing the shifted-key tests, verify the capture actually
+receives bytes (have the developer press one key in the diag overlay as a probe).
 
 Read `docs/notes/worklog.md` (top entries + HW-PENDING queue) and `docs/notes/decisions.md`
 (D11, D12) for the full story. This file is just the short "what to do next".
@@ -28,11 +34,12 @@ Read `docs/notes/worklog.md` (top entries + HW-PENDING queue) and `docs/notes/de
 
 ## Next tasks (in priority order)
 
-1. **HW verification queue** (table in worklog): SD card/persistence (`sd=0` at boot —
-   FAT32 card needed), full on-device exercise, the five "Polish:" rows — especially
-   whether Shift+arrow reaches us as arrow-plus-shift (D12's revisit trigger) and whether
-   a 2nd F6 press exits diagnostics (original report said it didn't) — and graph
-   profiling numbers (5.6, `graph recompute: N us` on USB serial, target <50 ms).
+1. **HW verification queue** (table in worklog): reflash, fix the serial capture, then
+   SD card/persistence (`sd=0` at boot — FAT32 card needed), full on-device exercise,
+   the "Polish:" rows — especially whether Shift+arrow reaches us as arrow-plus-shift
+   (D12's revisit trigger) and whether a 2nd F6 press exits diagnostics — the battery
+   indicator rows, and graph profiling numbers (5.6, `graph recompute: N us` on USB
+   serial, target <50 ms).
 2. **Dirty-rectangle / partial rendering (task 5.6 part 2).** Biggest remaining *code*
    item and worth doing before the next test drive: ~200 ms full-frame redraw per
    keypress dominates the feel of the device.

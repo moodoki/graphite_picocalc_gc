@@ -121,6 +121,16 @@ public:
                       : g_sd_test == SdTest::kFailed ? "FAIL"
                                                      : "no card");
         font.draw_string(fb, 8, y, line, g_sd_test == SdTest::kOk ? kGreen : kRed, kBlack);
+        y += lh;
+
+        const auto batt = platform::battery_status();
+        if (batt.percent >= 0) {
+            std::snprintf(line, sizeof(line), "Battery: %d%%%s", batt.percent,
+                          batt.charging ? " (charging)" : "");
+        } else {
+            std::snprintf(line, sizeof(line), "Battery: unavailable");
+        }
+        font.draw_string(fb, 8, y, line, batt.percent >= 0 ? kWhite : kRed, kBlack);
         y += lh * 2;
 
         std::snprintf(line, sizeof(line), "Keys seen: %d", key_count_);

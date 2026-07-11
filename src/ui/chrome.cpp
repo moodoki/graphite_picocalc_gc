@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/system.hpp"
 #include "gfx/font.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
@@ -11,6 +12,47 @@ namespace ui {
 
 namespace {
 const platform::Color kBarBg = platform::Color::from_rgb(30, 30, 30);
+const platform::Color kBattOk = platform::colors::kGreen;
+const platform::Color kBattLow = platform::Color::from_rgb(255, 180, 0);
+const platform::Color kBattCrit = platform::colors::kRed;
+const platform::Color kBattChg = platform::Color::from_rgb(0, 200, 220);
+
+// Battery icon (body + tip) with a level-colored fill and percent text.
+// Returns the leftmost x used, so other indicators can right-align to it.
+int draw_battery(gfx::Framebuffer& fb, const gfx::Font& font) {
+    using namespace platform::colors;
+    const auto batt = platform::battery_status();
+
+    platform::Color col = kBattOk;
+    if (batt.charging) {
+        col = kBattChg;
+    } else if (batt.percent >= 0 && batt.percent <= 20) {
+        col = kBattCrit;
+    } else if (batt.percent >= 0 && batt.percent <= 50) {
+        col = kBattLow;
+    }
+
+    char txt[8];
+    if (batt.percent >= 0) {
+        std::snprintf(txt, sizeof(txt), "%d%%", batt.percent);
+    } else {
+        std::snprintf(txt, sizeof(txt), "--");
+    }
+    const int tx = platform::kScreenW - font.text_width(txt) - 4;
+    font.draw_string(fb, tx, 2, txt, col);
+
+    // Icon: 14x8 body + 2x4 tip, vertically centered in the bar.
+    const int ix = tx - 20;
+    const int iy = (kStatusBarH - 8) / 2;
+    fb.draw_rect(ix, iy, 14, 8, kGrayLine);
+    fb.fill_rect(ix + 14, iy + 2, 2, 4, kGrayLine);
+    if (batt.percent > 0) {
+        const int fill = (batt.percent * 10 + 50) / 100;  // 0..10 px
+        fb.fill_rect(ix + 2, iy + 2, fill, 4, col);
+    }
+    return ix;
+}
+
 }  // namespace
 
 void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags) {
@@ -20,6 +62,9 @@ void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags)
     fb.fill_rect(0, 0, platform::kScreenW, kStatusBarH, kBarBg);
     font.draw_string(fb, 4, 2, title, kGrayLine);
 
+    // Battery, rightmost; other indicators right-align to its left edge.
+    const int batt_x = draw_battery(fb, font);
+
     // Right-aligned indicators: [2nd] [A] RAD/DEG FLOAT/FIX/SCI
     char right[32];
     const char* angle = math::angle_mode() == math::AngleMode::kRadians ? "RAD" : "DEG";
@@ -28,7 +73,7 @@ void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags)
                                                                          : "FLT";
     std::snprintf(right, sizeof(right), "%s%s%s %s", flags.second ? "2nd " : "",
                   flags.alpha ? "A " : "", angle, disp);
-    const int rx = platform::kScreenW - font.text_width(right) - 4;
+    const int rx = batt_x - 6 - font.text_width(right);
     font.draw_string(fb, rx, 2, right, kGreen);
 }
 

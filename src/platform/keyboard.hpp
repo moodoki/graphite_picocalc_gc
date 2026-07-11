@@ -126,6 +126,12 @@ public:
     // an event with key == Key::kNone when there is nothing new.
     KeyEvent poll();
 
+    // True when no register-select is in flight. Other STM32 traffic
+    // (e.g. the battery register) must only run while idle — a read
+    // injected between poll()'s two phases would be misinterpreted as
+    // FIFO data and produce phantom key events.
+    bool bus_idle() const { return phase_ == Phase::kIdle; }
+
     bool is_held(Key k) const;
 
     // Printable character for an event (0 if not printable).

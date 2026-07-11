@@ -60,6 +60,8 @@ Still to verify on hardware:
 | Polish: HOME key | From graph/window/mode/diag → home screen; on home with text → cursor-to-start |
 | Polish: e constant | `e` → 2.718281828; `5->E` → "E is reserved"; `2e3` → 2000 |
 | F7-F10 scan codes | Press Shift+F2..F5 in the diag key echo → expect codes 0x87-0x8A (135-138); decode assumes the 0x81+n pattern |
+| Battery indicator | Status-bar icon+% plausible vs. actual charge; cyan while charging; diag shows the same; type continuously past a 30 s refresh → no phantom keys (bus-idle guard) |
+| Serial capture | First attempt logged nothing during diag key tests — verify `cat /dev/cu.usbmodem*` actually receives the key echo before redoing the shifted-key tests |
 | Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
 | 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
 | 4.x Graphing | F1 Y= enter `x^2-3`, `sin(x)`; graph plots w/ axes+grid; trace, F2/F3 zoom, S/T presets |
@@ -67,6 +69,33 @@ Still to verify on hardware:
 | 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
 | 5.7 Full exit test | Power-cycle → Home → `2+3*sin(pi/4)` → F3 graph `sin(x)` trace+zoom → persistence |
 | Perf latency | ~200 ms full-screen redraw per keypress (D10) — confirm acceptable or prioritize dirty-rects |
+
+---
+
+## 2026-07-11 — Session 4: battery level indicator; first HW-test attempt stalled
+
+HW verification of the polish fixes started: new firmware flashed to Pico 1 over the
+1200-baud reset, serial capture attached. The diag-screen key tests were run **but the
+serial log came back empty** — then the developer suspected a flat battery and paused.
+Diagnose the capture path when the device returns (the key echo should print every
+press; an empty log means the capture, power, or USB path failed — not the firmware).
+
+That pause surfaced a gap: nothing displays battery level. `platform::read_battery_info()`
+existed since M1 (STM32 register: percent + charging bit) but had no UI. Added:
+
+- **`platform::battery_status()`** — cached accessor: refreshes at most every 30 s and
+  only while the keyboard poll state machine is idle (new `Keyboard::bus_idle()`).
+  The raw read blocks ~16 ms and shares the 10 kHz I2C bus with the keyboard's
+  two-phase FIFO poll — an interleaved read would be decoded as FIFO data and produce
+  phantom key events, hence the guard.
+- **Status bar** (chrome, all screens): battery icon + percent at the far right; green
+  above 50%, amber 21-50%, red at 20% and below, cyan while charging; "--" when
+  unavailable.
+- **Diag screen**: "Battery: N% (charging)" line.
+
+Both boards build; 96 host tests still pass (feature isn't host-testable — HW rows
+queued). **The on-device firmware is now one build behind** — reflash before resuming
+the HW checklist.
 
 ---
 
