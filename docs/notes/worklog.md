@@ -18,15 +18,18 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1 code complete; **Pico 1 HW verification finished** (2026-07-11, three
-  rounds in one live session). STM32 keyboard fw v1.6; battery works (incl. boot-grace
-  fix); dirty-band rendering (D13) verified — typing instant; SD persistence, store
-  op, pretty math (D2 revised: calls/powers stack in fractions), trace + S/T presets,
-  mode toggles, reboot-to-bootloader all verified. Only open HW items: **Pico 2
-  bring-up** and the charging-color check (needs battery <95%).
-- **Next up**: Pico 2 bring-up, `docs/notes/phase1-retro.md`, then Phase 2 task 2.1.
-  Phase 2/3 specs are in the tree (imported + reconciled 2026-07-11); phase roadmap
-  is weeks 11–16 / 17–25 / 26–35.
+- **Phase**: 1 code complete; **Pico 1 fully HW-verified** (2026-07-11) and **Pico 2
+  brought up** (2026-07-11/12): full-framebuffer display path works, cold-boot
+  PSRAM/SD failure root-caused to a ~5-8 s peripheral rail settle and fixed with
+  deferred late-init (D14, verified on a cold power-on). STM32 keyboard fw v1.6;
+  battery, dirty-band rendering (D13), SD persistence, store op, pretty math (D2
+  revised), trace/presets, mode, bootloader reboot all verified on Pico 1.
+- **Open HW items (small)**: charging-color check (needs battery <95%); a functional
+  spot-check on Pico 2 (eval/graph/dirty-band feel — display + keyboard + PSRAM +
+  SD + battery already verified there).
+- **Next up**: `docs/notes/phase1-retro.md`, then Phase 2 task 2.1. Phase 2/3 specs
+  are in the tree (imported + reconciled 2026-07-11); roadmap weeks 11–16 / 17–25 /
+  26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 27 layout = 106 checks, 0 failures
@@ -68,7 +71,7 @@ Still to verify on hardware:
 | Item | What to check on hardware |
 |------|---------------------------|
 | Charging color | Cyan battery icon while charging (bit 7 of low byte assumption) — inconclusive at 100% (charger idle when full); retest when battery <~95% |
-| Pico 2 bring-up | Never flashed; full-framebuffer display path untested |
+| Pico 2 spot-check | Display/keyboard/battery/PSRAM/SD verified (incl. D14 cold boot). Still worth a quick functional sweep: eval + history, graph + trace, dirty-band typing feel, persistence across a cold cycle |
 
 ---
 
@@ -127,6 +130,34 @@ Both boards build; 106 host checks green (host tests don't cover `ui/`).
   presets, mode toggles (status bar follows), reboot-to-bootloader (mounted
   RPI-RP2 — used it for the final reflash), SD card r/w self-test OK on the
   diag screen + history persistence. That completes the 5.7 exit test on Pico 1.
+
+**Pico 2 (RP2350) bring-up (same session, continued): display path works;
+cold-boot PSRAM/SD root-caused (D14).**
+
+- **First flash ever on Pico 2.** The untested full-framebuffer display path
+  **works**: home screen renders, diag shows "Pico 2 (RP2350)", color bars
+  correct, keyboard + battery fine. (BOOTSEL volume is `RP2350`, not `RPI-RP2`.)
+- **PSRAM + SD both failed on cold power-on, both fine on warm reboots.**
+  Debugged over three instrumented flash cycles (buffered init trace dumped
+  over USB serial after boot; timestamps). Measured: PSRAM reads zeros at
+  0.5 s, near-correct data (bit-shifted — analog marginal, same at 75 MHz and
+  18.75 MHz SCK) at 0.6-2.5 s, perfect at 7.5 s. SD answers CMD0/CMD8 cold but
+  never completes ACMD41 until ~7.5 s, then inits instantly (R7 voltage echo
+  clean). **The peripheral rail needs ~5-8 s to settle after cold power-on
+  with the Pico 2 module**; Pico 1 doesn't show this. Matches community
+  reports (RP2350 PSRAM cold-boot failures; fuzix SD failure on PicoCalc
+  Pico 2, clockworkpi/PicoCalc#12).
+- **Fix (D14): deferred late-init.** Boot stays instant; the main loop
+  retries PSRAM (`Psram::reinit()` — chip reset via the existing PIO, no
+  PIO/DMA re-allocation) and SD (`Storage::init()`) every 2 s for the first
+  30 s. Late storage arrival re-runs self-tests + loads history/variables/
+  graph state and refreshes the screen.
+- Debug harness worth remembering: `stty -f /dev/cu.usbmodem* 1200` works on
+  RP2350 for no-touch reflash; boot prints race USB enumeration, so buffer
+  init logs and dump them once `stdio_usb_connected()` (or just late).
+- **Verified on Pico 2 (cold power-on, 2026-07-12):** with the D14 late-init,
+  a cold boot ends with the diag screen showing PSRAM OK + SD OK (came up
+  before the developer even opened diag). Instant boot preserved.
 
 Full flash-test-fix loop on Pico 1 with live USB-serial capture. Three flash cycles.
 

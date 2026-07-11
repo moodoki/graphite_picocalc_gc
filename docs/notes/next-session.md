@@ -1,46 +1,50 @@
 # Start here — next session
 
-**Last session:** 2026-07-11 (Session 6, live HW session). **Pico 1 hardware
-verification is complete** — three rounds in one sitting. STM32 fw updated to v1.6
-(battery works, incl. a cold-boot grace fix); dirty-band partial rendering (D13)
-implemented and verified (typing instant, task 5.6 closed); pretty-print fraction
-fix for function calls/powers (D2 revised); SD persistence, store op, trace/presets,
-mode, reboot-to-bootloader all verified. On-device firmware = tree = committed build.
+**Last session:** 2026-07-11/12 (Session 6, long live HW session). Highlights:
+STM32 fw → v1.6 (battery works + boot-grace fix); dirty-band rendering (D13)
+implemented + verified (task 5.6 closed); pretty-print D2 revision (calls/powers
+stack in fractions); **Pico 1 HW verification complete**; **Pico 2 brought up** —
+full-framebuffer display path works, and the cold-boot PSRAM/SD failure was
+root-caused (peripheral rail needs ~5-8 s to settle with the Pico 2 module) and
+fixed with deferred late-init (D14, verified on a cold power-on).
+On-device firmware (both boards' builds) = tree = committed.
 
 Read `docs/notes/worklog.md` (Session 6 + queue) and `docs/notes/decisions.md`
-(D13, D2 revision) for the full story. This file is just the short "what to do next".
+(D13, D14, D2 revision) for the full story. This file is the short "what's next".
 
 ## Current state
 
-- **Pico 1: everything verified.** The only open HW items are the two queue rows:
-  charging color (needs battery <~95%; bit-7 assumption still unproven) and
-  **Pico 2 bring-up** (never flashed).
-- **Dirty-band rendering (D13):** screens opt in via `track_dirty()` + `invalidate(y0, y1)`;
-  home screen and Y= editor track bands; graph/mode/window/diag are full-frame by
-  design. A missed invalidate = stale rows; watch for it when touching `on_key` paths.
-- **STM32 fw is v1.6**; keyboard behavior identical to v1.2 (F1-F5 physical, F6-F9 =
-  Shift+F1-F4, no F10, Shift swallowed on arrows). **Never poll the STM32
-  aggressively** — back-to-back register reads wedge it; only a physical power
-  cycle recovers.
-- **Phase 2/3 specs are in `docs/phases/`**; Phase 2 starts with task 2.1 (extract
-  `graph/` subsystem).
+- **Pico 1: everything verified.** **Pico 2: display, keyboard, battery, PSRAM,
+  SD verified** (incl. cold boot via D14); a quick functional sweep (eval, graph,
+  dirty-band feel, persistence) is still queued.
+- **D14 late-init:** on Pico 2 cold boots the main loop retries PSRAM/SD every 2 s
+  for the first 30 s; storage arriving late re-runs self-tests + loads history/
+  variables/graph state. Warm reboots and Pico 1 never enter the retry path.
+- **Dirty-band rendering (D13):** home screen + Y= editor track dirty row bands;
+  a missed `invalidate()` = stale rows — watch for it when touching `on_key`.
+- **STM32 fw is v1.6**; keyboard behavior identical to v1.2 (F1-F5 physical,
+  F6-F9 = Shift+F1-F4, no F10, Shift swallowed on arrows). **Never poll the STM32
+  aggressively** — back-to-back register reads wedge it (physical power cycle to
+  recover).
+- **Pico 2 debug notes:** BOOTSEL volume is `RP2350` (not `RPI-RP2`); the
+  1200-baud reset works; boot printfs race USB enumeration — buffer and dump late.
 - **Session protocol:** read this file first when starting fresh; update it before
   ending a session.
 
 ## Next tasks (in priority order)
 
-1. **Pico 2 (RP2350) bring-up.** Never flashed. Uses `kUseFullFramebuffer = true` —
-   a completely different, untested display path (D13 made that buffer scratch, not
-   a persistent frame image). `build/pico2/picocalc_graphcalc.uf2` is current.
-   Swap boards, BOOTSEL-flash, then spot-check the Pico 1 checklist (boot, keys,
-   graph, dirty-band artifacts, SD).
-2. **Phase 1 wrap-up:** write `docs/notes/phase1-retro.md`, flip the phase to done.
-3. **Phase 2 task 2.1:** extract the `graph/` subsystem per `docs/phases/phase2-spec.md`.
-4. **KIV during next test drive:** F-key layout rethink (feedback item 7); charging
-   color once battery <95%.
+1. **Phase 1 retro** (`docs/notes/phase1-retro.md`) — HW verification is done;
+   write it and declare Phase 1 complete.
+2. **Phase 2 task 2.1:** extract the `graph/` subsystem per
+   `docs/phases/phase2-spec.md`.
+3. **KIV during next test drives:** Pico 2 functional spot-check (eval/graph/
+   dirty-band/persistence); charging color once battery <95%; F-key layout
+   rethink (feedback item 7).
 
 ## Backlog (not blocking, but tracked)
 
+- Root-cause the rail settle electrically (scope the 3V3 on Pico 2 cold boot) —
+  D14 works around it; understanding it may matter if Phase 3/4 needs PSRAM at boot.
 - Bulk PSRAM transfer hangs on HW — root-cause before Phase 3/4 (needs it). (D10)
 - Dual-core display stall never fully diagnosed (worked around with sync core-0 render). (D10)
 - Graph-screen latency: full-frame by design (D13) — if trace/zoom feel slow, the lever
@@ -54,7 +58,8 @@ Read `docs/notes/worklog.md` (Session 6 + queue) and `docs/notes/decisions.md`
 ## Hardware debugging kit (reminder)
 
 - Reset to BOOTSEL without touching the board: `stty -f /dev/cu.usbmodem* 1200`, then
-  `cp build/pico/picocalc_graphcalc.uf2 /Volumes/RPI-RP2/`.
+  `cp build/pico/picocalc_graphcalc.uf2 /Volumes/RPI-RP2/` (Pico 1) or
+  `cp build/pico2/picocalc_graphcalc.uf2 /Volumes/RP2350/` (Pico 2).
 - USB serial: `cat /dev/cu.usbmodem*`.
 - `picocalc_diag` target (`src/diag_main.cpp`) = vendored-only display test for bisecting.
 - Build env: `PICO_SDK_PATH=$PWD/pico-sdk`,

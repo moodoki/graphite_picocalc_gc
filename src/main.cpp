@@ -185,10 +185,46 @@ int main() {
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());
 
+    // RP2350 cold boot: the peripheral rail needs ~5-8 s to settle, so
+    // the boot-time PSRAM/SD init can fail on a cold power-on (D14 —
+    // measured 2026-07-11; warm reboots and Pico 1 are unaffected).
+    // Boot stays instant; the loop below retries until they come up or
+    // the window closes. A failing SD attempt with a card inserted
+    // blocks up to ~1 s, so retries are spaced out.
+    constexpr uint32_t kLateInitWindowMs = 30'000;
+    constexpr uint32_t kLateInitGapMs = 2'000;
+    uint32_t late_init_last_ms = 0;
+
     // Event-driven rendering: a full-frame push is ~200 ms, so redraw only
     // after input (or the initial frame) instead of every loop iteration.
     bool dirty = true;
     while (true) {
+        if (!g_init_status.psram || !g_init_status.storage) {
+            const uint32_t now = platform::uptime_ms();
+            if (now < kLateInitWindowMs && now - late_init_last_ms >= kLateInitGapMs) {
+                late_init_last_ms = now;
+                bool came_up = false;
+                if (!g_init_status.psram && platform::psram().reinit()) {
+                    g_init_status.psram = true;
+                    came_up = true;
+                }
+                if (!g_init_status.storage && platform::storage().init()) {
+                    g_init_status.storage = true;
+                    came_up = true;
+                    // Persistence arrived late: load what boot couldn't.
+                    apps::home_screen().load_state();
+                    apps::load_graph_state();
+                }
+                if (came_up) {
+                    run_self_tests();
+                    if (ui::Screen* s = mgr.current()) {
+                        s->invalidate_all();
+                    }
+                    dirty = true;
+                }
+            }
+        }
+
         const platform::KeyEvent ev = platform::keyboard().poll();
         if (ev.key != platform::Key::kNone && ev.pressed) {
             // F6 toggles the hardware diagnostics overlay from any screen.

@@ -109,7 +109,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 | 5.4 | Error handling (division by zero, syntax) | 3 | [x] | 1/0→Inf, 0/0→NaN, syntax→"Syntax error" in red; host-tested. No crashes |
 | 5.5 | Expression recall (UP key on empty input) | 2 | [x] | UP on empty input recalls last expr; else scrolls history |
 | 5.6 | Performance profiling + optimization | 4 | [x] | Recompute 15-17 ms on HW (target met). Dirty-band partial rendering (D13) HW-verified 2026-07-11: typing pushes ~28 rows not 320, feels instant, no artifacts |
-| 5.7 | Test on both Pico 1 and Pico 2 hardware | 4 | [~] | Pico 1 fully verified 2026-07-11 (three HW rounds; SD persistence, store op, trace/presets, mode, bootloader reboot). Pico 2 bring-up still pending |
+| 5.7 | Test on both Pico 1 and Pico 2 hardware | 4 | [x] | Pico 1 fully verified 2026-07-11 (three HW rounds). Pico 2 brought up 2026-07-11/12: full-FB display path works; cold-boot PSRAM/SD rail settle fixed via D14 late-init, verified cold. Functional spot-check queued (worklog) |
 | 5.8 | UF2 loader compatibility (clean reboot) | 2 | [x] | Mode screen "Reboot to bootloader" → `reset_usb_boot` (BOOTSEL) |
 | 5.9 | README, build instructions update | 2 | [x] | Features, host-tests, usage, flashing-from-firmware documented |
 
@@ -176,14 +176,14 @@ For each task:
 
 Before declaring Phase 1 complete:
 
-- [x] All week 1–10 tasks are `[x]` complete or `[~]`/`[!]` explicitly deferred (5.7: Pico 2 half pending).
-- [x] `./scripts/build-all.sh` produces `.uf2` files for both Pico 1 and Pico 2. *(Pico 1 boots and is fully verified; Pico 2 never flashed.)*
+- [x] All week 1–10 tasks are `[x]` complete or `[~]`/`[!]` explicitly deferred.
+- [x] `./scripts/build-all.sh` produces `.uf2` files for both Pico 1 and Pico 2. *(Both boot and run on hardware; Pico 1 fully verified, Pico 2 brought up incl. D14 cold-boot fix.)*
 - [~] Lint (`./scripts/lint.sh`) — clang-format applied repo-wide; clang-tidy not run (Homebrew `llvm` not installed on this host — developer's call).
 - [x] Hardware test: power-cycle → home screen → `2+3*sin(pi/4)` → `F3` graph `sin(x)` with trace/zoom. **Verified on Pico 1 2026-07-11.**
 - [x] History, variables, and Y-functions survive a power cycle. **Verified on Pico 1 2026-07-11** (SD self-test r/w OK, history persists).
 - [x] Phase 2 spec exists in `docs/phases/phase2-spec.md` (imported + reconciled 2026-07-11).
 - [x] Decisions D1–D5 recorded in `docs/notes/decisions.md` (plus D6–D13 for implementation choices).
 
-Remaining before Phase 1 can be declared *done*: Pico 2 bring-up (the only open HW
-item besides the charging-color check, which needs a <95% battery), then
-`docs/notes/phase1-retro.md`.
+Remaining before Phase 1 can be declared *done*: `docs/notes/phase1-retro.md`.
+(Two small KIV checks ride along in the worklog queue: charging color at <95%
+battery, and a Pico 2 functional spot-check.)

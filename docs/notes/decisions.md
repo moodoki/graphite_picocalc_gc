@@ -30,6 +30,16 @@ Format:
 
 ---
 
+## D14: Deferred PSRAM/SD late-init for the RP2350 cold-boot rail settle
+
+**Date**: 2026-07-11
+**Status**: Accepted
+**Context**: First Pico 2 (RP2350) bring-up: display, keyboard, and battery came up fine, but PSRAM and SD both failed on **cold power-on** and both worked on every warm reboot. Instrumented cold-boot traces (buffered `dbg_log`, dumped over USB serial) measured the failure directly: at 0.5 s the PSRAM reads back zeros; at 0.6-2.5 s it returns almost-correct data (single bit errors, or the whole word shifted one bit — analog-marginal behavior, independent of SPI clock: same at 75 MHz and 18.75 MHz); at 7.5 s it is perfect. The SD card answers CMD0/CMD8 immediately (comms fine, R7 voltage echo clean) but never completes ACMD41 — its power-sensitive init — until, at 7.5 s, it inits instantly. Conclusion: the peripheral rail needs **~5-8 s to settle after cold power-on with the Pico 2 module**; the Pico 1 module doesn't exhibit this (Phase 1 was fully verified on it, same mainboard, same card). Community reports match (RP2350 PSRAM cold-boot failures; fuzix SD failure on PicoCalc Pico 2).
+**Decision**: Do not block boot. Boot-time init runs as always (instant home screen); if PSRAM or SD failed, the main loop retries every 2 s for the first 30 s of uptime: PSRAM via `Psram::reinit()` (re-sends the chip reset through the already-configured PIO — deliberately not `psram_spi_init()`, which re-adds the PIO program and claims 2 DMA channels per call), SD via a fresh `Storage::init()` (f_mount re-runs `disk_initialize`). When storage arrives late, the self-tests re-run and history/variables/graph state load then; the current screen is fully invalidated so the UI reflects it.
+**Rationale**: A calculator that boots in 0.3 s shouldn't stall 8 s on one board variant. Warm reboots and Pico 1 hit the success path at boot and never enter the retry loop.
+**Tradeoffs**: During the first ~10 s of a Pico 2 cold boot, persistence isn't available yet and a failing SD attempt (card inserted, rail still low) blocks the loop up to ~1 s per retry — brief input lag if the user types immediately. History appears a few seconds after boot rather than instantly.
+**Revisit when**: The rail settle is understood at the hardware level (measure 3V3 with a scope; possibly a PicoCalc mainboard/Pico 2 SMPS interaction), or a keyboard-firmware/mainboard revision changes the power path. If Phase 3/4 needs PSRAM immediately at boot, reconsider a short blocking wait with a splash.
+
 ## D13: Opt-in dirty-band partial redraw (rows, not rectangles)
 
 **Date**: 2026-07-11

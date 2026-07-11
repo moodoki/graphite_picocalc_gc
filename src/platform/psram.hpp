@@ -12,8 +12,15 @@ namespace platform {
 // mapped, so access goes through read()/write(). reset() frees all.
 class Psram {
 public:
-    // Returns false if the PSRAM self-test fails (hardware absent).
+    // Returns false if the PSRAM self-test fails (hardware absent, or
+    // the peripheral rail is still settling on a cold RP2350 boot).
     bool init();
+
+    // Re-attempt bring-up after a failed init(): re-sends the chip
+    // reset and re-runs the self-test without re-allocating PIO/DMA
+    // resources. On a cold Pico 2 power-on the PSRAM needs several
+    // seconds of rail settle (D14) — the main loop retries via this.
+    bool reinit();
 
     bool ok() const { return ok_; }
 
