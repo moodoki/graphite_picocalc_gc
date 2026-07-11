@@ -31,11 +31,9 @@ constexpr uint32_t kI2cTimeoutUs = 100'000;  // Matches keyboard.cpp
 // Returns the raw 16-bit value, or -1 on failure. Blocks ~21 ms on
 // success. Do not call directly from UI code — use battery_status().
 //
-// HW note (2026-07-11, Pico 1 unit): the STM32 keyboard firmware on
-// this unit does not implement the battery register — reg 0x01 answers
-// but reg 0x0B times out on select or read. battery_status()'s failure
-// cap handles it; the indicator shows "--". Revisit after a keyboard
-// firmware update.
+// HW note: STM32 keyboard fw before v1.6 lacks the battery register
+// (0x0B times out; the indicator shows "--" via the failure cap).
+// Verified working on this unit after updating to v1.6 (2026-07-11).
 int read_stm32_reg(uint8_t reg_id) {
     sleep_ms(kPreGapMs);
     if (i2c_write_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, &reg_id, 1, false, kI2cTimeoutUs) < 0) {
@@ -85,12 +83,22 @@ BatteryInfo battery_status() {
     constexpr uint32_t kRefreshMs = 30'000;
     constexpr uint32_t kFailRetryMs = 10'000;
     constexpr int kMaxConsecutiveFailures = 5;
+    // On cold power-on the STM32 is still booting when the first frame
+    // renders, so the first read fails and the 10 s backoff left "--"
+    // in the status bar until a much later keypress (HW 2026-07-11).
+    // Until the first success, retry quickly and don't count failures
+    // toward the give-up cap.
+    constexpr uint32_t kBootGraceMs = 10'000;
+    constexpr uint32_t kBootRetryMs = 2'000;
 
     if (consecutive_failures >= kMaxConsecutiveFailures) {
         return cache;
     }
-    const uint32_t interval = cache.percent >= 0 ? kRefreshMs : kFailRetryMs;
     const uint32_t now = uptime_ms();
+    const bool in_boot_grace = cache.percent < 0 && now < kBootGraceMs;
+    const uint32_t interval = in_boot_grace        ? kBootRetryMs
+                              : cache.percent >= 0 ? kRefreshMs
+                                                   : kFailRetryMs;
     const bool due = !attempted || (now - last_attempt_ms) >= interval;
     if (due && keyboard().bus_idle()) {
         attempted = true;
@@ -99,7 +107,7 @@ BatteryInfo battery_status() {
         if (fresh.percent >= 0) {
             cache = fresh;
             consecutive_failures = 0;
-        } else {
+        } else if (!in_boot_grace) {
             ++consecutive_failures;
         }
     }

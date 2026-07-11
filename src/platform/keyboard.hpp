@@ -81,10 +81,11 @@ enum class Key : uint8_t {
 
     // Function keys. F1-F5 are physical; F6-F9 arrive via Shift+F1-F4,
     // which the STM32 translates into scan codes 0x86-0x89 before we
-    // see them. F10 is decoded (0x8A) but the current STM32 firmware
-    // never emits it — Shift+F5 arrives as plain F5 (HW 2026-07-11).
-    // NB: the STM32 swallows Shift on arrow keys entirely; Alt and Ctrl
-    // pass through with their flags intact.
+    // see them. F10 is decoded (0x8A) but the STM32 firmware never
+    // emits it — Shift+F5 arrives as plain F5.
+    // NB: the STM32 swallows Shift on arrow keys entirely (only the
+    // kShift event arrives, no arrow); Alt and Ctrl pass through with
+    // their flags intact. All re-verified on fw v1.6 (HW 2026-07-11).
     kF1,
     kF2,
     kF3,

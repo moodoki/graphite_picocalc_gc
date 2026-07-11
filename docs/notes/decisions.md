@@ -33,7 +33,7 @@ Format:
 ## D13: Opt-in dirty-band partial redraw (rows, not rectangles)
 
 **Date**: 2026-07-11
-**Status**: Accepted (HW verification pending)
+**Status**: Accepted; HW-verified same day (typing instant, no stale-row artifacts)
 **Context**: With synchronous full-frame rendering (D10), every keypress cost ~200 ms — the SPI push dominates (recompute is only 15-17 ms), and push time is proportional to pixel count. Task 5.6 part 2.
 **Decision**: Screens track a dirty **row band** (`[y0, y1)`, full width); `ScreenManager::render_frame()` consumes it and `Framebuffer::render_frame()` renders/pushes only the strips inside the band. Tracking is **opt-in** per screen (`track_dirty()` in the constructor + `invalidate()` on every state change in `on_key`); non-tracking screens keep full-frame redraws. Any screen surfacing to top of the stack is fully invalidated by the manager. Opted in: home screen (typing = input band, ~28 of 320 rows; Enter = everything above the softkeys, which also keeps the battery/mode status fresh) and the Y= editor (per-row bands). An empty band skips the render+push entirely, so unconsumed keys cost nothing.
 **Rationale**: A y-band is enough — the hot regions (input line, editor rows) are full-width, so x-cropping would add a strided push path for no measurable win. Opt-in keeps the default safe: a screen that never calls `invalidate()` can't accidentally stop redrawing.
@@ -48,7 +48,7 @@ Format:
 **Decision**: Plain UP/DOWN walk backward/forward through past inputs (the in-progress line is stashed and restored); **Alt+UP/DOWN or Ctrl+UP/DOWN** scroll the history view. HOME pops to the home screen from any screen (global intercept in the main loop, like F6); on the home screen it falls through to the input line's cursor-to-start. *Revision:* Shift was the original scroll modifier, but HW verification (2026-07-11) showed the STM32 swallows Shift on arrow keys (it emits a shift-release then a plain arrow); Alt and Ctrl pass through with flags intact, so scroll moved to them. Shift is still accepted in case a future keyboard firmware reports it.
 **Rationale**: Shell-style recall is the behavior every terminal user expects, and the keyboard has no PgUp/PgDn — shift is the only spare modifier and its state is already tracked in `KeyEvent`.
 **Tradeoffs**: Editing a recalled entry then pressing UP discards the edit (bash-like, not zsh-like). View scrolling is now two-handed.
-**Revisit when**: HW test shows the STM32 doesn't report arrows with shift held. This is a live risk: the STM32 demonstrably translates its shift layer into distinct codes (Shift+F1-F5 arrive as F6-F10 scan codes, not F-key-plus-shift), so shifted arrows may be remapped too. If so, view-scroll needs another key.
+**Revisit when**: a keyboard firmware update reports arrows with shift held. Re-checked on fw v1.6 (2026-07-11): still swallowed — the kShift press arrives with no arrow event at all — so Alt/Ctrl scroll stands.
 
 ## D11: `e` is Euler's constant; variable E is reserved
 

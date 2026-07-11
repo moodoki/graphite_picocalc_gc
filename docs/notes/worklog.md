@@ -18,16 +18,16 @@ Conventions:
 
 ## Current status
 
-- **Phase**: 1 code complete + HW verification round 1 done on Pico 1 (2026-07-11).
-  **STM32 keyboard firmware updated to v1.6 by the developer (2026-07-11) — battery
-  indicator now works on-device.** Dirty-band partial rendering (5.6 part 2, D13) is
-  implemented and building; HW verification pending. Remaining HW items: dirty-band
-  feel/artifacts, new-firmware checks (charging bit, Shift-on-arrows, F10), SD card,
-  store op, trace/presets, mode/reboot, full exit test, Pico 2 bring-up.
-- **Next up**: flash + verify dirty-band rendering and the rest of the HW-PENDING
-  queue (needs a FAT32 card for the SD rows), Pico 2 bring-up,
-  `docs/notes/phase1-retro.md`. Phase 2/3 specs are in the tree (imported +
-  reconciled 2026-07-11); phase roadmap is weeks 11–16 / 17–25 / 26–35.
+- **Phase**: 1 code complete; HW verification rounds 1–2 done on Pico 1 (2026-07-11).
+  STM32 keyboard fw **v1.6**; battery indicator works (incl. boot-grace fix, verified
+  after power cycle). **Dirty-band partial rendering (5.6 part 2, D13) verified
+  on-device** — typing feels instant, no stale-row artifacts; 5.6 is closed.
+  Remaining HW items: SD card, store op, pretty math, trace/presets, mode/reboot,
+  full exit test, charging color (needs battery <100%), Pico 2 bring-up.
+- **Next up**: remaining HW-PENDING queue (needs a FAT32 card for the SD rows),
+  Pico 2 bring-up, `docs/notes/phase1-retro.md`, then Phase 2 task 2.1. Phase 2/3
+  specs are in the tree (imported + reconciled 2026-07-11); phase roadmap is
+  weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 27 layout = 106 checks, 0 failures
@@ -64,8 +64,7 @@ Still to verify on hardware:
 |------|---------------------------|
 | SD card (sd=0 at boot) | Insert a FAT32 card → `/picocalc` created, self-test file r/w OK, persistence works |
 | Store op | `2->A` then `A+1` → 3 — confirm the keyboard can type `-` and `>` |
-| Dirty-band rendering (D13) | Typing on home screen feels instant (~20 ms band vs 200 ms full frame); no stale rows/artifacts on home + Y= editor (scroll, recall, edit, checkbox); full redraws still correct on screen switches |
-| STM32 fw v1.6 checks | Battery % shows (confirmed 2026-07-11); still check: cyan-when-charging (charging = bit 7 of low byte is an unverified assumption), no phantom keys after a 30 s battery refresh, does v1.6 still swallow Shift on arrows (else D12 can revert to Shift), does F10 exist now |
+| Charging color | Cyan battery icon while charging (bit 7 of low byte assumption) — inconclusive at 100% (charger idle when full); retest when battery <~95% |
 | 3.6 Pretty math | `1/2`, `x^2`, `(1+2)/(3^4)`, `sin(x)` → stacked fractions/exponents/parens legible at 8x12 |
 | Trace + S/T presets | Trace cursor readout + function switching; S/T zoom presets (zoom F2/F3 verified 2026-07-11) |
 | 5.3 Mode/reboot | F4→MODE toggles; "Reboot to bootloader"+ENTER drops to BOOTSEL (mounts RPI-RP2) |
@@ -98,8 +97,24 @@ with pixel count, so:
 - Graph screen intentionally left full-frame (trace/zoom touch ~280 rows anyway — D13
   "revisit when").
 
-Both boards build; 106 host checks green (host tests don't cover `ui/`). HW-PENDING:
-verify typing feel + no stale-row artifacts.
+Both boards build; 106 host checks green (host tests don't cover `ui/`).
+
+**HW verification round 2 (same session, live with the developer over USB serial):**
+
+- **Dirty-band rendering verified on Pico 1**: typing/recall/ESC instant, Enter,
+  history scroll, Y= editor select/edit/toggle, all screen switches — no stale rows
+  or seams anywhere. 5.6 closed.
+- **Battery**: % displays correctly (100%). Found + fixed: on cold power-on the STM32
+  is still booting when the first frame renders, so the first read failed and the
+  10 s backoff pinned "--" in the status bar. `battery_status()` now has a 10 s boot
+  grace (2 s retries that don't count toward the give-up cap). Verified after a
+  power cycle: % appears at the first keypress ~2 s in.
+- **STM32 v1.6 keyboard behavior unchanged from v1.2**: Shift+arrows still swallowed
+  (diag serial shows the kShift press arrive with *no* arrow event), F10 still never
+  emitted (Shift+F5 → F5). D12's Alt/Ctrl view-scroll stands. No phantom keys after
+  a 40 s idle spanning a battery refresh.
+- **Charging color inconclusive**: at 100% the charger is idle, so the charging bit
+  being 0 proves nothing. Retest when the battery is below ~95% (queue row).
 
 Full flash-test-fix loop on Pico 1 with live USB-serial capture. Three flash cycles.
 

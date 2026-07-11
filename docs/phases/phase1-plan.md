@@ -108,7 +108,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 | 5.3 | Mode screen (angle, display format) | 3 | [x] | `ModeScreen`: angle, FLOAT/FIX/SCI, fix digits, reboot-to-bootloader. F4 from Home |
 | 5.4 | Error handling (division by zero, syntax) | 3 | [x] | 1/0→Inf, 0/0→NaN, syntax→"Syntax error" in red; host-tested. No crashes |
 | 5.5 | Expression recall (UP key on empty input) | 2 | [x] | UP on empty input recalls last expr; else scrolls history |
-| 5.6 | Performance profiling + optimization | 4 | [~] | Recompute measured 15-17 ms on HW (2026-07-11, target met). Dirty-band partial rendering implemented (D13): typing pushes ~28 rows not 320 — feel/artifacts HW-PENDING |
+| 5.6 | Performance profiling + optimization | 4 | [x] | Recompute 15-17 ms on HW (target met). Dirty-band partial rendering (D13) HW-verified 2026-07-11: typing pushes ~28 rows not 320, feels instant, no artifacts |
 | 5.7 | Test on both Pico 1 and Pico 2 hardware | 4 | [!] | HW-PENDING — no PicoCalc attached to this session. Full checklist in worklog |
 | 5.8 | UF2 loader compatibility (clean reboot) | 2 | [x] | Mode screen "Reboot to bootloader" → `reset_usb_boot` (BOOTSEL) |
 | 5.9 | README, build instructions update | 2 | [x] | Features, host-tests, usage, flashing-from-firmware documented |
