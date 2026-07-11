@@ -27,9 +27,9 @@ Conventions:
 - **Open HW items (small)**: charging-color check (needs battery <95%); a functional
   spot-check on Pico 2 (eval/graph/dirty-band feel — display + keyboard + PSRAM +
   SD + battery already verified there).
-- **Next up**: `docs/notes/phase1-retro.md`, then Phase 2 task 2.1. Phase 2/3 specs
-  are in the tree (imported + reconciled 2026-07-11); roadmap weeks 11–16 / 17–25 /
-  26–35.
+- **Phase 1 declared done 2026-07-12** (retro: `docs/notes/phase1-retro.md`).
+- **Next up**: Phase 2 task 2.1 (extract `graph/`). Phase 2/3 specs are in the tree
+  (imported + reconciled 2026-07-11); roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 27 layout = 106 checks, 0 failures

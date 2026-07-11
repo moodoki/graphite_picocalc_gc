@@ -33,11 +33,10 @@ Read `docs/notes/worklog.md` (Session 6 + queue) and `docs/notes/decisions.md`
 
 ## Next tasks (in priority order)
 
-1. **Phase 1 retro** (`docs/notes/phase1-retro.md`) — HW verification is done;
-   write it and declare Phase 1 complete.
-2. **Phase 2 task 2.1:** extract the `graph/` subsystem per
-   `docs/phases/phase2-spec.md`.
-3. **KIV during next test drives:** Pico 2 functional spot-check (eval/graph/
+1. **Phase 2 task 2.1:** extract the `graph/` subsystem per
+   `docs/phases/phase2-spec.md`. **Phase 1 is complete** — retro written
+   (`docs/notes/phase1-retro.md`, 2026-07-12).
+2. **KIV during next test drives:** Pico 2 functional spot-check (eval/graph/
    dirty-band/persistence); charging color once battery <95%; F-key layout
    rethink (feedback item 7).
 

@@ -184,6 +184,6 @@ Before declaring Phase 1 complete:
 - [x] Phase 2 spec exists in `docs/phases/phase2-spec.md` (imported + reconciled 2026-07-11).
 - [x] Decisions D1–D5 recorded in `docs/notes/decisions.md` (plus D6–D13 for implementation choices).
 
-Remaining before Phase 1 can be declared *done*: `docs/notes/phase1-retro.md`.
+**Phase 1 declared done 2026-07-12** — retro at `docs/notes/phase1-retro.md`.
 (Two small KIV checks ride along in the worklog queue: charging color at <95%
 battery, and a Pico 2 functional spot-check.)
