@@ -33,16 +33,32 @@ Read `docs/notes/worklog.md` (top entries + HW-PENDING queue) and `docs/notes/de
 
 ## Next tasks (in priority order)
 
-1. **Remaining HW-PENDING rows** (short now): SD card/persistence (FAT32 card needed —
+1. **Update the STM32 keyboard firmware** (developer decision 2026-07-11: top task).
+   The unit's shipped firmware lacks the battery register (0x0B) — our read protocol
+   is identical to the official example, so a firmware update alone should light up
+   the battery indicator, no code change needed (failure cap resets at reboot).
+   Procedure (see the [wiki](https://github.com/clockworkpi/PicoCalc/wiki/Setting-Up-Arduino-Development-for-PicoCalc-keyboard)):
+   - DIP switch 1 → ON (back of mainboard); USB-C to the PC; long-press power.
+   - `brew install stm32flash`, then
+     `stm32flash -w PicoCalc_BIOS_v1.2.bin -v -S 0x08000000 /dev/cu.usbserial*`
+     (binary: `Bin/PicoCalc_BIOS_v1.2.bin` in the clockworkpi/PicoCalc repo; the
+     bridge may enumerate as `/dev/cu.wchusbserial*`; STM32CubeProgrammer = GUI option).
+   - DIP 1 → OFF, power-cycle. Low brick risk (bootloader in ROM, retryable); skim the
+     [forum thread on update trouble](https://forum.clockworkpi.com/t/unable-to-update-keyboard-firmware/17683) first.
+   - Afterwards verify: battery %/cyan-charging correct (charging bit = bit 7 of the
+     low byte is an unverified M1 assumption), no phantom keys typing past a 30 s
+     refresh, and re-check whether the new fw still swallows Shift on arrows /
+     still omits F10 (would let D12 revert to Shift and free Alt).
+2. **Remaining HW-PENDING rows** (short now): SD card/persistence (FAT32 card needed —
    `sd=0` at boot), store op `2->A` (types `-` and `>`), trace + S/T presets, 5.3
    mode/reboot-to-bootloader, 5.7 full exit test.
-2. **Dirty-rectangle / partial rendering (task 5.6 part 2).** Biggest remaining *code*
+3. **Dirty-rectangle / partial rendering (task 5.6 part 2).** Biggest remaining *code*
    item and worth doing before the next test drive: ~200 ms full-frame redraw per
    keypress dominates the feel of the device (recompute itself is only 15-17 ms).
-3. **Pico 2 (RP2350) bring-up.** Never flashed. Uses `kUseFullFramebuffer = true` — a
+4. **Pico 2 (RP2350) bring-up.** Never flashed. Uses `kUseFullFramebuffer = true` — a
    completely different, untested display path (200 KB SRAM framebuffer, not strips).
-4. **Phase 1 wrap-up:** `docs/notes/phase1-retro.md` after HW verification closes.
-5. **KIV during next test drive:** F-key layout rethink (feedback item 7). F1-F5
+5. **Phase 1 wrap-up:** `docs/notes/phase1-retro.md` after HW verification closes.
+6. **KIV during next test drive:** F-key layout rethink (feedback item 7). F1-F5
    physical matches TI's five top-row keys exactly; F6-F9 shifted for secondary
    functions (DIAG, Phase 2 HELP). Note F10 doesn't exist.
 
