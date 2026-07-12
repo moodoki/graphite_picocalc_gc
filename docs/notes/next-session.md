@@ -1,19 +1,19 @@
 # Start here — next session
 
-**Last session:** 2026-07-12 (Session 7). Highlights: **lint baseline is clean and
-gating** (clang-tidy installed; config + lint.sh fixed — backlog item closed) and
-**Phase 2 task 2.1 is done**: `src/graph/` now holds `Viewport` +
-`Plotter`/`PointSource`, GraphScreen routes through them, behavior-preserving
-(transforms locked by the new `tests/host/test_graph.cpp`). Tree = committed;
-on-device firmware is one refactor behind (needs a reflash on the next test drive).
+**Last session:** 2026-07-12 (Session 7, long). Highlights: **lint baseline clean
+and gating** (backlog item closed); **Phase 2 tasks 2.1–2.7 done** — `src/graph/`
+subsystem (Viewport/Plotter/PointSource/Mode/GraphState/sources/TraceCursor),
+editors per D15, mode-aware window screen, parametric plotting + trace. The whole
+parametric path is code-complete but **unreachable until a mode selector exists**.
+Tree = committed; on-device firmware is a full session behind (reflash needed).
 
 Read `docs/notes/worklog.md` (Session 7 + queue) for the full story. This file is
 the short "what's next".
 
 ## Current state
 
-- **Phase 2 in progress.** Task 2.1 done (graph/ extraction). Spec:
-  `docs/phases/phase2-spec.md`; task table in §11.
+- **Phase 2 in progress.** Tasks 2.1–2.7 done (week 11–12 column of spec §11).
+  Spec: `docs/phases/phase2-spec.md`; task table in §11.
 - **Lint is now a real gate**: `./scripts/lint.sh` runs clang-format +
   clang-tidy with `WarningsAsErrors: '*'` and exits non-zero on any finding.
   Run it before committing. It self-locates Homebrew's keg-only clang-tidy and
@@ -37,20 +37,24 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **Phase 2 task 2.6:** mode-aware window screen (Tmin/Tmax/Tstep rows when
-   mode == parametric; fields live in `graph::state()`).
-2. **Phase 2 task 2.7:** parametric plotting + trace — wire `ParametricSource`
-   (done, host-tested) into GraphScreen via `Plotter::plot()`; includes the
-   trace generalization deferred from 2.1 (spec §14).
-3. **Done this session:** 2.1–2.5. Editor architecture = D15 (SlotEditorScreen
-   base + thin per-mode subclasses; polar editor in 2.9 should subclass it
-   too). `ParamEditorScreen` exists but is unreachable until the mode selector
-   (2.22); its slots don't persist until the GraphState migration (2.23).
-   `GraphState` is nested-structs (not spec-flat).
-3. **KIV during next test drives:** function-mode visual check after the 2.1
-   refactor (plot/trace/zoom should be pixel-identical); Pico 2 functional
-   spot-check (eval/graph/dirty-band/persistence); charging color once battery
-   <95%; F-key layout rethink (feedback item 7).
+1. **Minimal mode selector (pull of 2.22):** add a "Graph mode" row to the
+   MODE screen cycling Function/Parametric (Polar once 2.8-2.11 land) →
+   sets `graph::state().mode`. Without it the entire parametric path
+   (editor, window rows, plotting, trace — all code-complete) is
+   unreachable on-device, and the week-11/12 acceptance test (circle +
+   Lissajous with trace) can't run.
+2. **HW test drive:** function-mode parity checks (2.1/2.5 refactors), then
+   parametric acceptance: X1T=cos(t), Y1T=sin(t) → circle; Lissajous
+   (cos(3t), sin(2t)); trace readout t/x/y; Tstep feel at default 2pi/63.
+3. **Phase 2 week 13 (polar):** 2.8 PolarSource (sweeps Variables::kTheta —
+   engine slot overload ready), 2.9 polar editor (SlotEditorScreen subclass,
+   ~50 lines), 2.10 theta window rows (3 table lines), 2.11 angle-mode handling.
+4. **Done this session:** 2.1–2.7 (see worklog). Parametric slots don't
+   persist until the GraphState migration (2.23). Parametric curve cache
+   caps at 340 points/pair (tiny Tstep truncates the curve — documented).
+5. **KIV during next test drives:** Pico 2 functional spot-check
+   (eval/graph/dirty-band/persistence); charging color once battery <95%;
+   F-key layout rethink (feedback item 7).
 
 ## Backlog (not blocking, but tracked)
 

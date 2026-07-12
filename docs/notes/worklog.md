@@ -36,15 +36,18 @@ Conventions:
   (apps::graph_model delegates into `graph::state()`); `FunctionSource` feeds
   GraphScreen's recompute; `Engine::eval_compiled` got a slot-indexed overload
   and `ParametricSource` sweeps t (host-tested with a unit circle).
-- **Task 2.5 done** (same session, D15): `SlotEditorScreen` base extracted from
-  the Y= editor (pure refactor commit), then `ParamEditorScreen` as a thin
-  subclass — unreachable until 2.22, unpersisted until 2.23.
-- **Next up**: Phase 2 task 2.6 (parametric window params), 2.7 (parametric
-  plotting + trace — includes the trace extraction deferred from 2.1).
-  Roadmap weeks 11–16 / 17–25 / 26–35.
+- **Tasks 2.5–2.7 done** (same session): editors per D15 (`SlotEditorScreen`
+  base + Y=/parametric subclasses); mode-aware WindowScreen (Tmin/Tmax/Tstep
+  rows); parametric plotting with a 340-point/pair pixel cache + mode-aware
+  `graph::TraceCursor` (the §14 trace extraction). Graph F5 routes to the
+  right editor per mode. **The whole parametric path is code-complete but
+  unreachable until the mode selector (2.22) and unpersisted until 2.23.**
+- **Next up**: pull a minimal mode selector forward (MODE screen row → sets
+  `graph::state().mode`) so parametric is testable on-device, then the
+  week-13 polar tasks (2.8–2.11) or tables. Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 18 graph = 130 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 53 graph = 165 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -185,6 +188,25 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
   (2.23) — both deliberate, per spec task order.
 - HW-PENDING: Y= editor visual/behavior spot-check after the extraction (queued
   with the 2.1 graph check).
+
+**Phase 2 tasks 2.6 + 2.7 — mode-aware window screen; parametric plot + trace:**
+
+- WindowScreen: fixed 6-field mapping → mode-driven field table; parametric
+  prepends Tmin/Tmax/Tstep (§5.2 order) pointing into `graph::state()`; rows
+  tighten to 28px when 9 fields; selection re-clamped on activate. Polar theta rows
+  = 3 more table lines at 2.10.
+- GraphScreen mode-branched: parametric recompute sweeps `ParametricSource` per
+  complete enabled pair into a clamped (px,py)-per-step cache
+  (`kMaxCurvePoints` = 340/pair ≈ 8 KB; default Tstep uses 64; tiny Tstep
+  truncates — documented limitation). Undefined steps keep their index so the
+  trace t-readout stays aligned.
+- Trace generalized to `graph::TraceCursor` (index = pixel column in function
+  mode, parameter step in parametric; clamped stepping host-tested). UP/DOWN
+  cycles the active slots of the current mode; readout "P<n> t= x= y=".
+- Graph F5 now pushes the parametric editor in parametric mode ("PAR" softkey).
+- Host total **165 checks**. Week 11–12 subtotal (2.1–2.7) is code-complete;
+  acceptance ("circle + Lissajous plot with trace") needs mode switching on
+  device → argues for pulling a minimal 2.22 forward.
 
 ---
 
