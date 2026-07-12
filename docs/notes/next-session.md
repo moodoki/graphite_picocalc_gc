@@ -55,11 +55,17 @@ the short "what's next".
      deletes; LEFT/RIGHT column scroll with >2 enabled functions
      (parametric shows X/Y pairs). Watch scroll latency — per-row compile
      is the known lever if it drags (worklog note for 2.25).
-2. **Next coding block:** split-screen (2.19–2.21) — needs the
-   framebuffer clip-rect (§8.1; touches verified rendering code — plan it
-   like 2.1: extract/verify in small steps), then trace sync + pane
-   focus. After that only 2.22 polish, 2.24 HW matrix, 2.25 perf remain.
-3. **Done this session:** 2.1–2.18 + 2.23 + 2.26–2.28 + minimal 2.22.
+2. **Split-screen additions to the test drive (D16):** F9 (Shift+F4)
+   from graph or table toggles split; F4 switches the focused pane;
+   trace↔table-row sync in all modes (nearest-row — judge the feel;
+   option b "trace steps by table-step" is the KIV upgrade); pane
+   clipping on the Pico 1 strip renderer; ~1.5x frame time budget.
+3. **After the test drive:** close 2.22 (assess what "mode selector
+   integration" still needs beyond the MODE row), 2.24 (the matrix run
+   itself), 2.25 (perf: table scroll compile-per-row lever, parametric
+   step tuning). That completes Phase 2.
+4. **Done this session:** 2.1–2.23 + 2.26–2.28 — all of Phase 2 except
+   2.22-polish/2.24/2.25. Spec §13 P2-1..P2-6 all resolved (see table).
    Parameter-mode curve cache = 340 points/curve (tiny steps truncate).
    KEYS help content must be revised if the F-key rethink lands.
 4. **KIV during next test drives:** Pico 2 functional spot-check

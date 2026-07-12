@@ -60,11 +60,18 @@ Conventions:
   (mode-aware columns + `evaluate_table_row`), `TableSetupScreen`
   (Start/Step/AUTO-ASK, persists via 2.23), `TableScreen` (auto infinite
   scroll, ask accumulation, horizontal column scroll, cached visible
-  window). Entry: Graph F4 "TBL". **Remaining in Phase 2: split-screen
-  (2.19–2.21) + integration (2.22 finish, 2.24, 2.25).**
-- **Next up**: HW test drive (function parity, parametric + polar
-  acceptance, tables in all three modes, help, persistence/migration),
-  then split-screen (2.19–2.21). Roadmap weeks 11–16 / 17–25 / 26–35.
+  window). Entry: Graph F4 "TBL".
+- **Split-screen done (2.19–2.21, D16)**: framebuffer pane clip rect;
+  horizontal split reusing the live graph/table singletons with runtime
+  pane geometry; nearest-row trace sync (all modes); F4 = pane focus,
+  F9 = split toggle. Spec §13 open questions P2-1..P2-6 all resolved.
+- **Phase 2 code-complete except**: 2.22 remainder (mode-selector polish
+  — the MODE row already cycles all three modes; assess what's left),
+  2.24 (HW matrix — the big test drive), 2.25 (perf check on device).
+- **Next up**: THE test drive — all of Phase 2 in one go (user's call,
+  D16 discussion): parity, parametric/polar acceptance, tables, split
+  (incl. sync feel → maybe upgrade to option b), help, persistence.
+  Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 72 graph = 202 checks, 0 failures
@@ -110,6 +117,8 @@ Still to verify on hardware:
 | Graph after 2.1 refactor | Function mode should be pixel-identical post-extraction (Session 7). During the next graph test drive: plot 2-3 functions, trace, zoom — confirm nothing looks different |
 | Y= editor after 2.5 extraction | SlotEditorScreen refactor (D15) should be behavior-identical: row nav, inline edit, F2/F3, dirty-band feel while typing |
 | GraphState persistence (2.23) | First boot: existing Y-funcs + window must migrate from the old files (graphstate.dat appears). Then: parametric + polar curves, graph mode, T/TH ranges survive a cold power cycle |
+| Tables (2.12–2.18) | Auto scroll both directions; ASK entry/delete; column scroll with >3 columns; per-row eval latency while scrolling (lever: compile once per regenerate) |
+| Split screen (2.19–2.21) | F9 from graph/table; pane clipping correct on the Pico 1 strip renderer; F4 focus switch; trace↔row sync feel (option b KIV); frame time ~1.5x |
 
 ---
 
@@ -302,6 +311,31 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
 - Entry point: **Graph F4 "TBL"** (was the free softkey slot); F3/ESC pops
   back to the graph. G-T split (F4 in the mock) comes with 2.19.
 - Host total **202 checks** (97 math + 33 layout + 72 graph).
+
+**Tasks 2.19–2.21 — split-screen graph|table (D16):**
+
+- `gfx::Framebuffer::set_pane_clip/clear_pane_clip` (§8.1): a rect composing
+  with the strip window, enforced in set_pixel + fill_rect (all primitives
+  funnel through them — verified before touching this HW-verified code).
+- **Horizontal split** (P2-1 → D16): graph pane rows 0–138 at full 320px
+  width — column caches, trace x-mapping, and plot code untouched; only the
+  viewport height shrinks. Table pane rows 142–298 (7 rows), divider between,
+  white edge marks the focused pane.
+- GraphScreen/TableScreen: geometry constants became members with
+  `set_pane`/`reset_pane` (set_pane marks dirty — cached py depends on
+  height). SplitScreen **reuses the singletons** — no duplicated caches, no
+  forked trace/window state; on_deactivate resets panes so pushed screens
+  (setup, editors) render full-screen and return cleanly.
+- Trace sync (2.20, option c nearest-row): `GraphScreen::trace_value/
+  sync_trace_to_value` + `TableScreen::selected_value/highlight_value` —
+  works in all three modes (pixel column in function, nearest parameter step
+  in parametric/polar). Option b (trace steps by table-step) KIV after the
+  test drive.
+- Keys (D16): F4 = switch graph↔table (full-screen) / pane focus (split);
+  F9 (Shift+F4) toggles split from graph or table; ESC exits; table-focused
+  F3 exits (its "GRAPH" meaning) while graph-focused F3 still zooms out.
+- HW-PENDING: split rendering on the Pico 1 strip renderer (clip-rect
+  compose), sync feel, pane sizes.
 
 ---
 

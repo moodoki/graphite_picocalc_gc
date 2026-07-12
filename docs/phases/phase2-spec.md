@@ -557,14 +557,14 @@ Split-screen renders two views per frame. With line-buffer rendering, each pane 
 
 ## 13. Open questions for Phase 2
 
-| # | Question | Options | When |
-|---|----------|---------|------|
-| P2-1 | Split-screen orientation: vertical (side by side) or horizontal (stacked)? | Vertical matches TI-84; horizontal may read better on square display | Week 16, task 2.19 |
-| P2-2 | Should $\theta$ have a dedicated physical key, or be typed as `theta` / entered via 2nd-menu? | Depends on keyboard layout available bindings | Week 13, task 2.9 |
-| P2-3 | Table infinite-scroll regeneration window size (how many rows to buffer above/below visible)? | Affects scroll smoothness vs. memory | Week 14, task 2.14 |
-| P2-4 | Unified `GraphState` binary format versioning — add a version byte for future migration? | Yes recommended; costs 1 byte | Week 16, task 2.23 |
-| P2-5 | In parametric table, show one row per T with X and Y columns, or separate X-table and Y-table? | One row per T is more compact | Week 14, task 2.17 |
-| P2-6 | Help entry point: Home F5 softkey only, or a global key reachable from any screen (like F6 diagnostics)? | F5 is free today; global is more discoverable but burns a key everywhere | Week 16, task 2.27 |
+| # | Question | Options | Resolution (2026-07-12) |
+|---|----------|---------|------------|
+| P2-1 | Split-screen orientation: vertical (side by side) or horizontal (stacked)? | Vertical matches TI-84; horizontal may read better on square display | **Horizontal** (D16): full-width graph keeps column caches/trace intact |
+| P2-2 | Should $\theta$ have a dedicated physical key, or be typed as `theta` / entered via 2nd-menu? | Depends on keyboard layout available bindings | Typed as `theta`; revisit with the F-key layout rethink |
+| P2-3 | Table infinite-scroll regeneration window size (how many rows to buffer above/below visible)? | Affects scroll smoothness vs. memory | No extra buffer: regenerate the visible window per scroll step |
+| P2-4 | Unified `GraphState` binary format versioning — add a version byte for future migration? | Yes recommended; costs 1 byte | Yes, via the magic tag ("PCG1"→"PCG2") + size guard |
+| P2-5 | In parametric table, show one row per T with X and Y columns, or separate X-table and Y-table? | One row per T is more compact | One row per T with X/Y column pairs |
+| P2-6 | Help entry point: Home F5 softkey only, or a global key reachable from any screen (like F6 diagnostics)? | F5 is free today; global is more discoverable but burns a key everywhere | Home F5 only |
 
 ---
 

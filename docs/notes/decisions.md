@@ -18,6 +18,16 @@ Format:
 
 ---
 
+## D16: Split-screen — horizontal, singleton reuse, nearest-row sync, F4/F9 keys
+
+**Date**: 2026-07-12
+**Status**: Accepted (developer decisions, session 7)
+**Context**: Task 2.19 needed the P2-1 orientation call plus four implementation choices.
+**Decision**: (1) **Horizontal** split (graph top / table bottom) — the graph keeps its full 320px width, so the column caches and trace x-mapping are untouched; only viewport height changes. (2) **Reuse the live GraphScreen/TableScreen singletons** with runtime pane geometry (`set_pane`) — the spec's embedded-instances sketch would fork ~14 KB of caches and trace state. (3) Trace↔table sync is **nearest-row** (option c); "trace steps by table-step in split" (option b) is KIV pending the test drive. (4) **All three modes** supported from the start. (5) Keys: **F4 switches graph↔table** (full-screen: push/pop; split: pane focus), **F9 (Shift+F4) toggles split**, ESC exits.
+**Rationale**: Horizontal turns 2.19 into a viewport-height change instead of a cache re-architecture; singleton reuse makes trace sync nearly free; nearest-row keeps round table values while tracing.
+**Tradeoffs**: Graph pane is short (138px). Sync is approximate in function mode (pixel-grid x vs table grid). Panes render full logic clipped — ~1.5x frame cost per spec §12.
+**Revisit when**: Test drive verdict on sync feel (upgrade to option b) or pane sizes.
+
 ## D15: One SlotEditorScreen base, thin per-mode editors
 
 **Date**: 2026-07-12
