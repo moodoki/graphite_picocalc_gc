@@ -113,6 +113,11 @@ tests are the 2.25 perf baseline (function vs parametric vs polar vs split).
 - Parameter-mode curve cache caps at 340 points/curve — very small T/TH steps
   truncate the drawn curve (documented; revisit if it bites).
 - No audio HAL (pwm_sound vendored/linked but unused).
+- **Fully permissive (all-MIT) release** — future option, NOT on any roadmap
+  (D17). Effort scoped in NOTICE.md: rewrite lcdspi from the datasheet
+  (~2-3 sessions incl. HW), rewrite i2ckbd (~1), replace font1 with a
+  permissive font (~1, overlaps D9), drop pwm_sound, verify Coyote's own
+  GPL provenance upstream. Until then: own code MIT, firmware GPL-2.0.
 - Deferred: DMA push, ZoomFit + axis tick labels, 8x16 font (D9), unbounded
   history file (D4), unused overclock, `float` graph-eval lever (D5), `rand()`
   unseeded (NOLINTed), key auto-repeat suppressed, 2nd/Alpha indicators not

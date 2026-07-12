@@ -197,4 +197,16 @@ Background research:
 
 ## License
 
-Personal-use project. License terms TBD.
+A personal project for fun, education, and sharing.
+
+- **This project's own code** (`src/`, `tests/`, `scripts/`, `docs/`) is
+  **MIT-licensed** — see [LICENSE](LICENSE). Reuse the math engine, graph
+  subsystem, or renderer freely.
+- **The combined firmware binary** links GPL-2.0 vendored drivers (display,
+  keyboard, and their bitmap font from Coyote OS), so the firmware as a whole
+  is distributed under **GPL-2.0**. See [NOTICE.md](NOTICE.md) for the full
+  component/license table.
+
+A fully permissive firmware would require rewriting the two GPL drivers and
+swapping the font; the effort is scoped in NOTICE.md as a future option, but
+it is not on any roadmap.

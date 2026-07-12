@@ -18,6 +18,16 @@ Format:
 
 ---
 
+## D17: Licensing — MIT own code, GPL-2.0 combined firmware
+
+**Date**: 2026-07-12
+**Status**: Accepted
+**Context**: Open-sourcing the project. The firmware links GPL-2.0 vendored drivers (Coyote OS lcdspi/i2ckbd/pwm_sound + font1 bitmap font compiled into gfx::main_font); everything else (FatFs, tinyexpr, rp2040-psram, Pico SDK) is permissive.
+**Decision**: Hybrid ("Option 3"): the project's own code is MIT (root LICENSE); the combined firmware binary is distributed under GPL-2.0 (treated as v2-only — Coyote files carry no per-file headers or "or later" language). NOTICE.md carries the component table and the scoped path to a fully permissive release — **kept as a future option, deliberately not on any roadmap**.
+**Rationale**: Ships today with zero engineering work; the reusable subsystems (math/graph/render) stay permissively reusable; the door to full-MIT stays open since the GPL surface sits behind the platform/ HAL by design.
+**Tradeoffs**: Repo carries two licenses (must stay clearly documented). GPLv2-only firmware means no code may ever be ported from GPLv3 projects (e.g. DB48X, the Phase 4 CAS reference — design reference only). Apache-2.0 was ruled out for the MIT side (incompatible with GPLv2-only).
+**Revisit when**: Phase 4 wants GPLv3-licensed code, or the D9 font swap happens anyway (first step of the permissive path), or Coyote upstream clarifies/relicenses.
+
 ## D16: Split-screen — horizontal, singleton reuse, nearest-row sync, F4/F9 keys
 
 **Date**: 2026-07-12
