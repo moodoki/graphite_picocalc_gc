@@ -38,22 +38,25 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **HW test drive (parametric + polar + help are now on-device):**
+1. **HW test drive (parametric + polar + help + persistence on-device):**
    - Function-mode parity first (2.1/2.5 refactors should be invisible).
+   - **Persistence/migration (2.23)**: first boot must carry over existing
+     Y-funcs + window from the old files (graphstate.dat appears on SD);
+     afterwards parametric/polar curves, graph mode, and T/TH ranges must
+     survive a cold power cycle.
    - Parametric acceptance: MODE → Graph mode → PARAM; X1T=cos(t),
      Y1T=sin(t) → circle; Lissajous (cos(3t), sin(2t)); trace t/x/y.
    - Polar acceptance (spec week 13): POLAR mode; r1=1+cos(theta) →
      cardioid; r2=2*sin(3*theta) → rose; **both angle modes** (in DEGREE
      set THmax=360, THstep~5.7); trace th/x/y readout.
    - Help: Home F5 → FUNC lists 17 functions, KEYS/SYNTAX scroll.
-2. **Choose next block:** week 14–15 tables (2.12–2.18), or pull **2.23
-   GraphState persistence** forward — the unpersisted IOU now covers
-   parametric + polar slots, graph mode, and t/theta ranges; a test drive
-   losing curves on every reboot may hurt.
-3. **Done this session:** 2.1–2.11 + minimal 2.22 + help (2.26–2.28).
-   All of spec weeks 11–13 code-complete. Parameter-mode curve cache =
-   340 points/curve (tiny steps truncate — documented). KEYS help content
-   must be revised if the F-key rethink lands.
+2. **Next coding block:** week 14–15 tables (2.12–2.18) — table setup
+   screen, mode-aware evaluate_table_row, auto/ask table screen.
+3. **Done this session:** 2.1–2.11 + minimal 2.22 + help (2.26–2.28) +
+   persistence (2.23). All of spec weeks 11–13 code-complete plus the two
+   biggest week-16 items. Parameter-mode curve cache = 340 points/curve
+   (tiny steps truncate — documented). KEYS help content must be revised
+   if the F-key rethink lands.
 4. **KIV during next test drives:** Pico 2 functional spot-check
    (eval/graph/dirty-band/persistence); charging color once battery <95%;
    F-key layout rethink (feedback item 7).

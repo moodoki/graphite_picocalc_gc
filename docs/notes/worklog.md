@@ -52,11 +52,13 @@ Conventions:
   aware conversion), `PolarEditorScreen` (D15 subclass), THmin/THmax/THstep
   window rows, GraphScreen polar branch sharing the parametric point cache,
   MODE cycles FUNC/PARAM/POLAR. **All of weeks 11–13 is code-complete.**
+- **2.23 done (pulled from week 16)**: unified `graphstate.dat` (magic-tagged
+  binary image) persists everything — mode, all three modes' slots, window,
+  t/theta ranges, table config; one-time migration from yfuncs.txt/window.dat;
+  parametric/polar editors + mode row now save. **No unpersisted state left.**
 - **Next up**: HW test drive (function parity, parametric + polar acceptance,
-  help browser), then week 14–15 tables (2.12–2.18) — or pull 2.23
-  (GraphState persistence) forward, since the unpersisted-slots IOU now
-  covers parametric, polar, mode, and t/theta ranges.
-  Roadmap weeks 11–16 / 17–25 / 26–35.
+  help browser, persistence across cold cycle + legacy migration), then week
+  14–15 tables (2.12–2.18). Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 58 graph = 188 checks, 0 failures
@@ -101,6 +103,7 @@ Still to verify on hardware:
 | Pico 2 spot-check | Display/keyboard/battery/PSRAM/SD verified (incl. D14 cold boot). Still worth a quick functional sweep: eval + history, graph + trace, dirty-band typing feel, persistence across a cold cycle |
 | Graph after 2.1 refactor | Function mode should be pixel-identical post-extraction (Session 7). During the next graph test drive: plot 2-3 functions, trace, zoom — confirm nothing looks different |
 | Y= editor after 2.5 extraction | SlotEditorScreen refactor (D15) should be behavior-identical: row nav, inline edit, F2/F3, dirty-band feel while typing |
+| GraphState persistence (2.23) | First boot: existing Y-funcs + window must migrate from the old files (graphstate.dat appears). Then: parametric + polar curves, graph mode, T/TH ranges survive a cold power cycle |
 
 ---
 
@@ -256,6 +259,22 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
 - Host total **188 checks** (97 math + 33 layout + 58 graph).
 - Acceptance queued for HW: cardioid `1+cos(theta)`, rose `2*sin(3*theta)`,
   both angle modes (spec week-13 acceptance).
+
+**Task 2.23 (pulled from week 16) — unified GraphState persistence:**
+
+- `GraphState::save/load` → `/picocalc/graphstate.dat`: "PCG1" magic +
+  size-guarded raw image (GraphState is static_assert'd trivially copyable).
+  Layout change = bump magic → old image rejected, defaults/migration apply.
+  Impl in `graph/graph_persist.cpp` so host-test links stay platform-free;
+  6.5 KB image buffer is static (Pico stack is too small).
+- `apps::load_graph_state`: unified image first; on miss, one-time migration
+  from window.dat + yfuncs.txt, then writes unified. Old files ignored, not
+  deleted. `save_functions`/`save_window` = thin wrappers over the full save;
+  param/polar editors + MODE graph-mode row now persist their changes.
+- Y-slots grew 96 → `config::kMaxExprLen` (256) per §9 — safe now that the
+  yfuncs.txt writer is gone (its buffers were the 96 constraint).
+- HW-PENDING: first boot after flash must migrate existing Y-funcs/window;
+  parametric + polar curves and mode must survive a cold power cycle.
 
 ---
 
