@@ -42,8 +42,10 @@ Conventions:
   `graph::TraceCursor` (the §14 trace extraction). Graph F5 routes to the
   right editor per mode. **The whole parametric path is code-complete but
   unreachable until the mode selector (2.22) and unpersisted until 2.23.**
-- **Next up**: pull a minimal mode selector forward (MODE screen row → sets
-  `graph::state().mode`) so parametric is testable on-device, then the
+- **Minimal 2.22 pull also done**: MODE screen gained a "Graph mode" row
+  (FUNC<->PARAM) so the parametric path is reachable on-device; polar joins the
+  cycle with 2.8–2.11.
+- **Next up**: HW test drive (function parity + parametric acceptance), then
   week-13 polar tasks (2.8–2.11) or tables. Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.

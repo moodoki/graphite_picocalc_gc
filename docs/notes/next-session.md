@@ -37,22 +37,21 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **Minimal mode selector (pull of 2.22):** add a "Graph mode" row to the
-   MODE screen cycling Function/Parametric (Polar once 2.8-2.11 land) →
-   sets `graph::state().mode`. Without it the entire parametric path
-   (editor, window rows, plotting, trace — all code-complete) is
-   unreachable on-device, and the week-11/12 acceptance test (circle +
-   Lissajous with trace) can't run.
-2. **HW test drive:** function-mode parity checks (2.1/2.5 refactors), then
+1. **HW test drive (parametric is now reachable):** MODE → "Graph mode" →
+   PARAM. Function-mode parity checks first (2.1/2.5 refactors), then
    parametric acceptance: X1T=cos(t), Y1T=sin(t) → circle; Lissajous
    (cos(3t), sin(2t)); trace readout t/x/y; Tstep feel at default 2pi/63.
-3. **Phase 2 week 13 (polar):** 2.8 PolarSource (sweeps Variables::kTheta —
+   Graph F5 opens the parametric editor in PARAM mode; WINDOW shows
+   Tmin/Tmax/Tstep rows.
+2. **Phase 2 week 13 (polar):** 2.8 PolarSource (sweeps Variables::kTheta —
    engine slot overload ready), 2.9 polar editor (SlotEditorScreen subclass,
-   ~50 lines), 2.10 theta window rows (3 table lines), 2.11 angle-mode handling.
-4. **Done this session:** 2.1–2.7 (see worklog). Parametric slots don't
-   persist until the GraphState migration (2.23). Parametric curve cache
-   caps at 340 points/pair (tiny Tstep truncates the curve — documented).
-5. **KIV during next test drives:** Pico 2 functional spot-check
+   ~50 lines), 2.10 theta window rows (3 table lines), 2.11 angle-mode
+   handling; then add POLAR to the MODE screen's graph-mode cycle.
+3. **Done this session:** 2.1–2.7 + a minimal 2.22 pull (MODE "Graph mode"
+   row, FUNC<->PARAM). Parametric slots + mode don't persist until the
+   GraphState migration (2.23). Parametric curve cache caps at 340
+   points/pair (tiny Tstep truncates the curve — documented).
+4. **KIV during next test drives:** Pico 2 functional spot-check
    (eval/graph/dirty-band/persistence); charging color once battery <95%;
    F-key layout rethink (feedback item 7).
 
