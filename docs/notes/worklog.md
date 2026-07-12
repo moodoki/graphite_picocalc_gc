@@ -48,12 +48,18 @@ Conventions:
 - **Built-in help done (2.26–2.28, pulled from week 16)**: `math::catalog`
   drives both `build_lookup` and the FUNC tab; `HelpScreen` (FUNC/KEYS/SYNTAX)
   on Home F5. Addresses the 07-11 test-drive discoverability pain (§10).
-- **Next up**: HW test drive (function parity + parametric acceptance + help
-  browser), then week-13 polar tasks (2.8–2.11) or tables.
+- **Polar week done (2.8–2.11)**: `PolarSource` (theta-slot sweep, angle-mode
+  aware conversion), `PolarEditorScreen` (D15 subclass), THmin/THmax/THstep
+  window rows, GraphScreen polar branch sharing the parametric point cache,
+  MODE cycles FUNC/PARAM/POLAR. **All of weeks 11–13 is code-complete.**
+- **Next up**: HW test drive (function parity, parametric + polar acceptance,
+  help browser), then week 14–15 tables (2.12–2.18) — or pull 2.23
+  (GraphState persistence) forward, since the unpersisted-slots IOU now
+  covers parametric, polar, mode, and t/theta ranges.
   Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 53 graph = 183 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 58 graph = 188 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -229,6 +235,27 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
 - **Content caveat**: KEYS reflects the current keymap; the F-key layout
   rethink (feedback 7) is still open — revise help strings if it lands.
 - Host total **183 checks** (97 math + 33 layout + 53 graph).
+
+**Polar week (2.8–2.11):**
+
+- `graph/polar_source.{hpp,cpp}`: theta sweep (integer step counter + endpoint
+  slack, same as parametric) writing `Variables::kTheta`; Cartesian conversion
+  honors angle mode (§6.3) — in degree mode the range is degrees and
+  `r*cos/sin` converts accordingly. Host tests: cardioid (radians, 64 points,
+  starts (2,0)), r=1 circle in degree mode hitting the four axis points.
+- `apps/polar_editor`: SlotEditorScreen subclass — r1..r6, palette label
+  colors, auto-enable on non-empty, ~50 lines (D15 paying off as predicted).
+- WindowScreen: polar prepends THmin/THmax/THstep; the name column now sizes
+  to the longest field name (function/param layout unchanged at 5 chars).
+- GraphScreen: `recompute_polar` shares the parametric (px,py)-per-step cache
+  (only one parameter mode is active at a time — no extra 8 KB); helpers are
+  now mode-switched (`param_style()` = parametric|polar); F5 routes to the
+  polar editor ("POL" softkey); trace readout "r<n> th= x= y=" with theta in
+  current angle-mode units. Theta var saved/restored around the sweep.
+- MODE screen graph-mode row cycles FUNC/PARAM/POLAR; help KEYS/SYNTAX updated.
+- Host total **188 checks** (97 math + 33 layout + 58 graph).
+- Acceptance queued for HW: cardioid `1+cos(theta)`, rose `2*sin(3*theta)`,
+  both angle modes (spec week-13 acceptance).
 
 ---
 

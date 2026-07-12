@@ -12,8 +12,9 @@ the short "what's next".
 
 ## Current state
 
-- **Phase 2 in progress.** Tasks 2.1–2.7 done (week 11–12 column of spec §11).
-  Spec: `docs/phases/phase2-spec.md`; task table in §11.
+- **Phase 2 in progress.** Tasks 2.1–2.11 done (weeks 11–13 of spec §11) plus
+  help (2.26–2.28) and a minimal 2.22. Remaining: tables (2.12–2.18),
+  split-screen + integration (2.19–2.25). Spec: `docs/phases/phase2-spec.md`.
 - **Lint is now a real gate**: `./scripts/lint.sh` runs clang-format +
   clang-tidy with `WarningsAsErrors: '*'` and exits non-zero on any finding.
   Run it before committing. It self-locates Homebrew's keg-only clang-tidy and
@@ -37,24 +38,22 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **HW test drive (parametric + help are now on-device):** MODE →
-   "Graph mode" → PARAM. Function-mode parity checks first (2.1/2.5
-   refactors), then parametric acceptance: X1T=cos(t), Y1T=sin(t) → circle;
-   Lissajous (cos(3t), sin(2t)); trace readout t/x/y; Tstep feel at default
-   2pi/63. Graph F5 opens the parametric editor in PARAM mode; WINDOW shows
-   Tmin/Tmax/Tstep rows. Also check **Home F5 → HELP** (2.26–2.28 pulled
-   forward): FUNC tab lists all 17 functions, KEYS/SYNTAX tabs scroll,
-   content accurate.
-2. **Phase 2 week 13 (polar):** 2.8 PolarSource (sweeps Variables::kTheta —
-   engine slot overload ready), 2.9 polar editor (SlotEditorScreen subclass,
-   ~50 lines), 2.10 theta window rows (3 table lines), 2.11 angle-mode
-   handling; then add POLAR to the MODE screen's graph-mode cycle.
-3. **Done this session:** 2.1–2.7 + minimal 2.22 pull + built-in help
-   (2.26–2.28 pulled from week 16; `math::catalog` = single source of truth
-   for parser + help; KEYS tab content must be revised if the F-key rethink
-   lands). Parametric slots + mode don't persist until the GraphState
-   migration (2.23). Parametric curve cache caps at 340 points/pair (tiny
-   Tstep truncates the curve — documented).
+1. **HW test drive (parametric + polar + help are now on-device):**
+   - Function-mode parity first (2.1/2.5 refactors should be invisible).
+   - Parametric acceptance: MODE → Graph mode → PARAM; X1T=cos(t),
+     Y1T=sin(t) → circle; Lissajous (cos(3t), sin(2t)); trace t/x/y.
+   - Polar acceptance (spec week 13): POLAR mode; r1=1+cos(theta) →
+     cardioid; r2=2*sin(3*theta) → rose; **both angle modes** (in DEGREE
+     set THmax=360, THstep~5.7); trace th/x/y readout.
+   - Help: Home F5 → FUNC lists 17 functions, KEYS/SYNTAX scroll.
+2. **Choose next block:** week 14–15 tables (2.12–2.18), or pull **2.23
+   GraphState persistence** forward — the unpersisted IOU now covers
+   parametric + polar slots, graph mode, and t/theta ranges; a test drive
+   losing curves on every reboot may hurt.
+3. **Done this session:** 2.1–2.11 + minimal 2.22 + help (2.26–2.28).
+   All of spec weeks 11–13 code-complete. Parameter-mode curve cache =
+   340 points/curve (tiny steps truncate — documented). KEYS help content
+   must be revised if the F-key rethink lands.
 4. **KIV during next test drives:** Pico 2 functional spot-check
    (eval/graph/dirty-band/persistence); charging color once battery <95%;
    F-key layout rethink (feedback item 7).
