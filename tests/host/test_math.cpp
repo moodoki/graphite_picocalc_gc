@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "math/catalog.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
@@ -211,6 +212,36 @@ int main() {
             std::printf("FAIL: 0/0 -> ok=%d val=%g (want NaN)\n", zz.ok,
                         zz.value);
             ++g_failures;
+        }
+    }
+
+    // ---- 2.26 function catalog: single source of truth for parser + help ----
+    {
+        int count = 0;
+        const math::FnDescriptor* cat = math::catalog(&count);
+        ++g_checks;
+        if (count < 17) {
+            std::printf("FAIL: catalog count %d (want >= 17)\n", count);
+            ++g_failures;
+        }
+        for (int i = 0; i < count; ++i) {
+            ++g_checks;
+            if (cat[i].name == nullptr || cat[i].signature == nullptr ||
+                cat[i].summary == nullptr || cat[i].fn == nullptr || cat[i].arity < 0 ||
+                cat[i].arity > 2) {
+                std::printf("FAIL: catalog entry %d malformed\n", i);
+                ++g_failures;
+                continue;
+            }
+            // Every signature must parse — the same registration path
+            // the calculator uses (a-z are variables, so "ncr(n, r)"
+            // is a valid expression as written).
+            const auto r = math::engine().evaluate(cat[i].signature);
+            if (!r.ok) {
+                std::printf("FAIL: catalog signature '%s' does not parse: %s\n",
+                            cat[i].signature, r.error);
+                ++g_failures;
+            }
         }
     }
 

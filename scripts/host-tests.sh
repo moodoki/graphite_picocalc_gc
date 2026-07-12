@@ -22,7 +22,7 @@ echo "== Compiling + linking test_math =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
     tests/host/test_math.cpp src/math/engine.cpp src/math/functions.cpp \
-    src/math/format.cpp "$OUT/tinyexpr.o" \
+    src/math/format.cpp src/math/catalog.cpp "$OUT/tinyexpr.o" \
     -o "$OUT/test_math"
 
 echo "== Compiling + linking test_layout =="
@@ -40,6 +40,7 @@ echo "== Compiling + linking test_graph =="
     src/graph/function_source.cpp src/graph/parametric_source.cpp \
     src/graph/trace.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp \
     "$OUT/tinyexpr.o" \
     -o "$OUT/test_graph"
 

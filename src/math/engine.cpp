@@ -5,7 +5,7 @@
 #include <cstring>
 #include <limits>
 
-#include "math/functions.hpp"
+#include "math/catalog.hpp"
 
 extern "C" {
 #include "tinyexpr.h"
@@ -117,7 +117,7 @@ namespace {
 // The lookup array is only needed during te_compile — the pointers it
 // captures (into vars and static function code) outlive it. Returns the
 // number of entries written; `lookup` must hold at least kLookupCount.
-constexpr int kLookupCount = 25 + 2 + 17;
+constexpr int kLookupCount = 25 + 2 + kMaxCatalogEntries;
 
 int build_lookup(Variables& vars, te_variable* lookup) {
     static char names[26][2];
@@ -133,23 +133,13 @@ int build_lookup(Variables& vars, te_variable* lookup) {
     lookup[li++] = {"theta", &vars.vars[Variables::kTheta], TE_VARIABLE, nullptr};
     lookup[li++] = {"ans", &vars.vars[Variables::kAns], TE_VARIABLE, nullptr};
 
-    lookup[li++] = {"sin", reinterpret_cast<const void*>(fn::sin_am), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"cos", reinterpret_cast<const void*>(fn::cos_am), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"tan", reinterpret_cast<const void*>(fn::tan_am), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"asin", reinterpret_cast<const void*>(fn::asin_am), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"acos", reinterpret_cast<const void*>(fn::acos_am), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"atan", reinterpret_cast<const void*>(fn::atan_am), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"log", reinterpret_cast<const void*>(fn::log10_ti), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"ln", reinterpret_cast<const void*>(fn::ln_nat), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"fac", reinterpret_cast<const void*>(fn::factorial), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"ncr", reinterpret_cast<const void*>(fn::ncr), TE_FUNCTION2, nullptr};
-    lookup[li++] = {"npr", reinterpret_cast<const void*>(fn::npr), TE_FUNCTION2, nullptr};
-    lookup[li++] = {"rand", reinterpret_cast<const void*>(fn::rand01), TE_FUNCTION0, nullptr};
-    lookup[li++] = {"round", reinterpret_cast<const void*>(fn::round_n), TE_FUNCTION2, nullptr};
-    lookup[li++] = {"min", reinterpret_cast<const void*>(fn::min2), TE_FUNCTION2, nullptr};
-    lookup[li++] = {"max", reinterpret_cast<const void*>(fn::max2), TE_FUNCTION2, nullptr};
-    lookup[li++] = {"deg", reinterpret_cast<const void*>(fn::deg), TE_FUNCTION1, nullptr};
-    lookup[li++] = {"rad", reinterpret_cast<const void*>(fn::rad), TE_FUNCTION1, nullptr};
+    // Functions come from the shared catalog (task 2.26) so the help
+    // browser and the parser cannot drift apart.
+    int fn_count = 0;
+    const FnDescriptor* cat = catalog(&fn_count);
+    for (int i = 0; i < fn_count; ++i) {
+        lookup[li++] = {cat[i].name, cat[i].fn, TE_FUNCTION0 + cat[i].arity, nullptr};
+    }
     return li;
 }
 

@@ -12,6 +12,7 @@
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/graph_screen.hpp"
+#include "apps/help_screen.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "apps/y_editor.hpp"
@@ -217,6 +218,9 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kF4:
             ui::screen_manager().push(&mode_screen());
             return true;
+        case Key::kF5:
+            ui::screen_manager().push(&help_screen());
+            return true;
         default:
             if (input_.on_key(ev)) {
                 invalidate_input();
@@ -265,7 +269,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     input_.render(fb, 2 + font.width() + 2, kInputY + 8, platform::kScreenW - font.width() - 8,
                   font, true);
 
-    const char* const keys[6] = {"Y=", "WIN", "GRPH", "MODE", "", "DIAG"};
+    const char* const keys[6] = {"Y=", "WIN", "GRPH", "MODE", "HELP", "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

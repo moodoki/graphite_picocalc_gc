@@ -80,6 +80,7 @@ add_executable(picocalc_graphcalc
     src/math/engine.cpp
     src/math/functions.cpp
     src/math/format.cpp
+    src/math/catalog.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -98,6 +99,7 @@ add_executable(picocalc_graphcalc
     src/apps/graph_screen.cpp
     src/apps/window_screen.cpp
     src/apps/mode_screen.cpp
+    src/apps/help_screen.cpp
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE
