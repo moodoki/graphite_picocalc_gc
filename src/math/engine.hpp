@@ -41,11 +41,17 @@ public:
     EvalResult evaluate_at(const char* expr, calc_t x_val);
 
     // Compile once, evaluate many (graphing): returns an opaque handle
-    // (nullptr on parse error). eval_compiled binds X then evaluates;
-    // caller must free_compiled() when done. Not reentrant across the
-    // shared X variable — evaluate one function's columns at a time.
+    // (nullptr on parse error). eval_compiled binds the swept variable
+    // then evaluates; caller must free_compiled() when done. Not
+    // reentrant across the shared variable slots — evaluate one
+    // function's points at a time.
+    //
+    // var_slot picks which Variables slot the sweep writes (task 2.4):
+    // 'x'-'a' for function mode, 't'-'a' for parametric,
+    // Variables::kTheta for polar. The 2-arg form sweeps X (Phase 1).
     void* compile(const char* expr);
     calc_t eval_compiled(void* handle, calc_t x_val);
+    calc_t eval_compiled(void* handle, int var_slot, calc_t value);
     void free_compiled(void* handle);
 
     Variables& vars() { return vars_; }

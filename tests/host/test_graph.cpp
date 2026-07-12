@@ -7,6 +7,7 @@
 
 #include "graph/function_source.hpp"
 #include "graph/graph_mode.hpp"
+#include "graph/parametric_source.hpp"
 #include "graph/graph_state.hpp"
 #include "graph/viewport.hpp"
 #include "math/engine.hpp"
@@ -194,6 +195,74 @@ int main() {
         expect(n == 320 && undefined > 100 && undefined < 200,
                "sqrt(x) undefined on the negative half only");
         eng.free_compiled(h);
+    }
+
+    // Parameterized swept variable (task 2.4): eval_compiled can drive
+    // any slot, and the X sweep is unchanged.
+    {
+        auto& eng = math::engine();
+        void* h = eng.compile("t^2+1");
+        expect(h != nullptr, "compile t^2+1");
+        expect(std::fabs(eng.eval_compiled(h, 't' - 'a', 3.0) - 10.0) < 1e-12,
+               "sweep writes the t slot");
+        eng.free_compiled(h);
+
+        h = eng.compile("theta*2");
+        expect(h != nullptr, "compile theta*2");
+        expect(std::fabs(eng.eval_compiled(h, math::Variables::kTheta, 1.5) - 3.0) < 1e-12,
+               "sweep writes the theta slot");
+        eng.free_compiled(h);
+
+        h = eng.compile("x+1");
+        expect(std::fabs(eng.eval_compiled(h, 41.0) - 42.0) < 1e-12,
+               "2-arg eval_compiled still sweeps X");
+        eng.free_compiled(h);
+    }
+
+    // ParametricSource (task 2.4): unit circle over [0, 2pi].
+    {
+        auto& eng = math::engine();
+        const graph::Viewport vp = phase1_viewport();
+        void* xh = eng.compile("cos(t)");
+        void* yh = eng.compile("sin(t)");
+        expect(xh != nullptr && yh != nullptr, "compile cos(t)/sin(t)");
+
+        const double two_pi = 2.0 * M_PI;
+        graph::ParametricSource circle(eng, xh, yh, 0.0, two_pi, two_pi / 63.0);
+        circle.begin(vp);
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+        int n = 0;
+        bool on_circle = true;
+        bool first_ok = false;
+        double last_x = 0.0;
+        while (circle.next(&x, &y, &defined)) {
+            if (n == 0) {
+                first_ok = defined && std::fabs(x - 1.0) < 1e-12 && std::fabs(y) < 1e-12;
+            }
+            on_circle = on_circle && defined && std::fabs(x * x + y * y - 1.0) < 1e-9;
+            last_x = x;
+            ++n;
+        }
+        expect(n == 64, "63 steps over 2pi emit 64 points (endpoint included)");
+        expect(first_ok, "starts at (1, 0)");
+        expect(on_circle, "every point lies on the unit circle");
+        expect(std::fabs(last_x - 1.0) < 1e-9, "ends back at t = 2pi");
+        eng.free_compiled(xh);
+        eng.free_compiled(yh);
+
+        // Degenerate step: only the start point, undefined (null
+        // handles eval to NaN), and no hang.
+        graph::ParametricSource none(eng, nullptr, nullptr, 0.0, 1.0, 0.0);
+        none.begin(vp);
+        int emitted = 0;
+        bool any_defined = false;
+        while (none.next(&x, &y, &defined)) {
+            any_defined = any_defined || defined;
+            ++emitted;
+        }
+        expect(emitted == 1 && !any_defined, "zero step emits one undefined point");
     }
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);

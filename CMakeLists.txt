@@ -88,6 +88,7 @@ add_executable(picocalc_graphcalc
     src/graph/graph_mode.cpp
     src/graph/graph_state.cpp
     src/graph/function_source.cpp
+    src/graph/parametric_source.cpp
     src/apps/home_screen.cpp
     src/apps/graph_model.cpp
     src/apps/y_editor.cpp

@@ -193,10 +193,14 @@ void* Engine::compile(const char* expr) {
 }
 
 calc_t Engine::eval_compiled(void* handle, calc_t x_val) {
-    if (handle == nullptr) {
+    return eval_compiled(handle, 'x' - 'a', x_val);
+}
+
+calc_t Engine::eval_compiled(void* handle, int var_slot, calc_t value) {
+    if (handle == nullptr || var_slot < 0 || var_slot >= Variables::kCount) {
         return std::numeric_limits<calc_t>::quiet_NaN();
     }
-    vars_.vars['x' - 'a'] = x_val;
+    vars_.vars[var_slot] = value;
     return te_eval(static_cast<te_expr*>(handle));
 }
 
