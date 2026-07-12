@@ -61,12 +61,13 @@ void ParamEditorScreen::set_field_text(int i, const char* s) {
     if (pair_complete(pair_of(i))) {
         funcs().enabled[pair_of(i)] = true;
     }
-    // Persisted with the GraphState migration (task 2.23).
+    save_graph_state();
     invalidate_row(2 * pair_of(i));  // Checkbox lives on the X row.
 }
 
 void ParamEditorScreen::toggle_field(int i) {
     funcs().enabled[pair_of(i)] = !funcs().enabled[pair_of(i)];
+    save_graph_state();
     invalidate_row(2 * pair_of(i));
 }
 
@@ -75,6 +76,7 @@ void ParamEditorScreen::clear_field(int i) {
     if (!pair_complete(pair_of(i))) {
         funcs().enabled[pair_of(i)] = false;
     }
+    save_graph_state();
     invalidate_row(2 * pair_of(i));
 }
 

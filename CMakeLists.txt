@@ -88,6 +88,7 @@ add_executable(picocalc_graphcalc
     src/graph/plotter.cpp
     src/graph/graph_mode.cpp
     src/graph/graph_state.cpp
+    src/graph/graph_persist.cpp
     src/graph/function_source.cpp
     src/graph/parametric_source.cpp
     src/graph/polar_source.cpp

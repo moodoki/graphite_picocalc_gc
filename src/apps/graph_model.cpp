@@ -40,35 +40,27 @@ platform::Color function_color(int index) {
     return kPalette[index % kNumFuncs];
 }
 
+// Unified persistence (task 2.23): every change writes the whole
+// GraphState image. The old per-file writers are gone; their names
+// stay as thin wrappers so Phase 1 call sites don't churn.
+void save_graph_state() {
+    graph::state().save(platform::storage());
+}
+
 void save_functions() {
-    auto& fs = platform::storage();
-    if (!fs.mounted()) {
-        return;
-    }
-    // One line per slot: "<enabled>\t<expr>\n" (empty expr allowed).
-    char out[kNumFuncs * 104];
-    int off = 0;
-    for (int i = 0; i < kNumFuncs; ++i) {
-        off += std::snprintf(out + off, sizeof(out) - off, "%d\t%s\n", g_funcs.enabled[i] ? 1 : 0,
-                             g_funcs.expr[i]);
-    }
-    fs.write_file(kFuncsPath, reinterpret_cast<const uint8_t*>(out), static_cast<size_t>(off));
+    save_graph_state();
 }
 
 void save_window() {
-    auto& fs = platform::storage();
-    if (!fs.mounted()) {
-        return;
-    }
-    fs.write_file(kWindowPath, reinterpret_cast<const uint8_t*>(&g_window), sizeof(g_window));
+    save_graph_state();
 }
 
-void load_graph_state() {
-    auto& fs = platform::storage();
-    if (!fs.mounted()) {
-        return;
-    }
+namespace {
 
+// Pre-2.23 formats: window.dat (raw GraphWindow) + yfuncs.txt
+// ("<enabled>\t<expr>\n" per slot). Read once, then superseded by
+// graphstate.dat; the old files are left in place but ignored.
+void migrate_legacy_files(platform::Storage& fs) {
     GraphWindow w;
     if (fs.read_file(kWindowPath, reinterpret_cast<uint8_t*>(&w), sizeof(w)) ==
         static_cast<int>(sizeof(w))) {
@@ -97,6 +89,22 @@ void load_graph_state() {
         ++slot;
         line = nl != nullptr ? nl + 1 : nullptr;
     }
+}
+
+}  // namespace
+
+void load_graph_state() {
+    auto& fs = platform::storage();
+    if (!fs.mounted()) {
+        return;
+    }
+    if (graph::state().load(fs)) {
+        return;
+    }
+    // No (or stale) unified image: migrate Phase 1 files and write the
+    // unified format going forward.
+    migrate_legacy_files(fs);
+    graph::state().save(fs);
 }
 
 void zoom_standard() {

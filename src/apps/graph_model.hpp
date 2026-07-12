@@ -19,8 +19,11 @@ YFunctions& y_functions();
 // Distinct plot color per function slot (spec 7.3 palette).
 platform::Color function_color(int index);
 
-// SD persistence (/picocalc/yfuncs.txt, /picocalc/window.dat).
+// SD persistence (task 2.23): unified /picocalc/graphstate.dat, with
+// one-time migration from Phase 1's yfuncs.txt/window.dat on load.
+// save_functions/save_window are legacy names for the same full save.
 void load_graph_state();
+void save_graph_state();
 void save_functions();
 void save_window();
 

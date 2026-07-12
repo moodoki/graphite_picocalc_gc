@@ -9,6 +9,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
+#include "apps/graph_model.hpp"
 #include "graph/graph_state.hpp"
 
 namespace apps {
@@ -47,6 +48,7 @@ void ModeScreen::adjust(int dir) const {
             int m = static_cast<int>(graph::state().mode) + dir;
             m = (m % kModeCount + kModeCount) % kModeCount;
             graph::state().mode = static_cast<graph::Mode>(m);
+            save_graph_state();
             break;
         }
         case kRowReboot:

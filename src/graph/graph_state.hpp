@@ -4,16 +4,15 @@
 #include "graph/graph_mode.hpp"
 #include "graph/table_config.hpp"
 
+namespace platform {
+class Storage;
+}
+
 namespace graph {
 
 constexpr int kFunctionSlots = 7;    // Y1..Y7
 constexpr int kParametricSlots = 6;  // (X1T,Y1T)..(X6T,Y6T)
 constexpr int kPolarSlots = 6;       // r1..r6
-
-// Phase 1 function-slot expression size. yfuncs.txt persistence and its
-// buffers are sized to this; grows to config::kMaxExprLen with the
-// unified-persistence migration (task 2.23).
-constexpr int kFuncExprLen = 96;
 
 // Shared x/y canvas window. All modes plot into it; parametric/polar
 // add their parameter ranges in GraphState. Defaults are ZStandard.
@@ -27,7 +26,7 @@ struct GraphWindow {
 };
 
 struct YFunctions {
-    char expr[kFunctionSlots][kFuncExprLen] = {};
+    char expr[kFunctionSlots][config::kMaxExprLen] = {};
     bool enabled[kFunctionSlots] = {};
 
     bool any_enabled() const {
@@ -54,8 +53,7 @@ struct PolarFunctions {
 
 // All graphing state across modes (spec §9). Nested rather than flat so
 // Phase 1 screens keep working against GraphWindow/YFunctions references;
-// content matches the spec's field list. save/load (graphstate.dat,
-// superseding yfuncs.txt/window.dat) arrive with the migration in 2.23.
+// content matches the spec's field list.
 struct GraphState {
     Mode mode = Mode::kFunction;
 
@@ -77,10 +75,17 @@ struct GraphState {
     double theta_step = 0.05;
 
     TableConfig table;
+
+    // Unified persistence (task 2.23): magic-tagged binary image at
+    // /picocalc/graphstate.dat, superseding Phase 1's yfuncs.txt and
+    // window.dat. A layout change bumps the magic; stale images load
+    // as false and the caller keeps defaults (or migrates legacy files).
+    // Defined in graph_persist.cpp (kept out of host-test links).
+    bool save(platform::Storage& storage) const;
+    bool load(platform::Storage& storage);
 };
 
-// The single live graph state (persisted subset handled by apps until
-// task 2.23 unifies persistence here).
+// The single live graph state.
 GraphState& state();
 
 }  // namespace graph

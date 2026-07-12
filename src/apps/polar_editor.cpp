@@ -39,16 +39,18 @@ void PolarEditorScreen::set_field_text(int i, const char* s) {
     if (funcs().expr[i][0] != 0) {
         funcs().enabled[i] = true;
     }
-    // Persisted with the GraphState migration (task 2.23).
+    save_graph_state();
 }
 
 void PolarEditorScreen::toggle_field(int i) {
     funcs().enabled[i] = !funcs().enabled[i];
+    save_graph_state();
 }
 
 void PolarEditorScreen::clear_field(int i) {
     funcs().expr[i][0] = 0;
     funcs().enabled[i] = false;
+    save_graph_state();
 }
 
 bool PolarEditorScreen::field_checked(int i) const {
