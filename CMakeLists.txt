@@ -91,6 +91,7 @@ add_executable(picocalc_graphcalc
     src/graph/parametric_source.cpp
     src/apps/home_screen.cpp
     src/apps/graph_model.cpp
+    src/apps/slot_editor.cpp
     src/apps/y_editor.cpp
     src/apps/graph_screen.cpp
     src/apps/window_screen.cpp
