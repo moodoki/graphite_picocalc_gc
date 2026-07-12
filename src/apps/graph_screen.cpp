@@ -14,6 +14,7 @@
 #include "apps/graph_model.hpp"
 #include "apps/param_editor.hpp"
 #include "apps/polar_editor.hpp"
+#include "apps/table_screen.hpp"
 #include "apps/y_editor.hpp"
 #include "graph/function_source.hpp"
 #include "graph/parametric_source.hpp"
@@ -352,6 +353,9 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             zoom_out();
             dirty_ = true;
             return true;
+        case Key::kF4:
+            ui::screen_manager().push(&table_screen());
+            return true;
         case Key::kF5:
             switch (mode()) {
                 case graph::Mode::kParametric:
@@ -464,7 +468,7 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     } else if (mode() == graph::Mode::kPolar) {
         editor_key = "POL";
     }
-    const char* const keys[6] = {"TRC", "Z+", "Z-", "", editor_key, "DIAG"};
+    const char* const keys[6] = {"TRC", "Z+", "Z-", "TBL", editor_key, "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

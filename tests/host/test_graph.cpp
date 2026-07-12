@@ -4,9 +4,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 #include "graph/function_source.hpp"
 #include "graph/graph_mode.hpp"
+#include "apps/table_model.hpp"
 #include "graph/parametric_source.hpp"
 #include "graph/polar_source.hpp"
 #include "graph/trace.hpp"
@@ -331,6 +333,62 @@ int main() {
         expect(tc.index == 63, "clamps at max_index");
         tc.clamp(9);
         expect(tc.index == 9, "re-clamp after range shrink");
+    }
+
+    // Table model (task 2.13): mode-aware columns + row evaluation.
+    {
+        char label[8];
+        double results[apps::kMaxTableColumns];
+
+        // Function mode: enabled slots in order (Y1, Y3), gap skipped.
+        graph::GraphState st;
+        std::snprintf(st.y.expr[0], sizeof(st.y.expr[0]), "x^2");
+        st.y.enabled[0] = true;
+        std::snprintf(st.y.expr[2], sizeof(st.y.expr[2]), "x+1");
+        st.y.enabled[2] = true;
+        expect(apps::table_column_count(st) == 2, "function mode: 2 columns");
+        apps::table_column_label(st, 0, label, sizeof(label));
+        expect(label[0] == 'Y' && label[1] == '1', "column 0 is Y1");
+        apps::table_column_label(st, 1, label, sizeof(label));
+        expect(label[0] == 'Y' && label[1] == '3', "column 1 is Y3 (gap skipped)");
+        expect(apps::evaluate_table_row(st, 3.0, results, apps::kMaxTableColumns) == 2 &&
+                   std::fabs(results[0] - 9.0) < 1e-12 && std::fabs(results[1] - 4.0) < 1e-12,
+               "row at x=3 -> [9, 4]");
+        expect(std::strcmp(apps::table_independent_label(st), "x") == 0, "independent is x");
+
+        // Parametric: T | X1T Y1T.
+        graph::GraphState pt;
+        pt.mode = graph::Mode::kParametric;
+        std::snprintf(pt.param.x_expr[0], sizeof(pt.param.x_expr[0]), "cos(t)");
+        std::snprintf(pt.param.y_expr[0], sizeof(pt.param.y_expr[0]), "sin(t)");
+        pt.param.enabled[0] = true;
+        expect(apps::table_column_count(pt) == 2, "parametric pair -> 2 columns");
+        apps::table_column_label(pt, 0, label, sizeof(label));
+        expect(std::strcmp(label, "X1T") == 0, "column 0 is X1T");
+        apps::table_column_label(pt, 1, label, sizeof(label));
+        expect(std::strcmp(label, "Y1T") == 0, "column 1 is Y1T");
+        expect(apps::evaluate_table_row(pt, 0.0, results, apps::kMaxTableColumns) == 2 &&
+                   std::fabs(results[0] - 1.0) < 1e-12 && std::fabs(results[1]) < 1e-12,
+               "row at t=0 -> [1, 0]");
+
+        // Polar: th | r1; sweep writes the theta slot.
+        graph::GraphState po;
+        po.mode = graph::Mode::kPolar;
+        std::snprintf(po.polar.expr[0], sizeof(po.polar.expr[0]), "2*theta");
+        po.polar.enabled[0] = true;
+        expect(apps::table_column_count(po) == 1, "polar -> 1 column");
+        apps::table_column_label(po, 0, label, sizeof(label));
+        expect(std::strcmp(label, "r1") == 0, "column 0 is r1");
+        expect(apps::evaluate_table_row(po, 2.0, results, apps::kMaxTableColumns) == 1 &&
+                   std::fabs(results[0] - 4.0) < 1e-12,
+               "row at theta=2 -> [4]");
+        expect(std::strcmp(apps::table_independent_label(po), "th") == 0, "independent is th");
+
+        // Syntax error in a slot -> NaN column, others unaffected.
+        std::snprintf(st.y.expr[0], sizeof(st.y.expr[0]), "x^^2");
+        expect(apps::evaluate_table_row(st, 3.0, results, apps::kMaxTableColumns) == 2 &&
+                   std::isnan(results[0]) && std::fabs(results[1] - 4.0) < 1e-12,
+               "bad expression yields NaN column");
     }
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
