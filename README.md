@@ -22,7 +22,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 - **Phase 2 (code-complete)**: Graph modes — **parametric** ($X_{nT}(t), Y_{nT}(t)$
   pairs) and **polar** ($r_n(\theta)$, angle-mode aware) alongside function mode,
   selected from the MODE screen; mode-aware Y=/parametric/polar editors and window
-  screen (Tmin/Tmax/Tstep, θ range); **value table** for every mode with auto
+  screen (Tmin/Tmax/Tstep, $\theta$ range); **value table** for every mode with auto
   (infinite scroll) and ask modes plus horizontal column scrolling; **split-screen
   graph|table** with pane focus and trace↔row sync; **built-in help browser**
   (function catalog driven by the same table the parser registers from, key
