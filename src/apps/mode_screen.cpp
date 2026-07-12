@@ -43,8 +43,7 @@ void ModeScreen::adjust(int dir) const {
             math::set_fix_digits(math::fix_digits() + dir);
             break;
         case kRowGraphMode: {
-            // Function <-> Parametric (polar joins with tasks 2.8-2.11).
-            constexpr int kModeCount = 2;
+            constexpr int kModeCount = 3;  // Function, Parametric, Polar
             int m = static_cast<int>(graph::state().mode) + dir;
             m = (m % kModeCount + kModeCount) % kModeCount;
             graph::state().mode = static_cast<graph::Mode>(m);
@@ -123,7 +122,12 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
                                                                     : "FLOAT");
     char fix_val[8];
     std::snprintf(fix_val, sizeof(fix_val), "%d", math::fix_digits());
-    const char* gmode_val = graph::state().mode == graph::Mode::kParametric ? "PARAM" : "FUNC";
+    const char* gmode_val = "FUNC";
+    if (graph::state().mode == graph::Mode::kParametric) {
+        gmode_val = "PARAM";
+    } else if (graph::state().mode == graph::Mode::kPolar) {
+        gmode_val = "POLAR";
+    }
 
     const char* const values[kNumRows] = {angle_val, disp_val, fix_val, gmode_val, "[ENTER]"};
 

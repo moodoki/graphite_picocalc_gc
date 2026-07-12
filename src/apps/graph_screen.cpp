@@ -13,10 +13,12 @@
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/param_editor.hpp"
+#include "apps/polar_editor.hpp"
 #include "apps/y_editor.hpp"
 #include "graph/function_source.hpp"
 #include "graph/parametric_source.hpp"
 #include "graph/plotter.hpp"
+#include "graph/polar_source.hpp"
 
 namespace apps {
 
@@ -28,8 +30,14 @@ int16_t clamp_px(int v) {
     return static_cast<int16_t>(v < -kClamp ? -kClamp : (v > kClamp ? kClamp : v));
 }
 
-bool parametric_mode() {
-    return graph::state().mode == graph::Mode::kParametric;
+graph::Mode mode() {
+    return graph::state().mode;
+}
+
+// Parametric and polar both sweep a parameter into the shared
+// point-per-step cache; function mode uses the column cache.
+bool param_style() {
+    return mode() != graph::Mode::kFunction;
 }
 }  // namespace
 
@@ -52,15 +60,22 @@ graph::Viewport GraphScreen::viewport() const {
 }
 
 int GraphScreen::slot_count() const {
-    return parametric_mode() ? graph::kParametricSlots : graph::kFunctionSlots;
+    switch (mode()) {
+        case graph::Mode::kParametric:
+            return graph::kParametricSlots;
+        case graph::Mode::kPolar:
+            return graph::kPolarSlots;
+        default:
+            return graph::kFunctionSlots;
+    }
 }
 
 bool GraphScreen::slot_active(int s) const {
-    return parametric_mode() ? pactive_[s] : active_[s];
+    return param_style() ? pactive_[s] : active_[s];
 }
 
 int GraphScreen::trace_max_index() const {
-    if (!parametric_mode()) {
+    if (!param_style()) {
         return kWidth - 1;
     }
     return pcount_[trace_.slot] > 0 ? pcount_[trace_.slot] - 1 : 0;
@@ -70,10 +85,16 @@ void GraphScreen::recompute() {
     const graph::Viewport vp = viewport();
     const uint64_t t0 = time_us_64();
 
-    if (parametric_mode()) {
-        recompute_parametric(vp);
-    } else {
-        recompute_function(vp);
+    switch (mode()) {
+        case graph::Mode::kParametric:
+            recompute_parametric(vp);
+            break;
+        case graph::Mode::kPolar:
+            recompute_polar(vp);
+            break;
+        default:
+            recompute_function(vp);
+            break;
     }
 
     last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
@@ -158,6 +179,46 @@ void GraphScreen::recompute_parametric(const graph::Viewport& vp) {
     eng.vars()['t'] = saved_t;
 }
 
+void GraphScreen::recompute_polar(const graph::Viewport& vp) {
+    auto& st = graph::state();
+    auto& eng = math::engine();
+
+    // The sweep writes the dedicated theta slot; preserve the user's value.
+    const math::calc_t saved_theta = eng.vars().vars[math::Variables::kTheta];
+
+    for (int p = 0; p < graph::kPolarSlots; ++p) {
+        pcount_[p] = 0;
+        pactive_[p] = st.polar.enabled[p] && st.polar.expr[p][0] != 0;
+        if (!pactive_[p]) {
+            continue;
+        }
+        void* rh = eng.compile(st.polar.expr[p]);
+        if (rh == nullptr) {
+            pactive_[p] = false;
+            continue;
+        }
+        graph::PolarSource src(eng, rh, st.theta_min, st.theta_max, st.theta_step);
+        src.begin(vp);
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+        int n = 0;
+        while (n < kMaxCurvePoints && src.next(&x, &y, &defined)) {
+            if (defined) {
+                ppx_[p][n] = clamp_px(vp.px_x(x));
+                ppy_[p][n] = clamp_px(vp.px_y(y));
+            } else {
+                ppx_[p][n] = 0;
+                ppy_[p][n] = kOffscreen;
+            }
+            ++n;
+        }
+        pcount_[p] = static_cast<int16_t>(n);
+        eng.free_compiled(rh);
+    }
+    eng.vars().vars[math::Variables::kTheta] = saved_theta;
+}
+
 void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     using namespace platform::colors;
     const auto& w = graph_window();
@@ -199,7 +260,8 @@ void GraphScreen::draw_function(gfx::Framebuffer& fb, int fi) const {
     }
 }
 
-void GraphScreen::draw_parametric(gfx::Framebuffer& fb, int p) const {
+// Replays the parameter-step cache (parametric and polar).
+void GraphScreen::draw_param_curve(gfx::Framebuffer& fb, int p) const {
     const graph::PlotStyle style{function_color(p), false};
     graph::Plotter plotter;
     plotter.begin();
@@ -217,7 +279,7 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     int py = kOffscreen;
     char line[64];
 
-    if (parametric_mode()) {
+    if (param_style()) {
         const int p = trace_.slot;
         if (pcount_[p] == 0) {
             return;
@@ -226,15 +288,17 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         px = ppx_[p][i];
         py = ppy_[p][i];
         const auto& st = graph::state();
-        const double t = st.t_min + i * st.t_step;
+        const bool polar = mode() == graph::Mode::kPolar;
+        const double param = polar ? st.theta_min + i * st.theta_step : st.t_min + i * st.t_step;
         char tb[24];
         char xb[24];
         char yb[24];
-        math::format_number(t, tb, sizeof(tb));
+        math::format_number(param, tb, sizeof(tb));
         const double nan = std::numeric_limits<double>::quiet_NaN();
         math::format_number(py == kOffscreen ? nan : vp.data_x(px), xb, sizeof(xb));
         math::format_number(py == kOffscreen ? nan : vp.data_y(py), yb, sizeof(yb));
-        std::snprintf(line, sizeof(line), "P%d  t=%s x=%s y=%s", p + 1, tb, xb, yb);
+        std::snprintf(line, sizeof(line), "%s%d  %s=%s x=%s y=%s", polar ? "r" : "P", p + 1,
+                      polar ? "th" : "t", tb, xb, yb);
     } else {
         px = trace_.index;
         py = plot_y_[trace_.slot][px];
@@ -289,10 +353,16 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             dirty_ = true;
             return true;
         case Key::kF5:
-            if (parametric_mode()) {
-                ui::screen_manager().push(&param_editor_screen());
-            } else {
-                ui::screen_manager().push(&y_editor_screen());
+            switch (mode()) {
+                case graph::Mode::kParametric:
+                    ui::screen_manager().push(&param_editor_screen());
+                    break;
+                case graph::Mode::kPolar:
+                    ui::screen_manager().push(&polar_editor_screen());
+                    break;
+                default:
+                    ui::screen_manager().push(&y_editor_screen());
+                    break;
             }
             return true;
         case Key::kLeft:
@@ -350,8 +420,8 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
         if (!slot_active(s)) {
             continue;
         }
-        if (parametric_mode()) {
-            draw_parametric(fb, s);
+        if (param_style()) {
+            draw_param_curve(fb, s);
         } else {
             draw_function(fb, s);
         }
@@ -363,21 +433,38 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     // Hint uses the pre-compile enabled state (Phase 1 behavior): a
     // slot with a syntax error suppresses it too.
     bool any = false;
-    if (parametric_mode()) {
-        const auto& pf = graph::state().param;
-        for (int p = 0; p < graph::kParametricSlots; ++p) {
-            any = any || (pf.enabled[p] && pf.x_expr[p][0] != 0 && pf.y_expr[p][0] != 0);
+    switch (mode()) {
+        case graph::Mode::kParametric: {
+            const auto& pf = graph::state().param;
+            for (int p = 0; p < graph::kParametricSlots; ++p) {
+                any = any || (pf.enabled[p] && pf.x_expr[p][0] != 0 && pf.y_expr[p][0] != 0);
+            }
+            break;
         }
-    } else {
-        any = y_functions().any_enabled();
+        case graph::Mode::kPolar: {
+            const auto& pf = graph::state().polar;
+            for (int p = 0; p < graph::kPolarSlots; ++p) {
+                any = any || (pf.enabled[p] && pf.expr[p][0] != 0);
+            }
+            break;
+        }
+        default:
+            any = y_functions().any_enabled();
+            break;
     }
     if (!any) {
-        const char* hint = parametric_mode() ? "No curves. Press F5 for the editor."
-                                             : "No functions. Press F5 for Y=.";
+        const char* hint = param_style() ? "No curves. Press F5 for the editor."
+                                         : "No functions. Press F5 for Y=.";
         font.draw_string(fb, 40, kTop + kHeight / 2, hint, kGrayLine);
     }
 
-    const char* const keys[6] = {"TRC", "Z+", "Z-", "", parametric_mode() ? "PAR" : "Y=", "DIAG"};
+    const char* editor_key = "Y=";
+    if (mode() == graph::Mode::kParametric) {
+        editor_key = "PAR";
+    } else if (mode() == graph::Mode::kPolar) {
+        editor_key = "POL";
+    }
+    const char* const keys[6] = {"TRC", "Z+", "Z-", "", editor_key, "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

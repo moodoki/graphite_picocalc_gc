@@ -8,7 +8,9 @@
 #include "graph/function_source.hpp"
 #include "graph/graph_mode.hpp"
 #include "graph/parametric_source.hpp"
+#include "graph/polar_source.hpp"
 #include "graph/trace.hpp"
+#include "math/types.hpp"
 #include "graph/graph_state.hpp"
 #include "graph/viewport.hpp"
 #include "math/engine.hpp"
@@ -264,6 +266,55 @@ int main() {
             ++emitted;
         }
         expect(emitted == 1 && !any_defined, "zero step emits one undefined point");
+    }
+
+    // PolarSource (task 2.8): cardioid in radians, circle in degrees.
+    {
+        auto& eng = math::engine();
+        const graph::Viewport vp = phase1_viewport();
+        const double two_pi = 2.0 * M_PI;
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+
+        void* rh = eng.compile("1+cos(theta)");
+        expect(rh != nullptr, "compile cardioid");
+        graph::PolarSource cardioid(eng, rh, 0.0, two_pi, two_pi / 63.0);
+        cardioid.begin(vp);
+        int n = 0;
+        bool first_ok = false;
+        bool all_defined = true;
+        while (cardioid.next(&x, &y, &defined)) {
+            if (n == 0) {
+                // theta=0: r=2 -> (2, 0).
+                first_ok = defined && std::fabs(x - 2.0) < 1e-9 && std::fabs(y) < 1e-9;
+            }
+            all_defined = all_defined && defined;
+            ++n;
+        }
+        expect(n == 64, "cardioid sweep emits 64 points");
+        expect(first_ok && all_defined, "cardioid starts at (2, 0), defined throughout");
+        eng.free_compiled(rh);
+
+        // Degree mode: theta range in degrees; conversion must follow.
+        math::set_angle_mode(math::AngleMode::kDegrees);
+        rh = eng.compile("1");
+        graph::PolarSource circle(eng, rh, 0.0, 360.0, 90.0);
+        circle.begin(vp);
+        n = 0;
+        bool quarter_ok = true;
+        while (circle.next(&x, &y, &defined)) {
+            // 0, 90, 180, 270, 360 degrees -> unit-circle axis points.
+            const double ax = std::fabs(x);
+            const double ay = std::fabs(y);
+            quarter_ok = quarter_ok && defined &&
+                         ((ax > 1.0 - 1e-9 && ay < 1e-9) || (ay > 1.0 - 1e-9 && ax < 1e-9));
+            ++n;
+        }
+        expect(n == 5, "degree circle emits 0/90/180/270/360");
+        expect(quarter_ok, "degree-mode theta converts to Cartesian correctly");
+        eng.free_compiled(rh);
+        math::set_angle_mode(math::AngleMode::kRadians);
     }
 
     // TraceCursor (task 2.7): clamped stepping.

@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "gfx/font.hpp"
 #include "ui/screen_manager.hpp"
@@ -30,6 +31,10 @@ int WindowScreen::fields(FieldRef* out) {
         out[n++] = {"Tmin", &st.t_min};
         out[n++] = {"Tmax", &st.t_max};
         out[n++] = {"Tstep", &st.t_step};
+    } else if (st.mode == graph::Mode::kPolar) {
+        out[n++] = {"THmin", &st.theta_min};
+        out[n++] = {"THmax", &st.theta_max};
+        out[n++] = {"THstep", &st.theta_step};
     }
     out[n++] = {"Xmin", &w.x_min};
     out[n++] = {"Xmax", &w.x_max};
@@ -131,6 +136,12 @@ void WindowScreen::render(gfx::Framebuffer& fb) {
     FieldRef refs[kMaxFields];
     const int count = fields(refs);
     const int row_h = row_height(count);
+    // Name column fits the longest field name ("THstep" in polar mode).
+    int name_chars = 5;
+    for (int i = 0; i < count; ++i) {
+        const auto len = static_cast<int>(std::strlen(refs[i].name));
+        name_chars = len > name_chars ? len : name_chars;
+    }
     for (int i = 0; i < count; ++i) {
         const int y = kTopY + i * row_h;
         const bool sel = (i == selected_);
@@ -138,9 +149,9 @@ void WindowScreen::render(gfx::Framebuffer& fb) {
             fb.fill_rect(0, y - 4, platform::kScreenW, row_h, platform::Color::from_rgb(0, 0, 60));
         }
         font.draw_string(fb, 8, y, refs[i].name, kGreen);
-        font.draw_char(fb, 8 + 5 * font.width(), y, '=', kWhite);
+        font.draw_char(fb, 8 + name_chars * font.width(), y, '=', kWhite);
 
-        const int vx = 8 + 7 * font.width();
+        const int vx = 8 + (name_chars + 2) * font.width();
         if (sel && editing_) {
             input_.render(fb, vx, y, platform::kScreenW - vx - 8, font, true);
         } else {

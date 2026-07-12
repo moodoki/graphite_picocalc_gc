@@ -60,6 +60,7 @@ private:
     void recompute();
     void recompute_function(const graph::Viewport& vp);
     void recompute_parametric(const graph::Viewport& vp);
+    void recompute_polar(const graph::Viewport& vp);
     graph::Viewport viewport() const;
 
     // Active-mode slot helpers for trace navigation.
@@ -69,7 +70,7 @@ private:
 
     void draw_axes(gfx::Framebuffer& fb) const;
     void draw_function(gfx::Framebuffer& fb, int fi) const;
-    void draw_parametric(gfx::Framebuffer& fb, int p) const;
+    void draw_param_curve(gfx::Framebuffer& fb, int p) const;
     void draw_trace(gfx::Framebuffer& fb) const;
 };
 

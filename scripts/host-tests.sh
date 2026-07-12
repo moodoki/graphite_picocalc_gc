@@ -38,7 +38,7 @@ echo "== Compiling + linking test_graph =="
     tests/host/test_graph.cpp src/graph/viewport.cpp \
     src/graph/graph_mode.cpp src/graph/graph_state.cpp \
     src/graph/function_source.cpp src/graph/parametric_source.cpp \
-    src/graph/trace.cpp \
+    src/graph/polar_source.cpp src/graph/trace.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
     src/math/catalog.cpp \
     "$OUT/tinyexpr.o" \
