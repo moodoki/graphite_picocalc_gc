@@ -18,6 +18,16 @@ Format:
 
 ---
 
+## D15: One SlotEditorScreen base, thin per-mode editors
+
+**Date**: 2026-07-12
+**Status**: Accepted
+**Context**: Task 2.5 needs a parametric editor; polar (2.9) follows. Options: generalize the HW-verified Y= editor into one mode-aware screen (spec §2's implied design), duplicate it per mode, or extract a shared base.
+**Decision**: Extract `apps::SlotEditorScreen` (selection, InputLine edit lifecycle, dirty-band row invalidation, key dispatch, render loop) with per-mode virtuals (labels/text/toggle/clear/checkbox, `after_commit`). Y=, parametric, and later polar are thin subclasses. Done in two commits: pure extraction (no behavior change), then the parametric subclass.
+**Rationale**: Three variants meet the rule of three. The D13 dirty-band footgun (a missed `invalidate()` = stale rows) lives in exactly one file instead of three; parametric keeps its natural pair-field model (2 fields/slot, checkbox on the X row) without if-mode branches in shared code.
+**Tradeoffs**: Virtual-call indirection in the editor (irrelevant: keypress-rate). The extraction touched a HW-verified screen — mitigated by the mechanical two-step and a queued HW spot-check.
+**Revisit when**: A mode editor needs a fundamentally different layout (e.g. scrolling lists for more slots) that the base's fixed row model can't express.
+
 ## D0: Track decisions in this file
 
 **Date**: TBD (Phase 0)

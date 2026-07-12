@@ -37,17 +37,16 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **Phase 2 task 2.5:** parametric editor (6 X/Y pairs, spec §5.1). First UI
-   task of Phase 2 — decide whether to generalize `YEditorScreen` or write a
-   separate screen; the mode descriptor (`graph::descriptor_for`) exists for
-   labels/slot counts. Slots live in `graph::state().param`.
-2. **Phase 2 task 2.6:** mode-aware window screen (Tmin/Tmax/Tstep rows when
+1. **Phase 2 task 2.6:** mode-aware window screen (Tmin/Tmax/Tstep rows when
    mode == parametric; fields live in `graph::state()`).
-3. **Phase 2 task 2.7:** parametric plotting + trace — wire `ParametricSource`
+2. **Phase 2 task 2.7:** parametric plotting + trace — wire `ParametricSource`
    (done, host-tested) into GraphScreen via `Plotter::plot()`; includes the
    trace generalization deferred from 2.1 (spec §14).
-4. **Done this session:** 2.1–2.4. `GraphState` is nested-structs (not
-   spec-flat); save/load deferred to 2.23 with the migration.
+3. **Done this session:** 2.1–2.5. Editor architecture = D15 (SlotEditorScreen
+   base + thin per-mode subclasses; polar editor in 2.9 should subclass it
+   too). `ParamEditorScreen` exists but is unreachable until the mode selector
+   (2.22); its slots don't persist until the GraphState migration (2.23).
+   `GraphState` is nested-structs (not spec-flat).
 3. **KIV during next test drives:** function-mode visual check after the 2.1
    refactor (plot/trace/zoom should be pixel-identical); Pico 2 functional
    spot-check (eval/graph/dirty-band/persistence); charging color once battery

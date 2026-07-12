@@ -36,9 +36,12 @@ Conventions:
   (apps::graph_model delegates into `graph::state()`); `FunctionSource` feeds
   GraphScreen's recompute; `Engine::eval_compiled` got a slot-indexed overload
   and `ParametricSource` sweeps t (host-tested with a unit circle).
-- **Next up**: Phase 2 task 2.5 (parametric editor UI), 2.6 (parametric window
-  params), 2.7 (parametric plotting + trace — includes the trace extraction
-  deferred from 2.1). Roadmap weeks 11–16 / 17–25 / 26–35.
+- **Task 2.5 done** (same session, D15): `SlotEditorScreen` base extracted from
+  the Y= editor (pure refactor commit), then `ParamEditorScreen` as a thin
+  subclass — unreachable until 2.22, unpersisted until 2.23.
+- **Next up**: Phase 2 task 2.6 (parametric window params), 2.7 (parametric
+  plotting + trace — includes the trace extraction deferred from 2.1).
+  Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 18 graph = 130 checks, 0 failures
@@ -82,6 +85,7 @@ Still to verify on hardware:
 | Charging color | Cyan battery icon while charging (bit 7 of low byte assumption) — inconclusive at 100% (charger idle when full); retest when battery <~95% |
 | Pico 2 spot-check | Display/keyboard/battery/PSRAM/SD verified (incl. D14 cold boot). Still worth a quick functional sweep: eval + history, graph + trace, dirty-band typing feel, persistence across a cold cycle |
 | Graph after 2.1 refactor | Function mode should be pixel-identical post-extraction (Session 7). During the next graph test drive: plot 2-3 functions, trace, zoom — confirm nothing looks different |
+| Y= editor after 2.5 extraction | SlotEditorScreen refactor (D15) should be behavior-identical: row nav, inline edit, F2/F3, dirty-band feel while typing |
 
 ---
 
@@ -162,6 +166,25 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
   defined only when both x(t) and y(t) are finite.
 - Host tests: swept-slot checks (t/theta/X-compat), unit-circle sweep, degenerate
   zero-step case. Host total now **161 checks** (79 math + 33 layout + 49 graph).
+
+**Phase 2 task 2.5 — SlotEditorScreen base + parametric editor (D15):**
+
+- Editor architecture decided (D15): one `apps::SlotEditorScreen` base owning
+  selection, InputLine editing, dirty-band row invalidation, key dispatch, and
+  the render loop; per-mode subclasses provide labels/text/toggle/clear/checkbox
+  + an `after_commit` hook. Chosen over both "one mode-aware Y= editor with
+  if-branches" and "three duplicated screens" — the D13 invalidate footgun now
+  lives in one file, and polar (2.9) should be ~50 lines.
+- Commit 1 was a pure extraction (Y= behavior unchanged — same constants, same
+  draw calls); commit 2 added `ParamEditorScreen`: 6 pairs as 12 rows (22px),
+  pair checkbox on the X row, auto-enable when both halves non-empty, X-commit
+  auto-focuses an empty partner (§5.1), F3 clears one field and drops the
+  enable when the pair goes incomplete.
+- **Not yet wired**: no navigation reaches the parametric editor until the mode
+  selector (2.22), and its slots don't persist until the GraphState migration
+  (2.23) — both deliberate, per spec task order.
+- HW-PENDING: Y= editor visual/behavior spot-check after the extraction (queued
+  with the 2.1 graph check).
 
 ---
 
