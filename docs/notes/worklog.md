@@ -45,11 +45,15 @@ Conventions:
 - **Minimal 2.22 pull also done**: MODE screen gained a "Graph mode" row
   (FUNC<->PARAM) so the parametric path is reachable on-device; polar joins the
   cycle with 2.8–2.11.
-- **Next up**: HW test drive (function parity + parametric acceptance), then
-  week-13 polar tasks (2.8–2.11) or tables. Roadmap weeks 11–16 / 17–25 / 26–35.
+- **Built-in help done (2.26–2.28, pulled from week 16)**: `math::catalog`
+  drives both `build_lookup` and the FUNC tab; `HelpScreen` (FUNC/KEYS/SYNTAX)
+  on Home F5. Addresses the 07-11 test-drive discoverability pain (§10).
+- **Next up**: HW test drive (function parity + parametric acceptance + help
+  browser), then week-13 polar tasks (2.8–2.11) or tables.
+  Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 53 graph = 165 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 53 graph = 183 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -209,6 +213,22 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
 - Host total **165 checks**. Week 11–12 subtotal (2.1–2.7) is code-complete;
   acceptance ("circle + Lissajous plot with trace") needs mode switching on
   device → argues for pulling a minimal 2.22 forward.
+
+**Minimal 2.22 pull + built-in help (2.26–2.28, pulled from week 16):**
+
+- MODE screen "Graph mode" row cycles FUNC<->PARAM (`graph::state().mode`);
+  polar joins the cycle with 2.8–2.11. Mode unpersisted until 2.23.
+- `math/catalog.{hpp,cpp}`: `FnDescriptor` table for all 17 parser functions;
+  `build_lookup` registers functions by iterating it (variables stay inline).
+  Host test asserts every catalog signature parses via the real engine — the
+  drift guard §10 asks for. `kLookupCount` sized by `kMaxCatalogEntries` (32).
+- `apps/help_screen`: FUNC tab (catalog-driven: signature + summary), KEYS tab
+  (per-screen key map incl. PARAM-era keys), SYNTAX tab (store op, e/E rules,
+  ans, factorial, angle mode, graph modes, history). Home F5 = "HELP"
+  (previously unassigned). All content in flash — no SD dependency.
+- **Content caveat**: KEYS reflects the current keymap; the F-key layout
+  rethink (feedback 7) is still open — revise help strings if it lands.
+- Host total **183 checks** (97 math + 33 layout + 53 graph).
 
 ---
 
