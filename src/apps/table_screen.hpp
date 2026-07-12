@@ -22,7 +22,21 @@ public:
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
 
+    // Pane geometry (task 2.19): render into rows [top, top+height)
+    // instead of the full-screen default; fewer rows fit in a pane.
+    void set_pane(int top, int height) {
+        top_ = top;
+        height_ = height;
+        dirty_ = true;
+    }
+    void reset_pane() { set_pane(0, kFullHeight); }
+
+    // Trace sync (task 2.20, nearest-row).
+    double selected_value() const;   // Independent value of the selected row
+    void highlight_value(double v);  // Select the row nearest v
+
 private:
+    static constexpr int kFullHeight = 300;  // Rows above the softkey bar
     static constexpr int kVisibleRows = 17;
     static constexpr int kVisibleCols = 3;  // Dependent columns on screen
     static constexpr int kMaxAskRows = 32;
@@ -44,7 +58,11 @@ private:
     bool entering_ = false;
     ui::InputLine input_;
 
+    int top_ = 0;
+    int height_ = kFullHeight;
+
     bool ask_mode() const;
+    int visible_rows() const;
     void regenerate();
     void move_selection(int dir);
     void commit_entry();

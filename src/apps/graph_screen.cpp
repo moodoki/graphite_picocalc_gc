@@ -14,6 +14,7 @@
 #include "apps/graph_model.hpp"
 #include "apps/param_editor.hpp"
 #include "apps/polar_editor.hpp"
+#include "apps/split_screen.hpp"
 #include "apps/table_screen.hpp"
 #include "apps/y_editor.hpp"
 #include "graph/function_source.hpp"
@@ -54,9 +55,9 @@ graph::Viewport GraphScreen::viewport() const {
     vp.y_min = w.y_min;
     vp.y_max = w.y_max;
     vp.left = 0;
-    vp.top = kTop;
+    vp.top = top_;
     vp.width = kWidth;
-    vp.height = kHeight;
+    vp.height = height_;
     return vp;
 }
 
@@ -80,6 +81,39 @@ int GraphScreen::trace_max_index() const {
         return kWidth - 1;
     }
     return pcount_[trace_.slot] > 0 ? pcount_[trace_.slot] - 1 : 0;
+}
+
+double GraphScreen::trace_value() const {
+    const auto& st = graph::state();
+    switch (mode()) {
+        case graph::Mode::kParametric:
+            return st.t_min + trace_.index * st.t_step;
+        case graph::Mode::kPolar:
+            return st.theta_min + trace_.index * st.theta_step;
+        default:
+            return viewport().data_x(trace_.index);
+    }
+}
+
+void GraphScreen::sync_trace_to_value(double v) {
+    const auto& st = graph::state();
+    trace_.active = true;
+    switch (mode()) {
+        case graph::Mode::kParametric:
+            if (st.t_step > 0) {
+                trace_.index = static_cast<int>(std::lround((v - st.t_min) / st.t_step));
+            }
+            break;
+        case graph::Mode::kPolar:
+            if (st.theta_step > 0) {
+                trace_.index = static_cast<int>(std::lround((v - st.theta_min) / st.theta_step));
+            }
+            break;
+        default:
+            trace_.index = viewport().px_x(v);
+            break;
+    }
+    trace_.clamp(trace_max_index());
 }
 
 void GraphScreen::recompute() {
@@ -230,7 +264,7 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
         const double start = std::ceil(w.x_min / w.x_scl) * w.x_scl;
         const auto nx = static_cast<int>(std::floor((w.x_max - start) / w.x_scl));
         for (int i = 0; i <= nx; ++i) {
-            fb.draw_vline(vp.px_x(start + i * w.x_scl), kTop, kHeight, kGridLine);
+            fb.draw_vline(vp.px_x(start + i * w.x_scl), top_, height_, kGridLine);
         }
     }
     if (w.y_scl > 0) {
@@ -246,7 +280,7 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
         fb.draw_hline(0, vp.px_y(0.0), kWidth, kWhite);
     }
     if (w.x_min <= 0 && w.x_max >= 0) {
-        fb.draw_vline(vp.px_x(0.0), kTop, kHeight, kWhite);
+        fb.draw_vline(vp.px_x(0.0), top_, height_, kWhite);
     }
 }
 
@@ -314,13 +348,13 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     }
 
     // Vertical trace line + cursor marker.
-    fb.draw_vline(px, kTop, kHeight, kCursor);
+    fb.draw_vline(px, top_, height_, kCursor);
     if (py != kOffscreen) {
         fb.fill_rect(px - 2, py - 2, 5, 5, function_color(trace_.slot));
     }
 
     // Coordinate readout at the bottom of the viewport (D3: bottom).
-    const int ty = kTop + kHeight - font.height() - 2;
+    const int ty = top_ + height_ - font.height() - 2;
     fb.fill_rect(0, ty - 2, platform::kScreenW, font.height() + 4,
                  platform::Color::from_rgb(20, 20, 20));
     font.draw_string(fb, 4, ty, line, kWhite);
@@ -355,6 +389,9 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             return true;
         case Key::kF4:
             ui::screen_manager().push(&table_screen());
+            return true;
+        case Key::kF9:  // Shift+F4: split-screen graph|table (D16)
+            ui::screen_manager().push(&split_screen());
             return true;
         case Key::kF5:
             switch (mode()) {
@@ -459,7 +496,7 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     if (!any) {
         const char* hint = param_style() ? "No curves. Press F5 for the editor."
                                          : "No functions. Press F5 for Y=.";
-        font.draw_string(fb, 40, kTop + kHeight / 2, hint, kGrayLine);
+        font.draw_string(fb, 40, top_ + height_ / 2, hint, kGrayLine);
     }
 
     const char* editor_key = "Y=";

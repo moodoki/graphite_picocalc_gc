@@ -71,17 +71,20 @@ uint16_t* Framebuffer::row(int y) {
 }
 
 void Framebuffer::set_pixel(int x, int y, Color c) {
-    if (x < 0 || x >= platform::kScreenW || y < clip_y0_ || y >= clip_y1_) {
+    if (x < pane_x0_ || x >= pane_x1_ || y < pane_y0_ || y >= pane_y1_ || y < clip_y0_ ||
+        y >= clip_y1_) {
         return;
     }
     row(y)[x] = c.rgb565;
 }
 
 void Framebuffer::fill_rect(int x, int y, int w, int h, Color c) {
-    int const x0 = x < 0 ? 0 : x;
-    int const x1 = x + w > platform::kScreenW ? platform::kScreenW : x + w;
-    int const y0 = y < clip_y0_ ? clip_y0_ : y;
-    int const y1 = y + h > clip_y1_ ? clip_y1_ : y + h;
+    int const x0 = x < pane_x0_ ? pane_x0_ : x;
+    int const x1 = x + w > pane_x1_ ? pane_x1_ : x + w;
+    const int cy0 = clip_y0_ > pane_y0_ ? clip_y0_ : pane_y0_;
+    const int cy1 = clip_y1_ < pane_y1_ ? clip_y1_ : pane_y1_;
+    int const y0 = y < cy0 ? cy0 : y;
+    int const y1 = y + h > cy1 ? cy1 : y + h;
     if (x0 >= x1 || y0 >= y1) {
         return;
     }

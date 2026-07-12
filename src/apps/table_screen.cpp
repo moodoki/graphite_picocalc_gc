@@ -1,6 +1,7 @@
 #include "apps/table_screen.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -8,16 +9,18 @@
 #include "ui/screen_manager.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
+#include "apps/split_screen.hpp"
 #include "apps/table_setup.hpp"
 
 namespace apps {
 
 namespace {
-constexpr int kHeaderY = 20;
-constexpr int kRowsY = 36;
+// Layout offsets within the pane [top_, top_ + height_).
+constexpr int kHeaderOff = 20;
+constexpr int kRowsOff = 36;
 constexpr int kRowH = 14;
-constexpr int kColW = 80;  // 10 characters per column
-constexpr int kDetailY = 278;
+constexpr int kColW = 80;       // 10 characters per column
+constexpr int kDetailOff = 22;  // Detail line from the pane bottom
 
 // Cell text: format_number capped to the column (9 chars + separator).
 void cell_text(double v, char* buf, size_t buf_len) {
@@ -29,6 +32,51 @@ void cell_text(double v, char* buf, size_t buf_len) {
 
 bool TableScreen::ask_mode() const {
     return graph::state().table.ask_mode;
+}
+
+int TableScreen::visible_rows() const {
+    const int fit = (height_ - kRowsOff - kDetailOff) / kRowH;
+    const int n = fit < kVisibleRows ? fit : kVisibleRows;
+    return n > 0 ? n : 1;
+}
+
+double TableScreen::selected_value() const {
+    const auto& t = graph::state().table;
+    if (ask_mode()) {
+        const int idx = base_ + sel_;
+        return idx >= 0 && idx < ask_count_ ? ask_values_[idx] : 0.0;
+    }
+    return t.start + (base_ + sel_) * t.step;
+}
+
+void TableScreen::highlight_value(double v) {
+    if (ask_mode()) {
+        if (ask_count_ == 0) {
+            return;
+        }
+        int best = 0;
+        for (int i = 1; i < ask_count_; ++i) {
+            if (std::fabs(ask_values_[i] - v) < std::fabs(ask_values_[best] - v)) {
+                best = i;
+            }
+        }
+        if (best < base_ || best >= base_ + visible_rows()) {
+            base_ = best - visible_rows() / 2;
+            dirty_ = true;
+        }
+        sel_ = best - base_;
+        return;
+    }
+    const auto& t = graph::state().table;
+    if (t.step == 0) {
+        return;
+    }
+    const int n = static_cast<int>(std::floor((v - t.start) / t.step + 0.5));
+    if (n < base_ || n >= base_ + visible_rows()) {
+        base_ = n - visible_rows() / 2;
+        dirty_ = true;
+    }
+    sel_ = n - base_;
 }
 
 void TableScreen::on_activate() {
@@ -44,9 +92,9 @@ void TableScreen::regenerate() {
     col_off_ = col_off_ > max_off ? max_off : col_off_;
 
     if (ask_mode()) {
-        base_ = std::max(0, std::min(base_, ask_count_ - kVisibleRows));
+        base_ = std::max(0, std::min(base_, ask_count_ - visible_rows()));
         row_count_ = 0;
-        for (int i = 0; i < kVisibleRows && base_ + i < ask_count_; ++i) {
+        for (int i = 0; i < visible_rows() && base_ + i < ask_count_; ++i) {
             indep_[i] = ask_values_[base_ + i];
             evaluate_table_row(st, indep_[i], values_[i], kMaxTableColumns);
             ++row_count_;
@@ -56,8 +104,8 @@ void TableScreen::regenerate() {
         }
         sel_ = std::max(sel_, 0);
     } else {
-        row_count_ = kVisibleRows;
-        for (int i = 0; i < kVisibleRows; ++i) {
+        row_count_ = visible_rows();
+        for (int i = 0; i < row_count_; ++i) {
             indep_[i] = st.table.start + (base_ + i) * st.table.step;
             evaluate_table_row(st, indep_[i], values_[i], kMaxTableColumns);
         }
@@ -74,7 +122,7 @@ void TableScreen::move_selection(int dir) {
             dirty_ = true;
         } else if (dir > 0 && sel_ < row_count_ - 1) {
             ++sel_;
-        } else if (dir > 0 && base_ + kVisibleRows < ask_count_) {
+        } else if (dir > 0 && base_ + visible_rows() < ask_count_) {
             ++base_;
             dirty_ = true;
         }
@@ -89,7 +137,7 @@ void TableScreen::move_selection(int dir) {
             dirty_ = true;
         }
     } else {
-        if (sel_ < kVisibleRows - 1) {
+        if (sel_ < visible_rows() - 1) {
             ++sel_;
         } else {
             ++base_;
@@ -114,8 +162,8 @@ void TableScreen::commit_entry() {
         ask_values_[kMaxAskRows - 1] = v;
     }
     // Land the selection on the new (last) entry.
-    base_ = ask_count_ > kVisibleRows ? ask_count_ - kVisibleRows : 0;
-    sel_ = (ask_count_ < kVisibleRows ? ask_count_ : kVisibleRows) - 1;
+    base_ = ask_count_ > visible_rows() ? ask_count_ - visible_rows() : 0;
+    sel_ = (ask_count_ < visible_rows() ? ask_count_ : visible_rows()) - 1;
     dirty_ = true;
 }
 
@@ -177,7 +225,11 @@ bool TableScreen::on_key(const platform::KeyEvent& ev) {
                 dirty_ = true;
             }
             return true;
+        case Key::kF9:  // Shift+F4: split-screen graph|table (D16)
+            ui::screen_manager().push(&split_screen());
+            return true;
         case Key::kF3:
+        case Key::kF4:  // F4 switches graph<->table (D16)
         case Key::kEscape:
             ui::screen_manager().pop();
             return true;
@@ -199,30 +251,30 @@ void TableScreen::render(gfx::Framebuffer& fb) {
     // static analyzer's model of fields between calls).
     col_count_ = std::min(col_count_, static_cast<int>(kMaxTableColumns));
     col_off_ = std::max(col_off_, 0);
-    row_count_ = std::min(row_count_, static_cast<int>(kVisibleRows));
+    row_count_ = std::min(row_count_, visible_rows());
     sel_ = std::max(0, std::min(sel_, kVisibleRows - 1));
 
     fb.clear(kBlack);
-    fb.fill_rect(0, 0, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, 2, ask_mode() ? "TABLE (ASK)" : "TABLE", kGrayLine);
+    fb.fill_rect(0, top_, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
+    font.draw_string(fb, 4, top_ + 2, ask_mode() ? "TABLE (ASK)" : "TABLE", kGrayLine);
 
     // Header: independent label + visible dependent columns.
-    font.draw_string(fb, 8, kHeaderY, table_independent_label(st), kGreen);
+    font.draw_string(fb, 8, top_ + kHeaderOff, table_independent_label(st), kGreen);
     for (int c = 0; c < kVisibleCols && col_off_ + c < col_count_; ++c) {
         char label[8];
         table_column_label(st, col_off_ + c, label, sizeof(label));
-        font.draw_string(fb, 8 + (c + 1) * kColW, kHeaderY, label, kGreen);
+        font.draw_string(fb, 8 + (c + 1) * kColW, top_ + kHeaderOff, label, kGreen);
     }
     if (col_off_ + kVisibleCols < col_count_) {
-        font.draw_string(fb, platform::kScreenW - font.width(), kHeaderY, ">", kGrayLine);
+        font.draw_string(fb, platform::kScreenW - font.width(), top_ + kHeaderOff, ">", kGrayLine);
     }
     if (col_off_ > 0) {
-        font.draw_string(fb, 0, kHeaderY, "<", kGrayLine);
+        font.draw_string(fb, 0, top_ + kHeaderOff, "<", kGrayLine);
     }
 
     // Rows.
     for (int i = 0; i < row_count_; ++i) {
-        const int y = kRowsY + i * kRowH;
+        const int y = top_ + kRowsOff + i * kRowH;
         if (i == sel_ && !entering_) {
             fb.fill_rect(0, y - 1, platform::kScreenW, kRowH, platform::Color::from_rgb(0, 0, 60));
         }
@@ -235,17 +287,18 @@ void TableScreen::render(gfx::Framebuffer& fb) {
         }
     }
     if (row_count_ == 0 && ask_mode()) {
-        font.draw_string(fb, 40, kRowsY + 40, "ENTER adds a value", kGrayLine);
+        font.draw_string(fb, 40, top_ + kRowsOff + 40, "ENTER adds a value", kGrayLine);
     }
 
     // Detail / entry line (full precision for the selected row).
-    fb.fill_rect(0, kDetailY - 2, platform::kScreenW, 16, platform::Color::from_rgb(20, 20, 20));
+    const int detail_y = top_ + height_ - kDetailOff;
+    fb.fill_rect(0, detail_y - 2, platform::kScreenW, 16, platform::Color::from_rgb(20, 20, 20));
     if (entering_) {
         char prompt[8];
         std::snprintf(prompt, sizeof(prompt), "%s=", table_independent_label(st));
-        font.draw_string(fb, 4, kDetailY, prompt, kGreen);
+        font.draw_string(fb, 4, detail_y, prompt, kGreen);
         const int ex = 4 + static_cast<int>(sizeof(prompt)) * font.width() / 2;
-        input_.render(fb, ex, kDetailY, platform::kScreenW - ex - 4, font, true);
+        input_.render(fb, ex, detail_y, platform::kScreenW - ex - 4, font, true);
     } else if (sel_ < row_count_) {
         char full[24];
         char line[56];
@@ -258,7 +311,7 @@ void TableScreen::render(gfx::Framebuffer& fb) {
             math::format_number(values_[sel_][col_off_], full, sizeof(full));
             std::snprintf(line + off, sizeof(line) - off, "  %s=%s", label, full);
         }
-        font.draw_string(fb, 4, kDetailY, line, kWhite);
+        font.draw_string(fb, 4, detail_y, line, kWhite);
     }
 
     // Softkey bar.

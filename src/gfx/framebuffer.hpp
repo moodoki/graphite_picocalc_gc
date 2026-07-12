@@ -46,6 +46,18 @@ public:
     int clip_y0() const { return clip_y0_; }
     int clip_y1() const { return clip_y1_; }  // Exclusive
 
+    // ---- Pane clip rect (task 2.19) ----
+    // Composes with the strip window: primitives draw only inside both.
+    // Used by SplitScreen to confine each sub-view to its pane; cleared
+    // state is the whole screen. Screen coordinates, x1/y1 exclusive.
+    void set_pane_clip(int x0, int y0, int x1, int y1) {
+        pane_x0_ = x0 > 0 ? x0 : 0;
+        pane_y0_ = y0 > 0 ? y0 : 0;
+        pane_x1_ = x1 < platform::kScreenW ? x1 : platform::kScreenW;
+        pane_y1_ = y1 < platform::kScreenH ? y1 : platform::kScreenH;
+    }
+    void clear_pane_clip() { set_pane_clip(0, 0, platform::kScreenW, platform::kScreenH); }
+
     // Raw row access for text/blit code. Row must be within the clip
     // window; returns pointer to pixel (0, y).
     uint16_t* row(int y);
@@ -54,6 +66,10 @@ private:
     uint16_t* buf_ = nullptr;
     int clip_y0_ = 0;
     int clip_y1_ = 0;
+    int pane_x0_ = 0;
+    int pane_y0_ = 0;
+    int pane_x1_ = platform::kScreenW;
+    int pane_y1_ = platform::kScreenH;
 };
 
 // Core 1 entry point: services display push jobs forever.

@@ -28,11 +28,31 @@ public:
     // Force a replot (e.g. after window edits from WindowScreen).
     void invalidate() { dirty_ = true; }
 
+    // Pane geometry (task 2.19): render into rows [top, top+height)
+    // instead of the full-screen default. Width stays 320 — the
+    // horizontal split (D16) keeps the column caches and trace
+    // x-mapping identical to full screen. Forces a replot (cached py
+    // values depend on the height).
+    void set_pane(int top, int height) {
+        top_ = top;
+        height_ = height;
+        dirty_ = true;
+    }
+    void reset_pane() { set_pane(kTopDefault, kHeightDefault); }
+
+    // Trace sync with the table pane (task 2.20, nearest-row).
+    bool trace_active() const { return trace_.active; }
+    double trace_value() const;          // Current independent value
+    void sync_trace_to_value(double v);  // Move the cursor near v
+
 private:
-    // Graph viewport geometry (content between status bar and softkeys).
-    static constexpr int kTop = 16;
-    static constexpr int kHeight = 280;
+    // Full-screen geometry (content between status bar and softkeys).
+    static constexpr int kTopDefault = 16;
+    static constexpr int kHeightDefault = 280;
     static constexpr int kWidth = 320;
+
+    int top_ = kTopDefault;
+    int height_ = kHeightDefault;
 
     static constexpr int16_t kOffscreen = INT16_MIN;
 

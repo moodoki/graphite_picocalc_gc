@@ -106,6 +106,7 @@ add_executable(picocalc_graphcalc
     src/apps/table_model.cpp
     src/apps/table_setup.cpp
     src/apps/table_screen.cpp
+    src/apps/split_screen.cpp
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE
