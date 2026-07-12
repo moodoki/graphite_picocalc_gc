@@ -8,40 +8,61 @@
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/graph_screen.hpp"
+#include "graph/graph_state.hpp"
 
 namespace apps {
 
 namespace {
 constexpr int kTopY = 32;
-constexpr int kRowH = 32;
+
+// 6 fields (function mode) get roomy rows; 9 (parametric) still must
+// end above the softkey bar at y=300: 32 + 9*28 = 284.
+int row_height(int count) {
+    return count > 6 ? 28 : 32;
+}
 }  // namespace
 
-double* WindowScreen::field_ptr(int i) const {
-    auto& w = graph_window();
-    switch (i) {
-        case 0:
-            return &w.x_min;
-        case 1:
-            return &w.x_max;
-        case 2:
-            return &w.y_min;
-        case 3:
-            return &w.y_max;
-        case 4:
-            return &w.x_scl;
-        default:
-            return &w.y_scl;
+int WindowScreen::fields(FieldRef* out) {
+    auto& st = graph::state();
+    auto& w = st.window;
+    int n = 0;
+    if (st.mode == graph::Mode::kParametric) {
+        out[n++] = {"Tmin", &st.t_min};
+        out[n++] = {"Tmax", &st.t_max};
+        out[n++] = {"Tstep", &st.t_step};
     }
+    out[n++] = {"Xmin", &w.x_min};
+    out[n++] = {"Xmax", &w.x_max};
+    out[n++] = {"Ymin", &w.y_min};
+    out[n++] = {"Ymax", &w.y_max};
+    out[n++] = {"Xscl", &w.x_scl};
+    out[n++] = {"Yscl", &w.y_scl};
+    return n;
+}
+
+int WindowScreen::field_count() {
+    FieldRef refs[kMaxFields];
+    return fields(refs);
+}
+
+double* WindowScreen::field_ptr(int i) {
+    FieldRef refs[kMaxFields];
+    const int n = fields(refs);
+    return refs[i < n ? i : n - 1].value;
 }
 
 const char* WindowScreen::field_name(int i) {
-    static constexpr const char* kNames[kNumFields] = {"Xmin", "Xmax", "Ymin",
-                                                       "Ymax", "Xscl", "Yscl"};
-    return kNames[i];
+    FieldRef refs[kMaxFields];
+    const int n = fields(refs);
+    return refs[i < n ? i : n - 1].name;
 }
 
 void WindowScreen::on_activate() {
     editing_ = false;
+    // The field list depends on the graph mode; re-clamp the selection.
+    if (selected_ >= field_count()) {
+        selected_ = field_count() - 1;
+    }
 }
 
 void WindowScreen::begin_edit() {
@@ -82,7 +103,7 @@ bool WindowScreen::on_key(const platform::KeyEvent& ev) {
             }
             return true;
         case Key::kDown:
-            if (selected_ < kNumFields - 1) {
+            if (selected_ < field_count() - 1) {
                 ++selected_;
             }
             return true;
@@ -107,13 +128,16 @@ void WindowScreen::render(gfx::Framebuffer& fb) {
     fb.fill_rect(0, 0, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
     font.draw_string(fb, 4, 2, "WINDOW SETTINGS", kGrayLine);
 
-    for (int i = 0; i < kNumFields; ++i) {
-        const int y = kTopY + i * kRowH;
+    FieldRef refs[kMaxFields];
+    const int count = fields(refs);
+    const int row_h = row_height(count);
+    for (int i = 0; i < count; ++i) {
+        const int y = kTopY + i * row_h;
         const bool sel = (i == selected_);
         if (sel) {
-            fb.fill_rect(0, y - 4, platform::kScreenW, kRowH, platform::Color::from_rgb(0, 0, 60));
+            fb.fill_rect(0, y - 4, platform::kScreenW, row_h, platform::Color::from_rgb(0, 0, 60));
         }
-        font.draw_string(fb, 8, y, field_name(i), kGreen);
+        font.draw_string(fb, 8, y, refs[i].name, kGreen);
         font.draw_char(fb, 8 + 5 * font.width(), y, '=', kWhite);
 
         const int vx = 8 + 7 * font.width();
@@ -121,7 +145,7 @@ void WindowScreen::render(gfx::Framebuffer& fb) {
             input_.render(fb, vx, y, platform::kScreenW - vx - 8, font, true);
         } else {
             char buf[24];
-            math::format_number(*field_ptr(i), buf, sizeof(buf));
+            math::format_number(*refs[i].value, buf, sizeof(buf));
             font.draw_string(fb, vx, y, buf, kWhite);
         }
     }
