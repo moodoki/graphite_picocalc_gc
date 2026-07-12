@@ -9,6 +9,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
+#include "graph/graph_state.hpp"
 
 namespace apps {
 
@@ -20,7 +21,8 @@ constexpr int kRowH = 36;
 constexpr int kRowAngle = 0;
 constexpr int kRowDisplay = 1;
 constexpr int kRowFixDigits = 2;
-constexpr int kRowReboot = 3;
+constexpr int kRowGraphMode = 3;
+constexpr int kRowReboot = 4;
 }  // namespace
 
 void ModeScreen::adjust(int dir) const {
@@ -40,6 +42,14 @@ void ModeScreen::adjust(int dir) const {
         case kRowFixDigits:
             math::set_fix_digits(math::fix_digits() + dir);
             break;
+        case kRowGraphMode: {
+            // Function <-> Parametric (polar joins with tasks 2.8-2.11).
+            constexpr int kModeCount = 2;
+            int m = static_cast<int>(graph::state().mode) + dir;
+            m = (m % kModeCount + kModeCount) % kModeCount;
+            graph::state().mode = static_cast<graph::Mode>(m);
+            break;
+        }
         case kRowReboot:
             if (dir != 0) {  // Only on ENTER/select, handled in on_key
             }
@@ -99,6 +109,7 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
         {"Angle", nullptr},
         {"Display", nullptr},
         {"Fix digits", nullptr},
+        {"Graph mode", nullptr},
         {"Reboot to bootloader", nullptr},
     };
 
@@ -112,8 +123,9 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
                                                                     : "FLOAT");
     char fix_val[8];
     std::snprintf(fix_val, sizeof(fix_val), "%d", math::fix_digits());
+    const char* gmode_val = graph::state().mode == graph::Mode::kParametric ? "PARAM" : "FUNC";
 
-    const char* const values[kNumRows] = {angle_val, disp_val, fix_val, "[ENTER]"};
+    const char* const values[kNumRows] = {angle_val, disp_val, fix_val, gmode_val, "[ENTER]"};
 
     for (int i = 0; i < kNumRows; ++i) {
         const int y = kTopY + i * kRowH;
