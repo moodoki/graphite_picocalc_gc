@@ -50,13 +50,18 @@ the short "what's next".
      cardioid; r2=2*sin(3*theta) → rose; **both angle modes** (in DEGREE
      set THmax=360, THstep~5.7); trace th/x/y readout.
    - Help: Home F5 → FUNC lists 17 functions, KEYS/SYNTAX scroll.
-2. **Next coding block:** week 14–15 tables (2.12–2.18) — table setup
-   screen, mode-aware evaluate_table_row, auto/ask table screen.
-3. **Done this session:** 2.1–2.11 + minimal 2.22 + help (2.26–2.28) +
-   persistence (2.23). All of spec weeks 11–13 code-complete plus the two
-   biggest week-16 items. Parameter-mode curve cache = 340 points/curve
-   (tiny steps truncate — documented). KEYS help content must be revised
-   if the F-key rethink lands.
+   - **Tables (2.12–2.18)**: Graph F4 → TBL. Auto mode scrolls both ways;
+     F1 setup (Start/Step/AUTO-ASK); ASK mode: ENTER adds values, F5
+     deletes; LEFT/RIGHT column scroll with >2 enabled functions
+     (parametric shows X/Y pairs). Watch scroll latency — per-row compile
+     is the known lever if it drags (worklog note for 2.25).
+2. **Next coding block:** split-screen (2.19–2.21) — needs the
+   framebuffer clip-rect (§8.1; touches verified rendering code — plan it
+   like 2.1: extract/verify in small steps), then trace sync + pane
+   focus. After that only 2.22 polish, 2.24 HW matrix, 2.25 perf remain.
+3. **Done this session:** 2.1–2.18 + 2.23 + 2.26–2.28 + minimal 2.22.
+   Parameter-mode curve cache = 340 points/curve (tiny steps truncate).
+   KEYS help content must be revised if the F-key rethink lands.
 4. **KIV during next test drives:** Pico 2 functional spot-check
    (eval/graph/dirty-band/persistence); charging color once battery <95%;
    F-key layout rethink (feedback item 7).

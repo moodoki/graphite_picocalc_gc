@@ -56,12 +56,18 @@ Conventions:
   binary image) persists everything — mode, all three modes' slots, window,
   t/theta ranges, table config; one-time migration from yfuncs.txt/window.dat;
   parametric/polar editors + mode row now save. **No unpersisted state left.**
-- **Next up**: HW test drive (function parity, parametric + polar acceptance,
-  help browser, persistence across cold cycle + legacy migration), then week
-  14–15 tables (2.12–2.18). Roadmap weeks 11–16 / 17–25 / 26–35.
+- **Table view done (2.12–2.18)**: host-testable `table_model`
+  (mode-aware columns + `evaluate_table_row`), `TableSetupScreen`
+  (Start/Step/AUTO-ASK, persists via 2.23), `TableScreen` (auto infinite
+  scroll, ask accumulation, horizontal column scroll, cached visible
+  window). Entry: Graph F4 "TBL". **Remaining in Phase 2: split-screen
+  (2.19–2.21) + integration (2.22 finish, 2.24, 2.25).**
+- **Next up**: HW test drive (function parity, parametric + polar
+  acceptance, tables in all three modes, help, persistence/migration),
+  then split-screen (2.19–2.21). Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 58 graph = 188 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 72 graph = 202 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -275,6 +281,27 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
   yfuncs.txt writer is gone (its buffers were the 96 constraint).
 - HW-PENDING: first boot after flash must migrate existing Y-funcs/window;
   parametric + polar curves and mode must survive a cold power cycle.
+
+**Tasks 2.12–2.18 — table view:**
+
+- `apps/table_model.{hpp,cpp}` (split out of table_screen for host-testability
+  — not in the spec's file list): column mapping per mode (enabled slots in
+  order, gaps skipped; parametric = two columns per pair, §7.3) and
+  `evaluate_table_row` (per-slot compile/eval/free; syntax errors → NaN
+  column). Per-row compile is the simple/spec-shaped path — if scroll feels
+  slow on HW, the lever is compiling once per regenerate (note for 2.25).
+- `TableSetupScreen`: Start/Step/Independent(AUTO/ASK); immediate-apply +
+  unified save (deviation from the §7.1 mock's F1:SAVE/F2:CANCEL — matches
+  the WINDOW screen convention; revisit if it feels wrong on-device).
+- `TableScreen`: 17 visible rows evaluated into a cache once per change
+  (dirty_ flag — same strip-render pattern as GraphScreen); auto mode
+  scrolls infinitely both directions (row n can be negative); ask mode holds
+  up to 32 entries (oldest dropped when full; ENTER adds via the detail-line
+  InputLine, F5 deletes); LEFT/RIGHT shifts the 3 visible dependent columns
+  with </> overflow markers; detail line = full-precision selected row.
+- Entry point: **Graph F4 "TBL"** (was the free softkey slot); F3/ESC pops
+  back to the graph. G-T split (F4 in the mock) comes with 2.19.
+- Host total **202 checks** (97 math + 33 layout + 72 graph).
 
 ---
 
