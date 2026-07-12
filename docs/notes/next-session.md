@@ -37,14 +37,17 @@ the short "what's next".
 
 ## Next tasks (in priority order)
 
-1. **Phase 2 task 2.3:** `FunctionSource` wrapping Phase 1 recompute behavior
-   (iterate pixel columns, eval via engine; GraphScreen's recompute should
-   populate its cache through it).
-2. **Phase 2 task 2.4:** parameterize the engine's swept variable
-   (`eval_compiled` hardcodes X — see spec §5.3/§14) + `ParametricSource`.
-3. **Note:** 2.2 is done — `GraphState` exists (nested structs, not spec-flat;
-   save/load deliberately deferred to 2.23 with the migration). Trace
-   generalization (spec §14 said within 2.1) was folded into 2.7.
+1. **Phase 2 task 2.5:** parametric editor (6 X/Y pairs, spec §5.1). First UI
+   task of Phase 2 — decide whether to generalize `YEditorScreen` or write a
+   separate screen; the mode descriptor (`graph::descriptor_for`) exists for
+   labels/slot counts. Slots live in `graph::state().param`.
+2. **Phase 2 task 2.6:** mode-aware window screen (Tmin/Tmax/Tstep rows when
+   mode == parametric; fields live in `graph::state()`).
+3. **Phase 2 task 2.7:** parametric plotting + trace — wire `ParametricSource`
+   (done, host-tested) into GraphScreen via `Plotter::plot()`; includes the
+   trace generalization deferred from 2.1 (spec §14).
+4. **Done this session:** 2.1–2.4. `GraphState` is nested-structs (not
+   spec-flat); save/load deferred to 2.23 with the migration.
 3. **KIV during next test drives:** function-mode visual check after the 2.1
    refactor (plot/trace/zoom should be pixel-identical); Pico 2 functional
    spot-check (eval/graph/dirty-band/persistence); charging color once battery

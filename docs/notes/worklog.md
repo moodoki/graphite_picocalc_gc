@@ -32,12 +32,13 @@ Conventions:
   (clang-tidy installed + config fixed, `WarningsAsErrors: '*'`), and **task 2.1 is
   done** — `src/graph/` now holds `Viewport` + `Plotter`/`PointSource`, GraphScreen
   routes through them, behavior-preserving (viewport formulas locked by host test).
-- **Task 2.2 also done** (same session): `graph::Mode` + `ModeDescriptor`,
-  `GraphState` holding all three modes' slots + windows + `TableConfig`;
-  `apps::graph_model` now delegates into `graph::state()` (aliases keep call
-  sites unchanged).
-- **Next up**: Phase 2 task 2.3 (`FunctionSource`), then 2.4 (engine swept-var
-  parameterization + `ParametricSource`). Roadmap weeks 11–16 / 17–25 / 26–35.
+- **Tasks 2.2–2.4 also done** (same session): `graph::Mode` + `GraphState`
+  (apps::graph_model delegates into `graph::state()`); `FunctionSource` feeds
+  GraphScreen's recompute; `Engine::eval_compiled` got a slot-indexed overload
+  and `ParametricSource` sweeps t (host-tested with a unit circle).
+- **Next up**: Phase 2 task 2.5 (parametric editor UI), 2.6 (parametric window
+  params), 2.7 (parametric plotting + trace — includes the trace extraction
+  deferred from 2.1). Roadmap weeks 11–16 / 17–25 / 26–35.
 - KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 79 math + 33 layout + 18 graph = 130 checks, 0 failures
@@ -147,6 +148,20 @@ Two commits: `lint: clang-tidy baseline clean`, `graph: extract Viewport + Plott
 - Parametric/polar slots use `config::kMaxExprLen` (256) per §9; Y-slots stay 96
   until 2.23 (yfuncs.txt buffers sized to it).
 - test_graph.cpp grew descriptor + defaults checks (host total now 144).
+
+**Phase 2 tasks 2.3 + 2.4 — FunctionSource, engine sweep slot, ParametricSource:**
+
+- `graph/function_source.{hpp,cpp}`: PointSource iterating viewport pixel columns
+  through `eval_compiled` — Phase 1's recompute inner loop wrapped; GraphScreen now
+  fills its cache from it (behavior identical).
+- `Engine::eval_compiled(handle, var_slot, value)` overload — Phase 1 hardcoded the
+  X write (§5.3/§14); 2-arg form delegates with the X slot. Parametric sweeps
+  `'t'-'a'`; polar (2.8) will sweep `Variables::kTheta`.
+- `graph/parametric_source.{hpp,cpp}`: t sweep with integer step counter +
+  endpoint slack (1e-9) — `[0,2pi]` at `2pi/63` emits exactly 64 points; a point is
+  defined only when both x(t) and y(t) are finite.
+- Host tests: swept-slot checks (t/theta/X-compat), unit-circle sweep, degenerate
+  zero-step case. Host total now **161 checks** (79 math + 33 layout + 49 graph).
 
 ---
 
