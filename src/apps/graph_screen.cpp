@@ -12,11 +12,26 @@
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
+#include "apps/param_editor.hpp"
 #include "apps/y_editor.hpp"
 #include "graph/function_source.hpp"
+#include "graph/parametric_source.hpp"
 #include "graph/plotter.hpp"
 
 namespace apps {
+
+namespace {
+// Clamp a pixel coordinate for the int16 caches (far-offscreen values
+// keep line joins sane; truly undefined points use kOffscreen).
+int16_t clamp_px(int v) {
+    constexpr int kClamp = graph::Plotter::kClampPy;
+    return static_cast<int16_t>(v < -kClamp ? -kClamp : (v > kClamp ? kClamp : v));
+}
+
+bool parametric_mode() {
+    return graph::state().mode == graph::Mode::kParametric;
+}
+}  // namespace
 
 void GraphScreen::on_activate() {
     dirty_ = true;
@@ -36,17 +51,46 @@ graph::Viewport GraphScreen::viewport() const {
     return vp;
 }
 
+int GraphScreen::slot_count() const {
+    return parametric_mode() ? graph::kParametricSlots : graph::kFunctionSlots;
+}
+
+bool GraphScreen::slot_active(int s) const {
+    return parametric_mode() ? pactive_[s] : active_[s];
+}
+
+int GraphScreen::trace_max_index() const {
+    if (!parametric_mode()) {
+        return kWidth - 1;
+    }
+    return pcount_[trace_.slot] > 0 ? pcount_[trace_.slot] - 1 : 0;
+}
+
 void GraphScreen::recompute() {
     const graph::Viewport vp = viewport();
+    const uint64_t t0 = time_us_64();
+
+    if (parametric_mode()) {
+        recompute_parametric(vp);
+    } else {
+        recompute_function(vp);
+    }
+
+    last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
+    printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
+    trace_.clamp(trace_max_index());
+    dirty_ = false;
+}
+
+void GraphScreen::recompute_function(const graph::Viewport& vp) {
     auto& fns = y_functions();
     auto& eng = math::engine();
 
     // Graphing sweeps the shared X variable; preserve any value the user
     // stored in X on the home screen.
     const math::calc_t saved_x = eng.vars()['x'];
-    const uint64_t t0 = time_us_64();
 
-    for (int fi = 0; fi < kNumFuncs; ++fi) {
+    for (int fi = 0; fi < graph::kFunctionSlots; ++fi) {
         active_[fi] = fns.enabled[fi] && fns.expr[fi][0] != 0;
         if (!active_[fi]) {
             continue;
@@ -62,23 +106,56 @@ void GraphScreen::recompute() {
         double y = 0.0;
         bool defined = false;
         for (int px = 0; px < kWidth && src.next(&x, &y, &defined); ++px) {
-            if (defined) {
-                // Clamp far-offscreen values so line joins stay sane, but
-                // mark truly-NaN as offscreen.
-                const int py = vp.px_y(y);
-                constexpr int kClamp = graph::Plotter::kClampPy;
-                plot_y_[fi][px] =
-                    static_cast<int16_t>(py < -kClamp ? -kClamp : (py > kClamp ? kClamp : py));
-            } else {
-                plot_y_[fi][px] = kOffscreen;
-            }
+            plot_y_[fi][px] = defined ? clamp_px(vp.px_y(y)) : kOffscreen;
         }
         eng.free_compiled(compiled);
     }
     eng.vars()['x'] = saved_x;
-    last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
-    printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
-    dirty_ = false;
+}
+
+void GraphScreen::recompute_parametric(const graph::Viewport& vp) {
+    auto& st = graph::state();
+    auto& eng = math::engine();
+
+    // The sweep writes the shared T variable; preserve the user's value.
+    const math::calc_t saved_t = eng.vars()['t'];
+
+    for (int p = 0; p < graph::kParametricSlots; ++p) {
+        pcount_[p] = 0;
+        pactive_[p] =
+            st.param.enabled[p] && st.param.x_expr[p][0] != 0 && st.param.y_expr[p][0] != 0;
+        if (!pactive_[p]) {
+            continue;
+        }
+        void* xh = eng.compile(st.param.x_expr[p]);
+        void* yh = eng.compile(st.param.y_expr[p]);
+        if (xh == nullptr || yh == nullptr) {
+            pactive_[p] = false;
+            eng.free_compiled(xh);
+            eng.free_compiled(yh);
+            continue;
+        }
+        graph::ParametricSource src(eng, xh, yh, st.t_min, st.t_max, st.t_step);
+        src.begin(vp);
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+        int n = 0;
+        while (n < kMaxCurvePoints && src.next(&x, &y, &defined)) {
+            if (defined) {
+                ppx_[p][n] = clamp_px(vp.px_x(x));
+                ppy_[p][n] = clamp_px(vp.px_y(y));
+            } else {
+                ppx_[p][n] = 0;
+                ppy_[p][n] = kOffscreen;
+            }
+            ++n;
+        }
+        pcount_[p] = static_cast<int16_t>(n);
+        eng.free_compiled(xh);
+        eng.free_compiled(yh);
+    }
+    eng.vars()['t'] = saved_t;
 }
 
 void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
@@ -122,30 +199,62 @@ void GraphScreen::draw_function(gfx::Framebuffer& fb, int fi) const {
     }
 }
 
+void GraphScreen::draw_parametric(gfx::Framebuffer& fb, int p) const {
+    const graph::PlotStyle style{function_color(p), false};
+    graph::Plotter plotter;
+    plotter.begin();
+    for (int i = 0; i < pcount_[p]; ++i) {
+        plotter.point(fb, ppx_[p][i], ppy_[p][i], ppy_[p][i] != kOffscreen, style);
+    }
+}
+
 void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     using namespace platform::colors;
     const auto& font = gfx::main_font();
-
     const graph::Viewport vp = viewport();
-    const int px = trace_px_;
-    const int py = plot_y_[trace_func_][px];
-    const double x = vp.data_x(px);
+
+    int px = 0;
+    int py = kOffscreen;
+    char line[64];
+
+    if (parametric_mode()) {
+        const int p = trace_.slot;
+        if (pcount_[p] == 0) {
+            return;
+        }
+        const int i = trace_.index;
+        px = ppx_[p][i];
+        py = ppy_[p][i];
+        const auto& st = graph::state();
+        const double t = st.t_min + i * st.t_step;
+        char tb[24];
+        char xb[24];
+        char yb[24];
+        math::format_number(t, tb, sizeof(tb));
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        math::format_number(py == kOffscreen ? nan : vp.data_x(px), xb, sizeof(xb));
+        math::format_number(py == kOffscreen ? nan : vp.data_y(py), yb, sizeof(yb));
+        std::snprintf(line, sizeof(line), "P%d  t=%s x=%s y=%s", p + 1, tb, xb, yb);
+    } else {
+        px = trace_.index;
+        py = plot_y_[trace_.slot][px];
+        const double x = vp.data_x(px);
+        char xb[24];
+        char yb[24];
+        math::format_number(x, xb, sizeof(xb));
+        math::format_number(
+            py == kOffscreen ? std::numeric_limits<double>::quiet_NaN() : vp.data_y(py), yb,
+            sizeof(yb));
+        std::snprintf(line, sizeof(line), "Y%d  x=%s  y=%s", trace_.slot + 1, xb, yb);
+    }
 
     // Vertical trace line + cursor marker.
     fb.draw_vline(px, kTop, kHeight, kCursor);
     if (py != kOffscreen) {
-        fb.fill_rect(px - 2, py - 2, 5, 5, function_color(trace_func_));
+        fb.fill_rect(px - 2, py - 2, 5, 5, function_color(trace_.slot));
     }
 
     // Coordinate readout at the bottom of the viewport (D3: bottom).
-    const double y = vp.data_y(py);
-    char xb[24];
-    char yb[24];
-    math::format_number(x, xb, sizeof(xb));
-    math::format_number(py == kOffscreen ? std::numeric_limits<double>::quiet_NaN() : y, yb,
-                        sizeof(yb));
-    char line[56];
-    std::snprintf(line, sizeof(line), "Y%d  x=%s  y=%s", trace_func_ + 1, xb, yb);
     const int ty = kTop + kHeight - font.height() - 2;
     fb.fill_rect(0, ty - 2, platform::kScreenW, font.height() + 4,
                  platform::Color::from_rgb(20, 20, 20));
@@ -159,15 +268,16 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
     }
     switch (ev.key) {
         case Key::kF1:  // Toggle trace
-            trace_ = !trace_;
-            if (trace_) {
-                // Start on the first active function.
-                for (int i = 0; i < kNumFuncs; ++i) {
-                    if (active_[i]) {
-                        trace_func_ = i;
+            trace_.active = !trace_.active;
+            if (trace_.active) {
+                // Start on the first active slot.
+                for (int i = 0; i < slot_count(); ++i) {
+                    if (slot_active(i)) {
+                        trace_.slot = i;
                         break;
                     }
                 }
+                trace_.clamp(trace_max_index());
             }
             return true;
         case Key::kF2:
@@ -179,27 +289,32 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             dirty_ = true;
             return true;
         case Key::kF5:
-            ui::screen_manager().push(&y_editor_screen());
+            if (parametric_mode()) {
+                ui::screen_manager().push(&param_editor_screen());
+            } else {
+                ui::screen_manager().push(&y_editor_screen());
+            }
             return true;
         case Key::kLeft:
-            if (trace_ && trace_px_ > 0) {
-                --trace_px_;
+            if (trace_.active) {
+                trace_.step(-1, trace_max_index());
             }
             return true;
         case Key::kRight:
-            if (trace_ && trace_px_ < kWidth - 1) {
-                ++trace_px_;
+            if (trace_.active) {
+                trace_.step(+1, trace_max_index());
             }
             return true;
         case Key::kUp:
         case Key::kDown:
-            if (trace_) {  // Switch to the next active function
-                for (int step = 0; step < kNumFuncs; ++step) {
-                    trace_func_ = (trace_func_ + 1) % kNumFuncs;
-                    if (active_[trace_func_]) {
+            if (trace_.active) {  // Switch to the next active slot
+                for (int step = 0; step < slot_count(); ++step) {
+                    trace_.slot = (trace_.slot + 1) % slot_count();
+                    if (slot_active(trace_.slot)) {
                         break;
                     }
                 }
+                trace_.clamp(trace_max_index());
             }
             return true;
         case Key::kEscape:
@@ -231,20 +346,38 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
 
     fb.clear(kBlack);
     draw_axes(fb);
-    for (int fi = 0; fi < kNumFuncs; ++fi) {
-        if (active_[fi]) {
-            draw_function(fb, fi);
+    for (int s = 0; s < slot_count(); ++s) {
+        if (!slot_active(s)) {
+            continue;
+        }
+        if (parametric_mode()) {
+            draw_parametric(fb, s);
+        } else {
+            draw_function(fb, s);
         }
     }
-    if (trace_) {
+    if (trace_.active) {
         draw_trace(fb);
     }
 
-    if (!y_functions().any_enabled()) {
-        font.draw_string(fb, 40, kTop + kHeight / 2, "No functions. Press F5 for Y=.", kGrayLine);
+    // Hint uses the pre-compile enabled state (Phase 1 behavior): a
+    // slot with a syntax error suppresses it too.
+    bool any = false;
+    if (parametric_mode()) {
+        const auto& pf = graph::state().param;
+        for (int p = 0; p < graph::kParametricSlots; ++p) {
+            any = any || (pf.enabled[p] && pf.x_expr[p][0] != 0 && pf.y_expr[p][0] != 0);
+        }
+    } else {
+        any = y_functions().any_enabled();
+    }
+    if (!any) {
+        const char* hint = parametric_mode() ? "No curves. Press F5 for the editor."
+                                             : "No functions. Press F5 for Y=.";
+        font.draw_string(fb, 40, kTop + kHeight / 2, hint, kGrayLine);
     }
 
-    const char* const keys[6] = {"TRC", "Z+", "Z-", "", "Y=", "DIAG"};
+    const char* const keys[6] = {"TRC", "Z+", "Z-", "", parametric_mode() ? "PAR" : "Y=", "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

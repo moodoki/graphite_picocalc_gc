@@ -3,17 +3,24 @@
 #include <cstdint>
 
 #include "ui/screen.hpp"
+#include "graph/graph_state.hpp"
+#include "graph/trace.hpp"
 #include "graph/viewport.hpp"
 
 namespace apps {
 
-// Function graphing viewport (tasks 4.2-4.7). Plots all enabled
-// Y-functions with axes, grid, discontinuity handling, trace, and zoom.
+// Graphing viewport (tasks 4.2-4.7; parametric since 2.7). Plots the
+// active mode's functions with axes, grid, discontinuity handling,
+// trace, and zoom.
 //
-// Plot points are precomputed into a column cache when the window or
-// functions change, so per-strip rendering is cheap.
+// Plot points are precomputed into pixel caches when the window or
+// functions change, so per-strip rendering is cheap: function mode
+// caches screen-y per pixel column; parametric caches (px, py) per
+// parameter step.
 class GraphScreen : public ui::Screen {
 public:
+    GraphScreen() { trace_.index = kWidth / 2; }
+
     void on_activate() override;
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
@@ -29,23 +36,40 @@ private:
 
     static constexpr int16_t kOffscreen = INT16_MIN;
 
-    // Cached screen-y per function per column (kOffscreen = no point).
-    int16_t plot_y_[7][kWidth] = {};
-    bool active_[7] = {};  // Which slots are enabled + non-empty
-    bool dirty_ = true;
+    // Parametric point budget per pair (~8 KB total cache). The default
+    // Tstep (2pi/63) uses 64; very small Tstep values get truncated.
+    static constexpr int kMaxCurvePoints = 340;
 
-    bool trace_ = false;
-    int trace_func_ = 0;
-    int trace_px_ = kWidth / 2;
+    // Function mode: cached screen-y per column (kOffscreen = no point).
+    int16_t plot_y_[graph::kFunctionSlots][kWidth] = {};
+    bool active_[graph::kFunctionSlots] = {};
+
+    // Parametric mode: cached pixel points per parameter step
+    // (ppy == kOffscreen = undefined at that step, pen up).
+    int16_t ppx_[graph::kParametricSlots][kMaxCurvePoints] = {};
+    int16_t ppy_[graph::kParametricSlots][kMaxCurvePoints] = {};
+    int16_t pcount_[graph::kParametricSlots] = {};
+    bool pactive_[graph::kParametricSlots] = {};
+
+    bool dirty_ = true;
+    graph::TraceCursor trace_;
 
     // Last replot time in microseconds (task 5.6 profiling hook).
     uint32_t last_recompute_us_ = 0;
 
     void recompute();
+    void recompute_function(const graph::Viewport& vp);
+    void recompute_parametric(const graph::Viewport& vp);
     graph::Viewport viewport() const;
+
+    // Active-mode slot helpers for trace navigation.
+    int slot_count() const;
+    bool slot_active(int s) const;
+    int trace_max_index() const;
 
     void draw_axes(gfx::Framebuffer& fb) const;
     void draw_function(gfx::Framebuffer& fb, int fi) const;
+    void draw_parametric(gfx::Framebuffer& fb, int p) const;
     void draw_trace(gfx::Framebuffer& fb) const;
 };
 

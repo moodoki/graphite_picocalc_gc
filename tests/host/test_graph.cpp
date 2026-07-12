@@ -8,6 +8,7 @@
 #include "graph/function_source.hpp"
 #include "graph/graph_mode.hpp"
 #include "graph/parametric_source.hpp"
+#include "graph/trace.hpp"
 #include "graph/graph_state.hpp"
 #include "graph/viewport.hpp"
 #include "math/engine.hpp"
@@ -263,6 +264,22 @@ int main() {
             ++emitted;
         }
         expect(emitted == 1 && !any_defined, "zero step emits one undefined point");
+    }
+
+    // TraceCursor (task 2.7): clamped stepping.
+    {
+        graph::TraceCursor tc;
+        tc.index = 5;
+        tc.step(-1, 63);
+        expect(tc.index == 4, "step left");
+        tc.step(-10, 63);
+        expect(tc.index == 0, "clamps at 0");
+        tc.index = 62;
+        tc.step(+1, 63);
+        tc.step(+1, 63);
+        expect(tc.index == 63, "clamps at max_index");
+        tc.clamp(9);
+        expect(tc.index == 9, "re-clamp after range shrink");
     }
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
