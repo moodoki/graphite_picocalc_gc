@@ -90,10 +90,25 @@ double npr(double n, double r) {
     return result;
 }
 
+namespace {
+// xorshift64* state. The default keeps host tests deterministic when nothing
+// seeds; firmware main() reseeds from the SDK entropy source at boot.
+constexpr std::uint64_t kDefaultRandSeed = 0x9E3779B97F4A7C15ULL;
+std::uint64_t g_rand_state = kDefaultRandSeed;
+}  // namespace
+
+void seed_rand(std::uint64_t seed) {
+    g_rand_state = seed != 0 ? seed : kDefaultRandSeed;
+}
+
 double rand01() {
-    // Unseeded rand() is deliberate for now (seeding is a tracked backlog item).
-    // NOLINTNEXTLINE(cert-msc30-c,cert-msc50-cpp,misc-predictable-rand)
-    return static_cast<double>(std::rand()) / (static_cast<double>(RAND_MAX) + 1.0);
+    std::uint64_t x = g_rand_state;
+    x ^= x >> 12U;
+    x ^= x << 25U;
+    x ^= x >> 27U;
+    g_rand_state = x;
+    // Top 53 bits of the scrambled output -> uniform double in [0, 1).
+    return static_cast<double>((x * 0x2545F4914F6CDD1DULL) >> 11U) / 9007199254740992.0;
 }
 
 double round_n(double x, double n) {

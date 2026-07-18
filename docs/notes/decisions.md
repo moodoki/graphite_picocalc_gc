@@ -250,12 +250,12 @@ further.
 ## D9: Interim 8x12 font (Coyote font1) instead of 8x16
 
 **Date**: 2026-07-08
-**Status**: Accepted (interim)
+**Status**: Resolved 2026-07-18 (Session 10)
 **Context**: Spec calls for an 8x16 font generated from a public-domain BDF; that conversion needs font tooling not yet in the repo.
 **Decision**: Ship milestone 1 with the vendored Coyote OS `font1` (8x12, UTFT layout) behind `gfx::Font`, which reads any UTFT-format header. Generate proper 8x16 + 6x8 fonts before milestone 5.
 **Rationale**: Unblocks all text rendering now; the Font abstraction makes the swap a data change.
 **Tradeoffs**: Slightly smaller glyphs than designed; layout metrics tuned later.
-**Revisit when**: Task 5.x polish, or when the math renderer needs multiple sizes (milestone 3).
+**Resolution (2026-07-18)**: Swapped to **Spleen** (BSD-2-Clause, one family for both sizes): 8x16 main + **5x8 small** (`gfx::small_font()`, in place of the spec's 6x8 — Spleen has no 6x8 and 5x8 suits axis labels better). Tooling: `scripts/bdf_to_utft.py`; sources vendored in `drivers/spleen/`. This was also step 3 of the D17 permissive path — `font1` is no longer compiled in. Layout impact was a data change plus three row-height constants, as designed.
 
 ---
 

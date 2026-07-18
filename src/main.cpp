@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "pico/rand.h"
 #include "pico/stdlib.h"
 
 #include "config.hpp"
@@ -19,6 +20,7 @@
 #include "gfx/framebuffer.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/functions.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -148,7 +150,7 @@ public:
 
         font.draw_string(fb, 8, y, "Type on the keyboard to test input.", kGrayLine, kBlack);
         y += lh;
-        // 8x12 font on a 320px panel: keep lines under ~38 chars.
+        // 8px-wide font on a 320px panel: keep lines under ~38 chars.
         font.draw_string(fb, 8, y, "ESC exits.", kGrayLine, kBlack);
         y += lh;
         font.draw_string(fb, 8, y, "Type files on home for SD list.", kGrayLine, kBlack);
@@ -179,6 +181,8 @@ int main() {
 
     g_init_status = platform::init();
     run_self_tests();
+
+    math::fn::seed_rand(get_rand_64());
 
     // Display rendering is synchronous on core 0 (the dual-core display
     // handshake hangs on hardware — see D10). Core 1 is left idle.

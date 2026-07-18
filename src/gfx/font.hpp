@@ -31,8 +31,10 @@ private:
     void draw_char_impl(Framebuffer& fb, int x, int y, char c, Color fg, const Color* bg) const;
 };
 
-// Main text font (8x12, vendored Coyote OS font1 — interim until a
-// proper 8x16 is generated; see worklog).
+// Main text font: Spleen 8x16 (D9 — replaced the interim Coyote 8x12).
 const Font& main_font();
+
+// Small font: Spleen 5x8 — axis labels, dense annotations.
+const Font& small_font();
 
 }  // namespace gfx

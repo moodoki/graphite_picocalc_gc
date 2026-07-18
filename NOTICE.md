@@ -15,7 +15,8 @@ portions remain individually reusable under MIT.
 
 | Component | Location | License | Origin |
 |-----------|----------|---------|--------|
-| ST7365P display driver (`lcdspi`, incl. `font1.h` bitmap font) | `drivers/lcdspi/` | GPL-2.0 | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) by laingcc |
+| ST7365P display driver (`lcdspi`; its `font1.h` font is no longer compiled in — replaced by Spleen, D9) | `drivers/lcdspi/` | GPL-2.0 | [Coyote OS](https://github.com/laingcc/Picocalc-Coyote-OS) by laingcc |
+| Spleen bitmap font (8x16, 5x8; generated headers in `src/gfx/fonts/`) | `drivers/spleen/` | BSD-2-Clause | [fcambus/spleen](https://github.com/fcambus/spleen) by Frederic Cambus |
 | STM32 I2C keyboard driver (`i2ckbd`) | `drivers/i2ckbd/` | GPL-2.0 | Coyote OS |
 | PWM buzzer driver (`pwm_sound`, currently unused) | `drivers/pwm_sound/` | GPL-2.0 | Coyote OS |
 | Reference headers (not compiled) | `drivers/coyote_reference/` | GPL-2.0 | Coyote OS |
@@ -26,14 +27,14 @@ portions remain individually reusable under MIT.
 
 Per-component license texts live next to the code (`drivers/LICENSE.coyote-os`,
 `drivers/fatfs/LICENSE.txt`, `drivers/tinyexpr/LICENSE`,
-`drivers/rp2040-psram/LICENSE`) and must be retained in redistributions.
+`drivers/rp2040-psram/LICENSE`, `drivers/spleen/LICENSE`) and must be retained
+in redistributions.
 
 ## Path to a fully permissive release (not planned — future option)
 
-The GPL surface is confined to `drivers/lcdspi`, `drivers/i2ckbd`,
-`drivers/pwm_sound`, and the `font1.h` font data compiled into `src/gfx/font`.
-The project's `platform/` HAL was designed so these are replaceable. To make
-the entire firmware MIT, the work would be roughly:
+The GPL surface is confined to `drivers/lcdspi`, `drivers/i2ckbd`, and
+`drivers/pwm_sound`. The project's `platform/` HAL was designed so these are
+replaceable. To make the entire firmware MIT, the work would be roughly:
 
 1. **Display driver rewrite** (largest item, ~2–3 sessions incl. HW
    verification): reimplement the ST7365P SPI init/push path from the
@@ -41,8 +42,8 @@ the entire firmware MIT, the work would be roughly:
    the bring-up harness.
 2. **Keyboard driver rewrite** (~1 session): the STM32 I2C register protocol
    is small and well understood.
-3. **Font replacement** (~1 session, overlaps the deferred D9 8x16-font item):
-   swap `font1.h` for a permissively licensed bitmap font (e.g. Spleen/Tamsyn).
+3. **Font replacement** — done 2026-07-18 (D9): `font1.h` swapped for
+   Spleen (BSD-2-Clause, `drivers/spleen/`).
 4. **Drop `pwm_sound`** from the build (already unused) until an audio HAL is
    written fresh.
 5. Re-derive anything sourced from `coyote_reference/` headers (pin maps and

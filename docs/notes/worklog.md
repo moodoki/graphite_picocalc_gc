@@ -82,14 +82,23 @@ Conventions:
   recompute ≪ frame push, the scroll symptom was event backlog (fixed),
   compile-once lever not needed; 2.22 closed — MODE row + D20 made mode
   fully integrated (F3 everywhere, mode-aware F1/WINDOW/labels).
-- **Next up**: start Phase 3 (`docs/phases/phase3-spec.md`) — sub-phase
-  3A: the `Array` primitive + list editor. Note the §8 strip-safety
-  rule and the 3D.14 combined Pico 1 pass.
+- **Session 10 (2026-07-18)**: pre-Phase-3 deferred-item batch, all four
+  items code-complete, lint-clean, flashed to the Pico 2 (HW eval
+  pending): **D9 done** — Spleen 8x16 main + 5x8 small font (BSD-2,
+  `drivers/spleen/`, `scripts/bdf_to_utft.py` converter), Coyote `font1`
+  no longer compiled (D17 step 3, NOTICE updated); **rand() seeded**
+  (xorshift64* in math::fn, `get_rand_64()` at boot, host-deterministic);
+  **ZoomFit** (`F` on graph); **numeric axis tick labels** in the small
+  font (`L` toggles — evaluation feature).
+- **Next up**: on-device eval of the Session 10 batch, then start
+  Phase 3 (`docs/phases/phase3-spec.md`) — sub-phase 3A: the `Array`
+  primitive + list editor. Note the §8 strip-safety rule and the 3D.14
+  combined Pico 1 pass.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 72 graph = 202 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 111 math + 33 layout + 72 graph = 216 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -150,6 +159,60 @@ Still to verify on hardware:
 | Item | What to check on hardware |
 |------|---------------------------|
 | Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes + Session 9 remap, and Phase 3 acceptance |
+| Session 10 batch (flashed 2026-07-18) | New fonts on every screen (readability, no clipped rows — esp. table/files/help at kRowH 16, status-bar/softkey text, pretty math, split panes); `F` ZoomFit in all three modes (incl. asymptote behavior, e.g. `1/x` gives a huge y-range — authentic TI behavior, judge the feel); `L` axis-label toggle + label placement at odd windows (axis off-screen, tight zoom); `rand()` varies across reboots |
+
+---
+
+## 2026-07-18 — Session 10: pre-Phase-3 deferred-item batch (D9 fonts, rand seed, ZoomFit, axis labels)
+
+Reviewed the deferred-items backlog before Phase 3; the user picked four to
+clear first (D10/D14 stay next in line): D9 was easy, ZoomFit is a good
+feature, axis tick labels need on-device evaluation (and needed D9's small
+font), and rand() needed seeding before statistics work begins.
+
+**D9 font upgrade — done (also D17 permissive-path step 3):**
+
+- Vendored **Spleen 2.2.0** (BSD-2-Clause) under `drivers/spleen/` (8x16 +
+  5x8 BDFs + LICENSE + README with regen commands).
+- New `scripts/bdf_to_utft.py` converts BDF → the UTFT header layout
+  `gfx::Font` already reads (packed row-major bitstream; glyphs composed via
+  BBX/ascent). Verified by decoding glyphs back to ASCII art.
+- Generated `src/gfx/fonts/spleen8x16.h` / `spleen5x8.h` (ASCII 32–126,
+  ~1.5 KB + ~0.5 KB); `gfx::main_font()` is now the 8x16, new
+  `gfx::small_font()` is the 5x8. Coyote `font1` is **no longer compiled
+  in** — NOTICE.md updated (GPL surface now lcdspi/i2ckbd/pwm_sound only).
+- Layout: Spleen's cell has built-in leading (caps ink rows 2–11), so
+  16px rows pack tight. `kRowH 14→16` (table, files), `kLineH 14→16` +
+  `kVisibleLines 19→16` (help), help scroll indicator moved into the title
+  bar. Everything else already scaled off `font.height()` or had roomy rows;
+  bar heights and text y-offsets unchanged (caps ink fits).
+
+**rand() seeded** (closed the lint-era backlog item): `math::fn::rand01()`
+is now a **xorshift64\*** PRNG (top-53-bits → [0,1) double) with
+`seed_rand(uint64)`; firmware `main()` seeds from the SDK entropy source
+(`get_rand_64()`, new `pico_rand` link dep). Host tests stay deterministic
+under the default seed; 6 new checks (range, determinism, divergence) —
+math suite 105→111.
+
+**ZoomFit** (`F` on the graph screen, task 4.7 finally): function mode
+refits y over the current x-range (TI behavior); parametric/polar refit
+both axes to the curve extent. Sweeps world coordinates through the same
+`PointSource`s recompute plots from (kMaxCurvePoints cap; engine vars
+saved/restored like recompute). 5% margin, half-unit span floor for flat
+curves; no active/plottable curve → no-op. Help KEYS updated.
+
+**Numeric axis tick labels** (task 4.4, deferred since Phase 1 M4): drawn
+in the small font at scl grid lines, thinned to >= ~48px (x) / ~24px (y)
+apart, origin skipped, placed beside the axes (flipping/clamping at
+edges; screen-edge fallback when an axis is off-screen). **`L` toggles
+live** — this shipped explicitly as an *evaluation* feature: judge on
+device whether it's too distracting; not persisted. Strip-safe (pure
+draws in `draw_axes`' const path).
+
+Lint clean (two float-loop-counter findings fixed by switching to the
+integer-index grid idiom), both boards build, 216 host checks green.
+**Pico 2 flashed same session** (BOOTSEL cp path, ~15 s mount wait
+confirmed again); on-device eval queued in HW-PENDING.
 
 ---
 

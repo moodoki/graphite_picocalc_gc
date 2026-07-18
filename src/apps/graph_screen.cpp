@@ -267,6 +267,120 @@ void GraphScreen::recompute_polar(const graph::Viewport& vp) {
     eng.vars().vars[math::Variables::kTheta] = saved_theta;
 }
 
+void GraphScreen::zoom_fit() {
+    // ZoomFit ('F', task 4.7): function mode refits y over the current
+    // x range (TI behavior); parametric/polar refit both axes to the
+    // curve's extent. Sweeps world coordinates with the same sources
+    // recompute() plots from.
+    auto& st = graph::state();
+    auto& eng = math::engine();
+    const graph::Viewport vp = viewport();
+
+    double xlo = 0.0;
+    double xhi = 0.0;
+    double ylo = 0.0;
+    double yhi = 0.0;
+    bool any = false;
+    auto add = [&](double x, double y) {
+        if (!any) {
+            xlo = xhi = x;
+            ylo = yhi = y;
+            any = true;
+            return;
+        }
+        xlo = x < xlo ? x : xlo;
+        xhi = x > xhi ? x : xhi;
+        ylo = y < ylo ? y : ylo;
+        yhi = y > yhi ? y : yhi;
+    };
+    auto sweep = [&](graph::PointSource& src) {
+        src.begin(vp);
+        double x = 0.0;
+        double y = 0.0;
+        bool defined = false;
+        int n = 0;
+        while (n < kMaxCurvePoints && src.next(&x, &y, &defined)) {
+            if (defined) {
+                add(x, y);
+            }
+            ++n;
+        }
+    };
+
+    switch (mode()) {
+        case graph::Mode::kParametric: {
+            const math::calc_t saved_t = eng.vars()['t'];
+            for (int p = 0; p < graph::kParametricSlots; ++p) {
+                if (!st.param.enabled[p] || st.param.x_expr[p][0] == 0 ||
+                    st.param.y_expr[p][0] == 0) {
+                    continue;
+                }
+                void* xh = eng.compile(st.param.x_expr[p]);
+                void* yh = eng.compile(st.param.y_expr[p]);
+                if (xh != nullptr && yh != nullptr) {
+                    graph::ParametricSource src(eng, xh, yh, st.t_min, st.t_max, st.t_step);
+                    sweep(src);
+                }
+                eng.free_compiled(xh);
+                eng.free_compiled(yh);
+            }
+            eng.vars()['t'] = saved_t;
+            break;
+        }
+        case graph::Mode::kPolar: {
+            const math::calc_t saved_theta = eng.vars().vars[math::Variables::kTheta];
+            for (int p = 0; p < graph::kPolarSlots; ++p) {
+                if (!st.polar.enabled[p] || st.polar.expr[p][0] == 0) {
+                    continue;
+                }
+                void* rh = eng.compile(st.polar.expr[p]);
+                if (rh != nullptr) {
+                    graph::PolarSource src(eng, rh, st.theta_min, st.theta_max, st.theta_step);
+                    sweep(src);
+                }
+                eng.free_compiled(rh);
+            }
+            eng.vars().vars[math::Variables::kTheta] = saved_theta;
+            break;
+        }
+        default: {
+            const math::calc_t saved_x = eng.vars()['x'];
+            auto& fns = y_functions();
+            for (int fi = 0; fi < graph::kFunctionSlots; ++fi) {
+                if (!fns.enabled[fi] || fns.expr[fi][0] == 0) {
+                    continue;
+                }
+                void* compiled = eng.compile(fns.expr[fi]);
+                if (compiled != nullptr) {
+                    graph::FunctionSource src(eng, compiled);
+                    // FunctionSource walks one x per viewport column, so
+                    // kWidth samples; the point cap never binds here.
+                    sweep(src);
+                }
+                eng.free_compiled(compiled);
+            }
+            eng.vars()['x'] = saved_x;
+            break;
+        }
+    }
+
+    if (!any) {
+        return;  // Nothing plottable — leave the window alone.
+    }
+
+    auto& w = graph_window();
+    // 5% margin; a flat curve (span 0) gets a half-unit each side.
+    const double my = (yhi - ylo) > 0 ? (yhi - ylo) * 0.05 : 0.5;
+    w.y_min = ylo - my;
+    w.y_max = yhi + my;
+    if (param_style()) {
+        const double mx = (xhi - xlo) > 0 ? (xhi - xlo) * 0.05 : 0.5;
+        w.x_min = xlo - mx;
+        w.x_max = xhi + mx;
+    }
+    save_window();
+}
+
 void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     using namespace platform::colors;
     const auto& w = graph_window();
@@ -294,6 +408,79 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     }
     if (w.x_min <= 0 && w.x_max >= 0) {
         fb.draw_vline(vp.px_x(0.0), top_, height_, kWhite);
+    }
+
+    if (axis_labels_) {
+        draw_axis_labels(fb);
+    }
+}
+
+void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
+    // Numeric tick labels (task 4.4, small font). Evaluation feature —
+    // 'L' toggles them live. Labels sit at scl grid lines but are
+    // thinned so neighbors stay >= ~48px (x) / ~24px (y) apart; the
+    // origin is skipped (the axis crossing says "0" already).
+    using namespace platform::colors;
+    const auto& w = graph_window();
+    const graph::Viewport vp = viewport();
+    const auto& font = gfx::small_font();
+    const int bottom = top_ + height_;
+
+    if (w.x_scl > 0) {
+        const double per_px = w.x_scl * kWidth / (w.x_max - w.x_min);
+        const int every = per_px >= 48.0 ? 1 : static_cast<int>(std::ceil(48.0 / per_px));
+        const double step = w.x_scl * every;
+        const double start = std::ceil(w.x_min / step) * step;
+        // Below the x-axis when it's in view (flipping above if that
+        // would clip); along the bottom edge otherwise.
+        int ly = bottom - font.height() - 2;
+        if (w.y_min <= 0 && w.y_max >= 0) {
+            const int axis_py = vp.px_y(0.0);
+            ly = axis_py + font.height() + 4 <= bottom ? axis_py + 3 : axis_py - font.height() - 3;
+        }
+        const auto n = static_cast<int>(std::floor((w.x_max - start) / step));
+        for (int i = 0; i <= n; ++i) {
+            const double v = start + i * step;
+            if (std::fabs(v) < w.x_scl / 2) {
+                continue;
+            }
+            char buf[24];
+            math::format_number(v, buf, sizeof(buf));
+            const int lx = vp.px_x(v) + 2;
+            if (lx + font.text_width(buf) < kWidth) {
+                font.draw_string(fb, lx, ly, buf, kGrayLine);
+            }
+        }
+    }
+
+    if (w.y_scl > 0) {
+        const double per_px = w.y_scl * height_ / (w.y_max - w.y_min);
+        const int every = per_px >= 24.0 ? 1 : static_cast<int>(std::ceil(24.0 / per_px));
+        const double step = w.y_scl * every;
+        const double start = std::ceil(w.y_min / step) * step;
+        const bool axis_in_view = w.x_min <= 0 && w.x_max >= 0;
+        const int axis_px = axis_in_view ? vp.px_x(0.0) : 0;
+        const auto n = static_cast<int>(std::floor((w.y_max - start) / step));
+        for (int i = 0; i <= n; ++i) {
+            const double v = start + i * step;
+            if (std::fabs(v) < w.y_scl / 2) {
+                continue;
+            }
+            char buf[24];
+            math::format_number(v, buf, sizeof(buf));
+            // Right of the y-axis (left of it if that would clip);
+            // left edge when the axis is off-screen.
+            int lx = 2;
+            if (axis_in_view) {
+                lx = axis_px + font.text_width(buf) + 3 < kWidth
+                         ? axis_px + 3
+                         : axis_px - font.text_width(buf) - 3;
+            }
+            const int ly = vp.px_y(v) - font.height() / 2;
+            if (ly >= top_ && ly + font.height() <= bottom) {
+                font.draw_string(fb, lx, ly, buf, kGrayLine);
+            }
+        }
     }
 }
 
@@ -444,7 +631,7 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             ui::screen_manager().pop();
             return true;
         default:
-            // 'S' = ZStandard, 'T' = ZTrig presets.
+            // 'S' = ZStandard, 'T' = ZTrig presets, 'F' = ZoomFit.
             if (ev.ch == 's' || ev.ch == 'S') {
                 zoom_standard();
                 dirty_ = true;
@@ -453,6 +640,16 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             if (ev.ch == 't' || ev.ch == 'T') {
                 zoom_trig();
                 dirty_ = true;
+                return true;
+            }
+            if (ev.ch == 'f' || ev.ch == 'F') {
+                zoom_fit();
+                dirty_ = true;
+                return true;
+            }
+            if (ev.ch == 'l' || ev.ch == 'L') {
+                axis_labels_ = !axis_labels_;
+                dirty_ = true;  // Replot is cheap and forces the redraw
                 return true;
             }
             return false;

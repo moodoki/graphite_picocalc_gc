@@ -76,12 +76,16 @@ private:
     bool pactive_[graph::kParametricSlots] = {};
 
     bool dirty_ = true;
+    // Numeric tick labels ('L' toggles; not persisted — evaluation
+    // feature, task 4.4).
+    bool axis_labels_ = true;
     graph::TraceCursor trace_;
 
     // Last replot time in microseconds (task 5.6 profiling hook).
     uint32_t last_recompute_us_ = 0;
 
     void recompute();
+    void zoom_fit();
     void recompute_function(const graph::Viewport& vp);
     void recompute_parametric(const graph::Viewport& vp);
     void recompute_polar(const graph::Viewport& vp);
@@ -93,6 +97,7 @@ private:
     int trace_max_index() const;
 
     void draw_axes(gfx::Framebuffer& fb) const;
+    void draw_axis_labels(gfx::Framebuffer& fb) const;
     void draw_function(gfx::Framebuffer& fb, int fi) const;
     void draw_param_curve(gfx::Framebuffer& fb, int p) const;
     void draw_trace(gfx::Framebuffer& fb) const;

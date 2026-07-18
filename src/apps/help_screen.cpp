@@ -15,8 +15,8 @@ constexpr int kTabCount = 3;
 const char* const kTabNames[kTabCount] = {"FUNC", "KEYS", "SYNTAX"};
 
 constexpr int kTopY = 24;
-constexpr int kLineH = 14;
-constexpr int kVisibleLines = 19;  // kTopY + 19*14 = 290, above softkeys
+constexpr int kLineH = 16;
+constexpr int kVisibleLines = 16;  // kTopY + 16*16 = 280, above softkeys
 
 // Lines starting with '#' render as green section headers.
 const char* const kKeysLines[] = {
@@ -45,6 +45,8 @@ const char* const kKeysLines[] = {
     "Alt+F5   split graph|table",
     "- / =    zoom out / in",
     "S / T    ZStandard / ZTrig",
+    "F        ZoomFit (y to curves)",
+    "L        toggle axis labels",
     "LT/RT    move trace cursor",
     "UP/DOWN  next curve (trace)",
     "#TABLE",
@@ -203,12 +205,11 @@ void HelpScreen::render(gfx::Framebuffer& fb) {
         }
     }
 
-    // Scroll indicator when content overflows.
+    // Scroll indicator when content overflows (right end of the title bar).
     if (max_scroll() > 0) {
         char pos[16];
         std::snprintf(pos, sizeof(pos), "%d/%d", scroll_ + 1, max_scroll() + 1);
-        font.draw_string(fb, platform::kScreenW - 4 - font.text_width(pos), kTopY - 14, pos,
-                         kGrayLine);
+        font.draw_string(fb, platform::kScreenW - 4 - font.text_width(pos), 2, pos, kGrayLine);
     }
 
     const int sk = platform::kScreenH - 20;

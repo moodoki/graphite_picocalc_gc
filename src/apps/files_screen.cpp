@@ -11,7 +11,7 @@ namespace apps {
 
 namespace {
 constexpr int kTopY = 24;
-constexpr int kRowH = 14;
+constexpr int kRowH = 16;
 constexpr const char* kDir = "/picocalc";
 
 int visible_rows() {

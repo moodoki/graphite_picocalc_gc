@@ -1,26 +1,36 @@
 # Start here — next session
 
-**Last session:** 2026-07-18 (Session 9). All ten Session 8 fixes verified on
-the Pico 2 (items 8+9 re-fixed and re-verified same day; charging-bit decode
-confirmed). Then a usage-observation round produced **six improvements, all
-implemented, flashed, and awaiting on-device verification**: graph status bar
-+ curve-bleed clip, square ZStandard (y ±8.75), typed commands
-(`help`/`diag`/`files`/`cls`/`clrhist`) + "type help" hint, case-sensitive
-input (D19), DEL/SPACE field semantics, and the **full F-key remap (D20)** —
-F1 editor / F2 window / F3 mode / F4 trace / F5 graph↔table / Alt+F5 split /
-`-` and `=` zoom / F6-F9 freed. The Pico 1 Phase 2 pass stays **deferred to
-post-Phase 3 (D18)**. Full record: worklog Session 9;
-`docs/notes/testdrive-phase2-observations.md` §"round 2".
+**Last session:** 2026-07-18 (Session 10). Pre-Phase-3 deferred-item batch,
+**all four items code-complete, lint-clean, and flashed to the Pico 2 —
+on-device eval pending** (checklist in the worklog HW-PENDING table):
 
-## Phase 2 is CLOSED (2026-07-18)
+- **D9 done**: Spleen 8x16 main font + 5x8 `gfx::small_font()` (BSD-2,
+  `drivers/spleen/`, converter `scripts/bdf_to_utft.py`). Coyote `font1` no
+  longer compiled — D17 permissive-path step 3; NOTICE.md updated.
+- **rand() seeded**: xorshift64* in `math::fn`, boot-seeded from
+  `get_rand_64()`; host tests deterministic (216 checks green).
+- **ZoomFit**: `F` on the graph screen (function mode refits y;
+  parametric/polar refit both axes).
+- **Numeric axis tick labels** (small font): **`L` toggles — evaluation
+  feature**, judge on device whether it's too distracting; not persisted.
 
-The Session 9 batch was verified on-device; 2.22/2.24/2.25 are closed
-(rationale in the worklog status block) and the retro is written:
-`docs/notes/phase2-retro.md`. Keymap reminder for anyone returning after a
-break: **F6 no longer opens diag** (type `diag` on home); **trace is F4**,
-not F1; help is the typed `help` command.
+Phase 2 remains CLOSED (retro: `docs/notes/phase2-retro.md`). Keymap
+reminders: **F6 no longer opens diag** (type `diag` on home); **trace is
+F4**; help is the typed `help` command; new graph keys **`F` ZoomFit / `L`
+labels** sit beside `S`/`T` presets.
 
-## The next job: start Phase 3 (statistics)
+## The next job: eval Session 10 on-device, review D10 + D14, then Phase 3
+
+1. Run the Session 10 HW-PENDING checklist (worklog) — especially font
+   readability on every screen and the axis-label verdict (`L` to compare).
+2. **Review D10 (bulk PSRAM, quarantined) and D14 (3V3 rail settle)** before
+   writing 3A code — decided Session 10, these come next: Phase 3 lists may
+   want bulk PSRAM, and the P3-1 max-length decision depends on where Array
+   data lives. Budget a hardware session (scope the rail; retest bulk
+   transfer) if 3A wants either.
+3. Start Phase 3 (statistics).
+
+## Phase 3 notes (unchanged from Session 9)
 
 `docs/phases/phase3-spec.md` — begin with sub-phase 3A (weeks 17–18): the
 `Array` primitive (§2, decide P3-1 max-length and P3-2 element-type up
@@ -37,11 +47,10 @@ front) and the list editor. Notes already embedded in the spec:
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the full Session 9 build** (item-8/9 re-fixes:
-  key drain via `Keyboard::fifo_empty()`, `battery_poll()` at 5 s — plus the
-  six-item improvement batch incl. the D20 keymap and typed commands). The
-  Pico 1 is still on Session 7 firmware; its pass is deferred to
-  post-Phase 3 (D18).
+- **Firmware on the unit is the Session 10 build** (Session 9 content plus
+  new fonts, seeded rand, `F` ZoomFit, `L` axis labels — flashed
+  2026-07-18, eval pending). The Pico 1 is still on Session 7 firmware;
+  its pass is deferred to post-Phase 3 (D18).
 - **D14 cold boot (~5-8 s rail settle):** PSRAM/SD may fail early init on a
   cold power-on; self-tests retry inside the 30 s late-init window and serial
   prints `late-init: ...` lines. If the F6 diag screen shows FAIL more than
@@ -79,12 +88,16 @@ run ~20×/frame) — rule recorded in `phase3-spec.md` §8.
 
 ## Open design threads
 
+- **Axis tick labels (Session 10): keep or kill** — evaluation feature, `L`
+  toggles live. If kept, decide default + whether to persist the toggle.
 - F-key layout: **resolved and shipped** (D20). KIV only: F3 MODE vs ZOOM
   (TI's F3 slot) — judge after real use.
 - D16 trace-sync option b (trace steps by table-step) — judge after more
   split use.
-- Backlog unchanged: Pico 2 rail settle root cause (scope 3V3), PSRAM bulk
-  transfer hang (D10), 340-point curve cache cap, audio HAL, licensing (D17).
+- Backlog: Pico 2 rail settle root cause (D14, scope 3V3) and PSRAM bulk
+  transfer hang (D10) — **now explicitly next in the deferred queue** (see
+  "next job" above); 340-point curve cache cap; audio HAL; licensing (D17 —
+  font step now done, display/keyboard rewrites remain).
 
 ## Hardware debugging kit (reminder)
 

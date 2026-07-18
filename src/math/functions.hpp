@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "math/types.hpp"
 
 // Extended function library registered into the engine (task 2.2).
@@ -21,6 +23,7 @@ double ncr(double n, double r);
 double npr(double n, double r);
 
 double rand01();                     // [0, 1)
+void seed_rand(std::uint64_t seed);  // 0 falls back to the fixed default seed
 double round_n(double x, double n);  // Round to n decimal places
 double min2(double a, double b);
 double max2(double a, double b);

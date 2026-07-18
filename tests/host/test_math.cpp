@@ -7,6 +7,7 @@
 
 #include "math/catalog.hpp"
 #include "math/engine.hpp"
+#include "math/functions.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
 
@@ -254,6 +255,33 @@ int main() {
                             cat[i].signature, r.error);
                 ++g_failures;
             }
+        }
+    }
+
+    // ---- rand01 seeding (xorshift64*) ----
+    {
+        math::fn::seed_rand(42);
+        double a[4];
+        for (double& v : a) {
+            v = math::fn::rand01();
+            ++g_checks;
+            if (v < 0.0 || v >= 1.0) {
+                std::printf("FAIL: rand01 %.12g out of [0, 1)\n", v);
+                ++g_failures;
+            }
+        }
+        // Same seed replays the same sequence; a different seed diverges.
+        math::fn::seed_rand(42);
+        ++g_checks;
+        if (math::fn::rand01() != a[0] || math::fn::rand01() != a[1]) {
+            std::printf("FAIL: rand01 not deterministic under a fixed seed\n");
+            ++g_failures;
+        }
+        math::fn::seed_rand(43);
+        ++g_checks;
+        if (math::fn::rand01() == a[0]) {
+            std::printf("FAIL: rand01 identical under different seeds\n");
+            ++g_failures;
         }
     }
 

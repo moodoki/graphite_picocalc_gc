@@ -23,7 +23,7 @@ namespace {
 // Layout offsets within the pane [top_, top_ + height_).
 constexpr int kHeaderOff = 20;
 constexpr int kRowsOff = 36;
-constexpr int kRowH = 14;
+constexpr int kRowH = 16;       // One 8x16 cell; Spleen's built-in leading spaces the rows
 constexpr int kColW = 80;       // 10 characters per column
 constexpr int kDetailOff = 22;  // Detail line from the pane bottom
 
