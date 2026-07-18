@@ -1,5 +1,7 @@
 #include "platform/system.hpp"
 
+#include <cstdio>
+
 #include "hardware/i2c.h"
 #include "pico/time.h"
 
@@ -57,9 +59,15 @@ BatteryInfo read_battery_info() {
     for (int i = 0; i < kAttempts; ++i) {
         const int raw = read_stm32_reg(kRegBattery);
         if (raw > 0) {
-            // High byte: percentage; bit 7 of low byte: charging.
+            // High byte = value: bits 0-6 percentage, bit 7 charging.
+            // The low byte is just the echoed register ID — reading the
+            // charging flag from it (pre-2026-07-18) meant charging
+            // could never show. Raw is printed so the layout can be
+            // confirmed on HW with the battery below full.
             info.percent = (raw >> 8) & 0x7F;
-            info.charging = (raw & 0x80) != 0;
+            info.charging = (raw & 0x8000) != 0;
+            printf("battery: raw=0x%04x pct=%d chg=%d\n", static_cast<unsigned>(raw), info.percent,
+                   info.charging ? 1 : 0);
             return info;
         }
         sleep_ms(kRetryGapMs);

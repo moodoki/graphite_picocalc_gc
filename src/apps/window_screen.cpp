@@ -6,6 +6,7 @@
 
 #include "gfx/font.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/engine.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/graph_screen.hpp"
@@ -78,7 +79,12 @@ void WindowScreen::begin_edit() {
 }
 
 void WindowScreen::commit_edit() {
-    *field_ptr(selected_) = std::strtod(input_.text(), nullptr);
+    // Full expression entry (2*pi, pi/180, ...); a bad expression
+    // keeps the field's old value instead of committing a junk prefix.
+    math::calc_t v = 0;
+    if (math::eval_field(input_.text(), &v)) {
+        *field_ptr(selected_) = v;
+    }
     editing_ = false;
     save_window();
 }
@@ -163,7 +169,7 @@ void WindowScreen::render(gfx::Framebuffer& fb) {
 
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4, "F1/ENTER:EDIT  ESC:BACK TO GRAPH", kGrayLine);
+    font.draw_string(fb, 2, sk + 4, "F1/ENTER:EDIT  ESC:BACK", kGrayLine);
 }
 
 WindowScreen& window_screen() {

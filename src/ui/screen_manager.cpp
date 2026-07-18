@@ -44,6 +44,21 @@ void ScreenManager::pop_to_root() {
     activate(stack_[0]);
 }
 
+void ScreenManager::switch_to(Screen* screen) {
+    if (screen == nullptr || depth_ <= 0) {
+        push(screen);
+        return;
+    }
+    if (current() == screen) {
+        return;
+    }
+    if (depth_ >= 2 && stack_[depth_ - 2] == screen) {
+        pop();
+        return;
+    }
+    replace(screen);
+}
+
 void ScreenManager::replace(Screen* screen) {
     if (screen == nullptr || depth_ == 0) {
         push(screen);

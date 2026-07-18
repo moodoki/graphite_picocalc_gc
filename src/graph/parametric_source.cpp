@@ -13,9 +13,18 @@ constexpr double kEndpointSlack = 1e-9;
 
 ParametricSource::ParametricSource(math::Engine& eng, void* x_handle, void* y_handle, double t_min,
                                    double t_max, double t_step)
-    : eng_(eng), x_handle_(x_handle), y_handle_(y_handle), t_min_(t_min), t_step_(t_step) {
+    : eng_(eng),
+      x_handle_(x_handle),
+      y_handle_(y_handle),
+      t_min_(t_min),
+      t_max_(t_max),
+      t_step_(t_step) {
     if (t_step > 0 && t_max >= t_min) {
         steps_ = static_cast<int>(std::floor((t_max - t_min) / t_step + kEndpointSlack));
+        // When the step doesn't divide the range the grid stops up to a
+        // full step short of t_max, visibly leaving closed curves open
+        // (HW 2026-07-18) — emit one extra sample clamped to t_max.
+        tail_ = t_min + steps_ * t_step < t_max - kEndpointSlack;
     }
 }
 
@@ -24,10 +33,10 @@ void ParametricSource::begin(const Viewport& /*vp*/) {
 }
 
 bool ParametricSource::next(double* x_data, double* y_data, bool* defined) {
-    if (i_ > steps_) {
+    if (i_ > steps_ + (tail_ ? 1 : 0)) {
         return false;
     }
-    const double t = t_min_ + i_ * t_step_;
+    const double t = i_ <= steps_ ? t_min_ + i_ * t_step_ : t_max_;
     ++i_;
     const double x = eng_.eval_compiled(x_handle_, kTSlot, t);
     const double y = eng_.eval_compiled(y_handle_, kTSlot, t);

@@ -4,6 +4,8 @@
 #include <cstring>
 
 #include "platform/storage.hpp"
+#include "math/format.hpp"
+#include "math/types.hpp"
 
 namespace apps {
 
@@ -99,6 +101,11 @@ void load_graph_state() {
         return;
     }
     if (graph::state().load(fs)) {
+        // MODE-row math settings ride in the image; push them back
+        // into the live math:: state.
+        math::set_angle_mode(graph::state().angle);
+        math::set_display_mode(graph::state().display);
+        math::set_fix_digits(graph::state().fix_digits);
         return;
     }
     // No (or stale) unified image: migrate Phase 1 files and write the

@@ -14,8 +14,11 @@
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
 #include "apps/mode_screen.hpp"
+#include "apps/param_editor.hpp"
+#include "apps/polar_editor.hpp"
 #include "apps/window_screen.hpp"
 #include "apps/y_editor.hpp"
+#include "graph/graph_state.hpp"
 
 namespace apps {
 
@@ -207,7 +210,18 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             invalidate_input();
             return true;
         case Key::kF1:
-            ui::screen_manager().push(&y_editor_screen());
+            // Mode-appropriate editor, same dispatch as graph F5.
+            switch (graph::state().mode) {
+                case graph::Mode::kParametric:
+                    ui::screen_manager().push(&param_editor_screen());
+                    break;
+                case graph::Mode::kPolar:
+                    ui::screen_manager().push(&polar_editor_screen());
+                    break;
+                default:
+                    ui::screen_manager().push(&y_editor_screen());
+                    break;
+            }
             return true;
         case Key::kF2:
             ui::screen_manager().push(&window_screen());
@@ -249,15 +263,22 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         if (e == nullptr) {
             break;
         }
+        // Expression layout first: the entry's full height must be
+        // known *before* drawing, or a tall pretty-printed expression
+        // ends up rendered across the status bar (HW 2026-07-18).
+        render::LayoutNode const* root = render::build_layout(e->expr, metrics);
+        const int eh = root != nullptr ? root->height : lh;
+        if (y - lh - (eh + 2) < kStatusH) {
+            break;
+        }
+
         // Result line (plain text).
         y -= lh;
         const int rx = platform::kScreenW - font.text_width(e->result) - 4;
         font.draw_string(fb, rx, y, e->result, e->error ? kRed : kWhite);
 
-        // Expression line(s), pretty-printed. Build to learn the height,
-        // then render immediately (the pool is reset on the next build).
-        render::LayoutNode const* root = render::build_layout(e->expr, metrics);
-        const int eh = root != nullptr ? root->height : lh;
+        // Expression line(s), rendered immediately (the pool is reset
+        // on the next build).
         y -= eh + 2;
         render::render_node(root, fb, 4, y, font, kGrayLine);
         y -= 2;
@@ -269,7 +290,18 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     input_.render(fb, 2 + font.width() + 2, kInputY + 8, platform::kScreenW - font.width() - 8,
                   font, true);
 
-    const char* const keys[6] = {"Y=", "WIN", "GRPH", "MODE", "HELP", "DIAG"};
+    const char* f1 = "Y=";
+    switch (graph::state().mode) {
+        case graph::Mode::kParametric:
+            f1 = "PAR";
+            break;
+        case graph::Mode::kPolar:
+            f1 = "R=";
+            break;
+        default:
+            break;
+    }
+    const char* const keys[6] = {f1, "WIN", "GRPH", "MODE", "HELP", "DIAG"};
     ui::draw_softkeys(fb, keys);
 }
 

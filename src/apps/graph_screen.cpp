@@ -1,5 +1,6 @@
 #include "apps/graph_screen.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -324,7 +325,11 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         py = ppy_[p][i];
         const auto& st = graph::state();
         const bool polar = mode() == graph::Mode::kPolar;
-        const double param = polar ? st.theta_min + i * st.theta_step : st.t_min + i * st.t_step;
+        // The last cached point may be the sample clamped to the range
+        // end (sources close the curve when step doesn't divide range),
+        // so cap the readout at max rather than extrapolating the grid.
+        const double grid = polar ? st.theta_min + i * st.theta_step : st.t_min + i * st.t_step;
+        const double param = std::min(grid, polar ? st.theta_max : st.t_max);
         char tb[24];
         char xb[24];
         char yb[24];

@@ -27,8 +27,10 @@ private:
     math::Engine& eng_;
     void* r_handle_;
     double theta_min_;
+    double theta_max_;
     double theta_step_;
-    int steps_ = 0;  // Points emitted = steps_ + 1
+    int steps_ = 0;      // Grid points emitted = steps_ + 1
+    bool tail_ = false;  // Extra sample clamped to theta_max when the grid stops short
     int i_ = 0;
 };
 

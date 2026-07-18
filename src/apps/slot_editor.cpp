@@ -2,6 +2,7 @@
 
 #include "gfx/font.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/engine.hpp"
 #include "apps/graph_screen.hpp"
 
 namespace apps {
@@ -9,6 +10,21 @@ namespace apps {
 namespace {
 constexpr int kStatusH = 16;
 constexpr int kTopY = 24;
+
+// A row whose expression doesn't compile is drawn red instead of being
+// silently skipped at plot time (HW feedback 2026-07-18). Same engine
+// compile the recompute path uses; empty rows are fine.
+bool field_compiles(const char* text) {
+    if (text == nullptr || text[0] == 0) {
+        return true;
+    }
+    void* h = math::engine().compile(text);
+    if (h == nullptr) {
+        return false;
+    }
+    math::engine().free_compiled(h);
+    return true;
+}
 }  // namespace
 
 void SlotEditorScreen::on_activate() {
@@ -86,7 +102,9 @@ bool SlotEditorScreen::on_key(const platform::KeyEvent& ev) {
             invalidate_row(selected_);
             return true;
         case Key::kF4:
-            ui::screen_manager().push(&graph_screen());
+            // Toggle-style jump: popping back when the graph is right
+            // beneath keeps repeated editor<->graph hops from stacking.
+            ui::screen_manager().switch_to(&graph_screen());
             return true;
         case Key::kEscape:
             ui::screen_manager().pop();
@@ -119,7 +137,8 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
         if (sel && editing_) {
             input_.render(fb, expr_x, y, platform::kScreenW - expr_x - 20, font, true);
         } else {
-            font.draw_string(fb, expr_x, y, field_text(i), kWhite);
+            const char* text = field_text(i);
+            font.draw_string(fb, expr_x, y, text, field_compiles(text) ? kWhite : kRed);
         }
 
         // Enable checkbox at the right edge.

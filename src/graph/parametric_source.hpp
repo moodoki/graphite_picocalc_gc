@@ -24,8 +24,10 @@ private:
     void* x_handle_;
     void* y_handle_;
     double t_min_;
+    double t_max_;
     double t_step_;
-    int steps_ = 0;  // Points emitted = steps_ + 1
+    int steps_ = 0;      // Grid points emitted = steps_ + 1
+    bool tail_ = false;  // Extra sample clamped to t_max when the grid stops short
     int i_ = 0;
 };
 

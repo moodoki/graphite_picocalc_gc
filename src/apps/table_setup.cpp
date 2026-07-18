@@ -5,6 +5,7 @@
 
 #include "gfx/font.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/engine.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "graph/graph_state.hpp"
@@ -40,7 +41,11 @@ void TableSetupScreen::begin_edit() {
 }
 
 void TableSetupScreen::commit_edit() {
-    *row_value(selected_) = std::strtod(input_.text(), nullptr);
+    // Full expression entry; a bad expression keeps the old value.
+    math::calc_t v = 0;
+    if (math::eval_field(input_.text(), &v)) {
+        *row_value(selected_) = v;
+    }
     editing_ = false;
     save_graph_state();
 }

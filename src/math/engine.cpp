@@ -1,6 +1,7 @@
 #include "math/engine.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -266,6 +267,18 @@ EvalResult Engine::evaluate_at(const char* expr, calc_t x_val) {
 Engine& engine() {
     static Engine instance;
     return instance;
+}
+
+bool eval_field(const char* text, calc_t* out) {
+    Engine& eng = engine();
+    // evaluate_at leaves Ans/store untouched; binding X to its own
+    // current value makes the call side-effect free.
+    const EvalResult res = eng.evaluate_at(text, eng.vars()['x']);
+    if (!res.ok || std::isnan(res.value) || std::isinf(res.value)) {
+        return false;
+    }
+    *out = res.value;
+    return true;
 }
 
 }  // namespace math

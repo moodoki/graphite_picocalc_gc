@@ -94,6 +94,7 @@ add_executable(picocalc_graphcalc
     src/graph/polar_source.cpp
     src/graph/trace.cpp
     src/apps/home_screen.cpp
+    src/apps/files_screen.cpp
     src/apps/graph_model.cpp
     src/apps/slot_editor.cpp
     src/apps/y_editor.cpp

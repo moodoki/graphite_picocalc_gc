@@ -17,7 +17,9 @@
 #include "platform/platform.hpp"
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
+#include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "apps/files_screen.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -77,6 +79,10 @@ public:
         }
         if (ev.key == platform::Key::kEscape) {
             ui::screen_manager().pop();
+            return true;
+        }
+        if (ev.key == platform::Key::kF5) {  // SD file listing
+            ui::screen_manager().push(&apps::files_screen());
             return true;
         }
         last_key_ = ev;
@@ -147,7 +153,7 @@ public:
 
         font.draw_string(fb, 8, y, "Type on the keyboard to test input.", kGrayLine, kBlack);
         y += lh;
-        font.draw_string(fb, 8, y, "F6 or ESC exits.", kGrayLine, kBlack);
+        font.draw_string(fb, 8, y, "F5 files. F6 or ESC exits.", kGrayLine, kBlack);
         y += lh;
         std::snprintf(line, sizeof(line), "Frame: %lu", static_cast<unsigned long>(frame_++));
         font.draw_string(fb, 8, y, line, kCursor, kBlack);
@@ -192,6 +198,12 @@ int main() {
     // Boot stays instant; the loop below retries until they come up or
     // the window closes. A failing SD attempt with a card inserted
     // blocks up to ~1 s, so retries are spaced out.
+    //
+    // Retries cover the self-tests too, not just init: in the marginal
+    // window init can "succeed" while readback is still garbage, and a
+    // one-shot retest right after a late reinit can fail the same way —
+    // either case used to freeze FAIL on the diag screen for good
+    // (observed on HW 2026-07-17).
     constexpr uint32_t kLateInitWindowMs = 30'000;
     constexpr uint32_t kLateInitGapMs = 2'000;
     uint32_t late_init_last_ms = 0;
@@ -200,24 +212,31 @@ int main() {
     // after input (or the initial frame) instead of every loop iteration.
     bool dirty = true;
     while (true) {
-        if (!g_init_status.psram || !g_init_status.storage) {
+        const bool psram_healthy = g_init_status.psram && g_psram_alloc_ok;
+        const bool sd_healthy = g_init_status.storage && g_sd_test == SdTest::kOk;
+        if (!psram_healthy || !sd_healthy) {
             const uint32_t now = platform::uptime_ms();
             if (now < kLateInitWindowMs && now - late_init_last_ms >= kLateInitGapMs) {
                 late_init_last_ms = now;
-                bool came_up = false;
                 if (!g_init_status.psram && platform::psram().reinit()) {
                     g_init_status.psram = true;
-                    came_up = true;
+                    printf("late-init: psram up at %lu ms\n", static_cast<unsigned long>(now));
                 }
                 if (!g_init_status.storage && platform::storage().init()) {
                     g_init_status.storage = true;
-                    came_up = true;
                     // Persistence arrived late: load what boot couldn't.
                     apps::home_screen().load_state();
                     apps::load_graph_state();
+                    printf("late-init: storage up at %lu ms, state loaded\n",
+                           static_cast<unsigned long>(now));
                 }
-                if (came_up) {
-                    run_self_tests();
+                run_self_tests();
+                const bool psram_now = g_init_status.psram && g_psram_alloc_ok;
+                const bool sd_now = g_init_status.storage && g_sd_test == SdTest::kOk;
+                if (psram_now != psram_healthy || sd_now != sd_healthy) {
+                    printf("late-init: self-tests psram=%s sd=%s at %lu ms\n",
+                           psram_now ? "ok" : "FAIL", sd_now ? "ok" : "FAIL",
+                           static_cast<unsigned long>(now));
                     if (ui::Screen* s = mgr.current()) {
                         s->invalidate_all();
                     }
@@ -226,8 +245,46 @@ int main() {
             }
         }
 
-        const platform::KeyEvent ev = platform::keyboard().poll();
-        if (ev.key != platform::Key::kNone && ev.pressed) {
+        // Status-bar liveness: the render model is event-driven, so a
+        // battery cache refresh used to sit invisible until the next
+        // keypress (stale %/charging on screen, HW 2026-07-18). Poll
+        // the cache (cheap; I2C at most every 30 s inside) about once
+        // a second and repaint just the 16-row status band on change.
+        {
+            static uint32_t last_batt_check_ms = 0;
+            static int last_batt_percent = -2;  // Distinct from the -1 "unknown"
+            static bool last_batt_charging = false;
+            const uint32_t now = platform::uptime_ms();
+            if (now - last_batt_check_ms >= 1'000) {
+                last_batt_check_ms = now;
+                const auto batt = platform::battery_status();
+                if (batt.percent != last_batt_percent || batt.charging != last_batt_charging) {
+                    last_batt_percent = batt.percent;
+                    last_batt_charging = batt.charging;
+                    if (ui::Screen* s = mgr.current()) {
+                        s->invalidate_band(0, ui::kStatusBarH);
+                    }
+                    dirty = true;
+                }
+            }
+        }
+
+        // Drain every queued key before rendering: while a render is in
+        // flight the STM32 FIFO keeps buffering held-key repeats, and
+        // handling one event per frame made the backlog play out after
+        // release (table scroll overrun, HW 2026-07-18). Handlers are
+        // cheap — the render is the expensive part — so process the
+        // whole burst and push one frame. The cap only guards against a
+        // wedged FIFO streaming events forever.
+        constexpr int kMaxEventsPerFrame = 16;
+        for (int n = 0; n < kMaxEventsPerFrame; ++n) {
+            const platform::KeyEvent ev = platform::keyboard().poll();
+            if (ev.key == platform::Key::kNone) {
+                break;
+            }
+            if (!ev.pressed) {
+                continue;
+            }
             // F6 toggles the hardware diagnostics overlay from any screen.
             if (ev.key == platform::Key::kF6) {
                 if (mgr.current() == &g_diag_screen) {

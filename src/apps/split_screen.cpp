@@ -85,10 +85,10 @@ void SplitScreen::render(gfx::Framebuffer& fb) {
     // Softkey bar.
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(
-        fb, 2, sk + 4,
-        graph_focused_ ? "[GRAPH] F4:PANE  F9/ESC:FULL" : "[TABLE] F4:PANE  F9/ESC:FULL",
-        kGrayLine);
+    font.draw_string(fb, 2, sk + 4,
+                     graph_focused_ ? "[GRAPH] F1:TRC F4:PANE F9/ESC:FULL"
+                                    : "[TABLE] F1:SETUP F4:PANE F9/ESC:FULL",
+                     kGrayLine);
 }
 
 SplitScreen& split_screen() {

@@ -6,7 +6,9 @@
 #include <cstdlib>
 
 #include "gfx/font.hpp"
+#include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/engine.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/split_screen.hpp"
@@ -151,7 +153,11 @@ void TableScreen::commit_entry() {
     if (input_.empty()) {
         return;
     }
-    const double v = std::strtod(input_.text(), nullptr);
+    // Full expression entry; a bad expression adds nothing.
+    math::calc_t v = 0;
+    if (!math::eval_field(input_.text(), &v)) {
+        return;
+    }
     if (ask_count_ < kMaxAskRows) {
         ask_values_[ask_count_++] = v;
     } else {
@@ -314,12 +320,10 @@ void TableScreen::render(gfx::Framebuffer& fb) {
         font.draw_string(fb, 4, detail_y, line, kWhite);
     }
 
-    // Softkey bar.
-    const int sk = platform::kScreenH - 20;
-    fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4,
-                     ask_mode() ? "F1:SETUP F2:STEP F3:GRAPH F5:DEL" : "F1:SETUP F2:STEP F3:GRAPH",
-                     kGrayLine);
+    // Softkey bar — standard divided cells like every other screen.
+    // F3 and F4 both return to the previous view (usually the graph).
+    const char* const keys[6] = {"SETP", "STEP", "BACK", "GRPH", ask_mode() ? "DEL" : "", ""};
+    ui::draw_softkeys(fb, keys);
 }
 
 TableScreen& table_screen() {

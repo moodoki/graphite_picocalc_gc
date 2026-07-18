@@ -32,16 +32,22 @@ void ModeScreen::adjust(int dir) const {
             math::set_angle_mode(math::angle_mode() == math::AngleMode::kRadians
                                      ? math::AngleMode::kDegrees
                                      : math::AngleMode::kRadians);
+            graph::state().angle = math::angle_mode();
+            save_graph_state();
             break;
         case kRowDisplay: {
             int m = static_cast<int>(math::display_mode()) + dir;
             const int count = 3;
             m = (m % count + count) % count;
             math::set_display_mode(static_cast<math::DisplayMode>(m));
+            graph::state().display = math::display_mode();
+            save_graph_state();
             break;
         }
         case kRowFixDigits:
             math::set_fix_digits(math::fix_digits() + dir);
+            graph::state().fix_digits = math::fix_digits();
+            save_graph_state();
             break;
         case kRowGraphMode: {
             constexpr int kModeCount = 3;  // Function, Parametric, Polar

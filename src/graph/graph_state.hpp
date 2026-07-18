@@ -1,6 +1,8 @@
 #pragma once
 
 #include "config.hpp"
+#include "math/format.hpp"
+#include "math/types.hpp"
 #include "graph/graph_mode.hpp"
 #include "graph/table_config.hpp"
 
@@ -75,6 +77,14 @@ struct GraphState {
     double theta_step = 0.05;
 
     TableConfig table;
+
+    // MODE-row math settings (persisted since PCG2 — DEG/RAD reset on
+    // every boot before that, HW 2026-07-18). The live values stay in
+    // math::*; screens changing them must mirror here and save, and
+    // load_graph_state() applies them back.
+    math::AngleMode angle = math::AngleMode::kRadians;
+    math::DisplayMode display = math::DisplayMode::kFloat;
+    int fix_digits = 2;
 
     // Unified persistence (task 2.23): magic-tagged binary image at
     // /picocalc/graphstate.dat, superseding Phase 1's yfuncs.txt and

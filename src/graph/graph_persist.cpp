@@ -11,9 +11,9 @@ namespace {
 
 constexpr const char* kPath = "/picocalc/graphstate.dat";
 
-// Bump when the GraphState layout changes ("PCG2", ...): old images
+// Bump when the GraphState layout changes ("PCG3", ...): old images
 // then fail to load and callers fall back to defaults/migration.
-constexpr char kMagic[4] = {'P', 'C', 'G', '1'};
+constexpr char kMagic[4] = {'P', 'C', 'G', '2'};
 
 struct Image {
     char magic[4] = {};

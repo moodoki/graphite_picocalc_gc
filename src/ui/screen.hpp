@@ -41,6 +41,11 @@ public:
     // becomes top of the stack).
     void invalidate_all() { invalidate(0, platform::kScreenH); }
 
+    // External band invalidation for chrome the main loop refreshes on
+    // its own clock (battery/status bar) — same as invalidate() but
+    // callable from outside the screen.
+    void invalidate_band(int y0, int y1) { invalidate(y0, y1); }
+
 protected:
     // Opt in to partial redraws (call from the constructor). A tracking
     // screen must invalidate() every row band its on_key changes —

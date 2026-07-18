@@ -15,10 +15,18 @@ constexpr double kEndpointSlack = 1e-9;
 
 PolarSource::PolarSource(math::Engine& eng, void* r_handle, double theta_min, double theta_max,
                          double theta_step)
-    : eng_(eng), r_handle_(r_handle), theta_min_(theta_min), theta_step_(theta_step) {
+    : eng_(eng),
+      r_handle_(r_handle),
+      theta_min_(theta_min),
+      theta_max_(theta_max),
+      theta_step_(theta_step) {
     if (theta_step > 0 && theta_max >= theta_min) {
         steps_ =
             static_cast<int>(std::floor((theta_max - theta_min) / theta_step + kEndpointSlack));
+        // When the step doesn't divide the range the grid stops up to a
+        // full step short of theta_max, visibly leaving closed curves
+        // open (HW 2026-07-18) — emit one extra sample clamped to it.
+        tail_ = theta_min + steps_ * theta_step < theta_max - kEndpointSlack;
     }
 }
 
@@ -27,10 +35,10 @@ void PolarSource::begin(const Viewport& /*vp*/) {
 }
 
 bool PolarSource::next(double* x_data, double* y_data, bool* defined) {
-    if (i_ > steps_) {
+    if (i_ > steps_ + (tail_ ? 1 : 0)) {
         return false;
     }
-    const double theta = theta_min_ + i_ * theta_step_;
+    const double theta = i_ <= steps_ ? theta_min_ + i_ * theta_step_ : theta_max_;
     ++i_;
     const double r = eng_.eval_compiled(r_handle_, math::Variables::kTheta, theta);
     const double theta_rad =

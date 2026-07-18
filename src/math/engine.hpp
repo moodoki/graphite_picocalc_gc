@@ -64,4 +64,11 @@ private:
 
 Engine& engine();
 
+// Evaluate a standalone numeric field entry (WINDOW, table setup, ASK
+// values): full expression syntax — 2*pi, pi/180, stored vars — with
+// no Ans update and no store. strtod-style prefix parsing silently
+// committed `2*pi` as 2.0 before this (HW 2026-07-18). Returns false
+// on parse error or a non-finite result; the field keeps its old value.
+bool eval_field(const char* text, calc_t* out);
+
 }  // namespace math
