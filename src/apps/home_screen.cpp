@@ -9,11 +9,14 @@
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "math/list_expr.hpp"
+#include "math/lists.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/files_screen.hpp"
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
+#include "apps/list_editor.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
 #include "apps/window_screen.hpp"
@@ -79,7 +82,7 @@ void HomeScreen::persist_history_line(const char* expr, const char* result) {
     if (!fs.mounted()) {
         return;
     }
-    char line[140];
+    char line[160];
     const int n = std::snprintf(line, sizeof(line), "%s\t%s\n", expr, result);
     fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
 }
@@ -130,26 +133,72 @@ void HomeScreen::load_state() {
     scroll_ = 0;
 }
 
+namespace {
+
+// "num" or "num>a" for the store form (shared by the scalar and
+// list-expression result paths).
+void format_scalar_result(const math::EvalResult& res, char* out, size_t out_len) {
+    if (!res.ok) {
+        std::snprintf(out, out_len, "%s", res.error);
+        return;
+    }
+    char num[24];
+    math::format_number(res.value, num, sizeof(num));
+    if (res.stored_var >= 0) {
+        const char name =
+            res.stored_var < 26 ? static_cast<char>('a' + res.stored_var) : 't';  // theta
+        std::snprintf(out, out_len, "%s>%c", num, name);
+    } else {
+        std::snprintf(out, out_len, "%s", num);
+    }
+}
+
+}  // namespace
+
 void HomeScreen::evaluate_input() {
     if (input_.empty()) {
         return;
     }
-    const auto res = math::engine().evaluate(input_.text());
 
-    char result[32];
-    if (res.ok) {
-        char num[24];
-        math::format_number(res.value, num, sizeof(num));
-        if (res.stored_var >= 0) {
-            const char name =
-                res.stored_var < 26 ? static_cast<char>('a' + res.stored_var) : 't';  // theta
-            std::snprintf(result, sizeof(result), "%s>%c", num, name);
+    // List expressions (Phase 3A) get first crack; Kind::kNone means
+    // "not list syntax" and falls through to the scalar engine.
+    const auto lres = math::listexpr::evaluate(input_.text());
+    if (lres.kind != math::listexpr::Kind::kNone) {
+        char result[48];
+        bool error = false;
+        if (lres.kind == math::listexpr::Kind::kError) {
+            std::snprintf(result, sizeof(result), "%s", lres.error);
+            error = true;
+        } else if (lres.kind == math::listexpr::Kind::kScalar) {
+            format_scalar_result(lres.scalar, result, sizeof(result));
+            error = !lres.scalar.ok;
         } else {
-            std::snprintf(result, sizeof(result), "%s", num);
+            char text[40];
+            math::listexpr::format_list(*lres.list, text, sizeof(text));
+            if (lres.stored_list >= 0) {
+                std::snprintf(result, sizeof(result), "%s>l%c", text,
+                              static_cast<char>('1' + lres.stored_list));
+            } else {
+                std::snprintf(result, sizeof(result), "%s", text);
+            }
         }
-    } else {
-        std::snprintf(result, sizeof(result), "%s", res.error);
+        push_entry(input_.text(), result, error);
+        if (!error) {
+            persist_history_line(input_.text(), result);
+            save_variables();
+            if (lres.lists_modified) {
+                math::lists().save(platform::storage());
+            }
+        }
+        input_.clear();
+        hist_nav_ = -1;
+        pending_[0] = 0;
+        return;
     }
+
+    const auto res = math::engine().evaluate(input_.text());
+    char result[48];
+    format_scalar_result(res, result, sizeof(result));
 
     push_entry(input_.text(), result, !res.ok);
     if (res.ok) {
@@ -191,6 +240,10 @@ bool HomeScreen::handle_command(const char* cmd) {
     }
     if (std::strcmp(cmd, "files") == 0) {
         ui::screen_manager().push(&files_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "lists") == 0) {
+        ui::screen_manager().push(&list_editor());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {

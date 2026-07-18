@@ -45,6 +45,17 @@ echo "== Compiling + linking test_graph =="
     "$OUT/tinyexpr.o" \
     -o "$OUT/test_graph"
 
+echo "== Compiling + linking test_lists =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_lists.cpp tests/host/host_psram_backend.cpp \
+    src/math/array.cpp src/math/lists.cpp src/math/list_ops.cpp \
+    src/math/list_expr.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp \
+    "$OUT/tinyexpr.o" \
+    -o "$OUT/test_lists"
+
 echo "== Running test_math =="
 "$OUT/test_math"
 
@@ -53,3 +64,6 @@ echo "== Running test_layout =="
 
 echo "== Running test_graph =="
 "$OUT/test_graph"
+
+echo "== Running test_lists =="
+"$OUT/test_lists"

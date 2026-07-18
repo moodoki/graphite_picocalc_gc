@@ -36,6 +36,17 @@ const FnDescriptor kCatalog[] = {
     {"max", "max(a, b)", "Larger of a and b", fp2(fn::max2), 2},
     {"deg", "deg(x)", "Radians to degrees", fp1(fn::deg), 1},
     {"rad", "rad(x)", "Degrees to radians", fp1(fn::rad), 1},
+    // List functions (Phase 3A): help-only rows (fn == nullptr) — they
+    // take list arguments, which tinyexpr can't, so math::listexpr
+    // intercepts them before the engine sees the expression.
+    {"sum", "sum(l)", "Sum of list elements", nullptr, 1},
+    {"prod", "prod(l)", "Product of elements", nullptr, 1},
+    {"length", "length(l)", "List element count", nullptr, 1},
+    {"sort_asc", "sort_asc(l)", "Sort list ascending", nullptr, 1},
+    {"sort_desc", "sort_desc(l)", "Sort list descending", nullptr, 1},
+    {"cumsum", "cumsum(l)", "Cumulative sums", nullptr, 1},
+    {"delta_list", "delta_list(l)", "Pairwise differences", nullptr, 1},
+    {"seq", "seq(f,v,lo,hi,st)", "Sequence into a list", nullptr, 5},
 };
 
 constexpr int kCount = sizeof(kCatalog) / sizeof(kCatalog[0]);

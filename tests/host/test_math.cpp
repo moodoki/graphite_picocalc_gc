@@ -240,9 +240,20 @@ int main() {
         for (int i = 0; i < count; ++i) {
             ++g_checks;
             if (cat[i].name == nullptr || cat[i].signature == nullptr ||
-                cat[i].summary == nullptr || cat[i].fn == nullptr || cat[i].arity < 0 ||
-                cat[i].arity > 2) {
+                cat[i].summary == nullptr) {
                 std::printf("FAIL: catalog entry %d malformed\n", i);
+                ++g_failures;
+                continue;
+            }
+            // Help-only rows (Phase 3A list functions, fn == nullptr)
+            // are not engine-registered; their signatures take list
+            // args and don't parse as scalar expressions.
+            if (cat[i].fn == nullptr) {
+                continue;
+            }
+            ++g_checks;
+            if (cat[i].arity < 0 || cat[i].arity > 2) {
+                std::printf("FAIL: catalog entry %d bad arity\n", i);
                 ++g_failures;
                 continue;
             }

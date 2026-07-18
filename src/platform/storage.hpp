@@ -16,6 +16,10 @@ public:
     bool file_exists(const char* path) const;
     // Returns bytes read, or -1 on error.
     int read_file(const char* path, uint8_t* buf, size_t max_len) const;
+    // Read up to max_len bytes starting at byte `offset` — for files
+    // too large for one SRAM buffer (lists.dat, Phase 3). Returns
+    // bytes read, or -1 on error.
+    int read_file_range(const char* path, size_t offset, uint8_t* buf, size_t max_len) const;
     bool write_file(const char* path, const uint8_t* buf, size_t len) const;
     bool append_file(const char* path, const uint8_t* buf, size_t len) const;
     bool delete_file(const char* path) const;

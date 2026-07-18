@@ -29,7 +29,7 @@ private:
 
     struct Entry {
         char expr[96];
-        char result[24];
+        char result[48];  // Wide enough for a short list "{...}>l1"
         bool error;
     };
 

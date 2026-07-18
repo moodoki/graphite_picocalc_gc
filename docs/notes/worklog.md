@@ -95,14 +95,24 @@ Conventions:
   HW-verified** (~6.8 MB/s); **D21 amended — Array cap 10000 with the
   PSRAM tier**; D14 parked as the NEXT BENCH SESSION (non-blocking,
   scope plan + schematic findings in next-session.md).
-- **Next up**: start Phase 3 (`docs/phases/phase3-spec.md`) — sub-phase
-  3A: the `Array` primitive + list editor, per D21 as amended. Note the
-  §8 strip-safety rule and the 3D.14 combined Pico 1 pass.
+- **Session 11 (2026-07-19): Phase 3 sub-phase 3A code-complete and
+  flashed** — `Array` (dtype-tagged, SRAM slab / PSRAM region tiers per
+  D21) + `ArrayStore`, `ListStore` l1-l6 with `lists.dat` persistence
+  (+ `Storage::read_file_range`), list ops incl. external merge sort
+  for PSRAM-tier lists, the `math::listexpr` home-screen layer
+  (literals, `->lk` store, reductions, vector lift — see **D22**), and
+  the list editor screen (typed `lists` command). 106 new host checks;
+  lint clean; **Pico 2 flashed, boot verified over serial (HW eval
+  pending — see HW-PENDING)**.
+- **Next up**: on-device eval of the 3A batch, then sub-phase 3B
+  (descriptive stats + regression, spec §4) — 1-var/2-var stats are the
+  first consumers of `Array`. Note the §8 strip-safety rule and the
+  3D.14 combined Pico 1 pass.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 111 math + 33 layout + 72 graph = 216 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 136 math + 37 layout + 72 graph + 106 lists = 351 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -165,8 +175,85 @@ Still to verify on hardware:
 | Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes + Session 9 remap, and Phase 3 acceptance |
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 | Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
+| Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column) |
 
 ---
+
+## 2026-07-19 — Session 11: Phase 3 sub-phase 3A — Array, lists, list editor (D22)
+
+Started Phase 3 per next-session.md. All five 3A tasks (3A.1-3A.5)
+code-complete in one session; both boards build, lint clean, 106 new host
+checks (suite now 351), Pico 2 flashed and boot-verified over serial.
+
+**Design departure recorded as D22** (the load-bearing discovery of the
+session): the spec's §2.1 `Array` sketch assumed pointer access, but the
+PSRAM is SPI-attached and **not memory-mapped** — `platform::Psram` deals
+in addresses via `read()`/`write()`, and its allocator is bump-only. The
+as-built API is therefore `get`/`set` + `read_range`/`write_range`
+(which is also exactly the shape D21's dtype-tag rule wants), and
+`ArrayStore` recycles fixed-size storage: 12 x 2 KB SRAM slabs, up to
+12 x 80 KB PSRAM regions on a free-list (bounded, fragmentation-free).
+The spec §2 got an "as built" note.
+
+What shipped:
+
+- **`math/array.{hpp,cpp}`** — dtype-tagged (D21) 1-D/2-D `Array`,
+  tier migration at 256 doubles (slab→region and back), zero-filled
+  growth, cap 10000; `math::psram_backend` seam so host tests run the
+  identical code against a malloc shim (`tests/host/host_psram_backend`).
+- **`math/lists.{hpp,cpp}` + `lists_persist.cpp`** — `ListStore` l1-l6;
+  `/picocalc/lists.dat` (magic `PCL1`, per-list dtype+count header,
+  elements streamed in 2 KB chunks both ways — a full file can be 480 KB,
+  far beyond any SRAM buffer, hence new **`Storage::read_file_range`**
+  (f_lseek) in the platform layer). Load is all-or-nothing and returns
+  false until PSRAM is up when large lists exist (D14 cold boot); main's
+  late-init loop retries it (`late-init: lists loaded`). Saves are
+  on-mutation (editor commits, home-screen list stores/sorts).
+- **`math/list_ops.{hpp,cpp}`** — sum/prod, in-place sorts (NaN-safe
+  total order; PSRAM tier uses an **external merge sort**: 256-element
+  sorted runs into a temp region, streaming merge passes ping-ponging
+  region<->region, ~6 passes at 10000), cumsum, delta_list, seq (engine
+  compile-once, var slot saved/restored), copy — all chunked/streaming.
+- **`math/list_expr.{hpp,cpp}`** — the home-screen syntax layer (D22):
+  literals, l-refs, `->lk` store, bare-arg reductions substituted as
+  numeric literals, wrapper functions, and the **vector lift** — any
+  engine expression over l1..l6 compiles once via the new
+  `Engine::compile_with(extras)` (l1..l6 bound as per-element variables)
+  and evaluates in 256-element chunks. `sort_asc(l1)` bare-arg form
+  sorts in place per spec; compound args are by-value.
+- **`apps/list_editor.{hpp,cpp}`** — grid editor (3 of 6 lists visible,
+  horizontal scroll, append row, type-to-edit via `eval_field`, DEL
+  row-delete, F6/F7 sort, F8 clear, global F1-F5 intact), reached by the
+  typed **`lists`** command. Strip-safe: visible cells cached as text on
+  change; render only draws. Dirty-band tracked.
+- **Home screen**: list expressions get first crack in evaluate_input
+  (kNone falls through to the scalar engine untouched); `Entry.result`
+  widened 24→48 for `{...}>l1` results; scalar-result formatting
+  factored. **Catalog** gained help-only rows (fn == nullptr, skipped by
+  build_lookup) for the eight list functions; help FUNC column widened
+  (kSummaryCol 13→19), KEYS/SYNTAX got LIST EDITOR / LISTS sections.
+
+Testing: `tests/host/test_lists.cpp` (106 checks) covers Array basics +
+tier boundaries + recycling, all ops (incl. 5000-element external sort,
+NaN ordering, seq edge cases), and ~40 list_expr cases (grammar, stores,
+errors, empty lists, formatting truncation, PSRAM-tier lift). test_math's
+catalog check was taught about help-only rows (arity check now
+registration-only).
+
+Flash: BOOTSEL cp path; note **`cp` exits 1 on macOS with "could not
+copy extended attributes"** — harmless, the UF2 lands and the board
+reboots (verified: volume unmounted, app re-enumerated, `psram-bulk: OK`
+heartbeat + battery line on serial). On-device functional eval is queued
+in HW-PENDING (Session 11 row).
+
+Deferred/notes:
+
+- Reductions take bare list names only; list literals can't sit inside
+  element-wise arithmetic (both documented in D22 — revisit if 3B wants
+  a real tagged-value evaluator).
+- List results don't set Ans (scalar Ans preserved — D22).
+- The editor's F8 clear is immediate (no confirm) — watch in eval.
+- ArrayStore worst case: 24 KB static SRAM (slabs) + 960 KB PSRAM.
 
 ## 2026-07-18 — Session 10: pre-Phase-3 deferred-item batch (D9 fonts, rand seed, ZoomFit, axis labels)
 

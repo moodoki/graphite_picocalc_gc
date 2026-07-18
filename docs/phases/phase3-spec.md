@@ -27,6 +27,16 @@ The single most important architectural piece is the **`Array` primitive** (3A).
 
 ## 2. The `Array` primitive (`math/array.hpp`)
 
+> **As built (Session 11, 2026-07-19 — see D22):** the sketch below predates
+> one hardware fact — the PSRAM is SPI-attached and **not memory-mapped** —
+> so the shipped API has **no `calc_t& at()` and no `data()` pointer**.
+> Element access is `get(i)`/`set(i, v)` (routed through the D21 dtype tag)
+> plus bulk `read_range`/`write_range` (chunked DMA). `ArrayStore` is a
+> fixed-size recycling store: 12 x 2 KB SRAM slabs and up to 12 x 80 KB
+> PSRAM regions on a free-list over the platform bump allocator. §3.2's
+> home-screen syntax is implemented by `math::listexpr` (vector lift over
+> the engine; see D22 for the exact grammar and its limits).
+
 ### 2.1 Design
 
 A single n-dimensional numeric array type. Lists are 1-D ($1 \times n$); matrices (Phase 4) are 2-D ($m \times n$). Designed for both.

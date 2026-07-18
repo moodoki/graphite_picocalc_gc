@@ -136,10 +136,14 @@ int build_lookup(Variables& vars, te_variable* lookup) {
     lookup[li++] = {"ans", &vars.vars[Variables::kAns], TE_VARIABLE, nullptr};
 
     // Functions come from the shared catalog (task 2.26) so the help
-    // browser and the parser cannot drift apart.
+    // browser and the parser cannot drift apart. Help-only rows
+    // (fn == nullptr — the list functions) are not engine-callable.
     int fn_count = 0;
     const FnDescriptor* cat = catalog(&fn_count);
     for (int i = 0; i < fn_count; ++i) {
+        if (cat[i].fn == nullptr) {
+            continue;
+        }
         lookup[li++] = {cat[i].name, cat[i].fn, TE_FUNCTION0 + cat[i].arity, nullptr};
     }
     return li;
@@ -182,6 +186,30 @@ void* Engine::compile(const char* expr) {
     const int li = build_lookup(vars_, lookup);
     int err = 0;
     return te_compile(processed, lookup, li, &err);
+}
+
+void* Engine::compile_with(const char* expr, const ExtraVar* extras, int extra_count) {
+    if (extra_count < 0 || extra_count > kMaxExtraVars) {
+        return nullptr;
+    }
+    char processed[kMaxExpr];
+    if (!preprocess(expr, processed, sizeof(processed))) {
+        return nullptr;
+    }
+    te_variable lookup[kLookupCount + kMaxExtraVars];
+    int li = build_lookup(vars_, lookup);
+    for (int i = 0; i < extra_count; ++i) {
+        lookup[li++] = {extras[i].name, extras[i].addr, TE_VARIABLE, nullptr};
+    }
+    int err = 0;
+    return te_compile(processed, lookup, li, &err);
+}
+
+calc_t Engine::eval_compiled_raw(void* handle) {
+    if (handle == nullptr) {
+        return std::numeric_limits<calc_t>::quiet_NaN();
+    }
+    return te_eval(static_cast<te_expr*>(handle));
 }
 
 calc_t Engine::eval_compiled(void* handle, calc_t x_val) {

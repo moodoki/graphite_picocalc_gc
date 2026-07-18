@@ -55,6 +55,20 @@ public:
     calc_t eval_compiled(void* handle, int var_slot, calc_t value);
     void free_compiled(void* handle);
 
+    // List support (task 3A.5): compile with extra variable bindings
+    // layered over the standard lookup — list_expr binds l1..l6 to
+    // per-element slots during vector-lifted evaluation. The bound
+    // addresses must outlive the handle.
+    struct ExtraVar {
+        const char* name;
+        const calc_t* addr;
+    };
+    static constexpr int kMaxExtraVars = 8;
+    void* compile_with(const char* expr, const ExtraVar* extras, int extra_count);
+    // te_eval without rebinding a variable slot (the caller writes the
+    // extras' addresses directly between calls).
+    calc_t eval_compiled_raw(void* handle);
+
     Variables& vars() { return vars_; }
 
 private:

@@ -32,6 +32,7 @@ const char* const kKeysLines[] = {
     "help     this help",
     "diag     diagnostics screen",
     "files    SD file list",
+    "lists    data list editor",
     "cls      clear screen (keeps",
     "         input history)",
     "clrhist  erase all history",
@@ -66,6 +67,12 @@ const char* const kKeysLines[] = {
     "SPACE    toggle enable",
     "DEL      clear field",
     "F5       graph",
+    "#LIST EDITOR (lists cmd)",
+    "arrows   move cell",
+    "ENTER/type  edit or append",
+    "DEL      delete row",
+    "F6/F7 (Shift+F1/F2) sort",
+    "F8 (Shift+F3) clear list",
     "#WINDOW / TABLE SETUP",
     "ENTER    edit value",
     "DEL      clear + edit empty",
@@ -106,11 +113,20 @@ const char* const kSyntaxLines[] = {
     "#HISTORY",
     "UP on empty input recalls;",
     "UP/DOWN walks past entries",
+    "#LISTS (l1..l6)",
+    "{1,2,3}->l1  store a list",
+    "l1+2*l2      element-wise",
+    "sum/prod/length(l1) scalar",
+    "sort_asc(l1) sorts in place",
+    "cumsum(l1), delta_list(l1)",
+    "seq(x^2,x,1,10,1)->l1",
+    "type lists for the editor",
 };
 constexpr int kSyntaxCount = sizeof(kSyntaxLines) / sizeof(kSyntaxLines[0]);
 
-// Column where the function summary starts ("round(x, n)" = 11 chars).
-constexpr int kSummaryCol = 13;
+// Column where the function summary starts ("seq(f,v,lo,hi,st)" = 17
+// chars is the widest signature; summaries then get ~20 chars).
+constexpr int kSummaryCol = 19;
 
 void draw_text_line(gfx::Framebuffer& fb, const gfx::Font& font, int y, const char* text) {
     using namespace platform::colors;

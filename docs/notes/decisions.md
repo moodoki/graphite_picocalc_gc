@@ -18,6 +18,22 @@ Format:
 
 ---
 
+## D22: Array as-built API (get/set, tiered store) + home-screen list syntax
+
+**Date**: 2026-07-19
+**Status**: Accepted (Session 11, task 3A implementation decisions)
+**Context**: Implementing D21's `Array` surfaced two facts the spec sketch (§2.1) didn't account for: (1) the PSRAM is SPI-attached and **not memory-mapped** (`platform::Psram` hands out addresses, access is `read()`/`write()`), so `calc_t& at()` / `calc_t* data()` cannot exist for the PSRAM tier; (2) `Psram::alloc` is bump-only (no free), so resizable lists need an allocation scheme above it. Separately, lists cannot flow through tinyexpr (scalar `double` values only), so §3.2's "callable from the home screen" needed a concrete syntax layer.
+**Decision**:
+1. **Element access is `get(i)`/`set(i, v)` plus bulk `read_range`/`write_range`** (chunked DMA underneath); no reference-returning accessors, no raw `data()`. This is also the natural shape for D21's tag-aware access rule — future complex elements change the accessor internals, not the callers.
+2. **`ArrayStore` = fixed-size recycling on both tiers**: a pool of 12 x 2 KB SRAM slabs (one slab = one small array, <= 256 doubles) and up to 12 x 80 KB PSRAM regions (one region = one large array at full 10000-double capacity) handed out from a free-list over the bump allocator. Fixed sizes make recycling trivial and fragmentation impossible; crossing 256 elements migrates slab→region (and back on shrink, freeing the region).
+3. **Home-screen list syntax** (`math::listexpr`, layered above the engine): `{1,2,3}` literals (elements are full expressions), `l1..l6` references (lowercase, D19), `-> lk` store, `sum/prod/length(l1)` **scalar reductions with bare-list args only** (substituted as numeric literals, so they embed in any scalar expression), wrappers `sort_asc/sort_desc/cumsum/delta_list(X)` + `seq(expr, var, lo, hi, step)`, and **vector lift**: any other engine expression mentioning `l1..l6` (e.g. `sin(l1)+2*l2`) is compiled once with `l1..l6` bound as per-element variables and evaluated element-wise in 256-element chunks.
+4. **Sort semantics**: `sort_asc(l1)` with a bare list arg sorts **in place** (spec §3.2); compound args (`sort_asc(l1+0)`) sort a copy. Large-list sorts use an external merge sort through one temp PSRAM region (~256-element runs, streaming merges).
+5. **`Ans` stays scalar** — list results display but don't set Ans; list persistence (`lists.dat`, magic `PCL1`, per-list dtype+count header + streamed raw elements) saves on every mutating edit/command, all-or-nothing load that waits for PSRAM on cold boot (D14).
+6. **Editor entry is the typed `lists` command** (D20 command layer); in-editor ops use non-global keys: ENTER/type to edit, DEL delete row, F6/F7 (Shift+F1/F2) sort, F8 (Shift+F3) clear list. F1-F5 keep the global scheme.
+**Rationale**: The seam (`math::psram_backend`) keeps the whole stack host-testable (malloc shim); fixed-size regions bound PSRAM use at 960 KB worst case against 8 MB; the vector lift reuses the engine's compile-once path instead of a second expression grammar; textual reduction substitution keeps tinyexpr untouched.
+**Tradeoffs**: Reductions only accept bare list names (`sum(cumsum(l1))` doesn't parse — store the inner result first); list literals can't appear inside element-wise arithmetic (`2*{1,2}` is an error; use a stored list); one 80 KB region per large list even when barely over 256 elements; wrapper nesting capped at 2.
+**Revisit when**: 3B stats/regression needs richer expressions (consider promoting list_expr to a real tagged-value evaluator), the complex dtype lands (accessor internals + `lists.dat` tag), or Phase 4 matrices need >80 KB (region size is a constant).
+
 ## D21: Phase 3 Array — 999 cap, SRAM-only, double elements with a dtype tag
 
 **Date**: 2026-07-18

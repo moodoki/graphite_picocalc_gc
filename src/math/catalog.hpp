@@ -9,7 +9,8 @@ struct FnDescriptor {
     const char* name;       // "ncr"
     const char* signature;  // "ncr(n, r)" — must itself be parseable
     const char* summary;    // "Combinations: n choose r"
-    const void* fn;         // Binding for build_lookup
+    const void* fn;         // Binding for build_lookup; nullptr = help-only
+                            // (list functions live in list_expr, not tinyexpr)
     int arity;              // 0..2 (TE_FUNCTION0 + arity)
 };
 

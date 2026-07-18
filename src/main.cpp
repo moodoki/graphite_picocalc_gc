@@ -22,6 +22,7 @@
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/functions.hpp"
+#include "math/lists.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -302,6 +303,10 @@ int main() {
 
     apps::home_screen().load_state();
     apps::load_graph_state();
+    // Data lists (Phase 3A). load() is all-or-nothing and returns
+    // false while SD or (for large lists) PSRAM is still down — the
+    // late-init loop below retries it.
+    bool lists_loaded = math::lists().load(platform::storage());
     // The typed `diag` command pushes the diagnostics overlay (the old
     // global F6 toggle is gone — 2026-07-18 remap).
     apps::home_screen().set_diag_screen(&g_diag_screen);
@@ -348,6 +353,13 @@ int main() {
                            static_cast<unsigned long>(now));
                 }
                 run_self_tests();
+                if (!lists_loaded) {
+                    lists_loaded = math::lists().load(platform::storage());
+                    if (lists_loaded) {
+                        printf("late-init: lists loaded at %lu ms\n",
+                               static_cast<unsigned long>(now));
+                    }
+                }
                 const bool psram_now = g_init_status.psram && g_psram_alloc_ok;
                 const bool sd_now = g_init_status.storage && g_sd_test == SdTest::kOk;
                 if (psram_now != psram_healthy || sd_now != sd_healthy) {

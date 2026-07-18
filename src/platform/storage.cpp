@@ -48,6 +48,24 @@ int Storage::read_file(const char* path, uint8_t* buf, size_t max_len) const {
     return rc == FR_OK ? static_cast<int>(read) : -1;
 }
 
+int Storage::read_file_range(const char* path, size_t offset, uint8_t* buf, size_t max_len) const {
+    if (!mounted_) {
+        return -1;
+    }
+    FIL f;
+    if (f_open(&f, path, FA_READ) != FR_OK) {
+        return -1;
+    }
+    if (f_lseek(&f, offset) != FR_OK) {
+        f_close(&f);
+        return -1;
+    }
+    UINT read = 0;
+    const FRESULT rc = f_read(&f, buf, max_len, &read);
+    f_close(&f);
+    return rc == FR_OK ? static_cast<int>(read) : -1;
+}
+
 bool Storage::write_file(const char* path, const uint8_t* buf, size_t len) const {
     if (!mounted_) {
         return false;
