@@ -124,9 +124,13 @@ markers, detail precision), split-screen + trace sync, help tabs, keymap, cold
 power cycle persistence. Bugs found were fixed the same session (commit 079a8b2).
 
 **Verified on Pico 2 hardware 2026-07-18 (Session 9 — offline spin + re-fix
-verification):** all ten Session 8 fixes, in two rounds. The offline spin passed
-8/10 on 079a8b2 (including the split-F1 watch-item and MODE/graphstate
-persistence across reboots — which also closes the PCG2 one-time-reset check).
+verification):** all ten Session 8 fixes, in two rounds, **plus the Session 9
+six-item improvement batch (D19/D20 keymap, typed commands, graph chrome,
+square ZStandard, DEL/SPACE) — all verified on-device same day** (minor
+polish rounds: diag text, hint color/wording, diag line wrap). The offline
+spin passed 8/10 on 079a8b2 (including the split-F1 watch-item and
+MODE/graphstate persistence across reboots — which also closes the PCG2
+one-time-reset check).
 The two failures (held-key scroll overrun; battery staleness) were
 re-root-caused, re-fixed, flashed, and **verified on-device same session**.
 Item 9's verification (charger plug → status bar follows within ~5-6 s, battery
@@ -137,7 +141,6 @@ Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
-| Session 9 improvement batch (Pico 2, flashed) | New keymap on every screen (F1 editor / F2 window-or-setup / F3 mode / F4 trace / F5 graph↔table / Alt+F5 split; `-`/`=` zoom); typed `help`/`diag`/`files`/`cls`/`clrhist` + grey hint; graph status bar shows + no curve bleed above it (try a steep function, e.g. tan(x)); ZStandard square (circle looks round: `S` then plot x²+y²… or polar r=5); DEL/SPACE in editors + DEL in WINDOW/setup; case sensitivity (`SIN(0)` errors, `sin(0)` fine, `2->a` stores) |
 | Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes + Session 9 remap, and Phase 3 acceptance |
 
 ---
