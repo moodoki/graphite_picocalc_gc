@@ -174,7 +174,9 @@ further.
 - Rendering is **event-driven**: a full-frame push is ~200 ms (5 fps), so redraw only after a key press, not every loop.
 **Rationale**: Get a correct, working calculator on hardware first. The DMA push, dual-core split, and bulk PSRAM are all optimizations/future-phase needs, not Phase 1 requirements; each is a separate investigation.
 **Tradeoffs**: ~200 ms full-screen redraw latency per keypress (single-threaded, full-frame). Acceptable for a calculator; the fix is dirty-rectangle / partial updates (and possibly a faster SPI clock or revisiting DMA), tracked for task 5.6.
-**Revisit when**: task 5.6 performance work — profile, then add partial updates and re-evaluate DMA/dual-core and the bulk PSRAM transfer (needed for Phase 3 statistics / Phase 4 matrices).
+**Revisit when**: task 5.6 performance work — profile, then add partial updates and re-evaluate DMA/dual-core (the bulk PSRAM leg is resolved).
+
+**Bulk-PSRAM leg RESOLVED 2026-07-18 (Session 10 round 3, HW-verified on the Pico 2).** Root cause: the PIO program takes 8-bit transfer counts (`out x, 8` / `out y, 8`), so one transaction maxes at 255 bits (31 bytes); the vendored `psram_write()`/`psram_read()` let the count byte wrap above 27/31 data bytes — `(4+count)*8 mod 256` — desyncing the PIO from the DMA byte stream (a wrapped count of 0 underflows `jmp x--` into a ~2^32-bit shift loop), wedging the blocking DMA wait forever. That was the Phase 1 boot hang; the upstream driver's own 4-byte-and-under fast paths never hit it. Fix: `Psram::read`/`write` now chunk internally (27-byte writes / 31-byte reads — also keeps CS-low under the chip's ~8 µs tCEM). Un-quarantined; guarded by a watchdog-armed boot self-test (hang → 2 s reboot → scratch-marker skip, no boot-loop) covering cap-straddling sizes, unaligned starts, and cross-chunk addressing. Measured on HW: 1 KB write 150 µs / read 156 µs (~6.8 MB/s). Dual-core display service remains deferred as before.
 
 ## D3: Trace coordinate readout at the bottom of the viewport
 

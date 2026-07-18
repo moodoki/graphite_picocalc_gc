@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "hardware/watchdog.h"
 #include "pico/rand.h"
 #include "pico/stdlib.h"
 
@@ -35,6 +36,105 @@ SdTest g_sd_test = SdTest::kNoCard;
 // PSRAM allocator self-test result (task 1.6 acceptance).
 bool g_psram_alloc_ok = false;
 
+// Bulk-transfer self-test (D10 un-quarantine, 2026-07-18).
+enum class BulkTest : std::uint8_t { kNotRun, kOk, kFailed, kHungLastBoot };
+BulkTest g_psram_bulk = BulkTest::kNotRun;
+uint32_t g_bulk_write_us = 0;  // 1 KB timings
+uint32_t g_bulk_read_us = 0;
+int g_bulk_fail_step = -1;
+
+// The historical failure mode of the bulk path is a DMA wait that never
+// returns, so the test arms the hardware watchdog: a wedge reboots in
+// 2 s, and the marker left in a watchdog scratch register makes the
+// next boot skip the test instead of boot-looping. (Scratch 4-7 belong
+// to the boot ROM's watchdog-vector protocol; 0/1 are free.)
+constexpr uint32_t kBulkTestMarker = 0xB07DFACEu;
+
+void run_psram_bulk_test() {
+    if (watchdog_caused_reboot() && watchdog_hw->scratch[0] == kBulkTestMarker) {
+        watchdog_hw->scratch[0] = 0;
+        g_bulk_fail_step = static_cast<int>(watchdog_hw->scratch[1]);
+        g_psram_bulk = BulkTest::kHungLastBoot;
+        return;
+    }
+
+    auto& ps = platform::psram();
+    const uint32_t base = ps.alloc(2 * 1024 + 64);
+    if (base == platform::Psram::kInvalid) {
+        return;  // Leave kNotRun; a late-init retry may succeed.
+    }
+
+    static uint8_t src[1024];
+    static uint8_t dst[1024];
+
+    watchdog_hw->scratch[0] = kBulkTestMarker;
+    watchdog_enable(2'000, true);
+
+    bool ok = true;
+    int step = 0;
+    auto check = [&](uint32_t addr, size_t len, uint32_t seed) {
+        watchdog_hw->scratch[1] = static_cast<uint32_t>(++step);
+        watchdog_update();
+        for (size_t i = 0; i < len; ++i) {
+            src[i] = static_cast<uint8_t>(seed + i * 31);
+        }
+        std::memset(dst, 0, len);
+        ps.write(addr, src, len);
+        ps.read(addr, dst, len);
+        if (std::memcmp(src, dst, len) != 0) {
+            ok = false;
+            g_bulk_fail_step = step;
+        }
+    };
+
+    // Sizes straddling the 27/31-byte PIO chunk caps, then bigger runs.
+    check(base, 1, 0x11);
+    check(base, 27, 0x22);
+    check(base, 28, 0x33);
+    check(base, 31, 0x44);
+    check(base, 32, 0x55);
+    check(base, 64, 0x66);
+    check(base, 255, 0x77);
+    check(base, 1024, 0x88);
+    check(base + 3, 61, 0x99);  // Unaligned start
+
+    // Chunk-boundary addressing: two 32-byte writes must read back as
+    // one contiguous 64-byte run (catches per-chunk address bugs).
+    {
+        watchdog_hw->scratch[1] = static_cast<uint32_t>(++step);
+        watchdog_update();
+        for (size_t i = 0; i < 64; ++i) {
+            src[i] = static_cast<uint8_t>(0xA0 + i * 7);
+        }
+        ps.write(base + 1024, src, 32);
+        ps.write(base + 1024 + 32, src + 32, 32);
+        std::memset(dst, 0, 64);
+        ps.read(base + 1024, dst, 64);
+        if (std::memcmp(src, dst, 64) != 0) {
+            ok = false;
+            g_bulk_fail_step = step;
+        }
+    }
+
+    // 1 KB timing (D10 revisit data: informs the Array PSRAM tier).
+    {
+        watchdog_hw->scratch[1] = static_cast<uint32_t>(++step);
+        watchdog_update();
+        uint64_t t0 = time_us_64();
+        ps.write(base, src, 1024);
+        g_bulk_write_us = static_cast<uint32_t>(time_us_64() - t0);
+        t0 = time_us_64();
+        ps.read(base, dst, 1024);
+        g_bulk_read_us = static_cast<uint32_t>(time_us_64() - t0);
+    }
+
+    hw_clear_bits(&watchdog_hw->ctrl, WATCHDOG_CTRL_ENABLE_BITS);
+    watchdog_hw->scratch[0] = 0;
+    g_psram_bulk = ok ? BulkTest::kOk : BulkTest::kFailed;
+    printf("psram-bulk: %s (1KB write %lu us, read %lu us)\n", ok ? "OK" : "FAIL",
+           static_cast<unsigned long>(g_bulk_write_us), static_cast<unsigned long>(g_bulk_read_us));
+}
+
 void run_self_tests() {
     if (g_init_status.storage) {
         auto& fs = platform::storage();
@@ -52,7 +152,7 @@ void run_self_tests() {
 
     if (g_init_status.psram) {
         auto& ps = platform::psram();
-        // Word-based r/w test (the vendored bulk path hangs on HW — D10).
+        // Word-based r/w test (bulk is tested separately below — D10).
         const uint32_t addr = ps.alloc(256);
         if (addr != platform::Psram::kInvalid) {
             bool ok = true;
@@ -67,6 +167,12 @@ void run_self_tests() {
             }
             g_psram_alloc_ok = ok;
         }
+    }
+
+    // Bulk path (D10): run once, after the word path proves healthy —
+    // late-init retries re-enter here until PSRAM comes up.
+    if (g_psram_alloc_ok && g_psram_bulk == BulkTest::kNotRun) {
+        run_psram_bulk_test();
     }
 }
 
@@ -112,12 +218,18 @@ public:
         font.draw_string(fb, 8, y, line, kWhite, kBlack);
         y += lh;
 
-        std::snprintf(line, sizeof(line), "PSRAM: %s",
+        const char* bulk = g_psram_bulk == BulkTest::kOk             ? "bulk OK"
+                           : g_psram_bulk == BulkTest::kFailed       ? "bulk FAIL"
+                           : g_psram_bulk == BulkTest::kHungLastBoot ? "bulk HUNG"
+                                                                     : "bulk not run";
+        std::snprintf(line, sizeof(line), "PSRAM: %s, %s",
                       !g_init_status.psram ? "not detected"
-                      : g_psram_alloc_ok   ? "OK (1KB r/w verified)"
-                                           : "FAIL (readback mismatch)");
-        font.draw_string(fb, 8, y, line, g_init_status.psram && g_psram_alloc_ok ? kGreen : kRed,
-                         kBlack);
+                      : g_psram_alloc_ok   ? "word OK"
+                                           : "word FAIL",
+                      bulk);
+        const bool psram_all_ok =
+            g_init_status.psram && g_psram_alloc_ok && g_psram_bulk == BulkTest::kOk;
+        font.draw_string(fb, 8, y, line, psram_all_ok ? kGreen : kRed, kBlack);
         y += lh;
 
         std::snprintf(line, sizeof(line), "SD card: %s",
@@ -247,6 +359,24 @@ int main() {
                     }
                     dirty = true;
                 }
+            }
+        }
+
+        // D10 verification: repeat the bulk-test verdict on a 30 s
+        // heartbeat (like battery:) — the boot-time print races USB
+        // enumeration and a one-shot is easy to miss on attach.
+        {
+            static uint32_t last_bulk_report_ms = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            if (now_ms > 3'000 && now_ms - last_bulk_report_ms >= 30'000 &&
+                g_psram_bulk != BulkTest::kNotRun) {
+                last_bulk_report_ms = now_ms;
+                const char* verdict = g_psram_bulk == BulkTest::kOk       ? "OK"
+                                      : g_psram_bulk == BulkTest::kFailed ? "FAIL"
+                                                                          : "HUNG-LAST-BOOT";
+                printf("psram-bulk: %s step=%d (1KB write %lu us, read %lu us)\n", verdict,
+                       g_bulk_fail_step, static_cast<unsigned long>(g_bulk_write_us),
+                       static_cast<unsigned long>(g_bulk_read_us));
             }
         }
 

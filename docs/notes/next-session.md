@@ -23,18 +23,37 @@ reminders: **F6 no longer opens diag** (type `diag` on home); **trace is
 F4**; help is the typed `help` command; new graph keys **`F` ZoomFit / `L`
 labels** sit beside `S`/`T` presets.
 
-## The next job: quick round-2 check, review D10 + D14, then Phase 3
+## The next job: quick round-2 check, then Phase 3
 
 1. Quick Session 10 round-2 checklist (worklog HW-PENDING): `L` persists
    across reboot (expect the **one-time PCG3 state reset** first boot —
    re-set window/mode, resave), `rand()` history render, short ZTrig ticks.
-2. **D21 (2026-07-18) decided the Array questions: P3-1 = 999 cap,
-   SRAM-only backing for Phase 3, P3-2 = double-only + dtype tag.** 3A is
-   therefore **decoupled from D10** — the D10 (bulk PSRAM) / D14 (rail
-   settle) review stays queued but no longer blocks 3A; it matters for
-   Phase 4 matrices or a future cap raise. Scope the rail / retest bulk
-   transfer whenever a hardware session is convenient.
-3. Start Phase 3 (statistics) — 3A can begin immediately per D21.
+2. **D21 decided the Array questions** (P3-1 = 999 cap, SRAM-only for
+   Phase 3, P3-2 = double-only + dtype tag), and **D10's bulk-PSRAM hang
+   is now root-caused, fixed, and Pico-2-verified** (round 3: PIO 8-bit
+   transfer-count overflow; chunked wrapper; ~6.8 MB/s; watchdog-guarded
+   self-test + `psram-bulk:` 30 s serial heartbeat). Nothing blocks 3A.
+3. Start Phase 3 (statistics) — 3A can begin immediately.
+
+## D14 rail settle — remaining deferred HW item (scope plan)
+
+The only unresolved deferred hardware question. Software already gives
+timestamps (`late-init:` lines, `psram-bulk:`/`battery:` heartbeats).
+Bench session plan:
+
+1. Scope the **3V3 rail** (PSRAM VCC pin or mainboard 3V3 test point) from
+   a **cold power-on** (unit off long enough to discharge; battery path),
+   trigger on rising edge, ~10 s capture.
+2. Measure: ramp shape/time to 3.3 V, dips during boot (SD inrush), and
+   whether the rail is actually late vs. the PSRAM/SD needing internal
+   init time after a fast-but-clean ramp.
+3. Correlate against serial `late-init:` timestamps from the same boot
+   (`scripts/serial-capture.py 40` on a second terminal).
+4. If the rail is clean, suspicion moves to PSRAM power-up state (needs
+   RESETEN/RESET after VDD stable — `Psram::reinit()` already does this;
+   an early-boot retry-with-reset loop might then beat the 5-8 s wait).
+5. Compare Pico 1 (no symptom) vs Pico 2 (symptom) — mainboard/SMPS
+   interaction is the working hypothesis (D14).
 
 ## Phase 3 notes (unchanged from Session 9)
 
@@ -104,10 +123,11 @@ run ~20×/frame) — rule recorded in `phase3-spec.md` §8.
   (TI's F3 slot) — judge after real use.
 - D16 trace-sync option b (trace steps by table-step) — judge after more
   split use.
-- Backlog: Pico 2 rail settle root cause (D14, scope 3V3) and PSRAM bulk
-  transfer hang (D10) — **now explicitly next in the deferred queue** (see
-  "next job" above); 340-point curve cache cap; audio HAL; licensing (D17 —
-  font step now done, display/keyboard rewrites remain).
+- Backlog: **D10 bulk PSRAM — RESOLVED 2026-07-18** (see D10 addendum;
+  dual-core display service still deferred). Remaining: D14 rail settle
+  (scope plan above — the last deferred HW item); 340-point curve cache
+  cap; audio HAL; licensing (D17 — font step done, display/keyboard
+  rewrites remain).
 
 ## Feature wishlist — wanted, not yet scheduled (raised 2026-07-18)
 
@@ -134,9 +154,12 @@ next phases (they need a home, not immediate work):
 
 ## Hardware debugging kit (reminder)
 
-- Serial: `cat /dev/cu.usbmodem*` — `late-init:` and `battery:` lines (the
-  latter on change + 30 s heartbeat); `graph recompute: N us` on window
-  changes.
+- Serial: **plain `cat` reads nothing** — pico stdio_usb only transmits
+  with DTR asserted (learned 2026-07-18). Interactive:
+  `./scripts/monitor.sh` (screen). Non-interactive/agent:
+  `./scripts/serial-capture.py [seconds] [match-substring]`. Lines:
+  `late-init:`, `battery:` (change + 30 s heartbeat), `psram-bulk:`
+  (30 s heartbeat), `graph recompute: N us` on window changes.
 - Flash: see the Pico 2 notes above; Pico 1 BOOTSEL volume is `RPI-RP2`.
 - `picocalc_diag` target = vendored-only display test for bisecting.
 - Build env: `PICO_SDK_PATH=$PWD/pico-sdk`,

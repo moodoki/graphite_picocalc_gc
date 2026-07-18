@@ -34,10 +34,10 @@ public:
     void write_word(uint32_t addr, uint32_t value);
     uint32_t read_word(uint32_t addr);
 
-    // Bulk access. WARNING: the vendored bulk transfer path hangs on
-    // PicoCalc hardware (2026-07-10) — do NOT use until fixed. Phase 1
-    // does not need it (framebuffer is line-buffered in SRAM). See D10 /
-    // worklog. Left declared for the future statistics/matrix use cases.
+    // Bulk access (un-quarantined 2026-07-18, D10 root cause found):
+    // the vendored bulk path overflowed the PIO's 8-bit transfer count
+    // above 27/31 bytes and wedged DMA; these now chunk transfers to
+    // the PIO limit internally. Any length/alignment is fine.
     void write(uint32_t addr, const uint8_t* data, size_t len);
     void read(uint32_t addr, uint8_t* data, size_t len);
 

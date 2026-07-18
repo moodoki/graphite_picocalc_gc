@@ -1,5 +1,7 @@
 #include "platform/psram.hpp"
 
+#include <cstring>
+
 extern "C" {
 #include "rp2040-psram/psram_spi.h"
 }
@@ -8,6 +10,18 @@ namespace platform {
 
 namespace {
 psram_spi_inst_t g_psram;
+
+// Bulk-transfer chunk caps (D10 fix, 2026-07-18). The PIO program takes
+// 8-bit transfer counts ("out x, 8" / "out y, 8"), so one transaction
+// moves at most 255 bits: 31 bytes total. A write spends 4 of those on
+// command+address (27 data bytes); a read's command phase is counted
+// separately (31 data bytes). The vendored psram_write()/psram_read()
+// let the count byte wrap above that — (4+count)*8 mod 256 — which
+// desyncs the PIO from the DMA byte stream and wedges the blocking
+// DMA wait (the Phase 1 boot hang). Chunking this size also keeps CS
+// low well under the PSRAM's ~8 us tCEM cap (~4 us per chunk).
+constexpr size_t kWriteChunk = 27;
+constexpr size_t kReadChunk = 31;
 
 // Cheap read-back self-test at two addresses.
 bool self_test() {
@@ -68,11 +82,42 @@ uint32_t Psram::read_word(uint32_t addr) {
 }
 
 void Psram::write(uint32_t addr, const uint8_t* data, size_t len) {
-    psram_write(&g_psram, addr, data, len);
+    // One buffer per chunk (header + payload) so each chunk is a single
+    // DMA call under one mutex hold; blocking, so the stack buffer is
+    // safe as a DMA source.
+    uint8_t cmd[6 + kWriteChunk];
+    while (len > 0) {
+        const size_t n = len < kWriteChunk ? len : kWriteChunk;
+        cmd[0] = static_cast<uint8_t>((4 + n) * 8);  // bits out
+        cmd[1] = 0;                                  // bits in
+        cmd[2] = 0x02u;                              // Write command
+        cmd[3] = static_cast<uint8_t>(addr >> 16);
+        cmd[4] = static_cast<uint8_t>(addr >> 8);
+        cmd[5] = static_cast<uint8_t>(addr);
+        std::memcpy(cmd + 6, data, n);
+        pio_spi_write_dma_blocking(&g_psram, cmd, 6 + n);
+        addr += n;
+        data += n;
+        len -= n;
+    }
 }
 
 void Psram::read(uint32_t addr, uint8_t* data, size_t len) {
-    psram_read(&g_psram, addr, data, len);
+    while (len > 0) {
+        const size_t n = len < kReadChunk ? len : kReadChunk;
+        // 40 bits out: 0x0B fast-read + 3 address bytes + 8 dummy cycles.
+        const uint8_t cmd[7] = {40,
+                                static_cast<uint8_t>(n * 8),
+                                0x0bu,
+                                static_cast<uint8_t>(addr >> 16),
+                                static_cast<uint8_t>(addr >> 8),
+                                static_cast<uint8_t>(addr),
+                                0};
+        pio_spi_write_read_dma_blocking(&g_psram, cmd, sizeof(cmd), data, n);
+        addr += n;
+        data += n;
+        len -= n;
+    }
 }
 
 Psram& psram() {

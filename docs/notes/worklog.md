@@ -160,6 +160,7 @@ Still to verify on hardware:
 |------|---------------------------|
 | Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes + Session 9 remap, and Phase 3 acceptance |
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
+| Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
 
 ---
 
@@ -213,6 +214,37 @@ Lint clean (two float-loop-counter findings fixed by switching to the
 integer-index grid idiom), both boards build, 216 host checks green.
 **Pico 2 flashed same session** (BOOTSEL cp path, ~15 s mount wait
 confirmed again); on-device eval queued in HW-PENDING.
+
+**Round 3 (same day) — D10 root-caused, fixed, HW-verified; D14 scoped.**
+The deferred-queue review moved to D10/D14:
+
+- **D10 bulk-PSRAM hang: solved.** Reading the vendored driver against
+  its PIO program found the mechanism — the PIO takes **8-bit transfer
+  counts** (`out x, 8`/`out y, 8`; max 255 bits = 31 bytes/transaction),
+  and `psram_write()`/`psram_read()` let the count byte wrap above 27/31
+  data bytes, desyncing PIO from the DMA stream (count 0 underflows
+  `jmp x--` into a ~2^32-bit shift loop) and wedging the blocking DMA
+  wait. Fix: `Psram::read/write` chunk internally (27 B writes / 31 B
+  reads, single DMA call + one mutex hold per chunk; also respects the
+  chip's ~8 us tCEM). **Un-quarantined** — any length/alignment works.
+- **Watchdog-guarded bulk self-test** in `run_self_tests()` (permanent):
+  cap-straddling sizes, unaligned start, cross-chunk addressing, 1 KB
+  timing. The historical failure is an infinite DMA wait, so the test
+  arms a 2 s watchdog with a scratch-register marker — a regression
+  reboots once and the next boot skips the test (no boot-loop). Verdict
+  repeats on a 30 s serial heartbeat (`psram-bulk:`); diag screen shows
+  `PSRAM: word OK, bulk OK`.
+- **HW-verified on the Pico 2 same session**: `psram-bulk: OK (1KB
+  write 150 us, read 156 us)` — ~6.8 MB/s, roughly 40x the word path.
+  Unblocks the Array PSRAM tier (D21 keeps Phase 3 SRAM-only by choice,
+  not necessity) and Phase 4 matrices.
+- **Serial-capture gotcha found**: pico stdio_usb transmits only with
+  DTR asserted — `screen` does that, plain `cat` does not (why captures
+  looked dead). New `scripts/serial-capture.py` asserts DTR/RTS for
+  non-interactive use: `serial-capture.py [seconds] [match-substring]`.
+- **D14 (rail settle)**: software instrumentation is already sufficient
+  (late-init timestamps + heartbeats); root cause needs bench time —
+  scope plan written into next-session. Unchanged risk profile.
 
 **Round 2 (same day) — eval verdict + fixes.** On-device: screens look
 good; **axis labels are keepers**. Three fixes from the eval, flashed:

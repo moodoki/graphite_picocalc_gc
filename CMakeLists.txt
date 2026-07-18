@@ -131,6 +131,7 @@ target_link_libraries(picocalc_graphcalc
     pico_stdlib
     pico_multicore
     pico_rand
+    hardware_watchdog
     hardware_spi
     hardware_i2c
     hardware_dma
