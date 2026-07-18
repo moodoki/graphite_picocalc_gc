@@ -18,6 +18,16 @@ Format:
 
 ---
 
+## D21: Phase 3 Array — 999 cap, SRAM-only, double elements with a dtype tag
+
+**Date**: 2026-07-18
+**Status**: Accepted (resolves phase3-spec P3-1 and P3-2 ahead of task 3A.1)
+**Context**: Phase 3 3A needs the `Array` primitive's shape decided up front. The spec suggested a 10000 cap "given PSRAM", but that predates D10's quarantine of bulk PSRAM transfer (only word r/w is verified), and the complex-numbers wishlist (2026-07-18) raised the element-type stakes for Phase 4's Matrix reconciliation.
+**Decision**: (1) **P3-1: max list length 999** (TI parity). (2) **Storage: SRAM-only for Phase 3** — six full lists are ~48 KB, inside even the Pico 1's ~195 KB headroom; `ArrayStore` keeps the backing abstract so PSRAM can be added later without caller churn. (3) **P3-2: elements are `calc_t` (double) only, but `Array` and the `lists.dat` image carry a dtype tag** reserved for future complex (or integer) elements.
+**Rationale**: Zero coupling to D10 — 3A cannot be blocked by a hardware session; fastest stat sweeps (no per-element SPI); TI-parity cap covers the realistic on-device datasets; the dtype tag future-proofs persistence and the Phase 4 `Matrix`-on-`Array` reconciliation for a few bytes now.
+**Tradeoffs**: No >999-element lists in Phase 3; ~48 KB of SRAM reserved at full occupancy (acceptable on both boards). Integer lists' space savings forgone.
+**Revisit when**: The D10 review un-quarantines bulk PSRAM (raise the cap behind ArrayStore), Phase 4 matrices outgrow SRAM, or complex-number support starts (dtype tag becomes live).
+
 ## D20: Global F-key scheme + typed command layer
 
 **Date**: 2026-07-18

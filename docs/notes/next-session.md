@@ -28,18 +28,19 @@ labels** sit beside `S`/`T` presets.
 1. Quick Session 10 round-2 checklist (worklog HW-PENDING): `L` persists
    across reboot (expect the **one-time PCG3 state reset** first boot —
    re-set window/mode, resave), `rand()` history render, short ZTrig ticks.
-2. **Review D10 (bulk PSRAM, quarantined) and D14 (3V3 rail settle)** before
-   writing 3A code — decided Session 10, these come next: Phase 3 lists may
-   want bulk PSRAM, and the P3-1 max-length decision depends on where Array
-   data lives. Budget a hardware session (scope the rail; retest bulk
-   transfer) if 3A wants either.
-3. Start Phase 3 (statistics).
+2. **D21 (2026-07-18) decided the Array questions: P3-1 = 999 cap,
+   SRAM-only backing for Phase 3, P3-2 = double-only + dtype tag.** 3A is
+   therefore **decoupled from D10** — the D10 (bulk PSRAM) / D14 (rail
+   settle) review stays queued but no longer blocks 3A; it matters for
+   Phase 4 matrices or a future cap raise. Scope the rail / retest bulk
+   transfer whenever a hardware session is convenient.
+3. Start Phase 3 (statistics) — 3A can begin immediately per D21.
 
 ## Phase 3 notes (unchanged from Session 9)
 
 `docs/phases/phase3-spec.md` — begin with sub-phase 3A (weeks 17–18): the
-`Array` primitive (§2, decide P3-1 max-length and P3-2 element-type up
-front) and the list editor. Notes already embedded in the spec:
+`Array` primitive (§2 — P3-1/P3-2 already decided, see D21) and the list
+editor. Notes already embedded in the spec:
 
 - §8 **strip-safety rule**: new `render()`s must be idempotent (they run
   ~20×/frame on the Pico 1 strip renderer; no host coverage catches
