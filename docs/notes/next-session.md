@@ -12,26 +12,28 @@ F1 editor / F2 window / F3 mode / F4 trace / F5 graph↔table / Alt+F5 split /
 post-Phase 3 (D18)**. Full record: worklog Session 9;
 `docs/notes/testdrive-phase2-observations.md` §"round 2".
 
-## First: verify the Session 9 batch on-device (Pico 2)
+## Phase 2 is CLOSED (2026-07-18)
 
-Checklist in the worklog HW-PENDING table — headline items: new keymap
-everywhere (muscle-memory sweep), typed commands, graph status bar with no
-bleed above it (steep function like tan(x)), a round circle after `S`,
-DEL/SPACE in editors and settings, `SIN(0)` errors vs `sin(0)`.
-**Note:** the old keymap is retired — F6 no longer opens diag (type `diag`
-on home); trace is F4 now, not F1.
+The Session 9 batch was verified on-device; 2.22/2.24/2.25 are closed
+(rationale in the worklog status block) and the retro is written:
+`docs/notes/phase2-retro.md`. Keymap reminder for anyone returning after a
+break: **F6 no longer opens diag** (type `diag` on home); **trace is F4**,
+not F1; help is the typed `help` command.
 
-## Then: close out Phase 2
+## The next job: start Phase 3 (statistics)
 
-- 2.24: **close it** — the test drive, offline spin, and fix verification are
-  all logged (Pico 1 no longer gates it, D18).
-- 2.25: baseline is captured and healthy (recompute ≪ frame push; table
-  scroll lag was event backlog, now truly coalesced after the Session 9 drain
-  fix — re-judge the feel). Decide if the remaining lever (table
-  compile-once-per-regenerate) is still needed.
-- 2.22: decide what "mode selector integration" needs beyond the MODE row.
-- Then: Phase 2 retro → pick up `docs/phases/phase3-spec.md` (note the
-  strip-safety rule added to its §8 and the 3D.14 note re: D18).
+`docs/phases/phase3-spec.md` — begin with sub-phase 3A (weeks 17–18): the
+`Array` primitive (§2, decide P3-1 max-length and P3-2 element-type up
+front) and the list editor. Notes already embedded in the spec:
+
+- §8 **strip-safety rule**: new `render()`s must be idempotent (they run
+  ~20×/frame on the Pico 1 strip renderer; no host coverage catches
+  violations).
+- Task **3D.14** carries the deferred Pico 1 pass (D18): Phase 2 sweep +
+  Session 8/9 fixes + Phase 3 acceptance in one board swap.
+- §10: reconcile Phase 4's `Matrix` onto `Array` when Phase 4 begins.
+- D10's bulk-PSRAM path is quarantined but Phase 3 lists will likely want
+  it — budget a hardware session if it gets un-quarantined.
 
 ## Key things to note — Pico 2 specific
 

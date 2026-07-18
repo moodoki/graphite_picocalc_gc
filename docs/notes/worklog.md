@@ -72,11 +72,19 @@ Conventions:
 - **Session 9 (2026-07-18)**: all ten Session 8 fixes verified on the
   Pico 2 (offline spin passed 8/10; items 8+9 re-root-caused, re-fixed,
   re-verified same session — see Session 9 entry). Charging-bit decode
-  confirmed. The full Pico 1 pass is **deferred to post-Phase 3** (D18) —
-  folds into task 3D.14 to save a board swap.
-- **Next up**: close out Phase 2 — 2.24 done; re-judge 2.25 (recompute ≪
-  frame push; decide on table compile-once); scope 2.22 ("mode selector
-  integration" beyond the MODE row); then Phase 2 retro → phase3-spec.
+  confirmed. Six-item usage-feedback batch shipped and HW-verified
+  (D19 case-sensitive input, D20 keymap + typed commands, graph chrome,
+  square ZStandard, DEL/SPACE). The full Pico 1 pass is **deferred to
+  post-Phase 3** (D18) — folds into task 3D.14 to save a board swap.
+- **Phase 2 declared done 2026-07-18** (retro:
+  `docs/notes/phase2-retro.md`). Close-out: 2.24 closed on the Pico 2
+  passes (Pico 1 leg → 3D.14 per D18); 2.25 closed on the baseline —
+  recompute ≪ frame push, the scroll symptom was event backlog (fixed),
+  compile-once lever not needed; 2.22 closed — MODE row + D20 made mode
+  fully integrated (F3 everywhere, mode-aware F1/WINDOW/labels).
+- **Next up**: start Phase 3 (`docs/phases/phase3-spec.md`) — sub-phase
+  3A: the `Array` primitive + list editor. Note the §8 strip-safety
+  rule and the 3D.14 combined Pico 1 pass.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.
