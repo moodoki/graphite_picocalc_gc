@@ -117,10 +117,12 @@ next phases (they need a home, not immediate work):
 - **Complex numbers.** The whole stack is real-valued `double` today
   (tinyexpr, format, storage). Wants: an `a+bi` value type through the
   engine, complex-aware functions (sqrt(-1), ln of negatives, ...), a
-  display format, and a MODE row entry (real / a+bi, TI-style). Touches
-  P3-2-style element-type questions if lists/matrices should hold complex
-  values — worth deciding *before* Phase 4's Matrix work fixes the element
-  type.
+  display format, and a MODE row entry (real / a+bi, TI-style).
+  **Committed scope (2026-07-18): lists and matrices will hold complex
+  values too** — D21's dtype tag in `Array`/`lists.dat` exists precisely
+  so this lands as a non-breaking addition; Phase 3/4 code touching
+  element access should not bake in double-only assumptions beyond the
+  tag check.
 - **TI-84 CALC-menu graph analysis** (2nd+TRACE on the TI): value, zero,
   minimum, maximum, **intersect**, dy/dx, **numeric fnInt** over an
   interval. Distinct from Phase 4's *symbolic* CAS: these are numeric +

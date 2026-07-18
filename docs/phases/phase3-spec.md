@@ -93,8 +93,11 @@ A single allocator manages array storage. Small arrays (lists up to 256 elements
 > is still quarantined (D10). `ArrayStore` keeps the API above so the PSRAM
 > tier can be added later (Phase 4 matrices, or a raised cap) without caller
 > churn; `in_psram()` simply returns false for now. `Array` additionally
-> carries a **dtype tag** (double-only today) persisted in `lists.dat` —
-> reserved for future complex/integer elements (see D21).
+> carries a **dtype tag** (double-only today) persisted in `lists.dat`.
+> The tag is committed, not speculative: **complex-valued lists/matrices
+> ship with the future complex-numbers feature** (see D21) — Phase 3 code
+> must route element access through the tag-aware API so that addition is
+> non-breaking.
 
 ```cpp
 namespace math {
