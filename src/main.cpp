@@ -246,10 +246,13 @@ int main() {
         }
 
         // Status-bar liveness: the render model is event-driven, so a
-        // battery cache refresh used to sit invisible until the next
-        // keypress (stale %/charging on screen, HW 2026-07-18). Poll
-        // the cache (cheap; I2C at most every 30 s inside) about once
-        // a second and repaint just the 16-row status band on change.
+        // battery change used to sit invisible until the next keypress
+        // (stale %/charging on screen, HW 2026-07-18). This check ran
+        // at 1 Hz but read a cache with a 30 s I2C refresh inside, so
+        // on-screen freshness was really ~31 s (offline spin, HW
+        // 2026-07-18). battery_poll() now owns the refresh (~5 s pacing
+        // for STM32 stability, this is its only call site); repaint
+        // just the 16-row status band on change.
         {
             static uint32_t last_batt_check_ms = 0;
             static int last_batt_percent = -2;  // Distinct from the -1 "unknown"
@@ -257,7 +260,7 @@ int main() {
             const uint32_t now = platform::uptime_ms();
             if (now - last_batt_check_ms >= 1'000) {
                 last_batt_check_ms = now;
-                const auto batt = platform::battery_status();
+                const auto batt = platform::battery_poll();
                 if (batt.percent != last_batt_percent || batt.charging != last_batt_charging) {
                     last_batt_percent = batt.percent;
                     last_batt_charging = batt.charging;
@@ -272,16 +275,28 @@ int main() {
         // Drain every queued key before rendering: while a render is in
         // flight the STM32 FIFO keeps buffering held-key repeats, and
         // handling one event per frame made the backlog play out after
-        // release (table scroll overrun, HW 2026-07-18). Handlers are
-        // cheap — the render is the expensive part — so process the
-        // whole burst and push one frame. The cap only guards against a
-        // wedged FIFO streaming events forever.
+        // release (table scroll overrun, HW 2026-07-18). The first
+        // drain attempt broke on the first kNone — but poll() is a
+        // two-phase machine, so kNone usually means "read in flight",
+        // not "FIFO empty", and the loop still consumed one event per
+        // frame (offline spin, HW 2026-07-18). Now keep polling until
+        // a completed read reports the FIFO empty; each drained event
+        // costs one ~10 ms poll cycle, still far cheaper than a frame.
+        // Cap + time budget guard against a wedged FIFO streaming
+        // events forever.
         constexpr int kMaxEventsPerFrame = 16;
-        for (int n = 0; n < kMaxEventsPerFrame; ++n) {
+        constexpr uint64_t kDrainBudgetUs = 250'000;
+        const uint64_t drain_deadline_us = platform::uptime_us() + kDrainBudgetUs;
+        for (int n = 0; n < kMaxEventsPerFrame;) {
             const platform::KeyEvent ev = platform::keyboard().poll();
             if (ev.key == platform::Key::kNone) {
-                break;
+                if (platform::keyboard().fifo_empty() ||
+                    platform::uptime_us() >= drain_deadline_us) {
+                    break;
+                }
+                continue;  // Read in flight (or hold-repeat suppressed)
             }
+            ++n;
             if (!ev.pressed) {
                 continue;
             }

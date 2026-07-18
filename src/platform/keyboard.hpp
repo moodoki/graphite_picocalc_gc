@@ -137,6 +137,15 @@ public:
     // FIFO data and produce phantom key events.
     bool bus_idle() const { return phase_ == Phase::kIdle; }
 
+    // True when the most recent *completed* FIFO read found no event.
+    // A kNone return from poll() usually just means a read is in
+    // flight (the two-phase machine spends >=10 ms per cycle), so a
+    // caller draining a key backlog must not stop on kNone alone —
+    // keep polling until this reports empty (HW 2026-07-18 offline
+    // spin: breaking on the first kNone capped draining at one event
+    // per frame and held-key backlogs played out after release).
+    bool fifo_empty() const { return fifo_empty_; }
+
     bool is_held(Key k) const;
 
     // Printable character for an event (0 if not printable).
@@ -147,6 +156,7 @@ private:
 
     Phase phase_ = Phase::kIdle;
     uint64_t phase_deadline_us_ = 0;
+    bool fifo_empty_ = true;
     bool shift_held_ = false;
     bool ctrl_held_ = false;
     bool alt_held_ = false;

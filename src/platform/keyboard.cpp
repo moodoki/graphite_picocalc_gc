@@ -205,8 +205,10 @@ KeyEvent Keyboard::poll() {
     uint8_t buf[2] = {0, 0};
     const int rc = i2c_read_timeout_us(I2C_KBD_MOD, I2C_KBD_ADDR, buf, 2, false, kI2cTimeoutUs);
     if (rc < 0 || (buf[0] == 0 && buf[1] == 0)) {
+        fifo_empty_ = true;
         return none;
     }
+    fifo_empty_ = false;
     return decode(buf[0], buf[1]);
 }
 
