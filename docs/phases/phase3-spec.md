@@ -88,16 +88,18 @@ private:
 
 A single allocator manages array storage. Small arrays (lists up to 256 elements, small matrices) live in an SRAM pool for speed; larger arrays go to PSRAM. This decision is internal to `Array` — callers don't manage it.
 
-> **D21 (2026-07-18): Phase 3 ships SRAM-only.** With the 999 cap, six full
-> lists are ~48 KB — inside both boards' headroom — and bulk PSRAM transfer
-> is still quarantined (D10). `ArrayStore` keeps the API above so the PSRAM
-> tier can be added later (Phase 4 matrices, or a raised cap) without caller
-> churn; `in_psram()` simply returns false for now. `Array` additionally
-> carries a **dtype tag** (double-only today) persisted in `lists.dat`.
-> The tag is committed, not speculative: **complex-valued lists/matrices
-> ship with the future complex-numbers feature** (see D21) — Phase 3 code
-> must route element access through the tag-aware API so that addition is
-> non-breaking.
+> **D21 (2026-07-18, amended same day): ships as specced above — SRAM pool
+> for <= 256 elements, PSRAM tier for larger, cap 10000.** The initial
+> SRAM-only call was made under the D10 bulk-PSRAM quarantine; the D10 fix
+> landed the same day (chunked transfers, ~6.8 MB/s HW-verified), so the
+> PSRAM tier is live for Phase 3 lists and Phase 4 matrices. Cold-boot
+> caveat (D14, unresolved, non-blocking): PSRAM can be late by a few
+> seconds on a cold power-on — list load just waits for late-init; nothing
+> needs PSRAM at boot. `Array` additionally carries a **dtype tag**
+> (double-only today) persisted in `lists.dat`. The tag is committed, not
+> speculative: **complex-valued lists/matrices ship with the future
+> complex-numbers feature** (see D21) — Phase 3 code must route element
+> access through the tag-aware API so that addition is non-breaking.
 
 ```cpp
 namespace math {
@@ -597,7 +599,7 @@ Solo developer, part-time (~20 hrs/week). ~8 weeks.
 
 | # | Question | Options | When |
 |---|----------|---------|------|
-| P3-1 | Max list length cap? | **DECIDED (D21, 2026-07-18): 999, SRAM-only backing for Phase 3** — six full lists ~48 KB fit SRAM on both boards; no D10 dependency. Raise later behind `ArrayStore` if bulk PSRAM is un-quarantined. | Decided |
+| P3-1 | Max list length cap? | **DECIDED (D21, 2026-07-18, amended same day): 10000, SRAM pool + PSRAM tier** — the D10 bulk-PSRAM fix landed the same day (~6.8 MB/s verified), so §2.2 ships as written: <= 256 elements SRAM, larger PSRAM. | Decided |
 | P3-2 | `Array` element type: always `calc_t` (double), or support integer lists? | **DECIDED (D21, 2026-07-18): double-only storage, plus a dtype tag in `Array` and `lists.dat`** reserved for future complex/int elements (Phase 4 Matrix + complex wishlist). | Decided |
 | P3-3 | Iterative regression solver: Levenberg-Marquardt or Gauss-Newton? | LM is more robust but more code. Suggest LM. | Week 21, task 3B.5 |
 | P3-4 | Distribution function naming: `normal_cdf(lo, hi, ...)` two-tailed like TI, or `normal_cdf(x)` one-tailed standard? | TI's two-arg lower/upper is practical for tests; standard CDF is more conventional. Decide and document. | Week 22, task 3C.2 |

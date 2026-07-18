@@ -90,10 +90,14 @@ Conventions:
   (xorshift64* in math::fn, `get_rand_64()` at boot, host-deterministic);
   **ZoomFit** (`F` on graph); **numeric axis tick labels** in the small
   font (`L` toggles — evaluation feature).
-- **Next up**: on-device eval of the Session 10 batch, then start
-  Phase 3 (`docs/phases/phase3-spec.md`) — sub-phase 3A: the `Array`
-  primitive + list editor. Note the §8 strip-safety rule and the 3D.14
-  combined Pico 1 pass.
+- **Session 10 later rounds (same day)**: round-1 eval passed (labels
+  kept → persisted, PCG3); **D10 bulk PSRAM root-caused, fixed,
+  HW-verified** (~6.8 MB/s); **D21 amended — Array cap 10000 with the
+  PSRAM tier**; D14 parked as the NEXT BENCH SESSION (non-blocking,
+  scope plan + schematic findings in next-session.md).
+- **Next up**: start Phase 3 (`docs/phases/phase3-spec.md`) — sub-phase
+  3A: the `Array` primitive + list editor, per D21 as amended. Note the
+  §8 strip-safety rule and the 3D.14 combined Pico 1 pass.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.

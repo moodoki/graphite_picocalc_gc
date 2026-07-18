@@ -23,22 +23,32 @@ reminders: **F6 no longer opens diag** (type `diag` on home); **trace is
 F4**; help is the typed `help` command; new graph keys **`F` ZoomFit / `L`
 labels** sit beside `S`/`T` presets.
 
-## The next job: quick round-2 check, then Phase 3
+## The next job: Phase 3 (statistics), sub-phase 3A
 
-1. Quick Session 10 round-2 checklist (worklog HW-PENDING): `L` persists
-   across reboot (expect the **one-time PCG3 state reset** first boot —
-   re-set window/mode, resave), `rand()` history render, short ZTrig ticks.
-2. **D21 decided the Array questions** (P3-1 = 999 cap, SRAM-only for
-   Phase 3, P3-2 = double-only + dtype tag), and **D10's bulk-PSRAM hang
-   is now root-caused, fixed, and Pico-2-verified** (round 3: PIO 8-bit
-   transfer-count overflow; chunked wrapper; ~6.8 MB/s; watchdog-guarded
-   self-test + `psram-bulk:` 30 s serial heartbeat). Nothing blocks 3A.
-3. Start Phase 3 (statistics) — 3A can begin immediately.
+Start `docs/phases/phase3-spec.md` sub-phase 3A: the `Array` primitive +
+list editor. Everything is decided and nothing blocks:
 
-## D14 rail settle — remaining deferred HW item (scope plan)
+- **D21 (as amended)**: cap **10000**, **SRAM pool <= 256 elements /
+  PSRAM tier above** (D10 is fixed — chunked bulk at ~6.8 MB/s,
+  Pico-2-verified), elements double-only **+ dtype tag** (complex lists/
+  matrices are committed future scope — keep element access tag-aware).
+- Cold-boot caveat: PSRAM can lag a few seconds on cold power-on (D14,
+  bench session pending, non-blocking) — list load waits for late-init;
+  don't require PSRAM at boot.
+- Mind the §8 strip-safety rule (idempotent `render()`) and task 3D.14
+  (combined Pico 1 pass, D18).
 
-The only unresolved deferred hardware question. Software already gives
-timestamps (`late-init:` lines, `psram-bulk:`/`battery:` heartbeats).
+Also fold in when convenient: the Session 10 round-2 quick checklist
+(worklog HW-PENDING): `L` persists across reboot (expect the one-time
+PCG3 state reset first boot), `rand()` history render, short ZTrig ticks.
+
+## D14 rail settle — NEXT BENCH SESSION (keep here until done at a scope)
+
+**Status (developer, 2026-07-18): non-blocking, deliberately kept on this
+page until the scope session happens.** Nothing needs PSRAM at boot and
+the few-second late-init wait feels fine in use — this is root-causing,
+not firefighting. Software already gives timestamps (`late-init:` lines,
+`psram-bulk:`/`battery:` heartbeats).
 Schematic findings (2026-07-18, `clockwork_Mainboard_V2.0_Schematic.pdf`
 in the clockworkpi/PicoCalc repo; copy fetched during Session 10):
 
