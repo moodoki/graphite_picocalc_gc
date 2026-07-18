@@ -76,9 +76,6 @@ private:
     bool pactive_[graph::kParametricSlots] = {};
 
     bool dirty_ = true;
-    // Numeric tick labels ('L' toggles; not persisted — evaluation
-    // feature, task 4.4).
-    bool axis_labels_ = true;
     graph::TraceCursor trace_;
 
     // Last replot time in microseconds (task 5.6 profiling hook).

@@ -1,8 +1,12 @@
 # Start here — next session
 
-**Last session:** 2026-07-18 (Session 10). Pre-Phase-3 deferred-item batch,
-**all four items code-complete, lint-clean, and flashed to the Pico 2 —
-on-device eval pending** (checklist in the worklog HW-PENDING table):
+**Last session:** 2026-07-18 (Session 10, two rounds). Pre-Phase-3
+deferred-item batch shipped and **round-1 eval passed on-device** (screens
+look good; **axis labels are keepers**). Round 2 then fixed the three eval
+findings — `L` toggle persisted (GraphState, **PCG3 magic bump — one-time
+state reset on first boot**), `rand())` history-render bug (layout parser
+empty-arg-list), tick labels capped at 4 sig digits — and was **flashed;
+its quick checklist is in HW-PENDING**. The batch:
 
 - **D9 done**: Spleen 8x16 main font + 5x8 `gfx::small_font()` (BSD-2,
   `drivers/spleen/`, converter `scripts/bdf_to_utft.py`). Coyote `font1` no
@@ -11,18 +15,19 @@ on-device eval pending** (checklist in the worklog HW-PENDING table):
   `get_rand_64()`; host tests deterministic (216 checks green).
 - **ZoomFit**: `F` on the graph screen (function mode refits y;
   parametric/polar refit both axes).
-- **Numeric axis tick labels** (small font): **`L` toggles — evaluation
-  feature**, judge on device whether it's too distracting; not persisted.
+- **Numeric axis tick labels** (small font): kept after eval; `L` toggles,
+  persisted (default on), labels at 4 sig digits.
 
 Phase 2 remains CLOSED (retro: `docs/notes/phase2-retro.md`). Keymap
 reminders: **F6 no longer opens diag** (type `diag` on home); **trace is
 F4**; help is the typed `help` command; new graph keys **`F` ZoomFit / `L`
 labels** sit beside `S`/`T` presets.
 
-## The next job: eval Session 10 on-device, review D10 + D14, then Phase 3
+## The next job: quick round-2 check, review D10 + D14, then Phase 3
 
-1. Run the Session 10 HW-PENDING checklist (worklog) — especially font
-   readability on every screen and the axis-label verdict (`L` to compare).
+1. Quick Session 10 round-2 checklist (worklog HW-PENDING): `L` persists
+   across reboot (expect the **one-time PCG3 state reset** first boot —
+   re-set window/mode, resave), `rand()` history render, short ZTrig ticks.
 2. **Review D10 (bulk PSRAM, quarantined) and D14 (3V3 rail settle)** before
    writing 3A code — decided Session 10, these come next: Phase 3 lists may
    want bulk PSRAM, and the P3-1 max-length decision depends on where Array
@@ -47,10 +52,11 @@ front) and the list editor. Notes already embedded in the spec:
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the Session 10 build** (Session 9 content plus
-  new fonts, seeded rand, `F` ZoomFit, `L` axis labels — flashed
-  2026-07-18, eval pending). The Pico 1 is still on Session 7 firmware;
-  its pass is deferred to post-Phase 3 (D18).
+- **Firmware on the unit is the Session 10 round-2 build** (fonts, seeded
+  rand, `F` ZoomFit, persisted `L` labels, rand() render fix — flashed
+  2026-07-18). First boot does a **one-time PCG3 state reset**. The Pico 1
+  is still on Session 7 firmware; its pass is deferred to post-Phase 3
+  (D18).
 - **D14 cold boot (~5-8 s rail settle):** PSRAM/SD may fail early init on a
   cold power-on; self-tests retry inside the 30 s late-init window and serial
   prints `late-init: ...` lines. If the F6 diag screen shows FAIL more than
@@ -88,8 +94,11 @@ run ~20×/frame) — rule recorded in `phase3-spec.md` §8.
 
 ## Open design threads
 
-- **Axis tick labels (Session 10): keep or kill** — evaluation feature, `L`
-  toggles live. If kept, decide default + whether to persist the toggle.
+- **Symbolic display (KIV, raised in the Session 10 eval)**: (a) axis ticks
+  as pi / pi/2 etc. when scl is an irrational multiple (ZTrig); (b) surd-form
+  displays (sqrt(2)/2-style); (c) answers as fractions and pi-fractions
+  (pi/2, pi/3). Natural Phase 3/4 polish family — needs exact-value
+  detection; the 4-sig-digit tick cap is the stopgap.
 - F-key layout: **resolved and shipped** (D20). KIV only: F3 MODE vs ZOOM
   (TI's F3 slot) — judge after real use.
 - D16 trace-sync option b (trace steps by table-step) — judge after more

@@ -89,6 +89,10 @@ struct GraphState {
     math::DisplayMode display = math::DisplayMode::kFloat;
     int fix_digits = 2;
 
+    // Numeric axis tick labels ('L' on the graph screen). Kept after the
+    // Session 10 on-device eval; persisted since PCG3.
+    bool axis_labels = true;
+
     // Unified persistence (task 2.23): magic-tagged binary image at
     // /picocalc/graphstate.dat, superseding Phase 1's yfuncs.txt and
     // window.dat. A layout change bumps the magic; stale images load

@@ -159,7 +159,7 @@ Still to verify on hardware:
 | Item | What to check on hardware |
 |------|---------------------------|
 | Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes + Session 9 remap, and Phase 3 acceptance |
-| Session 10 batch (flashed 2026-07-18) | New fonts on every screen (readability, no clipped rows — esp. table/files/help at kRowH 16, status-bar/softkey text, pretty math, split panes); `F` ZoomFit in all three modes (incl. asymptote behavior, e.g. `1/x` gives a huge y-range — authentic TI behavior, judge the feel); `L` axis-label toggle + label placement at odd windows (axis off-screen, tight zoom); `rand()` varies across reboots |
+| Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 
 ---
 
@@ -213,6 +213,25 @@ Lint clean (two float-loop-counter findings fixed by switching to the
 integer-index grid idiom), both boards build, 216 host checks green.
 **Pico 2 flashed same session** (BOOTSEL cp path, ~15 s mount wait
 confirmed again); on-device eval queued in HW-PENDING.
+
+**Round 2 (same day) — eval verdict + fixes.** On-device: screens look
+good; **axis labels are keepers**. Three fixes from the eval, flashed:
+
+1. **`L` toggle now persists**: `axis_labels` moved into `GraphState`
+   (default on), saved on toggle. Persistence magic bumped **PCG2→PCG3**
+   — one-time state reset on first boot with this build (the loader
+   falls back to defaults + Phase 1 legacy-file migration, so ancient
+   yfuncs.txt content may resurface once; re-enter window/mode and
+   resave).
+2. **`rand()` rendered as `rand())`** in history: the layout parser's
+   empty-arg-list path let `parse_expr` consume the `)` as a stray
+   one-char text atom, and `make_paren` then drew its own. Fixed in
+   `layout_builder.cpp` (empty args → empty text node); host layout
+   test added (suite 33→37).
+3. **Tick labels capped at 4 significant digits** (`%.4g`): ZTrig's
+   pi/2 steps printed full double precision. **KIV (recorded in
+   next-session)**: symbolic ticks (pi, pi/2) for irrational steps, and
+   more broadly surd-form / fraction / pi-fraction *answer* display.
 
 ---
 

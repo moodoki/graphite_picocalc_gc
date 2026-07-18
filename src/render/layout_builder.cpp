@@ -174,7 +174,11 @@ struct Parser {
             skip_spaces();
             if (*p == '(') {  // Function call: name followed by (args)
                 ++p;
-                LayoutNode* args = parse_expr();
+                skip_spaces();
+                // Empty arg list (rand()): parse_expr would consume the
+                // ')' as a stray-punctuation text node and make_paren
+                // would then add its own — "rand())".
+                LayoutNode* args = *p == ')' ? make_text("", 0, m) : parse_expr();
                 skip_spaces();
                 if (*p == ')') {
                     ++p;

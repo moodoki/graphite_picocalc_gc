@@ -181,6 +181,22 @@ int main() {
                "'ncr(10,3)' falls back (grammar has no comma support)");
     }
 
+    // Zero-arg call: rand() must not double the close paren (the empty
+    // arg list once parsed ')' as a stray text atom -> "rand())").
+    {
+        auto* n = build("rand()");
+        expect(n != nullptr && n->type == NodeType::kHBox, "'rand()' is HBox");
+        expect(n != nullptr && n->width == 6 * 8, "'rand()' width = 6 chars");
+        if (n != nullptr && n->type == NodeType::kHBox && n->h.count == 2) {
+            auto* group = n->h.items[1];
+            expect(group != nullptr && group->type == NodeType::kParen,
+                   "'rand()' arg group is Paren");
+            expect(group != nullptr && group->paren.child != nullptr &&
+                       group->paren.child->width == 0,
+                   "'rand()' arg list is empty");
+        }
+    }
+
     // Robustness: empty string
     expect(build("") == nullptr, "empty string -> nullptr");
 

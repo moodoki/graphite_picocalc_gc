@@ -410,14 +410,23 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
         fb.draw_vline(vp.px_x(0.0), top_, height_, kWhite);
     }
 
-    if (axis_labels_) {
+    if (graph::state().axis_labels) {
         draw_axis_labels(fb);
     }
 }
 
+namespace {
+// Tick-label formatting: 4 significant digits keeps irrational scl
+// steps short (pi/2 -> "1.571", not full double precision — HW
+// feedback 2026-07-18). KIV: symbolic pi / pi-fraction tick labels.
+void tick_label(double v, char* buf, size_t buf_len) {
+    std::snprintf(buf, buf_len, "%.4g", v);
+}
+}  // namespace
+
 void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
-    // Numeric tick labels (task 4.4, small font). Evaluation feature —
-    // 'L' toggles them live. Labels sit at scl grid lines but are
+    // Numeric tick labels (task 4.4, small font). 'L' toggles them
+    // (persisted since PCG3). Labels sit at scl grid lines but are
     // thinned so neighbors stay >= ~48px (x) / ~24px (y) apart; the
     // origin is skipped (the axis crossing says "0" already).
     using namespace platform::colors;
@@ -445,7 +454,7 @@ void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
                 continue;
             }
             char buf[24];
-            math::format_number(v, buf, sizeof(buf));
+            tick_label(v, buf, sizeof(buf));
             const int lx = vp.px_x(v) + 2;
             if (lx + font.text_width(buf) < kWidth) {
                 font.draw_string(fb, lx, ly, buf, kGrayLine);
@@ -467,7 +476,7 @@ void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
                 continue;
             }
             char buf[24];
-            math::format_number(v, buf, sizeof(buf));
+            tick_label(v, buf, sizeof(buf));
             // Right of the y-axis (left of it if that would clip);
             // left edge when the axis is off-screen.
             int lx = 2;
@@ -648,7 +657,8 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
                 return true;
             }
             if (ev.ch == 'l' || ev.ch == 'L') {
-                axis_labels_ = !axis_labels_;
+                graph::state().axis_labels = !graph::state().axis_labels;
+                save_graph_state();
                 dirty_ = true;  // Replot is cheap and forces the redraw
                 return true;
             }
