@@ -65,14 +65,16 @@ Conventions:
   horizontal split reusing the live graph/table singletons with runtime
   pane geometry; nearest-row trace sync (all modes); F4 = pane focus,
   F9 = split toggle. Spec §13 open questions P2-1..P2-6 all resolved.
-- **Phase 2 code-complete except**: 2.22 remainder (mode-selector polish
-  — the MODE row already cycles all three modes; assess what's left),
-  2.24 (HW matrix — the big test drive), 2.25 (perf check on device).
-- **Next up**: THE test drive — all of Phase 2 in one go (user's call,
-  D16 discussion): parity, parametric/polar acceptance, tables, split
-  (incl. sync feel → maybe upgrade to option b), help, persistence.
-  Roadmap weeks 11–16 / 17–25 / 26–35.
-- KIV: F-key layout rethink (feedback item 7; F1-F5 physical + F6-F9 shifted).
+- **2.24 test drive DONE on Pico 2 (Session 8, 2026-07-17/18)**: all
+  checklist steps pass; found-bug fixes + quick features implemented,
+  built, linted, flashed same session (see Session 8 entry). 2.25 perf
+  baseline captured (`docs/notes/testdrive-phase2-observations.md`).
+- **Next up**: developer's longer offline spin on the fixed firmware →
+  log observations; verify the Session 8 fixes on-device; full Pico 1
+  pass (still on Session 7 firmware — reflash first).
+- KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
+  uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
+  WINDOW-from-graph still open, help KEYS must move with them.
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
 - **Host tests**: `./scripts/host-tests.sh` → 97 math + 33 layout + 72 graph = 202 checks, 0 failures
 
@@ -108,19 +110,74 @@ persistence, store op `2->A`, pretty math incl. the D2 revision (`1/sqrt(2)`,
 `x^2/2` stack), trace + S/T presets, mode toggles, reboot-to-bootloader, full
 exit test. **Pico 1 verification is complete.**
 
+**Verified on Pico 2 hardware 2026-07-17/18 (Session 8 test drive):** everything in
+the 2.24 checklist — function-mode parity post-refactors, Y= editor feel, home
+basics, parametric acceptance (circle/Lissajous, editor auto-focus + pair
+behavior), polar acceptance in both angle modes (cardioid/rose), tables (auto
+infinite scroll, ASK add/delete/hint, setup + F2-to-Step, column scroll +
+markers, detail precision), split-screen + trace sync, help tabs, keymap, cold
+power cycle persistence. Bugs found were fixed the same session (commit 079a8b2).
+
 Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
-| Charging color | Cyan battery icon while charging (bit 7 of low byte assumption) — inconclusive at 100% (charger idle when full); retest when battery <~95% |
-| Pico 2 spot-check | Display/keyboard/battery/PSRAM/SD verified (incl. D14 cold boot). Still worth a quick functional sweep: eval + history, graph + trace, dirty-band typing feel, persistence across a cold cycle |
-| Graph after 2.1 refactor | Function mode should be pixel-identical post-extraction (Session 7). During the next graph test drive: plot 2-3 functions, trace, zoom — confirm nothing looks different |
-| Y= editor after 2.5 extraction | SlotEditorScreen refactor (D15) should be behavior-identical: row nav, inline edit, F2/F3, dirty-band feel while typing |
-| GraphState persistence (2.23) | First boot: existing Y-funcs + window must migrate from the old files (graphstate.dat appears). Then: parametric + polar curves, graph mode, T/TH ranges survive a cold power cycle |
-| Tables (2.12–2.18) | Auto scroll both directions; ASK entry/delete; column scroll with >3 columns; per-row eval latency while scrolling (lever: compile once per regenerate) |
-| Split screen (2.19–2.21) | F9 from graph/table; pane clipping correct on the Pico 1 strip renderer; F4 focus switch; trace↔row sync feel (option b KIV); frame time ~1.5x |
+| Session 8 fixes (Pico 2, fw 079a8b2 flashed) | Cardioid closes at THstep 5.73; `2*pi` in WINDOW fields; DEG/RAD + display/FIX survive reboot; repeated editor↔graph F4 hops never lock up push keys; F1 trace toggle inside split (couldn't repro the report in code — watch this one); bad editor row renders red; FILES screen (diag F6 → F5) lists graphstate.dat; held-key table scroll stops at release; status bar repaints ~1 s after battery change; no history overdraw with tall fractions |
+| Charging color/bit | Fix applied (`raw & 0x8000`, value-byte bit 7) but unverified — needs battery <95%. Serial prints `battery: raw=0x....` every ~30 s; capture one while plugged in below full to confirm the layout |
+| Pico 1 full pass | Still on Session 7 firmware — reflash `build/pico/…uf2` first. Whole Phase 2 sweep, headline: split-pane clipping on the strip renderer (no bleed across the divider), plus the Session 8 fixes above |
+| PCG2 one-time state reset | First boot on 079a8b2: graphstate magic bumped, so Phase 2 state (curves, mode, ranges) resets to defaults and legacy yfuncs/window migration re-runs — expected once, not a bug. Re-enter test curves and confirm they persist thereafter |
 
 ---
+
+## 2026-07-17/18 — Session 8: THE Phase 2 test drive (2.24) + same-session fixes
+
+**The full 2.24 checklist passed on the Pico 2** (Pico 1 deferred). Full record:
+`docs/notes/testdrive-phase2-observations.md`; raw serial + 2.25 perf baseline in
+`docs/notes/testdrive-serial-2026-07-18.txt`. Perf headline: recompute is nowhere
+near the bottleneck — parametric pair ~1.0-1.4 ms, function set ~5 ms, polar
+~2-5.3 ms, split ~4.1 ms vs the ~200 ms frame push.
+
+**Bugs found on-device, all root-caused and fixed same session (079a8b2):**
+
+- Stuck PSRAM/SD `FAIL` on the diag screen after a cold boot: the D14 late-init
+  loop never re-ran self-tests that failed while rails were marginal. Now retries
+  inside the 30 s window and prints late-init events over serial.
+- Screen-stack leak: editor F4 *pushed* graph even when the editor sat on top of
+  it; at kMaxDepth every push silently no-oped ("F4 stops working, ESC fixes
+  it"). New `ScreenManager::switch_to` pops/replaces instead.
+- Cardioid missing its final arc in degree mode: sweeps dropped the partial last
+  step (up to one full step short of THmax). Sources now emit a final sample
+  clamped to the range end; radian defaults had the same ~1.9° gap unnoticed.
+- Held-key table scroll overran after release (event backlog): main loop now
+  drains the key queue before each render.
+- Home status bar: tall pretty-printed history entries drew over it (layout
+  height checked only after drawing), and battery %/charging went stale under
+  event-driven rendering. History now clips at the bar; battery cache polled
+  ~1/s with a status-band repaint on change.
+- Charging flag read bit 7 of the echoed register ID (always 0) — the Session 6
+  "low byte assumption" was wrong. Now `raw & 0x8000` (value-byte bit 7) + a raw
+  serial print for confirmation below 95%.
+- DEG/RAD (and display mode / FIX digits) reset every boot: MODE-row settings now
+  persist in graphstate.dat (**magic bumped to PCG2** — one-time state reset).
+- Label lies: ESC/F4 pop to the *previous view* (behavior endorsed, wording
+  fixed); table softkeys now standard divided cells; window footer fixed.
+
+**Features from test-drive requests (same commit):** expression eval in all
+numeric entry fields via `math::eval_field` (`2*pi`, `pi/180`; parse errors keep
+the old value — strtod used to silently commit `2*pi` as 2.0); editor rows that
+fail to compile render red; FILES screen (diag F6 → F5) lists /picocalc via the
+existing `Storage::list_dir`; home F1 opens the mode-appropriate editor.
+
+**Split-trace note:** "can't start trace inside split" was reported, but code
+inspection says F1 is forwarded to the graph pane correctly and the split always
+full-redraws. Softkey bar + help now advertise F1; verify the toggle on-device.
+
+**Flash-path note (Pico 2):** macOS stopped mounting the `RP2350` BOOTSEL volume
+this session; `picotool info` still saw the device, and `picotool load <uf2>` +
+`picotool reboot` flashed fine. That is now the preferred path.
+
+Both boards build; lint clean; 079a8b2 flashed to the Pico 2. Next: developer's
+longer offline spin, then fix verification + the Pico 1 pass (see HW-PENDING).
 
 ## 2026-07-12 — Session 7: lint baseline clean + Phase 2 start (task 2.1 graph/ extraction)
 
