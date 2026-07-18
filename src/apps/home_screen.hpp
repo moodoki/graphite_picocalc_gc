@@ -20,6 +20,10 @@ public:
     // Load history + variables from SD (called once at boot).
     void load_state();
 
+    // The diag screen lives in main.cpp (it owns the self-test state);
+    // main registers it here so the typed `diag` command can push it.
+    void set_diag_screen(ui::Screen* s) { diag_screen_ = s; }
+
 private:
     static constexpr int kMaxHistory = 50;
 
@@ -34,6 +38,14 @@ private:
     int history_head_ = 0;   // Ring buffer next-write index
     int scroll_ = 0;         // View scroll, 0 = pinned to newest
 
+    // `cls` display watermark: entries pushed before the mark are
+    // hidden from the rendered scrollback but stay in the UP/DOWN
+    // recall walk (and in history.txt — cls is session-level).
+    uint32_t entries_total_ = 0;
+    uint32_t cls_mark_ = 0;
+
+    ui::Screen* diag_screen_ = nullptr;
+
     // Shell-style input recall (UP/DOWN walk past inputs; Shift+UP/DOWN
     // scroll the view). -1 = not browsing; otherwise entry_from_newest
     // index currently shown in the input line.
@@ -46,6 +58,8 @@ private:
     void invalidate_history();
 
     void evaluate_input();
+    bool handle_command(const char* cmd);
+    int visible_count() const;
     void push_entry(const char* expr, const char* result, bool error);
     void persist_history_line(const char* expr, const char* result);
     void save_variables();

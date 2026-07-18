@@ -19,8 +19,11 @@ namespace {
 constexpr size_t kMaxExpr = 256;
 
 // Preprocess into `out`:
-//  - lowercase (tinyexpr identifiers are lowercase; vars are A-Z)
 //  - postfix factorial: <primary>! -> fac(<primary>)
+// Input is case-sensitive (2026-07-18, was blanket-lowercased before):
+// identifiers are lowercase (sin, pi, a-z, theta, ans); uppercase input
+// fails compile with the normal parse error. Numeric literals are
+// unaffected — tinyexpr parses them with strtod, which accepts 1E10.
 // Returns false if the expression is too long.
 bool preprocess(const char* in, char* out, size_t out_len) {
     char tmp[kMaxExpr];
@@ -29,7 +32,7 @@ bool preprocess(const char* in, char* out, size_t out_len) {
         if (n + 1 >= sizeof(tmp)) {
             return false;
         }
-        tmp[n++] = static_cast<char>(std::tolower(*p));
+        tmp[n++] = *p;
     }
     tmp[n] = 0;
 
@@ -98,11 +101,9 @@ bool preprocess(const char* in, char* out, size_t out_len) {
 }  // namespace
 
 calc_t& Variables::operator[](char name) {
+    // Lowercase only (case-sensitive since 2026-07-18).
     if (name >= 'a' && name <= 'z') {
         return vars[name - 'a'];
-    }
-    if (name >= 'A' && name <= 'Z') {
-        return vars[name - 'A'];
     }
     return vars[kAns];
 }
@@ -218,10 +219,13 @@ EvalResult Engine::evaluate(const char* expr) {
         while (*rhs == ' ') {
             ++rhs;
         }
+        // Case-sensitive (2026-07-18): targets are lowercase a-z or
+        // "theta"; an uppercase single letter gets a pointed error
+        // instead of the old silent fold.
         char name[8] = {};
         size_t ni = 0;
         while (ni < sizeof(name) - 1 && std::isalpha(rhs[ni]) != 0) {
-            name[ni] = static_cast<char>(std::tolower(rhs[ni]));
+            name[ni] = rhs[ni];
             ++ni;
         }
         const char* after = rhs + ni;
@@ -229,15 +233,19 @@ EvalResult Engine::evaluate(const char* expr) {
             ++after;
         }
         if (*after == 0 && ni > 0) {
-            if (ni == 1) {
+            if (ni == 1 && name[0] >= 'a' && name[0] <= 'z') {
                 store_index = name[0] - 'a';
+            } else if (ni == 1 && name[0] >= 'A' && name[0] <= 'Z') {
+                EvalResult res;
+                res.error = "Variables are lowercase a-z";
+                return res;
             } else if (std::strcmp(name, "theta") == 0) {
                 store_index = Variables::kTheta;
             }
         }
         if (store_index == 'e' - 'a') {
             EvalResult res;
-            res.error = "E is reserved (Euler's e)";
+            res.error = "e is reserved (Euler's e)";
             return res;
         }
         if (store_index >= 0) {

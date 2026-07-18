@@ -4,6 +4,9 @@
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "apps/graph_screen.hpp"
+#include "apps/mode_screen.hpp"
+#include "apps/nav.hpp"
+#include "apps/window_screen.hpp"
 
 namespace apps {
 
@@ -88,20 +91,34 @@ bool SlotEditorScreen::on_key(const platform::KeyEvent& ev) {
                 invalidate_row(selected_);
             }
             return true;
+        // 2026-07-18 remap: row ops move to non-F keys (ENTER edit,
+        // SPACE toggle, DEL clear) so F2-F5 can follow the global
+        // scheme. F1 (the global "editor" key) is swallowed — we're
+        // already here.
         case Key::kEnter:
-        case Key::kF1:
             begin_edit();
             invalidate_row(selected_);
             return true;
-        case Key::kF2:
+        case Key::kSpace:
             toggle_field(selected_);
             invalidate_row(selected_);
             return true;
-        case Key::kF3:
+        case Key::kDel:
             clear_field(selected_);
             invalidate_row(selected_);
             return true;
+        case Key::kF1:
+            return true;
+        case Key::kF2:
+            ui::screen_manager().push(&window_screen());
+            return true;
+        case Key::kF3:
+            ui::screen_manager().push(&mode_screen());
+            return true;
         case Key::kF4:
+            goto_graph_trace();
+            return true;
+        case Key::kF5:
             // Toggle-style jump: popping back when the graph is right
             // beneath keeps repeated editor<->graph hops from stacking.
             ui::screen_manager().switch_to(&graph_screen());
@@ -154,7 +171,7 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
     // Softkey bar
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4, "F1:EDIT F2:SEL F3:CLR F4:GRAPH", kGrayLine);
+    font.draw_string(fb, 2, sk + 4, "ENTER:EDIT SPC:SEL DEL:CLR F5:GRPH", kGrayLine);
 }
 
 }  // namespace apps

@@ -40,6 +40,10 @@ public:
     }
     void reset_pane() { set_pane(kTopDefault, kHeightDefault); }
 
+    // Activate trace on the first active slot (F4 TRACE binding; also
+    // used by other screens jumping here in trace mode, TI-style).
+    void start_trace();
+
     // Trace sync with the table pane (task 2.20, nearest-row).
     bool trace_active() const { return trace_.active; }
     double trace_value() const;          // Current independent value

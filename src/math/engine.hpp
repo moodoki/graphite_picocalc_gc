@@ -14,7 +14,8 @@ struct Variables {
 
     calc_t vars[kCount] = {};
 
-    // name: 'A'..'Z' (case-insensitive). theta/Ans via the indices above.
+    // name: 'a'..'z' (case-sensitive; anything else maps to Ans).
+    // theta/Ans via the indices above.
     calc_t& operator[](char name);
     calc_t& ans() { return vars[kAns]; }
 };

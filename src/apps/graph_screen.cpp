@@ -13,11 +13,11 @@
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
-#include "apps/param_editor.hpp"
-#include "apps/polar_editor.hpp"
+#include "apps/mode_screen.hpp"
+#include "apps/nav.hpp"
 #include "apps/split_screen.hpp"
 #include "apps/table_screen.hpp"
-#include "apps/y_editor.hpp"
+#include "apps/window_screen.hpp"
 #include "graph/function_source.hpp"
 #include "graph/parametric_source.hpp"
 #include "graph/plotter.hpp"
@@ -46,6 +46,18 @@ bool param_style() {
 
 void GraphScreen::on_activate() {
     dirty_ = true;
+}
+
+void GraphScreen::start_trace() {
+    trace_.active = true;
+    // Start on the first active slot.
+    for (int i = 0; i < slot_count(); ++i) {
+        if (slot_active(i)) {
+            trace_.slot = i;
+            break;
+        }
+    }
+    trace_.clamp(trace_max_index());
 }
 
 graph::Viewport GraphScreen::viewport() const {
@@ -370,46 +382,41 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
     if (!ev.pressed) {
         return false;
     }
+    // Global F-key scheme (2026-07-18 remap, TI-84-shaped):
+    // F1 editor, F2 window, F3 mode, F4 trace, F5 table toggle,
+    // Alt+F5 split; -/= zoom out/in.
     switch (ev.key) {
-        case Key::kF1:  // Toggle trace
-            trace_.active = !trace_.active;
-            if (trace_.active) {
-                // Start on the first active slot.
-                for (int i = 0; i < slot_count(); ++i) {
-                    if (slot_active(i)) {
-                        trace_.slot = i;
-                        break;
-                    }
-                }
-                trace_.clamp(trace_max_index());
-            }
+        case Key::kF1:
+            push_mode_editor();
             return true;
         case Key::kF2:
-            zoom_in();
-            dirty_ = true;
+            ui::screen_manager().push(&window_screen());
             return true;
         case Key::kF3:
+            ui::screen_manager().push(&mode_screen());
+            return true;
+        case Key::kF4:  // Toggle trace
+            if (trace_.active) {
+                trace_.active = false;
+            } else {
+                start_trace();
+            }
+            return true;
+        case Key::kF5:
+            if (ev.alt_held) {  // Alt+F5: split graph|table
+                ui::screen_manager().push(&split_screen());
+            } else {
+                ui::screen_manager().push(&table_screen());
+            }
+            return true;
+        case Key::kMinus:
             zoom_out();
             dirty_ = true;
             return true;
-        case Key::kF4:
-            ui::screen_manager().push(&table_screen());
-            return true;
-        case Key::kF9:  // Shift+F4: split-screen graph|table (D16)
-            ui::screen_manager().push(&split_screen());
-            return true;
-        case Key::kF5:
-            switch (mode()) {
-                case graph::Mode::kParametric:
-                    ui::screen_manager().push(&param_editor_screen());
-                    break;
-                case graph::Mode::kPolar:
-                    ui::screen_manager().push(&polar_editor_screen());
-                    break;
-                default:
-                    ui::screen_manager().push(&y_editor_screen());
-                    break;
-            }
+        case Key::kEquals:
+        case Key::kPlus:  // Shift+= — same zoom direction
+            zoom_in();
+            dirty_ = true;
             return true;
         case Key::kLeft:
             if (trace_.active) {
@@ -461,6 +468,19 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     }
 
     fb.clear(kBlack);
+
+    // Confine plot drawing to the plot rows: curve segments heading
+    // past the window otherwise land in the status-bar band (rows
+    // 0-15), which nothing overdraws in full-screen mode (HW
+    // 2026-07-18). Intersect with the enclosing pane (split view) and
+    // restore it for the chrome below.
+    const int pane_x0 = fb.pane_x0();
+    const int pane_y0 = fb.pane_y0();
+    const int pane_x1 = fb.pane_x1();
+    const int pane_y1 = fb.pane_y1();
+    fb.set_pane_clip(pane_x0, top_ > pane_y0 ? top_ : pane_y0, pane_x1,
+                     top_ + height_ < pane_y1 ? top_ + height_ : pane_y1);
+
     draw_axes(fb);
     for (int s = 0; s < slot_count(); ++s) {
         if (!slot_active(s)) {
@@ -499,18 +519,32 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
             break;
     }
     if (!any) {
-        const char* hint = param_style() ? "No curves. Press F5 for the editor."
-                                         : "No functions. Press F5 for Y=.";
+        const char* hint = param_style() ? "No curves. Press F1 for the editor."
+                                         : "No functions. Press F1 for Y=.";
         font.draw_string(fb, 40, top_ + height_ / 2, hint, kGrayLine);
+    }
+
+    fb.set_pane_clip(pane_x0, pane_y0, pane_x1, pane_y1);
+
+    // Chrome only in the full-screen layout — inside a split pane the
+    // top rows are plot area and the split draws its own bar.
+    if (top_ >= ui::kStatusBarH) {
+        const char* title = "GRAPH FUNC";
+        if (mode() == graph::Mode::kParametric) {
+            title = "GRAPH PARAM";
+        } else if (mode() == graph::Mode::kPolar) {
+            title = "GRAPH POLAR";
+        }
+        ui::draw_status_bar(fb, title);
     }
 
     const char* editor_key = "Y=";
     if (mode() == graph::Mode::kParametric) {
         editor_key = "PAR";
     } else if (mode() == graph::Mode::kPolar) {
-        editor_key = "POL";
+        editor_key = "R=";
     }
-    const char* const keys[6] = {"TRC", "Z+", "Z-", "TBL", editor_key, "DIAG"};
+    const char* const keys[6] = {editor_key, "WIN", "MODE", "TRC", "TBL", ""};
     ui::draw_softkeys(fb, keys);
 }
 

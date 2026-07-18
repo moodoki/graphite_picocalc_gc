@@ -10,6 +10,8 @@
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/graph_screen.hpp"
+#include "apps/mode_screen.hpp"
+#include "apps/nav.hpp"
 #include "graph/graph_state.hpp"
 
 namespace apps {
@@ -119,8 +121,31 @@ bool WindowScreen::on_key(const platform::KeyEvent& ev) {
             }
             return true;
         case Key::kEnter:
-        case Key::kF1:
             begin_edit();
+            return true;
+        case Key::kDel:
+            // Clear the field: edit from empty instead of the prefill
+            // (HW feedback 2026-07-18). ESC or a bad/empty commit still
+            // keeps the old value.
+            input_.set_text("");
+            editing_ = true;
+            return true;
+        // Global F-key scheme (2026-07-18 remap); F2 = this screen.
+        case Key::kF1:
+            push_mode_editor();
+            return true;
+        case Key::kF2:
+            return true;
+        case Key::kF3:
+            ui::screen_manager().push(&mode_screen());
+            return true;
+        case Key::kF4:
+            graph_screen().invalidate();
+            goto_graph_trace();
+            return true;
+        case Key::kF5:
+            graph_screen().invalidate();
+            ui::screen_manager().switch_to(&graph_screen());
             return true;
         case Key::kEscape:
             graph_screen().invalidate();
@@ -169,7 +194,7 @@ void WindowScreen::render(gfx::Framebuffer& fb) {
 
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4, "F1/ENTER:EDIT  ESC:BACK", kGrayLine);
+    font.draw_string(fb, 2, sk + 4, "ENTER:EDIT DEL:CLR F5:GRPH ESC:BACK", kGrayLine);
 }
 
 WindowScreen& window_screen() {

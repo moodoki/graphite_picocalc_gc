@@ -93,6 +93,7 @@ add_executable(picocalc_graphcalc
     src/graph/parametric_source.cpp
     src/graph/polar_source.cpp
     src/graph/trace.cpp
+    src/apps/nav.cpp
     src/apps/home_screen.cpp
     src/apps/files_screen.cpp
     src/apps/graph_model.cpp

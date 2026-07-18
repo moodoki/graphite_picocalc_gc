@@ -15,9 +15,6 @@ public:
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
 
-    // Open with the Step row preselected (table screen's F2 shortcut).
-    void select_step() { selected_ = 1; }
-
 private:
     static constexpr int kNumRows = 3;  // Start, Step, Independent
 

@@ -102,18 +102,30 @@ int main() {
     check_near("b", 4);
     check_near("10->theta", 10);
     check_near("theta/2", 5);
-    // Case-insensitive entry
-    check_near("A+B", 6);
+    // Case-SENSITIVE entry (2026-07-18): uppercase identifiers are
+    // errors, not folded — functions, variables, and store targets are
+    // lowercase only.
+    check_error("A+B");
+    check_error("SIN(0)");
+    check_error("Sin(0)");
+    check_error("PI");
+    check_error("2->A");
+    check_error("2->Theta");
+    check_near("sin(0)", 0);
 
     // 'e' is Euler's constant (not a variable — it would shadow the
-    // tinyexpr builtin); variable E is reserved and can't be stored to.
+    // tinyexpr builtin) and can't be stored to; uppercase E is an
+    // unknown identifier, but strtod still accepts it inside numeric
+    // literals.
     check_near("e", 2.71828182845904523536, 1e-12);
     check_near("ln(e)", 1);
     check_near("e^2", std::exp(2.0), 1e-9);
     check_near("2e3", 2000);  // Scientific literals still parse
     check_near("1e10", 1e10);
+    check_near("1E10", 1e10);  // Uppercase-E literal via strtod
     check_error("5->e");
     check_error("5->E");
+    check_error("E");
 
     // Scientific display formatting (HW-found: Pico printf %e can emit
     // unnormalized mantissas; normalize_mantissa must fix them up).

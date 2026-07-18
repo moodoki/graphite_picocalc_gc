@@ -11,13 +11,12 @@
 #include "math/format.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
+#include "apps/files_screen.hpp"
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
 #include "apps/mode_screen.hpp"
-#include "apps/param_editor.hpp"
-#include "apps/polar_editor.hpp"
+#include "apps/nav.hpp"
 #include "apps/window_screen.hpp"
-#include "apps/y_editor.hpp"
 #include "graph/graph_state.hpp"
 
 namespace apps {
@@ -53,7 +52,15 @@ const HomeScreen::Entry* HomeScreen::entry_from_newest(int n) const {
     return &history_[idx];
 }
 
+// Entries visible in the scrollback: everything since the last `cls`,
+// capped by what the ring still holds. The recall walk ignores this.
+int HomeScreen::visible_count() const {
+    const uint32_t since = entries_total_ - cls_mark_;
+    return since < static_cast<uint32_t>(history_count_) ? static_cast<int>(since) : history_count_;
+}
+
 void HomeScreen::push_entry(const char* expr, const char* result, bool error) {
+    ++entries_total_;
     Entry& e = history_[history_head_];
     std::strncpy(e.expr, expr, sizeof(e.expr) - 1);
     e.expr[sizeof(e.expr) - 1] = 0;
@@ -135,7 +142,7 @@ void HomeScreen::evaluate_input() {
         math::format_number(res.value, num, sizeof(num));
         if (res.stored_var >= 0) {
             const char name =
-                res.stored_var < 26 ? static_cast<char>('A' + res.stored_var) : 't';  // theta
+                res.stored_var < 26 ? static_cast<char>('a' + res.stored_var) : 't';  // theta
             std::snprintf(result, sizeof(result), "%s>%c", num, name);
         } else {
             std::snprintf(result, sizeof(result), "%s", num);
@@ -154,6 +161,45 @@ void HomeScreen::evaluate_input() {
     pending_[0] = 0;
 }
 
+// Typed commands (2026-07-18): lowercase-only (input is
+// case-sensitive), matched against the trimmed line before math
+// evaluation. Commands don't enter history.
+bool HomeScreen::handle_command(const char* cmd) {
+    if (std::strcmp(cmd, "cls") == 0) {
+        // Session-level clear: hide the current scrollback, keep the
+        // recall walk and history.txt intact.
+        cls_mark_ = entries_total_;
+        scroll_ = 0;
+        return true;
+    }
+    if (std::strcmp(cmd, "clrhist") == 0) {
+        history_count_ = 0;
+        history_head_ = 0;
+        entries_total_ = 0;
+        cls_mark_ = 0;
+        scroll_ = 0;
+        hist_nav_ = -1;
+        auto& fs = platform::storage();
+        if (fs.mounted()) {
+            fs.delete_file(kHistoryPath);
+        }
+        return true;
+    }
+    if (std::strcmp(cmd, "help") == 0) {
+        ui::screen_manager().push(&help_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "files") == 0) {
+        ui::screen_manager().push(&files_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {
+        ui::screen_manager().push(diag_screen_);
+        return true;
+    }
+    return false;
+}
+
 bool HomeScreen::on_key(const platform::KeyEvent& ev) {
     using platform::Key;
     if (!ev.pressed) {
@@ -162,6 +208,27 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
     switch (ev.key) {
         case Key::kEnter:
             if (!input_.empty()) {
+                // Trimmed command match first (cls, help, ...).
+                char cmd[16];
+                const char* t = input_.text();
+                while (*t == ' ') {
+                    ++t;
+                }
+                size_t len = std::strlen(t);
+                while (len > 0 && t[len - 1] == ' ') {
+                    --len;
+                }
+                if (len > 0 && len < sizeof(cmd)) {
+                    std::memcpy(cmd, t, len);
+                    cmd[len] = 0;
+                    if (handle_command(cmd)) {
+                        input_.clear();
+                        hist_nav_ = -1;
+                        pending_[0] = 0;
+                        invalidate(0, kSoftkeyY);
+                        return true;
+                    }
+                }
                 evaluate_input();
                 invalidate(0, kSoftkeyY);  // History + input + status bar
             }
@@ -173,7 +240,9 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             // Shift on arrow keys (D12, HW-verified 2026-07-11); shift
             // kept in case a future keyboard firmware reports it.
             if (ev.alt_held || ev.ctrl_held || ev.shift_held) {
-                if (scroll_ < history_count_ - 1) {
+                // View scroll stops at the cls watermark; the recall
+                // walk below intentionally does not.
+                if (scroll_ < visible_count() - 1) {
                     ++scroll_;
                     invalidate_history();
                 }
@@ -209,31 +278,22 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
             hist_nav_ = -1;
             invalidate_input();
             return true;
+        // Global F-key scheme (2026-07-18 remap, TI-84-shaped):
+        // F1 editor, F2 window, F3 mode, F4 trace, F5 graph.
         case Key::kF1:
-            // Mode-appropriate editor, same dispatch as graph F5.
-            switch (graph::state().mode) {
-                case graph::Mode::kParametric:
-                    ui::screen_manager().push(&param_editor_screen());
-                    break;
-                case graph::Mode::kPolar:
-                    ui::screen_manager().push(&polar_editor_screen());
-                    break;
-                default:
-                    ui::screen_manager().push(&y_editor_screen());
-                    break;
-            }
+            push_mode_editor();
             return true;
         case Key::kF2:
             ui::screen_manager().push(&window_screen());
             return true;
         case Key::kF3:
-            ui::screen_manager().push(&graph_screen());
-            return true;
-        case Key::kF4:
             ui::screen_manager().push(&mode_screen());
             return true;
+        case Key::kF4:
+            goto_graph_trace();
+            return true;
         case Key::kF5:
-            ui::screen_manager().push(&help_screen());
+            ui::screen_manager().push(&graph_screen());
             return true;
         default:
             if (input_.on_key(ev)) {
@@ -257,8 +317,9 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     // math (task 3.6); results stay as plain right-aligned text (a
     // number or error string is already display-ready).
     const render::Metrics metrics{font.width(), font.height()};
+    const int visible = visible_count();  // cls hides older entries
     int y = kInputY - 4;
-    for (int n = scroll_; y > kStatusH + lh; ++n) {
+    for (int n = scroll_; y > kStatusH + lh && n < visible; ++n) {
         const Entry* e = entry_from_newest(n);
         if (e == nullptr) {
             break;
@@ -290,6 +351,16 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     input_.render(fb, 2 + font.width() + 2, kInputY + 8, platform::kScreenW - font.width() - 8,
                   font, true);
 
+    // Help discoverability (typed-command era): dim hint on the empty
+    // input line pointing at `help`. kGridLine, not kGrayLine — the
+    // latter reads near-white on the panel and was jarring here (HW
+    // 2026-07-18).
+    if (input_.empty()) {
+        const char* hint = "type help for docs";
+        font.draw_string(fb, platform::kScreenW - font.text_width(hint) - 4, kInputY + 8, hint,
+                         kGridLine);
+    }
+
     const char* f1 = "Y=";
     switch (graph::state().mode) {
         case graph::Mode::kParametric:
@@ -301,7 +372,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         default:
             break;
     }
-    const char* const keys[6] = {f1, "WIN", "GRPH", "MODE", "HELP", "DIAG"};
+    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", ""};
     ui::draw_softkeys(fb, keys);
 }
 

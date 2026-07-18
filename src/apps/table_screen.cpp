@@ -11,6 +11,9 @@
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "apps/graph_model.hpp"
+#include "apps/graph_screen.hpp"
+#include "apps/mode_screen.hpp"
+#include "apps/nav.hpp"
 #include "apps/split_screen.hpp"
 #include "apps/table_setup.hpp"
 
@@ -214,14 +217,29 @@ bool TableScreen::on_key(const platform::KeyEvent& ev) {
                 entering_ = true;
             }
             return true;
+        // Global F-key scheme (2026-07-18 remap): F1 editor, F2 setup
+        // (this screen's "window"), F3 mode, F4 trace, F5 graph
+        // toggle, Alt+F5 split; DEL removes the row in ASK mode.
         case Key::kF1:
-            ui::screen_manager().push(&table_setup_screen());
+            push_mode_editor();
             return true;
         case Key::kF2:
-            table_setup_screen().select_step();
             ui::screen_manager().push(&table_setup_screen());
             return true;
+        case Key::kF3:
+            ui::screen_manager().push(&mode_screen());
+            return true;
+        case Key::kF4:
+            goto_graph_trace();
+            return true;
         case Key::kF5:
+            if (ev.alt_held) {  // Alt+F5: split graph|table
+                ui::screen_manager().push(&split_screen());
+            } else {
+                ui::screen_manager().switch_to(&graph_screen());
+            }
+            return true;
+        case Key::kDel:
             if (ask_mode() && row_count_ > 0) {
                 const int idx = base_ + sel_;
                 for (int i = idx + 1; i < ask_count_; ++i) {
@@ -231,11 +249,6 @@ bool TableScreen::on_key(const platform::KeyEvent& ev) {
                 dirty_ = true;
             }
             return true;
-        case Key::kF9:  // Shift+F4: split-screen graph|table (D16)
-            ui::screen_manager().push(&split_screen());
-            return true;
-        case Key::kF3:
-        case Key::kF4:  // F4 switches graph<->table (D16)
         case Key::kEscape:
             ui::screen_manager().pop();
             return true;
@@ -322,7 +335,18 @@ void TableScreen::render(gfx::Framebuffer& fb) {
 
     // Softkey bar — standard divided cells like every other screen.
     // F3 and F4 both return to the previous view (usually the graph).
-    const char* const keys[6] = {"SETP", "STEP", "BACK", "GRPH", ask_mode() ? "DEL" : "", ""};
+    const char* ed = "Y=";
+    switch (graph::state().mode) {
+        case graph::Mode::kParametric:
+            ed = "PAR";
+            break;
+        case graph::Mode::kPolar:
+            ed = "R=";
+            break;
+        default:
+            break;
+    }
+    const char* const keys[6] = {ed, "SETP", "MODE", "TRC", "GRPH", ""};
     ui::draw_softkeys(fb, keys);
 }
 

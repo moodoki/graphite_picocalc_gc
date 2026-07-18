@@ -38,22 +38,29 @@ bool SplitScreen::on_key(const platform::KeyEvent& ev) {
     if (!ev.pressed) {
         return false;
     }
+    // 2026-07-18 remap: F5 switches pane focus (it's the graph<->table
+    // key), Alt+F5 exits the split, F4 always drives trace on the
+    // graph pane (the table's own F4 would switch screens — wrong as
+    // pane input). F1/F2/F3 forward normally: they push full-screen
+    // screens (editor/window/mode) over the split.
     switch (ev.key) {
-        case Key::kF4:  // Switch pane focus (D16 key scheme)
-            graph_focused_ = !graph_focused_;
+        case Key::kF5:
+            if (ev.alt_held) {  // Alt+F5: toggle split off
+                ui::screen_manager().pop();
+            } else {
+                graph_focused_ = !graph_focused_;
+            }
             return true;
-        case Key::kF9:  // Toggle split off
         case Key::kEscape:
             ui::screen_manager().pop();
             return true;
-        case Key::kF3:
-            // Table's F3 means "back to graph" — as pane input it would
-            // pop us unexpectedly; treat it as exit only from the table.
-            if (!graph_focused_) {
-                ui::screen_manager().pop();
-                return true;
+        case Key::kF4: {
+            const bool handled = graph_screen().on_key(ev);
+            if (handled) {
+                sync_panes();
             }
-            break;  // Graph pane: fall through to forward (zoom out).
+            return handled;
+        }
         default:
             break;
     }
@@ -86,8 +93,8 @@ void SplitScreen::render(gfx::Framebuffer& fb) {
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
     font.draw_string(fb, 2, sk + 4,
-                     graph_focused_ ? "[GRAPH] F1:TRC F4:PANE F9/ESC:FULL"
-                                    : "[TABLE] F1:SETUP F4:PANE F9/ESC:FULL",
+                     graph_focused_ ? "[GRAPH] F4:TRC F5:PANE aF5/ESC:FULL"
+                                    : "[TABLE] F2:SETP F5:PANE aF5/ESC:FULL",
                      kGrayLine);
 }
 

@@ -19,7 +19,6 @@
 #include "gfx/framebuffer.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
-#include "apps/files_screen.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -79,10 +78,6 @@ public:
         }
         if (ev.key == platform::Key::kEscape) {
             ui::screen_manager().pop();
-            return true;
-        }
-        if (ev.key == platform::Key::kF5) {  // SD file listing
-            ui::screen_manager().push(&apps::files_screen());
             return true;
         }
         last_key_ = ev;
@@ -153,7 +148,10 @@ public:
 
         font.draw_string(fb, 8, y, "Type on the keyboard to test input.", kGrayLine, kBlack);
         y += lh;
-        font.draw_string(fb, 8, y, "F5 files. F6 or ESC exits.", kGrayLine, kBlack);
+        // 8x12 font on a 320px panel: keep lines under ~38 chars.
+        font.draw_string(fb, 8, y, "ESC exits.", kGrayLine, kBlack);
+        y += lh;
+        font.draw_string(fb, 8, y, "Type files on home for SD list.", kGrayLine, kBlack);
         y += lh;
         std::snprintf(line, sizeof(line), "Frame: %lu", static_cast<unsigned long>(frame_++));
         font.draw_string(fb, 8, y, line, kCursor, kBlack);
@@ -188,6 +186,9 @@ int main() {
 
     apps::home_screen().load_state();
     apps::load_graph_state();
+    // The typed `diag` command pushes the diagnostics overlay (the old
+    // global F6 toggle is gone — 2026-07-18 remap).
+    apps::home_screen().set_diag_screen(&g_diag_screen);
 
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());
@@ -300,14 +301,9 @@ int main() {
             if (!ev.pressed) {
                 continue;
             }
-            // F6 toggles the hardware diagnostics overlay from any screen.
-            if (ev.key == platform::Key::kF6) {
-                if (mgr.current() == &g_diag_screen) {
-                    mgr.pop();
-                } else {
-                    mgr.push(&g_diag_screen);
-                }
-            } else if (ev.key == platform::Key::kHome && mgr.current() != &apps::home_screen()) {
+            // Diagnostics are reached via the typed `diag` command on
+            // the home screen (2026-07-18 remap; F6 freed).
+            if (ev.key == platform::Key::kHome && mgr.current() != &apps::home_screen()) {
                 // HOME returns to the home screen from anywhere. On the
                 // home screen itself it falls through to the input line
                 // (cursor-to-start).

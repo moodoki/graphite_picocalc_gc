@@ -87,12 +87,20 @@ bool TableSetupScreen::on_key(const platform::KeyEvent& ev) {
             }
             return true;
         case Key::kEnter:
-        case Key::kF1:
             if (selected_ == kRowAsk) {
                 graph::state().table.ask_mode = !graph::state().table.ask_mode;
                 save_graph_state();
             } else {
                 begin_edit();
+            }
+            return true;
+        case Key::kDel:
+            // Clear the field: edit from empty instead of the prefill
+            // (HW feedback 2026-07-18); bad/empty commit keeps the old
+            // value.
+            if (selected_ != kRowAsk) {
+                input_.set_text("");
+                editing_ = true;
             }
             return true;
         case Key::kEscape:
@@ -137,7 +145,7 @@ void TableSetupScreen::render(gfx::Framebuffer& fb) {
 
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4, "F1:EDIT  ESC:BACK", kGrayLine);
+    font.draw_string(fb, 2, sk + 4, "ENTER:EDIT DEL:CLR ESC:BACK", kGrayLine);
 }
 
 TableSetupScreen& table_setup_screen() {

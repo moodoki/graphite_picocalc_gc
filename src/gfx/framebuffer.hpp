@@ -58,6 +58,14 @@ public:
     }
     void clear_pane_clip() { set_pane_clip(0, 0, platform::kScreenW, platform::kScreenH); }
 
+    // Current pane rect — lets a renderer tighten the clip temporarily
+    // (e.g. GraphScreen confining curves to the plot rows) and restore
+    // the enclosing pane afterwards.
+    int pane_x0() const { return pane_x0_; }
+    int pane_y0() const { return pane_y0_; }
+    int pane_x1() const { return pane_x1_; }
+    int pane_y1() const { return pane_y1_; }
+
     // Raw row access for text/blit code. Row must be within the clip
     // window; returns pointer to pixel (0, y).
     uint16_t* row(int y);

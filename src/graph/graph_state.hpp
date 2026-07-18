@@ -17,12 +17,15 @@ constexpr int kParametricSlots = 6;  // (X1T,Y1T)..(X6T,Y6T)
 constexpr int kPolarSlots = 6;       // r1..r6
 
 // Shared x/y canvas window. All modes plot into it; parametric/polar
-// add their parameter ranges in GraphState. Defaults are ZStandard.
+// add their parameter ranges in GraphState. Defaults are ZStandard:
+// x = +-10, y derived from the full-screen plot aspect (320x280 px)
+// so the window is square as displayed — +-10 * 280/320 = +-8.75
+// (HW feedback 2026-07-18; +-10 both axes squashed circles ~12.5%).
 struct GraphWindow {
     double x_min = -10.0;
     double x_max = 10.0;
-    double y_min = -10.0;
-    double y_max = 10.0;
+    double y_min = -8.75;
+    double y_max = 8.75;
     double x_scl = 1.0;
     double y_scl = 1.0;
 };
