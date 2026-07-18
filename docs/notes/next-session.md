@@ -108,6 +108,27 @@ run ~20×/frame) — rule recorded in `phase3-spec.md` §8.
   "next job" above); 340-point curve cache cap; audio HAL; licensing (D17 —
   font step now done, display/keyboard rewrites remain).
 
+## Feature wishlist — wanted, not yet scheduled (raised 2026-07-18)
+
+Neither appears in any phase spec yet; **plan them in** when scoping the
+next phases (they need a home, not immediate work):
+
+- **Complex numbers.** The whole stack is real-valued `double` today
+  (tinyexpr, format, storage). Wants: an `a+bi` value type through the
+  engine, complex-aware functions (sqrt(-1), ln of negatives, ...), a
+  display format, and a MODE row entry (real / a+bi, TI-style). Touches
+  P3-2-style element-type questions if lists/matrices should hold complex
+  values — worth deciding *before* Phase 4's Matrix work fixes the element
+  type.
+- **TI-84 CALC-menu graph analysis** (2nd+TRACE on the TI): value, zero,
+  minimum, maximum, **intersect**, dy/dx, **numeric fnInt** over an
+  interval. Distinct from Phase 4's *symbolic* CAS: these are numeric +
+  interactive on the graph screen (cursor-picked left/right bounds +
+  guess; root-finding on the compiled function, intersect = root of
+  Y1-Y2; quadrature for the integral, shaded region). Could land as a
+  Phase 3.5 / early-Phase-4 slice since it only needs the existing
+  compiled-eval machinery, no CAS.
+
 ## Hardware debugging kit (reminder)
 
 - Serial: `cat /dev/cu.usbmodem*` — `late-init:` and `battery:` lines (the
