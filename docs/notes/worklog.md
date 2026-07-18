@@ -137,7 +137,8 @@ Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
-| Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes, and Phase 3 acceptance |
+| Session 9 improvement batch (Pico 2, flashed) | New keymap on every screen (F1 editor / F2 window-or-setup / F3 mode / F4 trace / F5 graph↔table / Alt+F5 split; `-`/`=` zoom); typed `help`/`diag`/`files`/`cls`/`clrhist` + grey hint; graph status bar shows + no curve bleed above it (try a steep function, e.g. tan(x)); ZStandard square (circle looks round: `S` then plot x²+y²… or polar r=5); DEL/SPACE in editors + DEL in WINDOW/setup; case sensitivity (`SIN(0)` errors, `sin(0)` fine, `2->a` stores) |
+| Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes + Session 9 remap, and Phase 3 acceptance |
 
 ---
 
@@ -178,9 +179,38 @@ cp-to-volume is preferred — `picotool load` hung for minutes at a black
 screen. Gotcha recorded: BOOTSEL reboot needs `picotool reboot -f -u`
 (plain `-f` reboots into the application).
 
-Both boards build; lint clean; 202 host checks pass; Session 9 firmware
-flashed to the Pico 2. Next: close out Phase 2 (2.24 done, judge 2.25,
-scope 2.22) → retro → Phase 3.
+**Usage-observation round + six improvements implemented (same session).**
+Observations logged (`testdrive-phase2-observations.md` §"round 2"),
+designs settled in a quiz with the developer, then implemented:
+
+1. **Graph status bar + top-bleed clip**: GraphScreen now draws the
+   status bar (title shows GRAPH FUNC/PARAM/POLAR) and confines plot
+   drawing to the plot rows via a tightened pane clip (restored for
+   chrome; split panes unaffected — Framebuffer gained pane rect
+   getters).
+2. **Square ZStandard**: default window y = ±8.75 (= 10·280/320), so
+   the standard window is square as displayed.
+3. **Typed commands** on home: `cls` (session-level scrollback clear
+   via display watermark — recall walk and history.txt untouched),
+   `clrhist` (full wipe incl. history.txt), `help`, `diag`, `files`;
+   grey right-aligned "type help" hint on the empty input line.
+4. **Case-sensitive input** (D19): lowercase folds removed from
+   preprocess + store op; `2->A` errors pointedly; `1E10` literals
+   still fine (strtod). Stored-var echo now prints lowercase.
+5. **DEL/SPACE semantics**: DEL clears (editor rows; WINDOW/table-setup
+   fields edit-from-empty; ASK-table row delete), SPACE toggles slot
+   enable in editors.
+6. **F-key remap** (D20): global F1 editor / F2 window (table: setup) /
+   F3 mode / F4 trace / F5 graph↔table, Alt+F5 split (HW-verified via
+   diag key echo before implementing), `-`/`=` zoom, F6-F9 freed,
+   global F6 diag toggle removed, FILES left the diag screen. New
+   shared `apps/nav.{hpp,cpp}` (push_mode_editor, goto_graph_trace).
+   Help KEYS/SYNTAX tabs rewritten for the new map.
+
+Both boards build; lint clean; host tests 105+33+72 = 210 checks green
+(new case-sensitivity coverage). Flashed to the Pico 2 (cp to BOOTSEL
+volume). Next: on-device sweep of the remap + fixes, then close out
+Phase 2 (2.24 done, judge 2.25, scope 2.22) → retro → Phase 3.
 
 ## 2026-07-17/18 — Session 8: THE Phase 2 test drive (2.24) + same-session fixes
 

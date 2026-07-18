@@ -18,6 +18,26 @@ Format:
 
 ---
 
+## D20: Global F-key scheme + typed command layer
+
+**Date**: 2026-07-18
+**Status**: Accepted (supersedes the D16 key bindings F4/F9 and the boot-era F6 diag toggle)
+**Context**: Test-drive feedback item 7 (inconsistent F-keys across screens, WINDOW unreachable from the graph) plus the wish to demote the diag screen from the prime F6 slot. Settled in a design quiz with the developer.
+**Decision**: TI-84-shaped global scheme on every screen: **F1** mode-dependent editor (Y=/PAR/POL), **F2** WINDOW (table screen: table setup), **F3** MODE, **F4** TRACE (opens the graph tracing from other screens; toggles on the graph), **F5** GRAPH / graph↔table toggle (split: pane focus), **Alt+F5** split toggle (HW-verified: Alt reaches F-keys with its flag intact; Shift+F5 is eaten by the STM32). Graph zoom moves to **`-`/`=`** (`+` also zooms in); S/T presets unchanged. Screen-local row/field ops move to non-F keys: **ENTER** edit, **SPACE** toggle slot enable, **DEL** clear (editor rows, WINDOW/setup fields — edit-from-empty; ASK-table row delete). Rarely-used surfaces become **typed commands** on the home screen (lowercase, matched before evaluation): `help`, `diag`, `files`, `cls`, `clrhist`; a grey right-aligned "type help" hint sits on the empty input line. F6-F9 are freed/reserved.
+**Rationale**: One muscle-memory map across screens, matching the TI-84 F-row (Y=|WINDOW|·|TRACE|GRAPH); WINDOW finally reachable from the graph; diag demoted without losing access.
+**Tradeoffs**: Commands (help included) only work from the home screen; diag lost its toggle-from-anywhere (serial late-init lines cover the cold-boot check). FILES moved out of the diag screen. The old F2-to-Step table shortcut was dropped as low-value.
+**Revisit when**: KIV — F3 might become ZOOM (its TI slot, e.g. a preset menu) with MODE moving elsewhere; judge after real use.
+
+## D19: Expression input is case-sensitive
+
+**Date**: 2026-07-18
+**Status**: Accepted (refines D11's wording)
+**Context**: The typed-command layer (D20) wants exact lowercase matches; the engine blanket-lowercased every expression before tinyexpr, making input case-insensitive. Developer preference: case-sensitive.
+**Decision**: Remove the lowercase folds (preprocess + store-op target). Identifiers — functions, variables a-z, `theta`, `ans`, commands — are lowercase only; uppercase input fails with a parse error, and `expr->A` gets a pointed "Variables are lowercase a-z" error. Numeric literals are unaffected (tinyexpr parses via strtod: `1E10` == `1e10`). `e` remains Euler's constant and not a variable; uppercase `E` is now just an unknown identifier.
+**Rationale**: Exact matching is simpler to reason about, matches the lowercase-canonical engine internals that already existed, and the STM32 keyboard types lowercase by default so the day-to-day feel is unchanged.
+**Tradeoffs**: Previously-persisted uppercase expressions (if any) now fail compile — editor rows render red and need retyping. Caps-lock typing errors instead of silently working.
+**Revisit when**: A future need for uppercase identifiers (e.g. distinct A-Z variable bank, TI-style).
+
 ## D18: Defer the Pico 1 Phase 2 verification pass to post-Phase 3
 
 **Date**: 2026-07-18

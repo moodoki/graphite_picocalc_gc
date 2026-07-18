@@ -363,3 +363,144 @@ plug within ~5-6 s (item 9) — and since the battery sat at 84%, that
 plug/unplug observation **also confirms the charging-bit decode**
 (`raw & 0x8000`, value-byte bit 7), closing the last open battery
 question from Session 6. Session 8 fix verification: **10/10 done.**
+
+## Usage observations — Session 9, round 2 (2026-07-18, not yet implemented)
+
+Feedback pass after the fix verification. Root causes traced during
+the observation phase; **all six items were implemented later the same
+session** (developer green-light) — see worklog Session 9 and D19/D20
+for what shipped. Sections below preserve the original analysis.
+
+### 1. No status bar in graph mode + curves bleed above the top grid line
+
+Two symptoms, one root: `GraphScreen::render` never draws the status
+bar even though the layout reserves 16 rows for it (`kTopDefault = 16`,
+"content between status bar and softkeys", graph_screen.hpp:50) — the
+reserved band is just cleared to black. And curve pixels are clamped
+only to ±`Plotter::kClampPy` (±1000, for line-join sanity), not to the
+plot rows; in full-screen mode the framebuffer pane is the whole
+screen, so segments heading off the top of the window land in rows
+0-15 and are visible. The same bleed exists at the *bottom*, but the
+softkey bar is drawn after the curves and overpaints it — the top has
+nothing drawn over it, hence "plots above the top grid lines."
+(In split view the pane clip rect already bounds the graph pane, so
+the bleed is a full-screen-only artifact.)
+
+Proposed fix: draw `ui::draw_status_bar(fb, "GRAPH")` (title TBD —
+could show mode: FUNC/PAR/POL) in graph render, and clip curve/axes
+drawing to rows [top_, top_+height_) — e.g. narrow the fb pane rect
+around the plot drawing and restore it for the chrome, mirroring what
+split mode already does. Note while inspecting: table, window, editor,
+help, and diag screens don't draw a status bar either (only HOME,
+MODE, FILES do) — decide whether the fix should generalize.
+
+### 2. ZStandard should be square on the device's screen
+
+`zoom_standard()` resets to `GraphWindow{}` defaults: x and y both
+-10..10 (graph_state.hpp:21). The full-screen plot area is 320x280 px,
+so pixels-per-unit is 16 horizontal vs 14 vertical — circles render
+~12.5% squashed. Proposed fix: make the standard window square *as
+displayed*: keep x = -10..10 and derive y from the aspect ratio —
+y = ±10·(height/width) = **±8.75** at full-screen geometry. Changing
+the `GraphWindow{}` defaults gets both the first-boot window and
+ZStandard; alternatively `zoom_standard()` could compute from the live
+pane height (TI-ZSquare-style), which would also stay square inside
+the split pane (138 px → y = ±4.3125). Decide: fixed 8.75 default vs
+live-geometry compute (or both: defaults 8.75, 'S' recomputes live).
+
+### 3. `cls` command — clear the screen, retain command history
+
+Request: typing `cls` on the home screen clears the visible scrollback
+but keeps the command history (UP/DOWN recall must still walk prior
+inputs). Relevant structure: HomeScreen has ONE ring buffer
+(`history_`, kMaxHistory entries) serving both the rendered scrollback
+and the D12 input-recall walk, persisted to `/picocalc/history.txt`
+(tail reloaded at boot).
+
+Sketch: intercept the literal input `cls` before math evaluation (no
+command layer exists yet — this would be the first; store ops like
+`2->A` live inside the engine). Cheapest mechanism that keeps recall
+intact: don't delete entries — add a display watermark (e.g.
+`display_from_` index); render skips entries older than the mark,
+UP/DOWN walk ignores it. `cls` itself should not enter history.
+`history.txt` untouched (retain).
+
+Decisions (developer, same session): (a) `cls` is session-level —
+scrollback reappearing from history.txt after reboot is fine, no
+persisted marker; (b) yes to `clrhist` as a second command (full wipe:
+ring + history.txt); (c) commands are lowercase-only, riding on the
+case-sensitivity switch below.
+
+### 4. Make expression entry case-sensitive (currently it is not)
+
+Question answered in-session: the command line is currently
+**case-insensitive** — `preprocess()` blanket-lowercases every
+expression before tinyexpr (engine.cpp:32), and the store op folds the
+target name too (engine.cpp:224). Those two folds are the *only*
+case-insensitivity in the system: variables are registered lowercase
+("a".."z" minus e, "theta", "ans" — build_lookup, engine.cpp:123),
+catalog function names are lowercase, and the STM32 delivers keys
+already cased. Developer preference: **switch to case-sensitive.**
+
+Estimated diff (small, contained):
+- Delete the fold in `preprocess()`; uppercase identifiers then fail
+  compile with the normal parse error (typed `SIN(` → error instead of
+  silently working).
+- Store op: drop the tolower at engine.cpp:224 and reject a
+  non-lowercase RHS with a clear error (today `->A` folds to `->a`;
+  after the switch it must not silently mismatch).
+- Numeric literals unaffected: tinyexpr parses numbers via strtod,
+  which accepts `1E10` and `1e10` alike.
+- D11 semantics preserved: `e` stays Euler; typed `E` becomes an
+  ordinary unknown-identifier error (still effectively reserved —
+  the dedicated "E is reserved" store message can stay or simplify).
+- Docs/tests: engine.hpp:17 comment ("case-insensitive") and the help
+  SYNTAX tab need updating; host tests already use lowercase only
+  (zero uppercase/tolower hits) — add explicit case-sensitivity
+  checks. Likely a new D-entry superseding the D11 wording.
+
+### 5. DEL clears the selected field in WINDOW (and other settings screens)
+
+Request: with a row selected (browse mode, not editing), DEL clears
+the existing entry. Today `begin_edit()` prefills the input line with
+the formatted current value (window_screen.cpp:74) — replacing a value
+means backspacing the whole prefill first. Sketch: in browse mode,
+DEL → enter edit mode with an *empty* input (`input_.set_text("")`)
+instead of the prefill; commit/escape semantics unchanged (ESC keeps
+the old value, and an empty commit already keeps the old value via
+eval_field's parse failure). While editing, DEL keeps its InputLine
+delete-forward meaning. Apply the same to TableSetupScreen's
+Start/Step fields (same prefill pattern); MODE rows are toggles — not
+applicable. Softkey/help note: mention DEL=clear in the help KEYS tab
+(2.27 rule: key changes update help).
+
+### 6. F-key remap — feedback item 7 resolved (design agreed, not implemented)
+
+Quizzed and settled in-session (2026-07-18). Target map, TI-84-shaped
+(F1..F5 = Y=|WINDOW|MODE|TRACE|GRAPH):
+
+| Key | Everywhere | Screen-local exceptions |
+|-----|------------|-------------------------|
+| F1 | Mode-dependent function editor (Y=/PAR/POL) | — |
+| F2 | WINDOW settings | Table: table setup (absorbs the old F2-to-Step jump — dropped, little convenience) |
+| F3 | MODE screen | **KIV: may rethink F3 as ZOOM (TI slot) vs MODE later** |
+| F4 | TRACE | — |
+| F5 | GRAPH / graph↔table toggle | Split: pane focus switch |
+| Alt+F5 | Split toggle (Shift+F5 is eaten by the STM32 → no F10) | **HW-VERIFIED 2026-07-18**: serial key echo shows Alt+F1..F4 arrive as their own codes with alt=1 (NOT translated to F6-F9 like Shift), and Alt+F5 reached the F5 binding (opened FILES from diag). No fallback alias needed |
+| `-` / `=` | — | Graph: zoom out / zoom in (shift-= is +); S/T presets unchanged |
+| DEL | Clear (browse mode): editor row, WINDOW/setup field | Table ASK mode: delete row (replaces old softkey F5) |
+| Space | — | Editors, browse mode: toggle slot on/off (while editing it types a space) |
+| F6-F9 | freed / reserved | old global F6 diag toggle removed |
+
+Typed commands (home screen only, lowercase — rides the
+case-sensitivity switch, obs. 4): `help`, `diag`, `files`, `cls`,
+`clrhist`. FILES moves out of the diag screen to its own command.
+Help discoverability: grey right-aligned "type help" hint on the home
+input line when it's empty.
+
+Consequences: WINDOW reachable from the graph screen at last (old
+papercut); diag loses toggle-from-anywhere (acceptable — serial
+late-init lines cover the cold-boot check, `diag` from home
+otherwise); help is home-only (accepted); help KEYS tab must be
+rewritten with the new map (2.27 rule); D-entry due at implementation
+(supersedes the D16 key scheme F4/F9 bindings).
