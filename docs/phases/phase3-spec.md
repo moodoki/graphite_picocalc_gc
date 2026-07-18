@@ -558,7 +558,7 @@ Solo developer, part-time (~20 hrs/week). ~8 weeks.
 | 3D.11 | StatPlot: box plot (+ outliers) | 4 | |
 | 3D.12 | StatPlot: normal probability plot | 3 | |
 | 3D.13 | ZoomStat + stat-plot toggles in graph screen | 4 | |
-| 3D.14 | Test on both Pico 1 and Pico 2 | 4 | |
+| 3D.14 | Test on both Pico 1 and Pico 2 | 6 | Pico 1 leg also retires the deferred Phase 2 verification pass (D18): split-pane clipping on the strip renderer + Session 8 fix list |
 | | **Subtotal** | **~65 hrs** | |
 
 ### Summary
@@ -578,6 +578,7 @@ Solo developer, part-time (~20 hrs/week). ~8 weeks.
 - **Regression on large lists**: polynomial regression builds and solves a normal-equations system. For a quartic fit on 1000 points, that's forming a 5$\times$5 matrix from 1000 summed products (~5000 multiply-adds) then solving 5$\times$5 — trivial. Iterative fits (logistic/sinusoidal) may take 50–200 iterations; on Pico 1 softfloat, budget ~100–500 ms. Acceptable, but show a "computing…" indicator.
 - **Distribution evaluations**: each `normal_cdf`/`t_cdf` is a special-function call (~1000+ cycles on Pico 1). Fine for single evaluations in tests; avoid in tight loops. The `F2:DRAW` distribution-shading feature plots a PDF across ~320 columns — that's 320 special-function calls, ~1–3 ms on Pico 2, ~10–30 ms on Pico 1. Acceptable.
 - **List storage**: a 1000-element `double` list is 8 KB — comfortably in PSRAM. Six full lists ≈ 48 KB in PSRAM, negligible against 8 MB.
+- **Strip-renderer safety (Pico 1 — required, see D18)**: Phase 3 is developed and hardware-tested on the Pico 2 (full framebuffer); the Pico 1 pass is deferred to 3D.14. On the Pico 1, `render()` runs once per 16-scanline strip — up to ~20×/frame — so every new screen's `render()` **must be idempotent**: no lazy cache fills, scroll adjustments, or other state mutation inside the draw path (compute in `on_key`/update, draw in `render`). Bugs here only manifest on Pico 1 hardware — there is no host coverage of the framebuffer. Also budget for strip overdraw: full-scene render logic re-runs per strip, so keep per-draw work (e.g. distribution shading, stat-plot point loops) cheap or dirty-band-scoped.
 
 ---
 

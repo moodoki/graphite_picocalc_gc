@@ -314,3 +314,52 @@ same shapes; trace readout th in degrees) was run later — see below.
 
 Raw log: `docs/notes/testdrive-serial-2026-07-18.txt` (copied from the
 host capture; includes attach/detach markers around the cold cycle).
+
+## Offline spin on 079a8b2 — Session 8 fix verification (2026-07-18)
+
+Developer ran the 10-item fix-verification checklist from
+`next-session.md` during a longer offline spin. **8/10 pass**, including
+the two watch-items: the split-view F1 trace toggle (item 5, the report
+code inspection couldn't reproduce) works, and MODE settings survive
+reboot (item 3). Items 1, 2, 4, 6, 7, 10 all pass as specified.
+
+**Item 8 FAIL — held-key table scroll still overruns after release.**
+Buffered key presses keep playing out after the key is let go. Root
+cause found in code: the Session 8 drain loop broke on the first
+`kNone` from `Keyboard::poll()`, but poll() is a two-phase state
+machine (register select, then a >=10 ms-spaced read) — `kNone`
+usually means "read in flight", not "FIFO empty". So the drain never
+consumed more than one event per frame and the fix was a no-op; the
+backlog still played out one scroll per ~frame. **Fixed this session:**
+`Keyboard::fifo_empty()` reports whether the last *completed* read
+found the FIFO empty; the drain loop now polls through mid-phase
+`kNone`s until a completed read says empty (event cap 16 + 250 ms
+budget as wedge guards). Draining an event costs one ~10 ms poll
+cycle — far cheaper than the frame renders that used to pace it.
+
+**Item 9 FAIL — status bar updates in ~2-3 s, not ~1 s.** Root cause:
+the main loop's 1 Hz check read `battery_status()`, whose internal I2C
+refresh interval was still 30 s — the "~1 s" target was never
+achievable (worst-case staleness ~31 s; the observed 2-3 s was a
+lucky phase). **Fixed this session:** battery API split —
+`battery_status()` is now cache-only (render-safe, no I2C ever), and a
+new `battery_poll()` (sole call site: the main loop's 1 Hz check) owns
+the refresh. The success interval was first set to 1 s, then **backed
+off to 5 s by developer call**: a wedged STM32 needs a physical power
+cycle, and a quicker charging indicator isn't worth that risk — expect
+status-bar updates within ~5-6 s of a change, which is fine for
+usability. Serial `battery:` print now fires on raw-value change + a
+30 s heartbeat instead of every read — the charging-bit confirmation
+capture still works (a change is exactly what gets printed).
+
+Both fixes: built (both boards), lint clean, 202 host checks pass,
+flashed to the Pico 2 (cp to the remounted RP2350 BOOTSEL volume —
+`picotool load` hung for minutes; volume copy is the preferred path
+again).
+
+**Re-verification (same day): both fixes PASS on-device.** Held-key
+table scroll stops at release (item 8); status bar follows a charger
+plug within ~5-6 s (item 9) — and since the battery sat at 84%, that
+plug/unplug observation **also confirms the charging-bit decode**
+(`raw & 0x8000`, value-byte bit 7), closing the last open battery
+question from Session 6. Session 8 fix verification: **10/10 done.**

@@ -24,9 +24,9 @@ Conventions:
   deferred late-init (D14, verified on a cold power-on). STM32 keyboard fw v1.6;
   battery, dirty-band rendering (D13), SD persistence, store op, pretty math (D2
   revised), trace/presets, mode, bootloader reboot all verified on Pico 1.
-- **Open HW items (small)**: charging-color check (needs battery <95%); a functional
-  spot-check on Pico 2 (eval/graph/dirty-band feel — display + keyboard + PSRAM +
-  SD + battery already verified there).
+- **Open HW items (small)**: none on the Pico 2 — charging decode verified
+  2026-07-18 (Session 9); the Session 8 test drive covered the functional
+  spot-check. Remaining HW work is the deferred Pico 1 pass (D18).
 - **Phase 1 declared done 2026-07-12** (retro: `docs/notes/phase1-retro.md`).
 - **Phase 2 started 2026-07-12** (Session 7): lint baseline is clean and gating
   (clang-tidy installed + config fixed, `WarningsAsErrors: '*'`), and **task 2.1 is
@@ -69,9 +69,14 @@ Conventions:
   checklist steps pass; found-bug fixes + quick features implemented,
   built, linted, flashed same session (see Session 8 entry). 2.25 perf
   baseline captured (`docs/notes/testdrive-phase2-observations.md`).
-- **Next up**: developer's longer offline spin on the fixed firmware →
-  log observations; verify the Session 8 fixes on-device; full Pico 1
-  pass (still on Session 7 firmware — reflash first).
+- **Session 9 (2026-07-18)**: all ten Session 8 fixes verified on the
+  Pico 2 (offline spin passed 8/10; items 8+9 re-root-caused, re-fixed,
+  re-verified same session — see Session 9 entry). Charging-bit decode
+  confirmed. The full Pico 1 pass is **deferred to post-Phase 3** (D18) —
+  folds into task 3D.14 to save a board swap.
+- **Next up**: close out Phase 2 — 2.24 done; re-judge 2.25 (recompute ≪
+  frame push; decide on table compile-once); scope 2.22 ("mode selector
+  integration" beyond the MODE row); then Phase 2 retro → phase3-spec.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.
@@ -118,16 +123,64 @@ infinite scroll, ASK add/delete/hint, setup + F2-to-Step, column scroll +
 markers, detail precision), split-screen + trace sync, help tabs, keymap, cold
 power cycle persistence. Bugs found were fixed the same session (commit 079a8b2).
 
+**Verified on Pico 2 hardware 2026-07-18 (Session 9 — offline spin + re-fix
+verification):** all ten Session 8 fixes, in two rounds. The offline spin passed
+8/10 on 079a8b2 (including the split-F1 watch-item and MODE/graphstate
+persistence across reboots — which also closes the PCG2 one-time-reset check).
+The two failures (held-key scroll overrun; battery staleness) were
+re-root-caused, re-fixed, flashed, and **verified on-device same session**.
+Item 9's verification (charger plug → status bar follows within ~5-6 s, battery
+at 84%) also **confirms the charging-bit decode** (`raw & 0x8000`, value-byte
+bit 7) — the last open battery question from Session 6.
+
 Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
-| Session 8 fixes (Pico 2, fw 079a8b2 flashed) | Cardioid closes at THstep 5.73; `2*pi` in WINDOW fields; DEG/RAD + display/FIX survive reboot; repeated editor↔graph F4 hops never lock up push keys; F1 trace toggle inside split (couldn't repro the report in code — watch this one); bad editor row renders red; FILES screen (diag F6 → F5) lists graphstate.dat; held-key table scroll stops at release; status bar repaints ~1 s after battery change; no history overdraw with tall fractions |
-| Charging color/bit | Fix applied (`raw & 0x8000`, value-byte bit 7) but unverified — needs battery <95%. Serial prints `battery: raw=0x....` every ~30 s; capture one while plugged in below full to confirm the layout |
-| Pico 1 full pass | Still on Session 7 firmware — reflash `build/pico/…uf2` first. Whole Phase 2 sweep, headline: split-pane clipping on the strip renderer (no bleed across the divider), plus the Session 8 fixes above |
-| PCG2 one-time state reset | First boot on 079a8b2: graphstate magic bumped, so Phase 2 state (curves, mode, ranges) resets to defaults and legacy yfuncs/window migration re-runs — expected once, not a bug. Re-enter test curves and confirm they persist thereafter |
+| Pico 1 full pass — **deferred to post-Phase 3 (D18)** | Runs as part of Phase 3's both-boards pass (3D.14). Still on Session 7 firmware — reflash `build/pico/…uf2` first. Covers the whole Phase 2 sweep (headline: split-pane clipping on the strip renderer — no bleed across the divider), the Session 8+9 fixes, and Phase 3 acceptance |
 
 ---
+
+## 2026-07-18 — Session 9: offline-spin verdict, items 8+9 re-fixed & verified, D18 Pico 1 deferral
+
+**Offline spin on 079a8b2: 8/10 Session 8 fixes verified on-device** — including
+the split-F1 trace toggle (the one code inspection couldn't reproduce) and
+MODE/graphstate persistence. The two failures were re-root-caused, fixed,
+flashed, and **verified on-device the same session**:
+
+- **Item 8 (held-key scroll overrun): the Session 8 drain was a no-op.**
+  `Keyboard::poll()` is a two-phase machine — the first call only selects the
+  FIFO register and returns kNone; the read lands ≥10 ms later. The drain loop
+  broke on that first kNone, so it still consumed one event per frame. New
+  `Keyboard::fifo_empty()` reports whether the last *completed* read found the
+  FIFO empty; the main loop now drains through mid-phase kNones until a real
+  empty read (event cap 16 + 250 ms budget as wedge guards). Verified: scroll
+  stops at release.
+- **Item 9 (battery staleness): the ~1 s target was never achievable** — the
+  1 Hz main-loop check read a cache whose internal I2C refresh was still 30 s
+  (worst case ~31 s; the observed 2-3 s was a lucky phase). Battery API split:
+  `battery_status()` is now cache-only (render-safe, no I2C ever);
+  new `battery_poll()` — sole call site, the main loop's 1 Hz check — owns the
+  refresh. Cadence set to **5 s by developer call** (stability over a snappy
+  charging indicator; an STM32 wedge needs a physical power cycle). Serial
+  `battery:` prints on change + 30 s heartbeat instead of every read.
+  Verified: status bar follows a charger plug within ~5-6 s — which also
+  **confirms the charging-bit decode** (battery was at 84%).
+
+**D17→D18: Pico 1 Phase 2 pass deferred to post-Phase 3** (board swap is
+tedious; the board-conditional surface is 4 files; clip logic is shared and
+Pico-2-exercised; RP2040 static RAM is 62.5 KB of 264 KB). Folds into Phase 3
+task 3D.14. Guardrail added to phase3-spec §8: new `render()`s must be
+strip-safe (idempotent, ~20×/frame on Pico 1; no host coverage exists).
+
+**Flash-path revision:** the RP2350 BOOTSEL volume mounts again and
+cp-to-volume is preferred — `picotool load` hung for minutes at a black
+screen. Gotcha recorded: BOOTSEL reboot needs `picotool reboot -f -u`
+(plain `-f` reboots into the application).
+
+Both boards build; lint clean; 202 host checks pass; Session 9 firmware
+flashed to the Pico 2. Next: close out Phase 2 (2.24 done, judge 2.25,
+scope 2.22) → retro → Phase 3.
 
 ## 2026-07-17/18 — Session 8: THE Phase 2 test drive (2.24) + same-session fixes
 

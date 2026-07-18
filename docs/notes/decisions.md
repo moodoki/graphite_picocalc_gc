@@ -18,6 +18,35 @@ Format:
 
 ---
 
+## D18: Defer the Pico 1 Phase 2 verification pass to post-Phase 3
+
+**Date**: 2026-07-18
+**Status**: Accepted
+**Context**: The Phase 2 test drive (2.24) passed on the Pico 2; the Pico 1 pass was
+deferred from Session 8. Both Picos share one PicoCalc mainboard, so a Pico 1 pass
+costs a tedious physical module swap. Question: run it before Phase 3, or fold it
+into Phase 3's own both-boards pass (task 3D.14)?
+**Decision**: Defer. One combined Pico 1 pass after Phase 3 covers the Phase 2 sweep
+(split-pane clipping headline, Session 8 fix list) plus Phase 3 acceptance — one
+board swap instead of two.
+**Rationale**: The board-conditional surface is four files, and the Pico 2 "full
+framebuffer" mode is the strip path with one buffer-sized strip — the pane/strip clip
+intersection (`set_pixel`/`fill_rect`) is shared code already exercised on the Pico 2,
+so the D16 bleed worry is largely covered. RAM is a non-issue: the RP2040 build uses
+62.5 KB static of 264 KB. The genuinely Pico-1-only risks — render non-idempotency
+across ~20 strip passes per band, and perf feel (strip mode re-renders the scene per
+strip; split full-redraws both panes) — produce localized visual/tuning bugs, not
+architectural rework.
+**Tradeoffs**: Bugs surface farther from their commit (mitigated: rebuild any tagged
+firmware, e.g. 079a8b2, to bisect phase-2 vs phase-3 fallout in one flash). If Phase 2
+introduced a non-idempotent render pattern, Phase 3 may copy it before hardware
+catches it — mitigated by the strip-safety rule added to `phase3-spec.md` §8: new
+screen `render()`s must be idempotent (may run ~20×/frame in strip mode).
+**Revisit when**: Phase 3 grows new rendering machinery beyond ordinary screens
+(animations, new split layouts) — then swap boards *before* that work starts; or any
+host-side strip-mode regression harness appears, which would shrink the deferred risk
+further.
+
 ## D17: Licensing — MIT own code, GPL-2.0 combined firmware
 
 **Date**: 2026-07-12
