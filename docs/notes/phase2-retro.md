@@ -42,7 +42,7 @@ Pico 1 verification pass is deliberately deferred to Phase 3 (D18).
   F-key scheme (F1 editor / F2 window / F3 mode / F4 trace / F5 graph↔table,
   Alt+F5 split, -/= zoom); typed commands (`help`, `diag`, `files`, `cls`,
   `clrhist`); DEL/SPACE row-and-field semantics; graph status bar + plot-row
-  clipping; square ZStandard (y ±8.75); FILES screen.
+  clipping; square ZStandard (y +-8.75); FILES screen.
 - **Quality floor**: clang-tidy lint baseline clean and gating
   (`WarningsAsErrors: '*'`); host checks grew 112 → **210** (97→105 math,
   33 layout, +72 graph — the graph suite is new this phase).
@@ -137,7 +137,7 @@ was fully settled — including a hardware feasibility check — before any code
   clipping on the strip renderer) + Session 8/9 fixes + Phase 3 acceptance,
   as task 3D.14. Until then the Pico 1 stays on Session 7 firmware.
 - **Strip-safety rule** (phase3-spec §8): new `render()`s must be idempotent
-  (~20×/frame in strip mode); no host coverage exists to catch violations.
+  (~20x/frame in strip mode); no host coverage exists to catch violations.
 - The `Array` primitive (phase3-spec §2) should be reconciled with Phase 4's
   `Matrix` per the spec's §10 note when Phase 4 begins.
 - Backlog otherwise as listed in `next-session.md`.
