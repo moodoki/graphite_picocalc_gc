@@ -31,6 +31,11 @@ private:
     void draw_char_impl(Framebuffer& fb, int x, int y, char c, Color fg, const Color* bg) const;
 };
 
+// Non-ASCII glyph baked into an unused slot by bdf_to_utft.py --map
+// (D24): Greek pi at DEL. Present in the 8x16 main font only — the
+// 5x8 BDF has no pi glyph, so small_font() draws it blank.
+constexpr char kGlyphPi = '\x7f';
+
 // Main text font: Spleen 8x16 (D9 — replaced the interim Coyote 8x12).
 const Font& main_font();
 

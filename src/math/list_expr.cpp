@@ -1,12 +1,15 @@
 #include "math/list_expr.hpp"
 
 #include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 #include "math/format.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
+#include "math/stats.hpp"
 
 namespace math::listexpr {
 
@@ -26,6 +29,17 @@ calc_t g_elem[ListStore::kCount];
 calc_t g_lift[ListStore::kCount][kChunk];
 calc_t g_outbuf[kChunk];
 const char* const kSlotNames[ListStore::kCount] = {"l1", "l2", "l3", "l4", "l5", "l6"};
+
+// Lift operands (D24): brace literals and wrapper calls inside a lifted
+// expression ("{1,2,3}+2", "range(1,9)*l1") are evaluated into these
+// side arrays and bound like extra list slots. Slots are handed out
+// monotonically per evaluate() (Ctx::ops) and released when the lift
+// that extracted them finishes, so nested lifts never alias.
+constexpr int kMaxOperands = 4;
+Array g_op[kMaxOperands];
+calc_t g_op_elem[kMaxOperands];
+calc_t g_op_lift[kMaxOperands][kChunk];
+const char* const kOpNames[kMaxOperands] = {"lopa", "lopb", "lopc", "lopd"};
 
 bool ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
@@ -102,16 +116,23 @@ bool wrapper_form(const char* s, const char* name, const char** inner, size_t* i
     return true;
 }
 
-const char* const kWrapperNames[] = {"sort_asc", "sort_desc", "cumsum", "delta_list", "seq"};
-// The single-list-argument subset (seq is handled separately).
+const char* const kWrapperNames[] = {"sort_asc",   "sort_desc", "cumsum",
+                                     "delta_list", "seq",       "range"};
+// The single-list-argument subset (seq and range are handled separately).
 const char* const kValueWrappers[] = {"sort_asc", "sort_desc", "cumsum", "delta_list"};
 
-bool starts_like_wrapper(const char* s) {
-    for (const char* name : kWrapperNames) {
-        const char* inner = nullptr;
-        size_t inner_len = 0;
-        if (wrapper_form(s, name, &inner, &inner_len)) {
-            return true;
+// A wrapper call anywhere in s ("range(1,9)*2" — not just as the whole
+// expression) makes it a list expression (D24 lift operands).
+bool contains_wrapper_call(const char* s) {
+    for (const char* p = s; *p != 0; ++p) {
+        if (p > s && ident_char(p[-1])) {
+            continue;  // Mid-identifier, not a call start
+        }
+        for (const char* name : kWrapperNames) {
+            const size_t nl = std::strlen(name);
+            if (std::strncmp(p, name, nl) == 0 && p[nl] == '(') {
+                return true;
+            }
         }
     }
     return false;
@@ -142,15 +163,52 @@ int split_args(const char* s, size_t n, const char** starts, size_t* lens, int m
     return count;
 }
 
-// Replace bare-list reductions — sum(l1), prod(l1), length(l1) — with
-// numeric literals so the rest of the expression can be a plain
-// scalar or vector-lifted engine expression.
+struct Ctx {
+    const char* err = nullptr;
+    int depth = 0;
+    int ops = 0;  // Next free lift-operand slot (monotonic, see g_op)
+};
+
+bool eval_list_into(const char* s, Array& out, Ctx& ctx);
+
+// Reduction names: list in, scalar out. mean/median/stdev added per
+// D24 (stdev = sample Sx; "std" is an alias).
+enum class Reduction : uint8_t { kSum, kProd, kLength, kMean, kMedian, kStdev, kStd };
+constexpr int kReductionCount = 7;
+const char* const kReductionNames[kReductionCount] = {"sum",    "prod",  "length", "mean",
+                                                      "median", "stdev", "std"};
+
+// Evaluated non-bare reduction arguments land here (released after use).
+Array g_red;
+
+bool contains_reduction_call(const char* s) {
+    for (const char* p = s; *p != 0; ++p) {
+        if (p > s && ident_char(p[-1])) {
+            continue;
+        }
+        for (const char* name : kReductionNames) {
+            const size_t nl = std::strlen(name);
+            if (std::strncmp(p, name, nl) == 0 && p[nl] == '(') {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Replace list reductions — sum(l1), mean(l1), ... — with numeric
+// literals so the rest of the expression can be a plain scalar or
+// vector-lifted engine expression. Bare list names take the fast path
+// (no copy); any other argument is evaluated as a list expression
+// (D24, lifting the D22 bare-arg limitation — sum(range(1,100)),
+// mean(l1*2)). Nested reductions resolve innermost-first: an argument
+// still containing a reduction call is skipped until a later pass.
 bool substitute_reductions(char* buf, size_t cap, const char** err) {
-    const char* const names[] = {"sum", "prod", "length"};
     bool changed = true;
     while (changed) {
         changed = false;
-        for (const char* name : names) {
+        for (int ni = 0; ni < kReductionCount; ++ni) {
+            const char* name = kReductionNames[ni];
             const size_t nl = std::strlen(name);
             for (char* p = buf; (p = std::strstr(p, name)) != nullptr; ++p) {
                 if (p > buf && ident_char(p[-1])) {
@@ -160,30 +218,81 @@ bool substitute_reductions(char* buf, size_t cap, const char** err) {
                 if (*q != '(') {
                     continue;
                 }
-                // Argument must be a bare list name (D22): "sum(l1)".
-                const char* a = q + 1;
-                while (*a == ' ') {
-                    ++a;
+                // Matching close paren (brace depth counts too).
+                const char* close = nullptr;
+                int depth = 0;
+                for (const char* r = q; *r != 0; ++r) {
+                    if (*r == '(' || *r == '{') {
+                        ++depth;
+                    } else if (*r == ')' || *r == '}') {
+                        --depth;
+                        if (depth == 0) {
+                            close = r;
+                            break;
+                        }
+                    }
                 }
-                const int slot = token_at(buf, a);
-                if (slot < 0) {
-                    continue;
+                if (close == nullptr) {
+                    continue;  // Unbalanced — let the engine report it
                 }
-                const char* close = a + 2;
-                while (*close == ' ') {
-                    ++close;
+                char raw[kMaxLen];
+                const auto alen = static_cast<size_t>(close - (q + 1));
+                if (alen >= sizeof(raw)) {
+                    *err = "Expression too long";
+                    return false;
                 }
-                if (*close != ')') {
-                    continue;
+                std::memcpy(raw, q + 1, alen);
+                raw[alen] = 0;
+                char arg[kMaxLen];
+                if (!trim_into(raw, arg, sizeof(arg))) {
+                    *err = "Expression too long";
+                    return false;
                 }
-                const Array& lst = lists().list(slot);
-                calc_t v = 0;
-                if (name[0] == 's') {
-                    v = listops::sum(lst);
-                } else if (name[0] == 'p') {
-                    v = listops::prod(lst);
+
+                const Array* lst = nullptr;
+                const int slot = std::strlen(arg) == 2 ? token_at(arg, arg) : -1;
+                if (slot >= 0) {
+                    lst = &lists().list(slot);
                 } else {
-                    v = static_cast<calc_t>(lst.size());
+                    if (contains_reduction_call(arg)) {
+                        continue;  // Inner reduction first
+                    }
+                    Ctx actx;
+                    if (!eval_list_into(arg, g_red, actx)) {
+                        *err = actx.err != nullptr ? actx.err : "Syntax error";
+                        return false;
+                    }
+                    lst = &g_red;
+                }
+                calc_t v = 0;
+                const auto red = static_cast<Reduction>(ni);
+                switch (red) {
+                    case Reduction::kSum:
+                        v = listops::sum(*lst);
+                        break;
+                    case Reduction::kProd:
+                        v = listops::prod(*lst);
+                        break;
+                    case Reduction::kLength:
+                        v = static_cast<calc_t>(lst->size());
+                        break;
+                    default: {  // mean / median / stdev / std
+                        const auto st = stats::one_var(*lst);
+                        if (!st.ok) {
+                            *err = st.error;
+                            g_red.clear();
+                            return false;
+                        }
+                        v = red == Reduction::kMean     ? st.mean
+                            : red == Reduction::kMedian ? st.median
+                                                        : st.sample_stddev;
+                        break;
+                    }
+                }
+                g_red.clear();
+                if (std::isnan(v)) {  // e.g. stdev of a 1-element list
+                    *err = "Undefined result";
+                    return false;
                 }
                 char num[40];
                 std::snprintf(num, sizeof(num), "%.17g", static_cast<double>(v));
@@ -203,13 +312,6 @@ bool substitute_reductions(char* buf, size_t cap, const char** err) {
     }
     return true;
 }
-
-struct Ctx {
-    const char* err = nullptr;
-    int depth = 0;
-};
-
-bool eval_list_into(const char* s, Array& out, Ctx& ctx);
 
 bool eval_literal(const char* s, Array& out, Ctx& ctx) {
     const size_t len = std::strlen(s);
@@ -291,65 +393,240 @@ bool eval_seq(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
     return true;
 }
 
-// Element-wise engine expression over l1..l6 (vector lift).
+// range(lo, hi[, step]) — inclusive endpoints, default step ±1 toward
+// hi (D24). Backed by listops::seq with the identity formula.
+bool eval_range(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
+    const char* starts[3];
+    size_t lens[3];
+    const int count = split_args(inner, inner_len, starts, lens, 3);
+    if (count != 2 && count != 3) {
+        ctx.err = "range needs (lo, hi[, step])";
+        return false;
+    }
+    calc_t vals[3] = {0, 0, 0};
+    for (int i = 0; i < count; ++i) {
+        char raw[kMaxLen];
+        char arg[kMaxLen];
+        if (lens[i] >= sizeof(raw)) {
+            ctx.err = "Expression too long";
+            return false;
+        }
+        std::memcpy(raw, starts[i], lens[i]);
+        raw[lens[i]] = 0;
+        if (!trim_into(raw, arg, sizeof(arg)) || !eval_field(arg, &vals[i])) {
+            ctx.err = "Bad range argument";
+            return false;
+        }
+    }
+    const calc_t lo = vals[0];
+    const calc_t hi = vals[1];
+    const calc_t step = count == 3 ? vals[2] : (hi >= lo ? 1 : -1);
+    const char* err = nullptr;
+    if (!listops::seq("x", 'x' - 'a', lo, hi, step, out, &err)) {
+        ctx.err = err;
+        return false;
+    }
+    return true;
+}
+
+// Extract top-level brace literals and wrapper calls from s into
+// operand slots (g_op, evaluated via eval_list_into), rewriting each
+// span to its bound name in `out` ("{1,2}+range(0,4)*l1" ->
+// "lopa+lopb*l1"). Slots are claimed from ctx.ops.
+bool extract_operands(const char* s, char* out, size_t cap, Ctx& ctx) {
+    size_t w = 0;
+    const char* p = s;
+    while (*p != 0) {
+        const char* span_end = nullptr;  // One past the span when found
+        if (*p == '{') {
+            int depth = 0;
+            for (const char* q = p; *q != 0; ++q) {
+                if (*q == '{') {
+                    ++depth;
+                } else if (*q == '}') {
+                    --depth;
+                    if (depth == 0) {
+                        span_end = q + 1;
+                        break;
+                    }
+                }
+            }
+            if (span_end == nullptr) {
+                ctx.err = "Syntax error";
+                return false;
+            }
+        } else if (p == s || !ident_char(p[-1])) {
+            for (const char* name : kWrapperNames) {
+                const size_t nl = std::strlen(name);
+                if (std::strncmp(p, name, nl) != 0 || p[nl] != '(') {
+                    continue;
+                }
+                int depth = 0;
+                for (const char* q = p + nl; *q != 0; ++q) {
+                    if (*q == '(') {
+                        ++depth;
+                    } else if (*q == ')') {
+                        --depth;
+                        if (depth == 0) {
+                            span_end = q + 1;
+                            break;
+                        }
+                    }
+                }
+                if (span_end == nullptr) {
+                    ctx.err = "Syntax error";
+                    return false;
+                }
+                break;
+            }
+        }
+
+        if (span_end == nullptr) {
+            if (w + 1 >= cap) {
+                ctx.err = "Expression too long";
+                return false;
+            }
+            out[w++] = *p++;
+            continue;
+        }
+
+        if (ctx.ops >= kMaxOperands) {
+            ctx.err = "Too many list terms";
+            return false;
+        }
+        const auto span_len = static_cast<size_t>(span_end - p);
+        char sub[kMaxLen];
+        if (span_len >= sizeof(sub)) {
+            ctx.err = "Expression too long";
+            return false;
+        }
+        std::memcpy(sub, p, span_len);
+        sub[span_len] = 0;
+        const int slot = ctx.ops++;
+        if (!eval_list_into(sub, g_op[slot], ctx)) {
+            return false;
+        }
+        const size_t name_len = std::strlen(kOpNames[slot]);
+        if (w + name_len + 1 >= cap) {
+            ctx.err = "Expression too long";
+            return false;
+        }
+        std::memcpy(out + w, kOpNames[slot], name_len);
+        w += name_len;
+        p = span_end;
+    }
+    out[w] = 0;
+    return true;
+}
+
+// Element-wise engine expression over l1..l6 plus extracted operands
+// (brace literals, wrapper calls) — the vector lift.
 bool eval_lift(const char* s, Array& out, Ctx& ctx) {
+    const int first_op = ctx.ops;
+    char rw[kMaxLen];
+    if (!extract_operands(s, rw, sizeof(rw), ctx)) {
+        return false;
+    }
+
     bool used[ListStore::kCount] = {};
-    for (const char* p = s; *p != 0; ++p) {
-        const int slot = token_at(s, p);
+    for (const char* p = rw; *p != 0; ++p) {
+        const int slot = token_at(rw, p);
         if (slot >= 0) {
             used[slot] = true;
         }
     }
     int n = -1;
+    bool mismatch = false;
     for (int i = 0; i < ListStore::kCount; ++i) {
         if (!used[i]) {
             continue;
         }
         const int sz = lists().list(i).size();
         if (n >= 0 && sz != n) {
-            ctx.err = "List length mismatch";
-            return false;
+            mismatch = true;
         }
         n = sz;
     }
-    if (n < 0) {
-        ctx.err = "Expected a list";
-        return false;
+    for (int k = first_op; k < ctx.ops; ++k) {
+        const int sz = g_op[k].size();
+        if (n >= 0 && sz != n) {
+            mismatch = true;
+        }
+        n = sz;
     }
 
-    Engine::ExtraVar extras[ListStore::kCount];
-    for (int i = 0; i < ListStore::kCount; ++i) {
-        extras[i] = {kSlotNames[i], &g_elem[i]};
-    }
-    void* h = engine().compile_with(s, extras, ListStore::kCount);
-    if (h == nullptr) {
-        ctx.err = "Syntax error";
-        return false;
-    }
-    if (!out.resize(n)) {
-        engine().free_compiled(h);
-        ctx.err = "Out of list memory";
-        return false;
-    }
-    for (int at = 0; at < n; at += kChunk) {
-        const int m = n - at < kChunk ? n - at : kChunk;
+    bool ok = false;
+    if (mismatch) {
+        ctx.err = "List length mismatch";
+    } else if (n < 0) {
+        ctx.err = "Expected a list";
+    } else {
+        Engine::ExtraVar extras[ListStore::kCount + kMaxOperands];
+        int nx = 0;
         for (int i = 0; i < ListStore::kCount; ++i) {
-            if (used[i]) {
-                lists().list(i).read_range(at, m, g_lift[i]);
-            }
+            extras[nx++] = {kSlotNames[i], &g_elem[i]};
         }
-        for (int j = 0; j < m; ++j) {
-            for (int i = 0; i < ListStore::kCount; ++i) {
-                if (used[i]) {
-                    g_elem[i] = g_lift[i][j];
+        for (int k = first_op; k < ctx.ops; ++k) {
+            extras[nx++] = {kOpNames[k], &g_op_elem[k]};
+        }
+        void* h = engine().compile_with(rw, extras, nx);
+        if (h == nullptr) {
+            ctx.err = "Syntax error";
+        } else if (!out.resize(n)) {
+            ctx.err = "Out of list memory";
+        } else {
+            for (int at = 0; at < n; at += kChunk) {
+                const int m = n - at < kChunk ? n - at : kChunk;
+                for (int i = 0; i < ListStore::kCount; ++i) {
+                    if (used[i]) {
+                        lists().list(i).read_range(at, m, g_lift[i]);
+                    }
                 }
+                for (int k = first_op; k < ctx.ops; ++k) {
+                    g_op[k].read_range(at, m, g_op_lift[k]);
+                }
+                for (int j = 0; j < m; ++j) {
+                    for (int i = 0; i < ListStore::kCount; ++i) {
+                        if (used[i]) {
+                            g_elem[i] = g_lift[i][j];
+                        }
+                    }
+                    for (int k = first_op; k < ctx.ops; ++k) {
+                        g_op_elem[k] = g_op_lift[k][j];
+                    }
+                    g_outbuf[j] = engine().eval_compiled_raw(h);
+                }
+                out.write_range(at, m, g_outbuf);
             }
-            g_outbuf[j] = engine().eval_compiled_raw(h);
+            ok = true;
         }
-        out.write_range(at, m, g_outbuf);
+        engine().free_compiled(h);
     }
-    engine().free_compiled(h);
-    return true;
+
+    // Release this lift's operand slots (see g_op).
+    for (int k = first_op; k < ctx.ops; ++k) {
+        g_op[k].clear();
+    }
+    ctx.ops = first_op;
+    return ok;
+}
+
+// True when the '{' at s[0] closes at the final char — i.e. s is one
+// whole brace literal. "{1,2}+{3,4}" starts and ends with braces but
+// is NOT (its first '{' closes mid-string); it must go to the lift.
+bool whole_literal(const char* s, size_t len) {
+    int depth = 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (s[i] == '{') {
+            ++depth;
+        } else if (s[i] == '}') {
+            --depth;
+            if (depth == 0) {
+                return i == len - 1;
+            }
+        }
+    }
+    return false;
 }
 
 bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
@@ -359,7 +636,7 @@ bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
         return false;
     }
 
-    if (s[0] == '{' && s[len - 1] == '}') {
+    if (s[0] == '{' && s[len - 1] == '}' && whole_literal(s, len)) {
         return eval_literal(s, out, ctx);
     }
 
@@ -376,6 +653,9 @@ bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
     size_t inner_len = 0;
     if (wrapper_form(s, "seq", &inner, &inner_len)) {
         return eval_seq(inner, inner_len, out, ctx);
+    }
+    if (wrapper_form(s, "range", &inner, &inner_len)) {
+        return eval_range(inner, inner_len, out, ctx);
     }
     for (const char* name : kValueWrappers) {
         if (!wrapper_form(s, name, &inner, &inner_len)) {
@@ -492,8 +772,8 @@ Result evaluate(const char* input) {
         }
     }
 
-    const bool listy =
-        contains_list_token(body) || std::strchr(body, '{') != nullptr || starts_like_wrapper(body);
+    const bool listy = contains_list_token(body) || std::strchr(body, '{') != nullptr ||
+                       contains_wrapper_call(body);
     if (!listy) {
         if (store >= 0) {
             res.kind = Kind::kError;
@@ -540,7 +820,7 @@ Result evaluate(const char* input) {
         return res;
     }
     if (!contains_list_token(body) && std::strchr(body, '{') == nullptr &&
-        !starts_like_wrapper(body)) {
+        !contains_wrapper_call(body)) {
         if (store >= 0) {
             res.kind = Kind::kError;
             res.error = "Store to l1-l6 needs a list";

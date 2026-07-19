@@ -319,7 +319,10 @@ void ListEditorScreen::render(gfx::Framebuffer& fb) {
                 fb.fill_rect(x, y - 1, kCellW, kRowH, platform::Color::from_rgb(0, 0, 60));
             }
             const char* text = cells_[r][c];
-            const bool placeholder = text[0] == '-' || text[0] == '_';
+            // Exact matches only — a leading '-' also starts negative
+            // numbers, which dimmed them to the placeholder gray
+            // (HW 2026-07-19).
+            const bool placeholder = std::strcmp(text, "_") == 0 || std::strcmp(text, "---") == 0;
             font.draw_string(fb, x + 4, y, text, placeholder ? kGridLine : kWhite);
         }
     }

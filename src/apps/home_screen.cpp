@@ -235,7 +235,10 @@ bool HomeScreen::handle_command(const char* cmd) {
         }
         return true;
     }
-    if (std::strcmp(cmd, "help") == 0) {
+    // Short aliases (D24): "?" for help, singular "list"/"stat" for the
+    // frequently-typed screens. No engine collisions — none parse as
+    // expressions.
+    if (std::strcmp(cmd, "help") == 0 || std::strcmp(cmd, "?") == 0) {
         ui::screen_manager().push(&help_screen());
         return true;
     }
@@ -243,11 +246,11 @@ bool HomeScreen::handle_command(const char* cmd) {
         ui::screen_manager().push(&files_screen());
         return true;
     }
-    if (std::strcmp(cmd, "lists") == 0) {
+    if (std::strcmp(cmd, "lists") == 0 || std::strcmp(cmd, "list") == 0) {
         ui::screen_manager().push(&list_editor());
         return true;
     }
-    if (std::strcmp(cmd, "stats") == 0) {
+    if (std::strcmp(cmd, "stats") == 0 || std::strcmp(cmd, "stat") == 0) {
         ui::screen_manager().push(&stats_screen());
         return true;
     }

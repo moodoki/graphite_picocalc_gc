@@ -6,7 +6,11 @@ data[2]=first char, data[3]=char count, then (w*h/8) bytes per glyph as a
 continuous row-major MSB-first bitstream.
 
 Usage:
-  bdf_to_utft.py FONT.bdf ARRAY_NAME [--first 32] [--last 126] > header.h
+  bdf_to_utft.py FONT.bdf ARRAY_NAME [--first 32] [--last 126] \
+      [--map DEST:CODEPOINT ...] > header.h
+
+--map bakes a non-ASCII glyph into an otherwise-unused slot, e.g.
+--last 127 --map 127:960 puts Greek pi (U+03C0) at byte 0x7F (DEL).
 """
 
 import argparse
@@ -74,7 +78,17 @@ def main():
     ap.add_argument("array_name")
     ap.add_argument("--first", type=int, default=32)
     ap.add_argument("--last", type=int, default=126)
+    ap.add_argument("--map", action="append", default=[],
+                    metavar="DEST:CODEPOINT",
+                    help="source slot DEST from another codepoint's glyph")
     args = ap.parse_args()
+
+    remap = {}
+    for spec in args.map:
+        dest, cp = (int(x) for x in spec.split(":"))
+        if not args.first <= dest <= args.last:
+            sys.exit(f"error: --map dest {dest} outside {args.first}..{args.last}")
+        remap[dest] = cp
 
     cell_w, cell_h, ascent, glyphs = parse_bdf(args.bdf)
     if (cell_w * cell_h) % 8 != 0:
@@ -82,7 +96,8 @@ def main():
     count = args.last - args.first + 1
 
     out = [cell_w, cell_h, args.first, count]
-    for cp in range(args.first, args.last + 1):
+    for slot in range(args.first, args.last + 1):
+        cp = remap.get(slot, slot)
         grid = (render_cell(cell_w, cell_h, ascent, glyphs[cp])
                 if cp in glyphs else [[False] * cell_w for _ in range(cell_h)])
         bits = [px for row in grid for px in row]
@@ -101,9 +116,16 @@ def main():
     for g in range(count):
         base = 4 + g * per_glyph
         row = ", ".join(f"0x{b:02X}" for b in out[base:base + per_glyph])
-        ch = chr(args.first + g)
-        label = ch if ch not in "\\" else "backslash"
-        print(f"    {row},  // {args.first + g} '{label}'")
+        slot = args.first + g
+        if slot in remap:
+            label = f"U+{remap[slot]:04X}"
+        elif chr(slot) == "\\":
+            label = "backslash"
+        elif chr(slot).isprintable():
+            label = chr(slot)
+        else:
+            label = f"0x{slot:02X}"
+        print(f"    {row},  // {slot} '{label}'")
     print("};")
 
 

@@ -200,9 +200,53 @@ Still to verify on hardware:
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 | Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
 | Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column) |
+| Session 13 — observation-batch fixes (D24; flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | **Bug-fix verification**: `{1,2,3}+2` and `{1,2,3}+{2,2,2}` broadcast (were "Expected a list"/"Bad list element"); HOME nav — from home press F4 (trace), then HOME, then ESC-walk: home must stay reachable (was: root replaced, home unreachable); list editor negative values render white. **New features**: `range(1,9)`, `range(5,1)` down, `range(0,1,.1)`, `range(1,10000)->l1` (PSRAM tier, then 1-Var timing + the new "Computing..." indicator visibility); `cumsum(range(1,4))+1`; `mean/median/stdev(l1)` and `sum(range(1,100))` = 5050; `?`/`list`/`stat` aliases; `2*pi` in history shows the pi glyph (and pretty-print regression: `pi/2`, `sin(pi)`). Help: COMMANDS alias line, LISTS section, FUNC tab rows (range/mean/median/stdev) |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. **PSRAM-tier timing feel**: 1-Var on a 10000-element list (quartile selection ~0.7 s expected — judge if a "computing..." indicator is needed, D23 revisit). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 
 ---
+
+## 2026-07-19 — Session 13: on-device observation batch — bug fixes + usability (D24)
+
+Worked the verbatim Session 11/12 usage-notes list
+(`phase3A-3B-observations-verbatim.md`): fixed the two reported bugs, implemented
+the direct requests, parked the design questions on the wishlist. Dispositions
+recorded as **D24** (the 3C naming calls move to D25). Host suite now **508
+checks** (was 473), lint clean, both boards build (Pico 1 bss ~135 KB/264 KB
+after +9 KB of lift-operand buffers), **flashed to the Pico 2** (BOOTSEL cp
+path, boot verified over serial — battery + `psram-bulk: OK` heartbeats).
+
+Bugs fixed:
+
+- **Brace-literal broadcast** (`{1,2,3}+2` → "Expected a list"; `{1,2,3}+{2,2,2}`
+  → "Bad list element"): the whole-literal test was first/last-char only (so
+  `{..}+{..}` misparsed as one literal) and the vector lift knew only l1..l6.
+  Fix is general **lift operands** (D24.1): top-level literals and wrapper calls
+  evaluate into 4 side arrays bound as extra engine vars — wrapper results now
+  compose in expressions too (`cumsum(range(1,4))+1`).
+- **Home screen unreachable after graph/HOME interplay**: `switch_to()` at
+  depth 1 `replace()`d the stack root (trigger: F4 trace from home), leaving no
+  home screen beneath. `switch_to` now never displaces the root (pushes instead).
+- **List editor negative numbers** drew in placeholder gray (leading-'-' test);
+  placeholder detection is now exact-match on "_"/"---".
+
+Implemented from the notes:
+
+- **`range(lo, hi[, step])`** — inclusive, default step +/-1 toward hi,
+  seq-backed, catalog-registered. The quick large-list generator (item 5/7).
+- **`mean` / `median` / `stdev` (+`std`) home reductions** via `stats::one_var`,
+  and **reduction args generalized to any list expression** (innermost-first) —
+  `sum(range(1,10000))`, `mean(l1*2)` (lifts the D22 bare-arg limitation).
+- **Aliases**: `?` → help, `list` → lists, `stat` → stats.
+- **Stats "Computing..." indicator**: one forced frame before the synchronous
+  Calculate (D23 revisit closed).
+- **Pi glyph**: `bdf_to_utft.py --map` bakes U+03C0 at 0x7F in the 8x16 font
+  (byte-identical regeneration otherwise); layout builder renders identifier
+  `pi` as the glyph (host-tested, incl. no substitution inside longer idents).
+- Help updated (COMMANDS aliases, LISTS syntax incl. literals/range/reduction
+  args, 4 new FUNC rows — catalog at 29/32 entries).
+
+On-device eval of this batch queued in HW-PENDING (Session 13 row) alongside
+the still-pending Session 11/12 sweeps.
 
 ## 2026-07-19 — Session 12: Phase 3 sub-phase 3B — descriptive stats + all ten regressions (D23)
 

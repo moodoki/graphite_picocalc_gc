@@ -265,7 +265,17 @@ bool StatsScreen::on_key(const platform::KeyEvent& ev) {
             return true;
         case Key::kEnter:
             if (rows[row_] == kRowCalc) {
+                // Calculate is synchronous and can take a while on
+                // PSRAM-tier lists / slow LM fits, so push one
+                // "Computing..." frame first (D23 revisit, HW
+                // 2026-07-19). render() stays idempotent — the flag is
+                // plain state, only ever set across this forced frame.
+                computing_ = true;
+                invalidate_all();
+                ui::screen_manager().render_frame();
+                computing_ = false;
                 calculate();
+                invalidate_all();
             } else {
                 msg_ = nullptr;
                 adjust(rows[row_], +1);
@@ -373,7 +383,10 @@ void StatsScreen::render(gfx::Framebuffer& fb) {
         font.draw_string(fb, 12, hint_y, math::stats::regression_form(reg_type(analysis_)),
                          kGridLine);
     }
-    if (msg_ != nullptr) {
+    if (computing_) {
+        font.draw_string(fb, 12, hint_y + 20, "Computing...",
+                         platform::Color::from_rgb(255, 200, 0));
+    } else if (msg_ != nullptr) {
         font.draw_string(fb, 12, hint_y + 20, msg_, kRed);
     }
 

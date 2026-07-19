@@ -37,6 +37,7 @@ private:
     const char* msg_ = nullptr;  // Form-level error (static string)
 
     bool showing_results_ = false;
+    bool computing_ = false;  // True only during the forced pre-Calculate frame
     int scroll_ = 0;
     int line_count_ = 0;
     char lines_[kMaxLines][kLineChars] = {};

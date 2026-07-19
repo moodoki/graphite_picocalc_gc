@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "gfx/font.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_node.hpp"
 
@@ -93,6 +94,24 @@ int main() {
         expect(n != nullptr && n->type == NodeType::kParen, "'(1+2)' is Paren");
         expect(n != nullptr && n->width == (3 * 8) + 2 * 8,
                "'(1+2)' width = inner + 2 chars");
+    }
+
+    // "pi" renders as the baked Greek glyph (D24) — one char wide.
+    {
+        auto* n = build("pi");
+        expect(n != nullptr && n->type == NodeType::kText &&
+                   n->t.text[0] == gfx::kGlyphPi && n->t.text[1] == 0,
+               "'pi' is the pi glyph");
+        expect(n != nullptr && n->width == 8, "'pi' width = 1 char");
+        auto* h = build("2*pi");
+        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 3 &&
+                   h->h.items[2]->t.text[0] == gfx::kGlyphPi,
+               "'2*pi' substitutes the glyph");
+        // Identifiers merely containing 'pi' are untouched.
+        auto* s = build("pit");
+        expect(s != nullptr && s->type == NodeType::kText &&
+                   std::strcmp(s->t.text, "pit") == 0,
+               "'pit' is not substituted");
     }
 
     // Function call sin(x) -> HBox[Text("sin"), Paren(x)]

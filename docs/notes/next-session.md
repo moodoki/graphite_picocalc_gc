@@ -1,32 +1,35 @@
 # Start here — next session
 
-**Last session:** 2026-07-19 (Session 12). **Phase 3 sub-phase 3B
-(descriptive stats + all ten regressions) is code-complete, lint-clean,
-host-tested (suite now 473 checks) and flashed to the Pico 2** (boot
-verified over serial; functional eval pending — Session 11 **and** 12
-rows in worklog HW-PENDING). What landed (see **D23**):
+**Last session:** 2026-07-19 (Session 13). Worked the **on-device
+observation batch** (`phase3A-3B-observations-verbatim.md`) from the
+first real use of the 3A/3B firmware — all dispositions recorded as
+**D24**; suite now **508 checks**, lint clean, both boards build,
+**flashed to the Pico 2** (boot verified over serial). What landed:
 
-- **`math::stats`**: 1-var (plain + freq-weighted) / 2-var stats.
-  Quartiles/medians via **streaming rank selection** (binary search on
-  the double bit space, <= 64 shared passes, weighted + x-filterable) —
-  no sort, no temp region, works identically on the PSRAM tier.
-- **All ten regressions**: polynomial 1-4 (normal equations on
-  center+scaled x), ln/exp/pwr (linearized, TI-style r/r²), logistic +
-  sinusoidal (**LM**, P3-3 resolved; logit / frequency-scan seeds;
-  `converged` flag), median-median (filtered selection; x-boundary ties
-  group by value). `r` NaN where TI doesn't define it.
-- **`stats` typed command** → form (Analysis / lists / Freq / Store /
-  Calculate) + scrollable results. **Store to y1..y7** writes the
-  numeric model (engine-parseable, SinReg degree-converted in DEGREE
-  mode) and enables the slot. Help KEYS/SYNTAX updated.
+- **Bug fixes**: brace-literal broadcast (`{1,2,3}+2`,
+  `{1,2,3}+{2,2,2}`) via the new **lift-operand** mechanism (literals
+  and wrapper calls bind as extra lift vars, so `cumsum(range(1,4))+1`
+  composes too); HOME-nav breakage (`switch_to` no longer replaces the
+  stack root); list-editor negative numbers no longer placeholder-gray.
+- **From the request list**: `range(lo,hi[,step])` (inclusive, default
+  step +/-1 toward hi); `mean`/`median`/`stdev` (+`std`) reductions;
+  reduction args generalized to any list expression
+  (`sum(range(1,10000))` — D22 bare-arg limitation lifted); `?`/`list`/
+  `stat` command aliases; stats **"Computing..." indicator** (D23
+  revisit closed); **pi glyph** baked at 0x7F (8x16) + pretty-print
+  substitution (`bdf_to_utft.py --map`).
+- **Parked on the wishlist** (D24.9): greek/subscript stats display,
+  JuliaMono, scientific constants, unit conversions, >6 lists / SD
+  list files.
 
 ## The next job
 
-1. **On-device eval of the 3A + 3B batches** (Session 11 and Session 12
-   rows in worklog HW-PENDING): list editor + home list syntax first,
+1. **On-device eval of the 3A + 3B + 13 batches** (Session 11, 12,
+   **and 13** rows in worklog HW-PENDING): list editor + home list
+   syntax (now incl. literals/range/reductions and the bug-fix checks),
    then the stats screen sweep (form feel, results, store→graph
-   overlay, error paths, the 10000-element 1-Var timing feel — decide
-   whether a "computing..." indicator is warranted, D23 revisit).
+   overlay, error paths, the 10000-element 1-Var timing +
+   "Computing..." visibility).
 2. Then **continue sub-phase 3C** (`phase3-spec.md` §5, weeks 22-23).
    **3C.1 is DONE (Session 12)**: cephes `cprob` subset vendored to
    `drivers/cephes/` (see its `README.md`) — `ndtr`/`ndtri`,
@@ -55,7 +58,8 @@ rows in worklog HW-PENDING). What landed (see **D23**):
      `stats` screen pattern (distribution + function + numeric param
      fields → result; numeric fields need InputLine rows like
      WINDOW's, not the L/R-cycle rows).
-   Record the naming/UI calls as **D24** when made.
+   Record the naming/UI calls as **D25** when made (D24 was taken by
+   the Session 13 observation batch).
 
 Mind the §8 strip-safety rule (idempotent `render()` — StatsScreen
 follows it: compute in on_key, cached result lines) and task 3D.14
@@ -70,10 +74,11 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the Session 12 build** (Phase 3B stats on
-  top of everything from Session 11; flashed 2026-07-19, `psram-bulk:
-  OK` + battery heartbeat seen on serial). The Pico 1 is still on
-  Session 7 firmware; its pass is deferred to post-Phase 3 (D18).
+- **Firmware on the unit is the Session 13 build** (observation-batch
+  fixes on top of 3A+3B; flashed 2026-07-19, `psram-bulk: OK` + battery
+  heartbeat seen on serial — the BOOTSEL volume mounted in ~5 s and cp
+  exited 0 again). The Pico 1 is still on Session 7 firmware; its pass
+  is deferred to post-Phase 3 (D18).
 - **`lists.dat` may not exist yet on the SD card** — first save creates
   it. If a load ever misbehaves, deleting the file resets all lists
   (magic PCL1; bump to PCL2 on layout change).
@@ -117,16 +122,16 @@ still comfortable, but re-check the map file then.
 
 - **List UX watch-items (Session 11, judge on device)**: F8 clear-list is
   immediate (no confirm); list history results truncate at ~40 chars
-  (`,...`); reductions bare-arg limitation (D22); `lists`/`stats` are
-  typed-command-only entries — decide whether stats deserves an
-  F-key/menu slot now that the screen exists.
-- **Stats watch-items (Session 12, judge on device)**: synchronous
-  Calculate with no "computing..." indicator (matters only for
-  PSRAM-tier lists / slow LM fits); results are plain text lines (no
-  two-column layout for 2-Var's 17 lines); `mean/median/stdev` are NOT
-  home-screen reductions (only sum/prod/length are, D22) — the stats
-  screen is the path; consider promoting them if that grates (D22
-  revisit: tagged-value evaluator).
+  (`,...`); `lists`/`stats` are typed-command-only entries (now with
+  `list`/`stat` aliases, D24) — decide whether stats deserves an
+  F-key/menu slot now that the screen exists. (Resolved by D24:
+  reductions bare-arg limitation; mean/median/stdev promotion.)
+- **Stats watch-items (Session 12, judge on device)**: results are
+  plain text lines (no two-column layout for 2-Var's 17 lines).
+  (Resolved by D24: "Computing..." indicator — verify its visibility
+  on a 10000-element 1-Var.)
+- **Session 13 caps to watch**: 4 lift operands per expression, 64
+  elements per brace literal — revisit if real use pinches (D24).
 - F3 MODE vs ZOOM (TI's F3 slot) — judge after real use (D20 KIV).
 - D16 trace-sync option b (trace steps by table-step) — after more split
   use.

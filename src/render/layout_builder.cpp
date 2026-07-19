@@ -4,11 +4,16 @@
 #include <cctype>
 #include <cstring>
 
+#include "gfx/font.hpp"
 #include "render/pool.hpp"
 
 namespace render {
 
 namespace {
+
+// Display form of the identifier "pi" (D24) — the Greek glyph the main
+// font bakes at gfx::kGlyphPi.
+const char kPiGlyph[2] = {gfx::kGlyphPi, 0};
 
 // ---- Node factories (compute size at construction) ----
 
@@ -170,7 +175,9 @@ struct Parser {
             while (std::isalnum(static_cast<unsigned char>(*p)) != 0) {
                 ++p;
             }
-            LayoutNode* name = make_text(start, static_cast<int>(p - start), m);
+            const int ident_len = static_cast<int>(p - start);
+            const bool is_pi = ident_len == 2 && start[0] == 'p' && start[1] == 'i';
+            LayoutNode* name = is_pi ? make_text(kPiGlyph, 1, m) : make_text(start, ident_len, m);
             skip_spaces();
             if (*p == '(') {  // Function call: name followed by (args)
                 ++p;

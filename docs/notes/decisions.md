@@ -18,6 +18,25 @@ Format:
 
 ---
 
+## D24: Session 13 usability batch — lift operands (literal broadcast fix), range(), reduction args, aliases, pi glyph
+
+**Date**: 2026-07-19
+**Status**: Accepted (Session 13 — dispositions for the on-device observation batch in `phase3A-3B-observations-verbatim.md`)
+**Context**: First real usage of the Session 12 firmware produced a verbatim observation list: two outright bugs (brace-literal broadcast rejected; home screen unreachable after HOME/trace use in the graph screen), several direct requests (range(), mean/median/std on the home screen, command shortcuts, a computing indicator, pi glyph, list-editor color), and design questions to park.
+**Decision**:
+1. **Lift operands**: inside a vector-lifted expression, top-level brace literals and wrapper calls (sort_asc/sort_desc/cumsum/delta_list/seq/range) are evaluated into side arrays (4 slots, handed out monotonically per evaluate() and released per lift, so nesting never aliases) and bound as extra engine variables (`lopa`..`lopd`). Fixes the reported `{1,2,3}+2` / `{1,2,3}+{2,2,2}` errors at the general level and makes wrapper results compose: `cumsum(range(1,4))+1`, `range(1,9)*l1`.
+2. **`range(lo, hi[, step])`**: inclusive endpoints, default step of +/-1 toward hi (`range(5,1)` counts down), backed by `listops::seq` with the identity formula; same 10000 cap. The quick generator the large-array testing gap asked for.
+3. **Reductions gain `mean`/`median`/`stdev`** (sample Sx, via `stats::one_var`; `std` accepted as an alias), **and reduction arguments generalize** from bare list names to any list expression, substituted innermost-first — this lifts the D22 bare-arg limitation (`sum(range(1,10000))`, `mean(l1*2)` work). NaN reduction results (stdev of 1 element) error as "Undefined result".
+4. **Typed-command aliases**: `?` = help, `list` = lists, `stat` = stats (no collisions — none parse as expressions).
+5. **Stats Calculate pushes one "Computing..." frame** before the synchronous compute (flag + forced `render_frame()`, render stays idempotent). Closes the D23 revisit — added ahead of the timing-feel eval since it costs one frame.
+6. **Pi glyph**: `bdf_to_utft.py` gained `--map DEST:CODEPOINT`; the 8x16 main font bakes U+03C0 at the unused DEL slot (0x7F, `gfx::kGlyphPi`) and the layout builder renders the identifier `pi` as that glyph. The 5x8 BDF has no pi, so the small font is untouched (draws blank if ever asked).
+7. **HOME nav invariant**: `ScreenManager::switch_to()` never replaces the root screen — at depth 1 it pushes instead. Root cause of the observed breakage: F4 trace from the home screen went through `switch_to` → `replace()`, overwriting the stack root with the graph screen, after which ESC/HOME had no home screen to return to.
+8. **List editor placeholder color** is decided by exact cell text ("_" / "---"), not a leading '-', so negative numbers render white like positive ones.
+9. **Parked on the wishlist**: greek letters/subscripts in stats output, JuliaMono font swap (licensing + baking check), scientific constants, unit conversions, >6 lists and SD list-data files (CBL/CBR).
+**Rationale**: One general operand mechanism fixes the literal bug and delivers range() composability instead of two special cases; generalized reduction args + range() directly serve the observed "no quick way to generate/test large arrays" gap; the rest are verbatim developer requests from device use.
+**Tradeoffs**: ~9 KB more bss (operand chunk buffers + 5 static Arrays; Pico 1 bss now ~135 KB of 264 KB); `lopa`..`lopd` are technically bindable identifiers while a literal is present (harmless, undocumented); reduction substitution evaluates arguments eagerly, so a slow argument computes even when the surrounding expression later errors; literals stay capped at 64 elements, operands at 4 per lift.
+**Revisit when**: the 4-operand or 64-element caps pinch in practice; complex dtype (4C) reaches the lift/operand path; or `sum({...})`-style reduction-over-operand syntax confusion shows up on device.
+
 ## D23: 3B stats as-built — LM for iterative fits, rank-selection quartiles, TI r conventions
 
 **Date**: 2026-07-19

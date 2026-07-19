@@ -47,6 +47,11 @@ const FnDescriptor kCatalog[] = {
     {"cumsum", "cumsum(l)", "Cumulative sums", nullptr, 1},
     {"delta_list", "delta_list(l)", "Pairwise differences", nullptr, 1},
     {"seq", "seq(f,v,lo,hi,st)", "Sequence into a list", nullptr, 5},
+    // D24 additions: list generator + scalar reductions.
+    {"range", "range(lo,hi,st?)", "List lo..hi, step 1", nullptr, 3},
+    {"mean", "mean(l)", "Mean of elements", nullptr, 1},
+    {"median", "median(l)", "Median of elements", nullptr, 1},
+    {"stdev", "stdev(l)", "Sample stddev (Sx)", nullptr, 1},
 };
 
 constexpr int kCount = sizeof(kCatalog) / sizeof(kCatalog[0]);

@@ -368,6 +368,89 @@ void test_list_expr() {
     check_near(res.scalar.value, 500500.0, "large sum");
 }
 
+// D24: brace literals and wrapper calls as lift operands, range(), the
+// mean/median/stdev reductions, and general reduction arguments.
+void test_list_expr_d24() {
+    using math::listexpr::Kind;
+    eval_list("{1,2,3}->l1");
+
+    // Brace literals broadcast (HW 2026-07-19 bug: "Expected a list" /
+    // "Bad list element").
+    {
+        const double e[] = {3, 4, 5};
+        check_list_result("{1,2,3}+2", e, 3);
+    }
+    {
+        const double e[] = {2, 4, 6};
+        check_list_result("{1,2,3}+{1,2,3}", e, 3);
+    }
+    {
+        const double e[] = {11, 12, 13};
+        check_list_result("10+{1,2,3}", e, 3);
+    }
+    {
+        const double e[] = {2, 3, 4};
+        check_list_result("l1+{1,1,1}", e, 3);
+    }
+    {
+        const double e[] = {0, -1};
+        check_list_result("{-1,-2}+1", e, 2);
+    }
+    {
+        const double e[] = {2, 3, 4};
+        check_list_result("{1,2,3}+1->l3", e, 3);
+    }
+
+    // range(lo, hi[, step]) — inclusive, default step toward hi.
+    {
+        const double e[] = {1, 2, 3, 4, 5};
+        check_list_result("range(1,5)", e, 5);
+    }
+    {
+        const double e[] = {5, 4, 3, 2, 1};
+        check_list_result("range(5,1)", e, 5);
+    }
+    {
+        const double e[] = {0, 0.5, 1};
+        check_list_result("range(0,1,0.5)", e, 3);
+    }
+
+    // Wrapper calls compose inside expressions (lift operands).
+    {
+        const double e[] = {2, 4, 6};
+        check_list_result("range(1,3)*2", e, 3);
+    }
+    {
+        const double e[] = {2, 4, 7, 11};
+        check_list_result("cumsum(range(1,4))+1", e, 4);
+    }
+    {
+        const auto res = eval_list("range(1,100)->l2");
+        check(res.kind == Kind::kList && res.stored_list == 1, "range store");
+        check_near(math::lists().list(1).get(99), 100.0, "range store values");
+    }
+
+    // New reductions (bare args).
+    check_near(eval_list("mean(l1)").scalar.value, 2.0, "mean(l1)");
+    check_near(eval_list("median(l1)").scalar.value, 2.0, "median(l1)");
+    check_near(eval_list("stdev(l1)").scalar.value, 1.0, "stdev(l1)");
+    check_near(eval_list("std(l1)").scalar.value, 1.0, "std alias");
+
+    // General reduction arguments (D22 bare-arg limitation lifted).
+    check_near(eval_list("sum(range(1,100))").scalar.value, 5050.0, "sum(range)");
+    check_near(eval_list("mean({1,2,3,4})").scalar.value, 2.5, "mean(literal)");
+    check_near(eval_list("sum(l1*2)").scalar.value, 12.0, "sum(list expr)");
+    check_near(eval_list("mean(l1)+sum(l1)").scalar.value, 8.0, "mixed reductions");
+    check_near(eval_list("sum(cumsum(l1))").scalar.value, 10.0, "sum(cumsum(l1))");
+
+    // Errors.
+    check_list_error("{1,2}+{1,2,3}", "List length mismatch");
+    check_list_error("range(1,2,-1)", "Bad seq range");
+    check_list_error("range(1)", "range needs (lo, hi[, step])");
+    check_list_error("{1}+{2}+{3}+{4}+{5}", "Too many list terms");
+    check_list_error("stdev({5})", "Undefined result");
+}
+
 }  // namespace
 
 int main() {
@@ -375,6 +458,7 @@ int main() {
     test_array_tiers();
     test_list_ops();
     test_list_expr();
+    test_list_expr_d24();
 
     std::printf("test_lists: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -56,6 +56,13 @@ void ScreenManager::switch_to(Screen* screen) {
         pop();
         return;
     }
+    if (depth_ == 1) {
+        // Never displace the root: switch_to() from the home screen
+        // (e.g. F4 trace) used to replace() it, leaving HOME/ESC with
+        // no home screen to return to (HW 2026-07-19).
+        push(screen);
+        return;
+    }
     replace(screen);
 }
 
