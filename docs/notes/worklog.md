@@ -178,6 +178,15 @@ infinite scroll, ASK add/delete/hint, setup + F2-to-Step, column scroll +
 markers, detail precision), split-screen + trace sync, help tabs, keymap, cold
 power cycle persistence. Bugs found were fixed the same session (commit 079a8b2).
 
+**Verified on Pico 2 hardware 2026-07-19 (Session 14 batch, developer eval):**
+new distribution features and functions spot-check OK; docs/catalogue OK. The
+same eval produced a new observation batch — **logged, not yet fixed**
+(`session14-observations-verbatim.md`): Y=-editor long-expression/selection
+overlap (truncate with `...`), SD "no card" after an extended power-off
+(root cause: late-init retries stop at 30 s — analysis in the file), proposed
+red `SD`/`PSRAM` top-bar health indicators, and runtime SD eject/insert being
+unhandled (DET pin never polled after boot).
+
 **Verified on Pico 2 hardware 2026-07-19 (Session 13 batch, developer eval):**
 the D24 bug fixes (brace-literal broadcast, HOME-nav root replacement, list-editor
 negative color) and new implementations work correctly on device; large-array
@@ -207,7 +216,6 @@ Still to verify on hardware:
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 | Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
 | Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column) |
-| Session 14 — Phase 3C distributions (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `normal_cdf(-1,1,0,1)` ≈ .6827, `normal_inv(0.975,0,1)` ≈ 1.96, `t_inv(0.975,10)` ≈ 2.228, `binomial_pmf(3,10,0.5)` = .1171875, `chisq_inv(0.95,1)` ≈ 3.841; domain errors show NaN (`normal_pdf(0,0,-1)`, `binomial_pmf(2.5,10,.5)`). **Timing feel on Pico 2** (FPU): single calls should be instant; spec flags Pico 1 softfloat as the slow case (~1000+ cycle erf) — defer to the D18 pass. `dist` command: cycle all 7 distributions + functions, param edit (ENTER/DEL, expression entry like `1/3`), Calculate shows call + result, **Ans updates** (check `ans` on home after). Param persistence pdf→cdf (mu/sd kept). Help: COMMANDS `dist` row, KEYS DIST section, SYNTAX DISTRIBUTIONS section, FUNC tab long signatures don't overlap summaries (normal_cdf row). Regression: FUNC tab scroll to the end (47 entries), stats/lists screens unaffected |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 
 ---

@@ -25,13 +25,24 @@ Conventions recorded as **D25** (resolves P3-4). What landed:
   track packages in `requirements-dev.txt` (mpmath — reference-vector
   generator `tests/host/gen_dist_vectors.py`).
 
+**Session 14 eval (2026-07-19): 3C spot-check OK** (features, functions,
+docs/catalogue). It produced a new **logged-not-fixed observation
+batch** — [session14-observations-verbatim.md](session14-observations-verbatim.md):
+Y=-editor long-expression overlap (truncate + `...`), SD "no card"
+after extended power-off (**root cause found: late-init retries stop
+at 30 s** — lean: retry forever on a slow heartbeat), red `SD`/`PSRAM`
+top-bar health indicators, SD hot-plug unhandled (DET pin never polled
+after boot). Work it as one storage-health batch + one small UI fix;
+record decisions when made.
+
 ## The next job
 
 1. **On-device eval** of the outstanding batches (worklog HW-PENDING):
-   Session 11 (3A lists sweep), Session 12 (3B stats sweep — timing
-   question already resolved), **Session 14 (3C distributions +
-   `dist` screen)**.
-2. Then **sub-phase 3D** (`phase3-spec.md` §6, weeks 24-25): inference
+   Session 11 (3A lists sweep) and Session 12 (3B stats sweep — timing
+   question already resolved).
+2. **The Session 14 observation batch** (above) — storage health
+   (retry-forever + indicators + hot-plug) and the editor truncation.
+3. Then **sub-phase 3D** (`phase3-spec.md` §6, weeks 24-25): inference
    (hypothesis tests + confidence intervals over `math::stats` +
    `math::dist`), inference UI, and the StatPlot layer. Open questions
    to decide there: **P3-5** (stat plots vs Y-slots enable UI, task
