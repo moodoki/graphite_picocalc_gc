@@ -625,8 +625,8 @@ Solo developer, part-time (~20 hrs/week). ~8 weeks.
 | P3-2 | `Array` element type: always `calc_t` (double), or support integer lists? | **DECIDED (D21, 2026-07-18): double-only storage, plus a dtype tag in `Array` and `lists.dat`** reserved for future complex/int elements (Phase 4 Matrix + complex wishlist). | Decided |
 | P3-3 | Iterative regression solver: Levenberg-Marquardt or Gauss-Newton? | **DECIDED (D23, 2026-07-19): Levenberg-Marquardt**, with linearized-logit (logistic) and frequency-scan (sinusoidal) seeding; `converged` false on the 100-iteration cap. | Decided |
 | P3-4 | Distribution function naming: `normal_cdf(lo, hi, ...)` two-tailed like TI, or `normal_cdf(x)` one-tailed standard? | **DECIDED (D25, 2026-07-19): TI-style two-sided `cdf(lo, hi, ...)`**; open tails via +/-1e99, `inv` takes the lower-tail area. Discrete `k`/`n` are `calc_t` with the TI integer rule (pmf strict, cdf floors). | Decided |
-| P3-5 | Should stat plots and function plots share the same enable/disable UI, or separate Plot1-3 vs Y1-7 lists? | TI separates them; unified might be cleaner. | Week 25, task 3D.13 |
-| P3-6 | Inference results: always compute the paired CI alongside each test, or only on request? | Computing always is convenient; may clutter. | Week 24, task 3D.8 |
+| P3-5 | Should stat plots and function plots share the same enable/disable UI, or separate Plot1-3 vs Y1-7 lists? | **DECIDED (D27, 2026-07-20): separate Plot1-3 slots** (typed `plot` command; persisted in GraphState/PCG4); plots draw alongside functions; `Z` on the graph = ZoomStat. | Decided |
+| P3-6 | Inference results: always compute the paired CI alongside each test, or only on request? | **DECIDED (D27, 2026-07-20): not bundled** — intervals are separate entries in the same `test` screen, TI-style. | Decided |
 
 ---
 

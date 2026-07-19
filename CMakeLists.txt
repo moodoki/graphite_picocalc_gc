@@ -109,6 +109,7 @@ add_executable(picocalc_graphcalc
     src/math/list_expr.cpp
     src/math/stats.cpp
     src/math/dist.cpp
+    src/math/infer.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -120,6 +121,7 @@ add_executable(picocalc_graphcalc
     src/graph/function_source.cpp
     src/graph/parametric_source.cpp
     src/graph/polar_source.cpp
+    src/graph/stat_plot.cpp
     src/graph/trace.cpp
     src/apps/nav.cpp
     src/apps/home_screen.cpp
@@ -127,6 +129,8 @@ add_executable(picocalc_graphcalc
     src/apps/list_editor.cpp
     src/apps/stats_screen.cpp
     src/apps/dist_screen.cpp
+    src/apps/infer_screen.cpp
+    src/apps/plot_screen.cpp
     src/apps/graph_model.cpp
     src/apps/slot_editor.cpp
     src/apps/y_editor.cpp

@@ -56,6 +56,29 @@ struct PolarFunctions {
     bool enabled[kPolarSlots] = {};
 };
 
+// Statistical plots (sub-phase 3D, D27): three TI-style slots drawn in
+// the graph viewport alongside the mode's functions. Configured via
+// the typed `plot` command; data comes from the l1..l6 lists at draw
+// time (summaries cached by graph::recompute_stat_plots).
+enum class StatPlotType : uint8_t {
+    kScatter,
+    kXyLine,
+    kHistogram,
+    kBoxPlot,     // Modified box plot: outliers past 1.5 IQR as marks
+    kNormalProb,  // Ordered data vs normal quantiles (Blom positions)
+};
+constexpr int kStatPlotSlots = 3;
+constexpr int kStatPlotTypeCount = 5;
+
+struct StatPlotConfig {
+    StatPlotType type = StatPlotType::kScatter;
+    uint8_t x_list = 0;  // Source list (0-5)
+    uint8_t y_list = 1;  // Scatter/xy-line only
+    uint8_t mark = 0;    // 0 dot, 1 plus, 2 cross
+    bool enabled = false;
+    double bin_width = 0;  // Histogram; 0 = auto ((max-min)/10)
+};
+
 // All graphing state across modes (spec §9). Nested rather than flat so
 // Phase 1 screens keep working against GraphWindow/YFunctions references;
 // content matches the spec's field list.
@@ -92,6 +115,9 @@ struct GraphState {
     // Numeric axis tick labels ('L' on the graph screen). Kept after the
     // Session 10 on-device eval; persisted since PCG3.
     bool axis_labels = true;
+
+    // Stat plots (3D, persisted since PCG4).
+    StatPlotConfig stat_plots[kStatPlotSlots];
 
     // Unified persistence (task 2.23): magic-tagged binary image at
     // /picocalc/graphstate.dat, superseding Phase 1's yfuncs.txt and

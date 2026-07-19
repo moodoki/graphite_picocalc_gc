@@ -17,9 +17,11 @@
 #include "apps/files_screen.hpp"
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
+#include "apps/infer_screen.hpp"
 #include "apps/list_editor.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
+#include "apps/plot_screen.hpp"
 #include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "graph/graph_state.hpp"
@@ -257,6 +259,14 @@ bool HomeScreen::handle_command(const char* cmd) {
     }
     if (std::strcmp(cmd, "dist") == 0) {
         ui::screen_manager().push(&dist_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "test") == 0 || std::strcmp(cmd, "infer") == 0) {
+        ui::screen_manager().push(&infer_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "plot") == 0 || std::strcmp(cmd, "plots") == 0) {
+        ui::screen_manager().push(&plot_screen());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {

@@ -1,54 +1,46 @@
 # Start here — next session
 
-**Last session:** 2026-07-19 (Session 14). The Session 13 batch was
-**developer-verified on device** (fixes + features work; large-array
-stats feel OK; "Computing..." shows), then **sub-phase 3C shipped in
-full (3C.2-3C.8)**: suite now **625 checks**, lint clean, both boards
-build, **flashed to the Pico 2** (boot verified over serial).
-Conventions recorded as **D25** (resolves P3-4). What landed:
+**Last session:** 2026-07-20 (Session 15). **Phase 3 is code-complete**:
+part 1 implemented the Session 14 observation batch (**D26** — storage
+health: retry-forever heartbeat, SD hot-plug via DET poll, red
+`SD`/`PSRAM` status-bar indicators; Y=-editor `...` truncation); part 2
+shipped **all of sub-phase 3D except the Pico 1 pass (3D.1-3D.13,
+D27** — resolves P3-5 + P3-6). Suite **716 checks**, lint clean, both
+boards build, **flashed to the Pico 2**. What landed in part 2:
 
-- **`math::dist`**: normal/t/chisq/F pdf+cdf+inv, binomial/poisson/
-  geometric pmf+cdf on the cephes primitives + lgamma closed forms.
-  **Two-sided CDFs** `cdf(lo, hi, ...)` (open tails +/-1e99),
-  lower-tail `inv`, real-valued df, NaN on domain errors, TI integer
-  rule for discrete args (pmf strict, cdf floors k).
-- **Catalog/help**: 18 new rows (47 total, `kMaxCatalogEntries` -> 56),
-  fp3/fp4 casts, FUNC-tab summary column yields to long signatures.
-- **`dist` typed command** -> guided form (Distribution/Function
-  cycles, InputLine param fields with shared named slots, Calculate
-  shows the equivalent call + result, **updates Ans**).
-- **Link fix worth knowing**: cephes had never actually linked before —
-  `lgam` needs an `isfinite()` *function* newlib/macOS don't export;
-  shim at `src/math/cephes_support.c` (in the cephes target + host
-  tests; see `drivers/cephes/README.md`).
-- **Python dev-deps rule (this session)**: use the gitignored `.venv`,
-  track packages in `requirements-dev.txt` (mpmath — reference-vector
-  generator `tests/host/gen_dist_vectors.py`).
-
-**Session 15 (2026-07-19): the Session 14 observation batch is
-IMPLEMENTED (D26)** — retry-forever storage heartbeat, SD hot-plug
-(DET poll, eject-unmount, load-once on remount), red `SD`/`PSRAM`
-status-bar indicators, Y=-editor `...` truncation. HW checks queued in
-the worklog Session 15 row (hot-plug needs the physical card).
+- **`math::stats` inference** (`src/math/infer.{hpp,cpp}`): z/t
+  (pooled + Welch, Data or summary), paired t, 1/2-prop z, chi-square
+  GOF + 2-way (columns = l1..lk), one-way ANOVA (groups = l1..lk),
+  linreg slope t-test, and the six interval families. `Alt` (!=, <, >)
+  on the mean/prop/slope tests; p-values via new one-sided `dist`
+  survival functions.
+- **`test` typed command** (alias `infer`): 15-kind form (10 tests + 5
+  intervals), Data/Stats source toggle, results as cached lines.
+- **StatPlots**: Plot1-3 (`plot` command; persisted — **PCG4, one-time
+  graph-state reset on first boot**): scatter, xy-line, histogram,
+  modified box plot, normal-probability plot. Cache/draw split for
+  strip safety; graph draws plots under curves; **`Z` = ZoomStat**.
 
 ## The next job
 
 1. **On-device eval** of the outstanding batches (worklog HW-PENDING):
-   Session 11 (3A lists sweep), Session 12 (3B stats sweep — timing
-   question already resolved), Session 15 (storage health + editor
-   truncation).
-2. Then **sub-phase 3D** (`phase3-spec.md` §6, weeks 24-25): inference
-   (hypothesis tests + confidence intervals over `math::stats` +
-   `math::dist`), inference UI, and the StatPlot layer. Open questions
-   to decide there: **P3-5** (stat plots vs Y-slots enable UI, task
-   3D.13) and **P3-6** (always-compute paired CIs, task 3D.8). The
-   sub-phase ends with **3D.14 — the combined Pico 1 pass (D18)**:
-   reflash `build/pico/…uf2` first; note Sessions 11-14 added static
-   SRAM and ~30 KB of text (cephes now really links) — re-check the
-   map file there (bss ~135 KB of 264 KB as of Session 14).
+   Session 11 (3A lists), Session 12 (3B stats), Session 15 storage
+   health (hot-plug needs the physical card) **and** Session 15 3D
+   (inference + stat plots — expect the PCG4 one-time reset on first
+   boot).
+2. **3D.14 — the combined Pico 1 pass (D18)** closes Phase 3: swap the
+   board, reflash `build/pico/…uf2` (BOOTSEL volume `RPI-RP2`), run the
+   Phase 2 sweep (headline: split-pane clipping on the strip renderer),
+   the Session 8+9 fix list, Phase 3 acceptance, and watch every §8
+   screen for strip-render artifacts (stats/dist/test results, stat
+   plots — scatter/normprob re-stream per strip; judge the feel).
+   Pico 1 budget as of Session 15: text ~305 KB, bss ~147 KB of
+   264 KB — re-check the map file.
+3. Then **Phase 4** (`phase4-spec.md`): 4A matrices, 4B graph analysis
+   (CALC menu), 4C complex numbers.
 
-Mind the §8 strip-safety rule (idempotent `render()` — StatsScreen and
-DistScreen follow it: compute in on_key, cached result lines).
+Mind the §8 strip-safety rule (idempotent `render()` — Stats/Dist/
+Infer screens cache result lines; stat plots split recompute/draw).
 
 ## D14 rail settle — NEXT BENCH SESSION
 
@@ -59,11 +51,11 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the Session 14 build** (3C distributions on
-  top of everything prior; flashed 2026-07-19, `psram-bulk: OK` +
-  battery heartbeat seen on serial — the BOOTSEL volume mounted in ~5 s
-  and cp exited 0 again). The Pico 1 is still on Session 7 firmware;
-  its pass is deferred to post-Phase 3 (D18/3D.14).
+- **Firmware on the unit is the Session 15 build** (storage health +
+  full 3D on top of everything prior; flashed 2026-07-20). **First boot
+  does a one-time graph-state reset (PCG4)** — window/mode/axis-labels/
+  plots return to defaults once. The Pico 1 is still on Session 7
+  firmware; its pass is 3D.14 (D18).
 - **`lists.dat` may not exist yet on the SD card** — first save creates
   it. If a load ever misbehaves, deleting the file resets all lists
   (magic PCL1; bump to PCL2 on layout change).

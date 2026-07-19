@@ -22,6 +22,7 @@
 #include "graph/parametric_source.hpp"
 #include "graph/plotter.hpp"
 #include "graph/polar_source.hpp"
+#include "graph/stat_plot.hpp"
 
 namespace apps {
 
@@ -144,6 +145,9 @@ void GraphScreen::recompute() {
             recompute_function(vp);
             break;
     }
+    // Stat-plot caches (3D): histogram bins, box summaries, normprob
+    // sorted copies — anything render must not compute per strip (§8).
+    graph::recompute_stat_plots();
 
     last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
     printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
@@ -656,6 +660,25 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
                 dirty_ = true;
                 return true;
             }
+            if (ev.ch == 'z' || ev.ch == 'Z') {  // ZoomStat (3D, D27)
+                graph::recompute_stat_plots();
+                double xlo = 0;
+                double xhi = 0;
+                double ylo = 0;
+                double yhi = 0;
+                if (graph::stat_plots_bounds(&xlo, &xhi, &ylo, &yhi)) {
+                    auto& w = graph_window();
+                    const double mx = (xhi - xlo) > 0 ? (xhi - xlo) * 0.05 : 0.5;
+                    const double my = (yhi - ylo) > 0 ? (yhi - ylo) * 0.05 : 0.5;
+                    w.x_min = xlo - mx;
+                    w.x_max = xhi + mx;
+                    w.y_min = ylo - my;
+                    w.y_max = yhi + my;
+                    save_window();
+                    dirty_ = true;
+                }
+                return true;
+            }
             if (ev.ch == 'l' || ev.ch == 'L') {
                 graph::state().axis_labels = !graph::state().axis_labels;
                 save_graph_state();
@@ -689,6 +712,8 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
                      top_ + height_ < pane_y1 ? top_ + height_ : pane_y1);
 
     draw_axes(fb);
+    // Stat plots under the curves so regression overlays stay on top.
+    graph::draw_stat_plots(fb, viewport());
     for (int s = 0; s < slot_count(); ++s) {
         if (!slot_active(s)) {
             continue;

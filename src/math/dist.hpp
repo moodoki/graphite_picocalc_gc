@@ -53,4 +53,15 @@ calc_t poisson_cdf(calc_t k, calc_t lambda);
 calc_t geometric_pmf(calc_t k, calc_t p);
 calc_t geometric_cdf(calc_t k, calc_t p);
 
+// One-sided building blocks for inference (3D): lower-tail CDFs and
+// survival functions (upper tails computed directly, so p-values keep
+// full precision in the far tail instead of rounding through 1-cdf).
+// No argument validation — inference callers check domains.
+calc_t normal_cdf_1(calc_t z);  // Standard normal P(Z <= z)
+calc_t normal_sf(calc_t z);     // P(Z > z)
+calc_t t_cdf_1(calc_t t, calc_t df);
+calc_t t_sf(calc_t t, calc_t df);
+calc_t chisq_sf(calc_t x, calc_t df);  // P(X > x) via igamc
+calc_t f_sf(calc_t x, calc_t df1, calc_t df2);
+
 }  // namespace math::dist

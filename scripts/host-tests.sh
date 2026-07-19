@@ -78,6 +78,14 @@ echo "== Compiling + linking test_dist =="
     "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_dist"
 
+echo "== Compiling + linking test_infer =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_infer.cpp tests/host/host_psram_backend.cpp \
+    src/math/array.cpp src/math/infer.cpp src/math/dist.cpp \
+    "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_infer"
+
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -102,6 +110,9 @@ echo "== Running test_lists =="
 
 echo "== Running test_dist =="
 "$OUT/test_dist"
+
+echo "== Running test_infer =="
+"$OUT/test_infer"
 
 echo "== Running test_stats =="
 "$OUT/test_stats"

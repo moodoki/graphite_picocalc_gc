@@ -18,6 +18,22 @@ Format:
 
 ---
 
+## D27: 3D inference + stat plots as-built — Alt-driven tests, separate intervals (P3-6), Plot1-3 layer (P3-5)
+
+**Date**: 2026-07-20
+**Status**: Accepted (Session 15, sub-phase 3D conventions; resolves phase3-spec P3-5 and P3-6)
+**Context**: 3D needed the calls the spec left open: whether tests bundle confidence intervals (P3-6), how stat plots share the graph screen (P3-5), how the alternative hypothesis enters the API, and how 2-D inputs (contingency tables, ANOVA groups) map onto the flat l1..l6 lists.
+**Decision**:
+1. **P3-6: tests do NOT bundle intervals.** Intervals are their own entries (TI-style) in the same `test` screen — no clutter, clean signatures. `TestResult` carries statistic/p/df/df2/estimate/se; `Interval` carries center/low/high/moe/conf.
+2. **P3-5: separate Plot1-3 stat-plot slots** (typed `plot` command, alias `plots`; config persisted in GraphState — magic bump to **PCG4**, one-time state reset on first boot). Plots draw in the graph viewport alongside (under) the mode's functions so regression overlays stay on top; slot colors orange/cyan/magenta; **'Z' on the graph screen = ZoomStat** (5% margins; histogram y from 0).
+3. **Inference API** (`math::stats` in `src/math/infer.{hpp,cpp}`): mean/proportion/slope tests take an `Alt` (`!=`, `<`, `>`); p-values use the new one-sided `dist` survival functions directly (far-tail precision — no 1-cdf rounding). Two-sample t defaults to **Welch** (pooled optional, Welch-Satterthwaite fractional df through the real-df `t_inv`); paired t = one-sample on streamed differences; 1-prop z is the score test (se from p0), 2-prop z pooled; intervals use Wald proportion se. Chi-square 2-way and ANOVA take their **columns/groups as l1..lk lists** (2-6) — there is no 2-D Array until the Phase 4 Matrix (deviation from the spec sketch). GOF df = k-1 (no df override). linreg t-test: H0 slope=0, two-pass centered sums, n>=3. A lightweight streaming `mean_sd` replaces `one_var` in the t machinery (skips the 64-pass quartile selection).
+4. **`test` command** (alias `infer`) — 15 kinds in one L/R cycle (10 tests + 5 intervals); t kinds get a Data/Stats source toggle (spec UI sketch); z kinds are summary-only (sigma-known problems are summary problems). Count fields reject non-integers. Results are cached text lines (strip-safe §8).
+5. **StatPlot strip-safety split**: `recompute_stat_plots()` (called from GraphScreen's recompute) caches histogram bins (<= 64), box five-number summaries + 1.5-IQR fences + within-fence whiskers, and normprob **sorted-copy + Blom-quantile Arrays** (render never calls ndtri — Pico 1 softfloat). `draw_stat_plots()` only streams and draws. Box plots are **modified box plots** (outliers past the fences as marks) drawn in fixed horizontal bands at 1/4, 2/4, 3/4 viewport height, ignoring the y window (TI behavior). Histogram auto bin width = span/10.
+6. **Deviations noted**: no freq-list weighting in stat plots v1 (spec sketch had `freq_list`); scatter/normprob draw all points per frame — fine on the Pico 2 full framebuffer, re-judge per-strip cost at the 3D.14 Pico 1 pass.
+**Rationale**: TI conventions where users have expectations (separate TESTS/intervals, modified box plot, ZoomStat), Welch as the safer 2-samp default, and the cache/draw split keeps every new render path §8-legal.
+**Tradeoffs**: 15-entry kind cycle is long (no submenu); contingency tables live in lists rather than a matrix editor until Phase 4; PCG4 resets saved graph state once; Pico 1 bss now ~147 KB of 264 KB and text ~305 KB (map re-check queued for 3D.14).
+**Revisit when**: 4A matrices land (native contingency tables); stat-plot freq weighting or a histogram-of-frequencies is missed on device; the kind cycle grates (add category grouping).
+
 ## D26: Storage health — retry-forever heartbeat, SD hot-plug, red status-bar indicators
 
 **Date**: 2026-07-19

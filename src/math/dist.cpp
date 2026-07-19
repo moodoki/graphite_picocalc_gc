@@ -341,4 +341,43 @@ calc_t geometric_cdf(calc_t k, calc_t p) {
     return -std::expm1(ki * std::log1p(-p));
 }
 
+// ---- One-sided inference building blocks (3D) ----
+
+calc_t normal_cdf_1(calc_t z) {
+    return normal_cdf_lower(z, 0, 1);
+}
+
+calc_t normal_sf(calc_t z) {
+    return normal_cdf_lower(-z, 0, 1);  // Symmetry keeps tail precision
+}
+
+calc_t t_cdf_1(calc_t t, calc_t df) {
+    return t_cdf_lower(t, df);
+}
+
+calc_t t_sf(calc_t t, calc_t df) {
+    return t_cdf_lower(-t, df);
+}
+
+calc_t chisq_sf(calc_t x, calc_t df) {
+    if (x <= 0) {
+        return 1;
+    }
+    if (std::isinf(x)) {
+        return 0;
+    }
+    return igamc(df / 2, x / 2);
+}
+
+calc_t f_sf(calc_t x, calc_t df1, calc_t df2) {
+    if (x <= 0) {
+        return 1;
+    }
+    if (std::isinf(x) || std::isinf(df1 * x)) {
+        return 0;
+    }
+    // cephes fdtrc identity: P(F > x) = I_{d2/(d2+d1 x)}(d2/2, d1/2)
+    return incbet(df2 / 2, df1 / 2, df2 / (df2 + df1 * x));
+}
+
 }  // namespace math::dist

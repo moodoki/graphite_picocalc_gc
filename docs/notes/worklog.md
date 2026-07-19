@@ -216,10 +216,44 @@ Still to verify on hardware:
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 | Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
 | Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column) |
+| Session 15 — 3D inference + stat plots (D27; flashed 2026-07-20) | **First boot: PCG4 one-time graph-state reset** (window/mode/plots back to defaults — re-set once, then persistence resumes). `test` cmd: T-Test on `{12.9,13.5,12.8,15.6,17.2,19.2,12.6,15.3,14.4,11.3}->l1` vs mu0=14 → t≈.634, p≈.542; same data 2-SampT vs l2, Welch df≈17.65; Stats source entry; 1-PropZ x=57 n=100 p0=.5 (>) → z=1.4 p≈.0808; ANOVA over l1..l3; T-Interval C=.95; error paths (n non-integer, conf=1). `plot` cmd: scatter l1 vs l2 + `Z` ZoomStat on graph; histogram (auto + manual bin width); box plot with an outlier (e.g. append 99); NormProb of a normal-ish list ≈ straight line; three plots at once + a Y= function overlay. Help: COMMANDS test/plot rows, KEYS TEST + STAT PLOTS sections, graph Z row. Regression: trace/table/split unaffected; stats/dist screens fine |
 | Session 15 — storage health (D26) + editor truncation | Y= editor: store a regression model to y1, open Y= — text ends `...` before the checkbox, no overlap. **Hot-plug** (needs the physical card): eject while on → red `SD` appears in the home status bar within ~1 s (serial: `sd: card removed`); `files` shows no card; re-insert → `sd: card inserted`, remount within ~2 s, indicator clears, files/save work again; **in-memory lists/history survive** (no stale reload). **Extended-cold-boot case** (the original observation): power on after a long time off — if SD is slow, red `SD` shows, then clears when the (now unlimited) retries land; serial `late-init:` lines confirm. PSRAM indicator: hard to test without fault injection — verify it's absent when healthy |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 
 ---
+
+## 2026-07-20 — Session 15 (part 2): Phase 3 sub-phase 3D — inference + stat plots (D27)
+
+All of 3D.1-3D.13 in one pass (3D.14, the combined Pico 1 pass, remains —
+it needs the physical board swap). Host suite now **716 checks** (new
+`test_infer`, 91), lint clean, both boards build (Pico 1 text ~305 KB,
+bss ~147 KB/264 KB), flashed to the Pico 2. Conventions recorded as
+**D27** (resolves P3-5 + P3-6).
+
+- **`math::stats` inference** (`src/math/infer.{hpp,cpp}`): z (1/2-samp,
+  summary), t (1-samp/2-samp/paired, Data or summary, pooled or Welch
+  with fractional df), 1/2-prop z, chi-square GOF + 2-way (columns =
+  l1..lk), one-way ANOVA (groups = l1..lk), linreg slope t-test; the six
+  interval families. `Alt` (!=, <, >) on mean/prop/slope tests;
+  p-values via new one-sided `dist` survival functions (`normal_sf`,
+  `t_sf`, `chisq_sf`, `f_sf` — far-tail precise). Lightweight streaming
+  `mean_sd` (no quartile selection) for the t machinery.
+- **`test` command** (alias `infer`) → 15-kind form screen with
+  Data/Stats source toggle, list pickers, InputLine numeric fields,
+  H1/pooled/count cycles; results as cached lines (§8).
+- **StatPlot layer** (`src/graph/stat_plot.{hpp,cpp}`): scatter,
+  xy-line, histogram, modified box plot (1.5-IQR outlier marks, fixed
+  bands), normal probability plot (Blom). Cache/draw split for strip
+  safety: recompute caches bins/five-numbers/sorted+quantile Arrays;
+  render only streams and draws. Plot1-3 config via the `plot` command
+  (persisted — **PCG4**, one-time graph-state reset on first boot);
+  graph screen draws plots under curves; **`Z` = ZoomStat**.
+- **Reference vectors**: `tests/host/gen_infer_vectors.py` (mpmath).
+
+Remaining in Phase 3: on-device eval (Sessions 11/12/15 HW-PENDING) and
+**3D.14** — the combined Pico 1 pass (D18): reflash `build/pico/…uf2`,
+Phase 2 sweep + Sessions 8/9 fixes + Phase 3 acceptance + strip-render
+idempotency of every §8 screen, map-file re-check.
 
 ## 2026-07-19 — Session 15 (part 1): Session 14 observation fixes — storage health (D26)
 
