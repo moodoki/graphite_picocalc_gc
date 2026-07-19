@@ -53,7 +53,16 @@ int draw_battery(gfx::Framebuffer& fb, const gfx::Font& font) {
     return ix;
 }
 
+// D26 storage-health state (healthy until the main loop says otherwise).
+bool g_sd_ok = true;
+bool g_psram_ok = true;
+
 }  // namespace
+
+void set_health_flags(bool sd_ok, bool psram_ok) {
+    g_sd_ok = sd_ok;
+    g_psram_ok = psram_ok;
+}
 
 void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags) {
     using namespace platform::colors;
@@ -61,6 +70,17 @@ void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags)
 
     fb.fill_rect(0, 0, platform::kScreenW, kStatusBarH, kBarBg);
     font.draw_string(fb, 4, 2, title, kGrayLine);
+
+    // D26: red subsystem indicators while SD/PSRAM are unhealthy
+    // (retries keep running; these clear on recovery).
+    int hx = 4 + font.text_width(title) + 10;
+    if (!g_sd_ok) {
+        font.draw_string(fb, hx, 2, "SD", kRed);
+        hx += font.text_width("SD") + 8;
+    }
+    if (!g_psram_ok) {
+        font.draw_string(fb, hx, 2, "PSRAM", kRed);
+    }
 
     // Battery, rightmost; other indicators right-align to its left edge.
     const int batt_x = draw_battery(fb, font);

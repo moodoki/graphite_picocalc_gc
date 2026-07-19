@@ -11,6 +11,12 @@ public:
     // Mount the SD card. Returns false if no card or mount failed.
     bool init();
 
+    // D26 hot-plug: the DET pin says the card is gone — drop the mount
+    // (and the sd-layer init state) immediately rather than letting
+    // I/O fail mid-write; the main loop's retry heartbeat re-inits
+    // after re-insertion.
+    void on_card_removed();
+
     bool mounted() const { return mounted_; }
 
     bool file_exists(const char* path) const;

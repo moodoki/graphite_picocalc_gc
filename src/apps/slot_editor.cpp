@@ -1,5 +1,7 @@
 #include "apps/slot_editor.hpp"
 
+#include <cstring>
+
 #include "gfx/font.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
@@ -155,7 +157,20 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
             input_.render(fb, expr_x, y, platform::kScreenW - expr_x - 20, font, true);
         } else {
             const char* text = field_text(i);
-            font.draw_string(fb, expr_x, y, text, field_compiles(text) ? kWhite : kRed);
+            const platform::Color color = field_compiles(text) ? kWhite : kRed;
+            // Truncate to the space left of the enable checkbox — long
+            // expressions (stored regression models) ran beneath it
+            // (HW 2026-07-19).
+            const int max_chars = (platform::kScreenW - 20 - expr_x) / font.width();
+            char shown[40];
+            if (static_cast<int>(std::strlen(text)) > max_chars && max_chars > 3 &&
+                max_chars < static_cast<int>(sizeof(shown))) {
+                std::memcpy(shown, text, static_cast<size_t>(max_chars) - 3);
+                std::memcpy(shown + max_chars - 3, "...", 4);
+                font.draw_string(fb, expr_x, y, shown, color);
+            } else {
+                font.draw_string(fb, expr_x, y, text, color);
+            }
         }
 
         // Enable checkbox at the right edge.

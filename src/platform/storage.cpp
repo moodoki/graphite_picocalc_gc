@@ -26,6 +26,12 @@ bool Storage::init() {
     return true;
 }
 
+void Storage::on_card_removed() {
+    f_unmount("");
+    mounted_ = false;
+    sd::invalidate();
+}
+
 bool Storage::file_exists(const char* path) const {
     if (!mounted_) {
         return false;

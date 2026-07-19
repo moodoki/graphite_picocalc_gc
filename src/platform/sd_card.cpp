@@ -205,6 +205,10 @@ bool initialized() {
     return g_initialized;
 }
 
+void invalidate() {
+    g_initialized = false;
+}
+
 uint32_t sector_count() {
     return g_sectors;
 }

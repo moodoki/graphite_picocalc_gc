@@ -20,6 +20,12 @@ struct StatusFlags {
 // ALPHA indicators, the angle mode (RAD/DEG), and the display mode.
 void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags = {});
 
+// Storage-health indicators (D26): while SD or PSRAM is down, the
+// status bar shows a red "SD" / "PSRAM" after the title; they clear
+// when the main loop's retry heartbeat recovers the subsystem. The
+// main loop calls this on change and invalidates the status band.
+void set_health_flags(bool sd_ok, bool psram_ok);
+
 // Draw the bottom softkey bar. `labels` is 6 entries (F1..F6); a null or
 // empty entry leaves that slot blank.
 void draw_softkeys(gfx::Framebuffer& fb, const char* const labels[6]);

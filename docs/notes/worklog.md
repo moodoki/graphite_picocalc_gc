@@ -216,9 +216,31 @@ Still to verify on hardware:
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 | Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
 | Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column) |
+| Session 15 — storage health (D26) + editor truncation | Y= editor: store a regression model to y1, open Y= — text ends `...` before the checkbox, no overlap. **Hot-plug** (needs the physical card): eject while on → red `SD` appears in the home status bar within ~1 s (serial: `sd: card removed`); `files` shows no card; re-insert → `sd: card inserted`, remount within ~2 s, indicator clears, files/save work again; **in-memory lists/history survive** (no stale reload). **Extended-cold-boot case** (the original observation): power on after a long time off — if SD is slow, red `SD` shows, then clears when the (now unlimited) retries land; serial `late-init:` lines confirm. PSRAM indicator: hard to test without fault injection — verify it's absent when healthy |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 
 ---
+
+## 2026-07-19 — Session 15 (part 1): Session 14 observation fixes — storage health (D26)
+
+Implemented the logged Session 14 batch (`session14-observations-verbatim.md`):
+
+- **Retry-forever** (D26): the D14 30 s late-init window is now only the
+  fast phase; unhealthy SD/PSRAM retry on a 10 s heartbeat indefinitely.
+  `run_self_tests()` skips green subsystems (the PSRAM word test
+  bump-allocates per run — must not repeat forever).
+- **SD hot-plug**: DET pin polled ~1 s in the main loop. Eject →
+  `Storage::on_card_removed()` (f_unmount + `sd::invalidate()`),
+  `g_sd_test = kNoCard`; insert → immediate retry. Persisted state
+  loads exactly once per power-on (re-insert never clobbers the
+  session).
+- **Red `SD` / `PSRAM` status-bar indicators** while down
+  (`ui::set_health_flags` + chrome), clearing on recovery;
+  band-invalidated like the battery refresh.
+- **Y=/PAR/POL editor**: long expressions truncate with `...` before
+  the enable checkbox (stored regression models ran beneath it).
+
+Both boards build, lint clean. HW checks queued in the Session 15 row.
 
 ## 2026-07-19 — Session 14: Phase 3 sub-phase 3C — probability distributions (D25)
 

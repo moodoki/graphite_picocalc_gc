@@ -10,6 +10,9 @@ namespace platform::sd {
 
 bool init();  // Card init sequence; false if absent/failed
 bool initialized();
+// D26 hot-plug: forget the card-level init state (ejected card) so
+// disk_status() reports NOINIT and the next init() re-runs bring-up.
+void invalidate();
 bool read_block(uint32_t lba, uint8_t* dst);         // 512 bytes
 bool write_block(uint32_t lba, const uint8_t* src);  // 512 bytes
 uint32_t sector_count();                             // Total 512-byte sectors (0 if unknown)

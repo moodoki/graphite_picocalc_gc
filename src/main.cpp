@@ -17,6 +17,7 @@
 
 #include "config.hpp"
 #include "platform/platform.hpp"
+#include "platform/sd_card.hpp"
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
 #include "ui/chrome.hpp"
@@ -137,7 +138,12 @@ void run_psram_bulk_test() {
 }
 
 void run_self_tests() {
-    if (g_init_status.storage) {
+    // Both tests are skipped once green: with the D26 retry-forever
+    // heartbeat this runs indefinitely while *either* subsystem is
+    // down, and the PSRAM word test bump-allocates 256 B per run (no
+    // free), while the SD probe rewrites a file. Ejecting a card
+    // resets g_sd_test, so a remount retests.
+    if (g_init_status.storage && g_sd_test != SdTest::kOk) {
         auto& fs = platform::storage();
         fs.ensure_dir("/picocalc");
         const char* probe = "/picocalc/selftest.txt";
@@ -151,7 +157,7 @@ void run_self_tests() {
         }
     }
 
-    if (g_init_status.psram) {
+    if (g_init_status.psram && !g_psram_alloc_ok) {
         auto& ps = platform::psram();
         // Word-based r/w test (bulk is tested separately below — D10).
         const uint32_t addr = ps.alloc(256);
@@ -317,18 +323,30 @@ int main() {
     // RP2350 cold boot: the peripheral rail needs ~5-8 s to settle, so
     // the boot-time PSRAM/SD init can fail on a cold power-on (D14 —
     // measured 2026-07-11; warm reboots and Pico 1 are unaffected).
-    // Boot stays instant; the loop below retries until they come up or
-    // the window closes. A failing SD attempt with a card inserted
-    // blocks up to ~1 s, so retries are spaced out.
+    // Boot stays instant; the loop below retries until they come up.
+    // A failing SD attempt with a card inserted blocks up to ~1 s, so
+    // retries are spaced out.
     //
     // Retries cover the self-tests too, not just init: in the marginal
     // window init can "succeed" while readback is still garbage, and a
     // one-shot retest right after a late reinit can fail the same way —
     // either case used to freeze FAIL on the diag screen for good
     // (observed on HW 2026-07-17).
-    constexpr uint32_t kLateInitWindowMs = 30'000;
-    constexpr uint32_t kLateInitGapMs = 2'000;
+    //
+    // D26 (HW 2026-07-19): retries no longer give up. The old 30 s
+    // window is only the *fast phase* — after it, an unhealthy SD or
+    // PSRAM keeps retrying on a slow heartbeat forever. An SD card
+    // observed to need longer than the window after an extended
+    // power-off used to stay dead until a reboot; the status bar shows
+    // red SD/PSRAM while a subsystem is down (ui::set_health_flags).
+    constexpr uint32_t kRetryFastWindowMs = 30'000;
+    constexpr uint32_t kRetryFastGapMs = 2'000;
+    constexpr uint32_t kRetrySlowGapMs = 10'000;
     uint32_t late_init_last_ms = 0;
+    // Persisted state loads exactly once: a card mounted late loads
+    // then, but a card ejected + re-inserted mid-session must NOT
+    // clobber the in-memory working state with stale files (D26).
+    bool state_loaded = g_init_status.storage;
 
     // Event-driven rendering: a full-frame push is ~200 ms, so redraw only
     // after input (or the initial frame) instead of every loop iteration.
@@ -336,9 +354,37 @@ int main() {
     while (true) {
         const bool psram_healthy = g_init_status.psram && g_psram_alloc_ok;
         const bool sd_healthy = g_init_status.storage && g_sd_test == SdTest::kOk;
+
+        // D26 hot-plug: poll the DET pin (~1 s, one GPIO read).
+        // Ejecting drops the mount right away — otherwise FatFs keeps
+        // believing in the card and a state save could half-write.
+        // Insertion arms an immediate retry below instead of waiting
+        // out the slow heartbeat.
+        {
+            static uint32_t last_det_ms = 0;
+            static bool last_present = platform::sd::card_present();
+            const uint32_t now = platform::uptime_ms();
+            if (now - last_det_ms >= 1'000) {
+                last_det_ms = now;
+                const bool present = platform::sd::card_present();
+                if (!present && g_init_status.storage) {
+                    platform::storage().on_card_removed();
+                    g_init_status.storage = false;
+                    g_sd_test = SdTest::kNoCard;
+                    printf("sd: card removed at %lu ms\n", static_cast<unsigned long>(now));
+                }
+                if (present && !last_present) {
+                    late_init_last_ms = 0;
+                    printf("sd: card inserted at %lu ms\n", static_cast<unsigned long>(now));
+                }
+                last_present = present;
+            }
+        }
+
         if (!psram_healthy || !sd_healthy) {
             const uint32_t now = platform::uptime_ms();
-            if (now < kLateInitWindowMs && now - late_init_last_ms >= kLateInitGapMs) {
+            const uint32_t gap = now < kRetryFastWindowMs ? kRetryFastGapMs : kRetrySlowGapMs;
+            if (now - late_init_last_ms >= gap) {
                 late_init_last_ms = now;
                 if (!g_init_status.psram && platform::psram().reinit()) {
                     g_init_status.psram = true;
@@ -346,11 +392,17 @@ int main() {
                 }
                 if (!g_init_status.storage && platform::storage().init()) {
                     g_init_status.storage = true;
-                    // Persistence arrived late: load what boot couldn't.
-                    apps::home_screen().load_state();
-                    apps::load_graph_state();
-                    printf("late-init: storage up at %lu ms, state loaded\n",
-                           static_cast<unsigned long>(now));
+                    if (!state_loaded) {
+                        // Persistence arrived late: load what boot couldn't.
+                        apps::home_screen().load_state();
+                        apps::load_graph_state();
+                        state_loaded = true;
+                        printf("late-init: storage up at %lu ms, state loaded\n",
+                               static_cast<unsigned long>(now));
+                    } else {
+                        printf("late-init: storage remounted at %lu ms\n",
+                               static_cast<unsigned long>(now));
+                    }
                 }
                 run_self_tests();
                 if (!lists_loaded) {
@@ -371,6 +423,25 @@ int main() {
                     }
                     dirty = true;
                 }
+            }
+        }
+
+        // D26 status-bar health indicators (red SD / PSRAM): update on
+        // any change, in either direction, and repaint the status band
+        // (same pattern as the battery refresh below).
+        {
+            static bool last_sd_ok = true;
+            static bool last_psram_ok = true;
+            const bool sd_ok = g_init_status.storage && g_sd_test == SdTest::kOk;
+            const bool ps_ok = g_init_status.psram && g_psram_alloc_ok;
+            if (sd_ok != last_sd_ok || ps_ok != last_psram_ok) {
+                last_sd_ok = sd_ok;
+                last_psram_ok = ps_ok;
+                ui::set_health_flags(sd_ok, ps_ok);
+                if (ui::Screen* s = mgr.current()) {
+                    s->invalidate_band(0, ui::kStatusBarH);
+                }
+                dirty = true;
             }
         }
 

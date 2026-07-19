@@ -18,6 +18,21 @@ Format:
 
 ---
 
+## D26: Storage health — retry-forever heartbeat, SD hot-plug, red status-bar indicators
+
+**Date**: 2026-07-19
+**Status**: Accepted (Session 15 — implements the Session 14 observation batch, `session14-observations-verbatim.md`)
+**Context**: On-device: SD showed "no card" after an extended power-off and only a reboot recovered it. Root cause: the D14 late-init retries ran every 2 s but stopped for good at 30 s uptime. Also unhandled: card eject/insert while powered (DET pin was only read inside init), and there was no visible signal that a subsystem was down.
+**Decision**:
+1. **Retries never give up**: the 30 s window is now just the fast phase (2 s cadence, D14 rail settle); after it, an unhealthy SD or PSRAM keeps retrying on a **10 s heartbeat** indefinitely. `run_self_tests()` skips subsystems already green (the PSRAM word test bump-allocates 256 B per run and must not repeat forever; the SD probe stops rewriting its file once OK).
+2. **Hot-plug**: the main loop polls the DET pin every ~1 s. **Eject** → `Storage::on_card_removed()` (f_unmount + `sd::invalidate()` so FatFs sees NOINIT), storage marked down, `g_sd_test = kNoCard`. **Insert** → the retry timer resets, so the remount attempt is immediate.
+3. **Persisted state loads exactly once** per power-on: a late-mounted card loads then, but an eject + re-insert must NOT reload — the in-memory working state is newer than the files. (Lists already load-once.)
+4. **Status-bar indicators**: red `SD` / `PSRAM` after the title while the subsystem is unhealthy (`ui::set_health_flags`, drawn by `draw_status_bar`); the main loop updates on any change and repaints the status band (battery-refresh pattern). Only screens using the shared chrome show them (WINDOW/editors draw their own plain bars — acceptable; the home screen is where you look).
+5. Same batch: Y=/PAR/POL editor rows truncate long expressions with `...` before the enable checkbox (stored regression models ran beneath it).
+**Rationale**: "Disappear when the retries finally work" (the request) requires retries that never stop; eject-drop-the-mount prevents half-written state files; load-once protects the session from stale reloads.
+**Tradeoffs**: A failing-but-present card costs a ~1 s blocking init attempt every 10 s forever (visible as a periodic hitch only in that broken state); DET polling assumes the pin is configured (guaranteed — boot always reaches `sd::init()`'s GPIO setup); mid-write ejects can still corrupt the file being written (poll is 1 s — hardware can't prevent it).
+**Revisit when**: the periodic init hitch is noticeable in real use (make the attempt async/backoff), or a future RTC/logging feature needs write-behind flushing on eject.
+
 ## D25: 3C distributions as-built — two-sided CDFs (P3-4), real-df wrappers, `dist` guided screen
 
 **Date**: 2026-07-19
