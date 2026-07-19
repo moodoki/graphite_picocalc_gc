@@ -18,6 +18,20 @@ Format:
 
 ---
 
+## D23: 3B stats as-built — LM for iterative fits, rank-selection quartiles, TI r conventions
+
+**Date**: 2026-07-19
+**Status**: Accepted (Session 12, sub-phase 3B implementation decisions; resolves phase3-spec P3-3)
+**Context**: Task 3B needed four calls the spec left open: the iterative solver for logistic/sinusoidal (P3-3), how to get quartiles/medians without mutating or copying a possibly-80 KB PSRAM list (the D22 API has no `data()` to sort through), what r/r² mean per model, and where the results UI lives.
+**Decision**:
+1. **P3-3: Levenberg-Marquardt** (classic Marquardt damping, analytic Jacobians, <= 100 iterations, ~2 streaming passes per iteration) for logistic and sinusoidal. Seeds: logistic from a linearized logit at ceiling `1.05*max(y)`; sinusoidal from a frequency scan (0.25-cycle grid over the x-span, <= 64 candidates, each solved as a linear sin/cos fit in one shared streaming pass) — LM alone cannot find the frequency basin. `converged=false` (surfaced as a results-screen warning) when the cap is hit; the fit is still returned.
+2. **Quartiles/medians by streaming rank selection, not sorting**: binary search over the order-preserving uint64 image of the doubles, one weighted counting pass per bit, all requested ranks advancing in the same passes (<= 64 passes per batch total). No temp region, no allocation, identical code path for plain, frequency-weighted (integer freq >= 0, TI rule; freq 0 excludes the element), and x-range-filtered selections (which is how median-median gets its group y-medians). Med-med caveat: x-ties straddling a group boundary land whole in the outer group (value-based grouping), a documented deviation from a strict positional split.
+3. **r/r² per TI convention**: `r` only for linear and the linearized fits (ln/exp/power, where it describes the linearized regression, as on the handheld); polynomial degree >= 2, logistic, sinusoidal, med-med report `r²` only, computed as 1 - SSE/SST on the original data (NaN skips the results line). Polynomial fits standardize x (center+scale) before forming normal equations, then expand coefficients back — quartic on year-scale x stays conditioned.
+4. **UI: typed `stats` command** (D20 pattern) → one screen, form + results phases. Form: Analysis (1-Var / 2-Var / 10 regressions), source lists, optional freq list (1-Var), optional Store-to y1..y7 (regressions, task 3B.8 — writes the numeric model via `format_model`, enables the slot, saves graph state; SinReg coefficients are degree-converted when the global mode is DEGREE per spec §10). Results are cached text lines (strip-safe render), scrollable.
+**Rationale**: LM is the spec's lean and the robustness matters more than the extra solve code (shared with the polynomial path anyway); rank selection keeps stats allocation-free and O(passes) on PSRAM lists where a pair-sort would have needed new machinery; TI conventions keep results comparable to the handheld the UI imitates.
+**Tradeoffs**: Selection costs up to 64 streaming passes (~0.7 s worst case on a full 10000-element PSRAM list — one-shot per Calculate, acceptable); no `r` for the nonlinear fits (TI-consistent); sinusoidal frequency grid caps at ~16 cycles over the x-span (denser oscillations need pre-scaled x).
+**Revisit when**: 3C/3D need the same quantile machinery with real-valued weights; a user hits the frequency-grid cap; or the stats screen needs a "computing..." indicator (compute is synchronous in on_key — judge on device with large lists).
+
 ## D22: Array as-built API (get/set, tiered store) + home-screen list syntax
 
 **Date**: 2026-07-19

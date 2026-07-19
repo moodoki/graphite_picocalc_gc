@@ -220,6 +220,18 @@ List arithmetic is element-wise and returns a new list. Length-mismatched operat
 
 ## 4. Sub-phase 3B: Descriptive stats & regression (weeks 19–21)
 
+> **As built (Session 12, 2026-07-19 — see D23):** the structs below ship
+> with an added `ok` + static `error` field (project error convention) and
+> an `n`/`converged` on `RegressionResult`. Quartiles/medians use a
+> streaming **rank selection** (binary search over the ordered double bit
+> space, weighted, optionally x-filtered) instead of sorting — no temp
+> copy, one code path for plain/weighted/median-median. `r` follows the
+> TI convention (linear + linearized fits only; linearized fits report
+> the linearized r/r²); iterative fits use **LM** (P3-3 decided).
+> §4.3's `store_regression_to_y` lives in the stats screen (apps layer)
+> as `format_model` + a Y-slot write, keeping `math` free of `graph`
+> dependencies. The results UI is the typed `stats` command (D20).
+
 ### 4.1 One-variable statistics
 
 ```cpp
@@ -611,7 +623,7 @@ Solo developer, part-time (~20 hrs/week). ~8 weeks.
 |---|----------|---------|------|
 | P3-1 | Max list length cap? | **DECIDED (D21, 2026-07-18, amended same day): 10000, SRAM pool + PSRAM tier** — the D10 bulk-PSRAM fix landed the same day (~6.8 MB/s verified), so §2.2 ships as written: <= 256 elements SRAM, larger PSRAM. | Decided |
 | P3-2 | `Array` element type: always `calc_t` (double), or support integer lists? | **DECIDED (D21, 2026-07-18): double-only storage, plus a dtype tag in `Array` and `lists.dat`** reserved for future complex/int elements (Phase 4 Matrix + complex wishlist). | Decided |
-| P3-3 | Iterative regression solver: Levenberg-Marquardt or Gauss-Newton? | LM is more robust but more code. Suggest LM. | Week 21, task 3B.5 |
+| P3-3 | Iterative regression solver: Levenberg-Marquardt or Gauss-Newton? | **DECIDED (D23, 2026-07-19): Levenberg-Marquardt**, with linearized-logit (logistic) and frequency-scan (sinusoidal) seeding; `converged` false on the 100-iteration cap. | Decided |
 | P3-4 | Distribution function naming: `normal_cdf(lo, hi, ...)` two-tailed like TI, or `normal_cdf(x)` one-tailed standard? | TI's two-arg lower/upper is practical for tests; standard CDF is more conventional. Decide and document. | Week 22, task 3C.2 |
 | P3-5 | Should stat plots and function plots share the same enable/disable UI, or separate Plot1-3 vs Y1-7 lists? | TI separates them; unified might be cleaner. | Week 25, task 3D.13 |
 | P3-6 | Inference results: always compute the paired CI alongside each test, or only on request? | Computing always is convenient; may clutter. | Week 24, task 3D.8 |

@@ -1,49 +1,48 @@
 # Start here — next session
 
-**Last session:** 2026-07-19 (Session 11). **Phase 3 sub-phase 3A (Array +
-lists + list editor) is code-complete, lint-clean, host-tested (suite now
-351 checks) and flashed to the Pico 2** (boot verified over serial;
-functional eval pending — the quick checklist is the Session 11 row in
-worklog HW-PENDING). What landed:
+**Last session:** 2026-07-19 (Session 12). **Phase 3 sub-phase 3B
+(descriptive stats + all ten regressions) is code-complete, lint-clean,
+host-tested (suite now 473 checks) and flashed to the Pico 2** (boot
+verified over serial; functional eval pending — Session 11 **and** 12
+rows in worklog HW-PENDING). What landed (see **D23**):
 
-- **`math::Array`** per D21 (dtype tag, cap 10000, SRAM <= 256 doubles /
-  PSRAM tier above) — but note **D22**: PSRAM is *not memory-mapped*, so
-  the API is `get`/`set` + `read_range`/`write_range`, no references/
-  `data()`; `ArrayStore` recycles 2 KB SRAM slabs + fixed 80 KB PSRAM
-  regions (free-list over the bump allocator).
-- **l1..l6** (`math::lists()`), persisted to `lists.dat` (streamed
-  chunks; new `Storage::read_file_range`). Load is all-or-nothing and
-  waits for PSRAM on cold boot (late-init retries; serial prints
-  `late-init: lists loaded` when late).
-- **List ops**: in-place sorts (external merge sort for PSRAM-tier),
-  cumsum, delta_list, seq, sum/prod/length, element-wise **vector lift**
-  (`sin(l1)+2*l2` — engine compile-once with l1..l6 as bound variables).
-- **Home syntax (D22)**: `{1,2,3}->l1`, `l1*2`, `sum(l1)` (bare-arg
-  reductions embed in scalar exprs), `sort_asc(l1)` in place. Errors for
-  length mismatch / scalar→list store. List results don't set Ans.
-- **List editor** via typed **`lists`** command: grid (3 of 6 columns),
-  type-to-edit, DEL row, F6/F7 sort, F8 clear (immediate — watch it),
-  F1-F5 global scheme intact. Help FUNC/KEYS/SYNTAX updated.
+- **`math::stats`**: 1-var (plain + freq-weighted) / 2-var stats.
+  Quartiles/medians via **streaming rank selection** (binary search on
+  the double bit space, <= 64 shared passes, weighted + x-filterable) —
+  no sort, no temp region, works identically on the PSRAM tier.
+- **All ten regressions**: polynomial 1-4 (normal equations on
+  center+scaled x), ln/exp/pwr (linearized, TI-style r/r²), logistic +
+  sinusoidal (**LM**, P3-3 resolved; logit / frequency-scan seeds;
+  `converged` flag), median-median (filtered selection; x-boundary ties
+  group by value). `r` NaN where TI doesn't define it.
+- **`stats` typed command** → form (Analysis / lists / Freq / Store /
+  Calculate) + scrollable results. **Store to y1..y7** writes the
+  numeric model (engine-parseable, SinReg degree-converted in DEGREE
+  mode) and enables the slot. Help KEYS/SYNTAX updated.
 
 ## The next job
 
-1. **On-device eval of the 3A batch** (Session 11 HW-PENDING row):
-   editor feel, home list syntax, persistence across reboot + cold boot,
-   the 1000-element PSRAM-tier path, help pages. Fold in anything still
-   open from the Session 10 round-2 checklist (same table).
-2. Then **sub-phase 3B** (`phase3-spec.md` §4, weeks 19-21): 1-var/2-var
-   stats then the ten regressions. First consumers of `Array`; the
-   normal-equations solve (3B.3) is the first small matrix-math user.
-   Open call there: P3-3 (LM vs Gauss-Newton for logistic/sinusoidal —
-   spec leans LM). Stats results UI (3B.9) needs a home; a `stats`
-   typed command + screen would match the D20 pattern.
-3. KIV for 3B+: D22 notes reductions are bare-list-arg only and literals
-   can't join element-wise arithmetic — if 3B's UI wants richer
-   expressions, consider promoting list_expr to a tagged-value evaluator.
+1. **On-device eval of the 3A + 3B batches** (Session 11 and Session 12
+   rows in worklog HW-PENDING): list editor + home list syntax first,
+   then the stats screen sweep (form feel, results, store→graph
+   overlay, error paths, the 10000-element 1-Var timing feel — decide
+   whether a "computing..." indicator is warranted, D23 revisit).
+2. Then **sub-phase 3C** (`phase3-spec.md` §5, weeks 22-23):
+   distributions. Start with 3C.1 — vendor the needed cephes sources
+   (`ndtr`, `incbet`, `igam`/`igamc`; public domain) into
+   `drivers/cephes/`, update `docs/dependencies.md` + NOTICE. Open
+   call **P3-4** (naming: TI two-arg `normal_cdf(lo, hi, ...)` vs
+   one-tailed standard) — spec leans TI two-arg for test usefulness;
+   decide at 3C.2. Registration goes through `math::catalog` (3C.7,
+   full-arity only — tinyexpr has no default args); local bisection
+   for inverse CDFs (no Phase 1 solver exists).
+3. KIV for 3C UI: distributions are scalar functions, so they mostly
+   ride the normal engine path + catalog/help; the guided-entry helper
+   (3C.8) could follow the `stats` form pattern.
 
-Mind the §8 strip-safety rule (idempotent `render()` — the list editor
-follows it: cached cells, draw-only render) and task 3D.14 (combined
-Pico 1 pass, D18).
+Mind the §8 strip-safety rule (idempotent `render()` — StatsScreen
+follows it: compute in on_key, cached result lines) and task 3D.14
+(combined Pico 1 pass, D18).
 
 ## D14 rail settle — NEXT BENCH SESSION (keep here until done at a scope)
 
@@ -51,7 +50,7 @@ Pico 1 pass, D18).
 page until the scope session happens.** Nothing needs PSRAM at boot and
 the few-second late-init wait feels fine in use — this is root-causing,
 not firefighting. Software already gives timestamps (`late-init:` lines,
-`psram-bulk:`/`battery:` heartbeats; lists now also wait for late-init).
+`psram-bulk:`/`battery:` heartbeats; lists wait for late-init).
 Schematic findings (2026-07-18, `clockwork_Mainboard_V2.0_Schematic.pdf`
 in the clockworkpi/PicoCalc repo; copy fetched during Session 10):
 
@@ -91,27 +90,26 @@ Bench session plan:
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the Session 11 build** (Phase 3A lists on
-  top of everything from Session 10; flashed 2026-07-19, `psram-bulk:
+- **Firmware on the unit is the Session 12 build** (Phase 3B stats on
+  top of everything from Session 11; flashed 2026-07-19, `psram-bulk:
   OK` + battery heartbeat seen on serial). The Pico 1 is still on
   Session 7 firmware; its pass is deferred to post-Phase 3 (D18).
-- **`lists.dat` doesn't exist yet on the SD card** — first save creates
+- **`lists.dat` may not exist yet on the SD card** — first save creates
   it. If a load ever misbehaves, deleting the file resets all lists
   (magic PCL1; bump to PCL2 on layout change).
 - **D14 cold boot (~5-8 s rail settle):** PSRAM/SD may fail early init on
   a cold power-on; self-tests retry inside the 30 s late-init window and
-  serial prints `late-init: ...` lines (now including `lists loaded`).
+  serial prints `late-init: ...` lines (including `lists loaded`).
   Large lists are simply absent until then; the editor shows "List
   memory unavailable" if a >256-element append beats PSRAM bring-up.
-- **Flash path (revised Session 9):** the `RP2350` BOOTSEL volume mounts
-  again, and **cp to the volume is the preferred path** — `picotool load`
-  proved slow (minutes at a black screen). Sequence: reboot to BOOTSEL
-  (`stty -f /dev/cu.usbmodem* 1200`, or `picotool reboot -f -u` — note `-u`;
-  plain `-f` reboots to *application* mode), **wait ~15 s for the volume to
-  mount**, then `cp build/pico2/picocalc_graphcalc.uf2 /Volumes/RP2350/`
-  (auto-reboots). **macOS `cp` exits 1 with an xattr complaint — harmless,
-  the UF2 landed (Session 11)**. Keep `picotool load` + `picotool reboot`
-  as the fallback for when the volume doesn't mount at all.
+  Stats on a not-yet-loaded list just sees fewer/empty elements.
+- **Flash path (revised Session 9, reconfirmed Session 12):** `stty -f
+  /dev/cu.usbmodem* 1200` reboots to BOOTSEL, the **RP2350 volume
+  mounted in ~5 s this time**, then
+  `cp build/pico2/picocalc_graphcalc.uf2 /Volumes/RP2350/`
+  (auto-reboots; cp exited 0 this session — the Session 11 xattr
+  complaint didn't recur). Keep `picotool load` + `picotool reboot` as
+  the fallback for when the volume doesn't mount at all.
 - **Battery/charging: fully verified 2026-07-18.** Refresh cadence is 5 s
   by design — stability over snappiness; don't "optimize" it back down.
 - **Boot printfs still race USB enumeration** — only prints after ~2 s
@@ -131,8 +129,9 @@ Session 8+9 fix list and Phase 3 acceptance. Until then the Pico 1 stays on
 Session 7 firmware; reflash before that pass (`build/pico/…uf2`, BOOTSEL volume
 `RPI-RP2`). Guardrail: Phase 3 render code must be strip-safe (idempotent, may
 run ~20x/frame) — rule recorded in `phase3-spec.md` §8. Note for that pass:
-Session 11 added ~24 KB static SRAM (ArrayStore slabs + list buffers) — RP2040
-static was 62.5 KB, still far inside headroom, but re-check the map file.
+Sessions 11+12 added static SRAM (ArrayStore slabs, list buffers, stats chunk
+buffers + sinusoid scan accumulators ~10 KB) — Pico 1 bss is ~126 KB of 264 KB,
+still comfortable, but re-check the map file then.
 
 ## Open design threads
 
@@ -141,9 +140,16 @@ static was 62.5 KB, still far inside headroom, but re-check the map file.
   the 4-sig-digit tick cap is the stopgap.
 - **List UX watch-items (Session 11, judge on device)**: F8 clear-list is
   immediate (no confirm); list history results truncate at ~40 chars
-  (`,...`); reductions bare-arg limitation (D22); `lists` command is the
-  only editor entry — decide whether stats deserves an F-key/menu slot
-  when 3B's stats screens land.
+  (`,...`); reductions bare-arg limitation (D22); `lists`/`stats` are
+  typed-command-only entries — decide whether stats deserves an
+  F-key/menu slot now that the screen exists.
+- **Stats watch-items (Session 12, judge on device)**: synchronous
+  Calculate with no "computing..." indicator (matters only for
+  PSRAM-tier lists / slow LM fits); results are plain text lines (no
+  two-column layout for 2-Var's 17 lines); `mean/median/stdev` are NOT
+  home-screen reductions (only sum/prod/length are, D22) — the stats
+  screen is the path; consider promoting them if that grates (D22
+  revisit: tagged-value evaluator).
 - F3 MODE vs ZOOM (TI's F3 slot) — judge after real use (D20 KIV).
 - D16 trace-sync option b (trace steps by table-step) — after more split
   use.
@@ -163,7 +169,9 @@ next phases (they need a home, not immediate work):
   and matrices hold complex values too** — that's why `Array`/`lists.dat`
   carry the dtype tag (D21/D22); 3A shipped with all element access
   routed through `get`/`set`, so the accessor internals are the only
-  place the complex representation lands.
+  place the complex representation lands. (3B note: `math::stats`
+  streams through `read_range` — real-valued stats stay correct
+  whatever the storage dtype becomes.)
 - **TI-84 CALC-menu graph analysis** (value, zero, min/max, intersect,
   dy/dx, numeric fnInt): numeric + interactive on the graph screen;
   could be a Phase 3.5 / early-Phase-4 slice on the existing

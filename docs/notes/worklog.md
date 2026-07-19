@@ -104,15 +104,27 @@ Conventions:
   the list editor screen (typed `lists` command). 106 new host checks;
   lint clean; **Pico 2 flashed, boot verified over serial (HW eval
   pending — see HW-PENDING)**.
-- **Next up**: on-device eval of the 3A batch, then sub-phase 3B
-  (descriptive stats + regression, spec §4) — 1-var/2-var stats are the
-  first consumers of `Array`. Note the §8 strip-safety rule and the
+- **Session 12 (2026-07-19): Phase 3 sub-phase 3B code-complete and
+  flashed** — `math::stats`: 1-var (incl. freq-weighted) / 2-var
+  descriptive stats with **rank-selection quartiles** (streaming binary
+  search over the double bit space — no sort, no temp copy), all ten
+  regression models (polynomial via standardized normal equations,
+  linearized ln/exp/pwr, **LM** for logistic/sinusoidal per **D23**
+  which resolves P3-3, Tukey median-median via filtered selection),
+  `format_model` → Y-slot store (3B.8, DEGREE-converted SinReg), and
+  the **typed `stats` command** → form + results screen (3B.9). 122 new
+  host checks (every model string engine-compile-checked); lint clean;
+  **Pico 2 flashed, boot verified over serial (HW eval pending — see
+  HW-PENDING)**.
+- **Next up**: on-device eval of the 3A+3B batches, then sub-phase 3C
+  (distributions, spec §5) — vendor cephes special functions first
+  (3C.1), decide P3-4 naming. Note the §8 strip-safety rule and the
   3D.14 combined Pico 1 pass.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.
 - **Both boards build**: yes (`./scripts/build-all.sh`). Diagnostic target: `picocalc_diag`.
-- **Host tests**: `./scripts/host-tests.sh` → 136 math + 37 layout + 72 graph + 106 lists = 351 checks, 0 failures
+- **Host tests**: `./scripts/host-tests.sh` → 136 math + 37 layout + 72 graph + 106 lists + 122 stats = 473 checks, 0 failures
 
 ### Hardware bring-up debugging kit (learned 2026-07-10)
 
@@ -176,8 +188,55 @@ Still to verify on hardware:
 | Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
 | Session 10 round 3 (bulk PSRAM verified on Pico 2 2026-07-18) | Nothing further on the Pico 2 (`psram-bulk: OK`, 150/156 us). **Pico 1 leg folds into the D18/3D.14 pass**: check the `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` there — the chunked path is board-independent but only Pico-2-verified |
 | Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column) |
+| Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. **PSRAM-tier timing feel**: 1-Var on a 10000-element list (quartile selection ~0.7 s expected — judge if a "computing..." indicator is needed, D23 revisit). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 
 ---
+
+## 2026-07-19 — Session 12: Phase 3 sub-phase 3B — descriptive stats + all ten regressions (D23)
+
+Continued Phase 3 per next-session.md (the 3A on-device eval still needs the
+developer at the keyboard; its checklist stays in HW-PENDING). All nine 3B
+tasks (3B.1-3B.9) are code-complete, host-tested, lint-clean, built for both
+boards, and **flashed to the Pico 2** (BOOTSEL-volume cp path; boot verified
+over serial — `psram-bulk: OK`, battery heartbeat).
+
+- **`math::stats`** (`src/math/stats.{hpp,cpp}`, host-testable through the
+  D22 psram_backend seam): `OneVarStats` (plain + freq-weighted),
+  `TwoVarStats`, `regress()` for all ten models, `eval_model`,
+  `format_model`, display metadata. Spec structs + the project error
+  convention (`ok` + static error string).
+- **Quartiles without sorting**: weighted rank selection by binary search
+  over the order-preserving uint64 image of the doubles — one streaming
+  counting pass per bit, all ranks batched into the same passes (<= 64
+  total), optional x-range filter. Serves plain quartiles, freq-weighted
+  quartiles (integer freq >= 0, freq 0 excludes), and the median-median
+  group medians with one code path and zero allocation (D23).
+- **Regressions**: polynomial (1-4) via normal equations on
+  center+scaled x with binomial expansion back (quartic on year-scale x
+  stays conditioned — host-tested); ln/exp/pwr linearized with TI-style
+  r/r² from the linearized fit; **logistic + sinusoidal via LM (P3-3
+  resolved → D23)** with logit-linearization / frequency-scan seeding;
+  median-median via filtered selection (x-boundary ties group by value).
+  `r` = NaN where TI doesn't define it; `r²` = 1 - SSE/SST elsewhere.
+- **3B.8**: `format_model` emits an engine-parseable model in x
+  (`%.10g` coefficients, parenthesized exponents); the stats screen
+  writes it to the chosen Y slot, enables it, saves graph state. SinReg
+  b/c convert to degrees when the global mode is DEGREE (spec §10).
+- **3B.9**: typed **`stats`** command (D20) → `StatsScreen`: form
+  (Analysis / lists / Freq / Store / Calculate) + scrollable cached-text
+  results; strip-safe (compute in on_key, render draws only). Help KEYS
+  + SYNTAX updated.
+- **Tests**: `tests/host/test_stats.cpp`, 122 checks — known-answer
+  stats (incl. weighted + a 1000-element PSRAM-tier list), all ten
+  fits (exact-data recovery for LM models), error paths, and an
+  engine-compile + eval cross-check of every generated model string.
+  Suite now **473 checks**.
+- Deviations from spec sketch: stats structs gained `ok`/`error`; r/r²
+  conventions and `converged` semantics per D23; `one_var` returns
+  quartiles NaN for n=1.
+
+Next: on-device eval (Session 11 + 12 rows in HW-PENDING), then 3C
+distributions (cephes vendoring, P3-4 naming call).
 
 ## 2026-07-19 — Session 11: Phase 3 sub-phase 3A — Array, lists, list editor (D22)
 

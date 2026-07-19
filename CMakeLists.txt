@@ -87,6 +87,7 @@ add_executable(picocalc_graphcalc
     src/math/lists_persist.cpp
     src/math/list_ops.cpp
     src/math/list_expr.cpp
+    src/math/stats.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -103,6 +104,7 @@ add_executable(picocalc_graphcalc
     src/apps/home_screen.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
+    src/apps/stats_screen.cpp
     src/apps/graph_model.cpp
     src/apps/slot_editor.cpp
     src/apps/y_editor.cpp

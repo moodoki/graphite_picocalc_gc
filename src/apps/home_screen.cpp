@@ -19,6 +19,7 @@
 #include "apps/list_editor.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
+#include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "graph/graph_state.hpp"
 
@@ -244,6 +245,10 @@ bool HomeScreen::handle_command(const char* cmd) {
     }
     if (std::strcmp(cmd, "lists") == 0) {
         ui::screen_manager().push(&list_editor());
+        return true;
+    }
+    if (std::strcmp(cmd, "stats") == 0) {
+        ui::screen_manager().push(&stats_screen());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {
