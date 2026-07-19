@@ -1,0 +1,5 @@
+# Dev-tooling Python dependencies (install into the gitignored .venv:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt).
+# Used by test-reference-value generation (e.g. tests/host test vectors);
+# the firmware build does not need Python packages.
+mpmath==1.4.1

@@ -18,11 +18,26 @@ echo "== Compiling tinyexpr (C) =="
 "$CC" -std=c11 -O1 -DTE_POW_FROM_RIGHT -c drivers/tinyexpr/tinyexpr.c \
     -o "$OUT/tinyexpr.o"
 
+echo "== Compiling cephes (C) =="
+# Same renames as the CMake cephes target (see drivers/cephes/README.md).
+# Every test that links catalog.cpp needs these + dist.cpp (3C).
+CEPHES_DEFS="-Dgamma=cephes_gamma -Derf=cephes_erf -Derfc=cephes_erfc"
+CEPHES_OBJS=()
+for f in const polevl mtherr gamma ndtr expx2 ndtri igam igami incbet incbi; do
+    "$CC" -std=c11 -O1 -w $CEPHES_DEFS -c "drivers/cephes/$f.c" -o "$OUT/cephes_$f.o"
+    CEPHES_OBJS+=("$OUT/cephes_$f.o")
+done
+# isfinite-function shim (neither newlib nor macOS libm exports the
+# symbol; see the file).
+"$CC" -std=c11 -O1 -c src/math/cephes_support.c -o "$OUT/cephes_shim.o"
+CEPHES_OBJS+=("$OUT/cephes_shim.o")
+
 echo "== Compiling + linking test_math =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
     tests/host/test_math.cpp src/math/engine.cpp src/math/functions.cpp \
-    src/math/format.cpp src/math/catalog.cpp "$OUT/tinyexpr.o" \
+    src/math/format.cpp src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_math"
 
 echo "== Compiling + linking test_layout =="
@@ -41,8 +56,8 @@ echo "== Compiling + linking test_graph =="
     src/graph/polar_source.cpp src/graph/trace.cpp \
     src/apps/table_model.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
-    src/math/catalog.cpp \
-    "$OUT/tinyexpr.o" \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_graph"
 
 echo "== Compiling + linking test_lists =="
@@ -52,9 +67,16 @@ echo "== Compiling + linking test_lists =="
     src/math/array.cpp src/math/lists.cpp src/math/list_ops.cpp \
     src/math/list_expr.cpp src/math/stats.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
-    src/math/catalog.cpp \
-    "$OUT/tinyexpr.o" \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_lists"
+
+echo "== Compiling + linking test_dist =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_dist.cpp src/math/dist.cpp \
+    "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_dist"
 
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
@@ -62,8 +84,8 @@ echo "== Compiling + linking test_stats =="
     tests/host/test_stats.cpp tests/host/host_psram_backend.cpp \
     src/math/array.cpp src/math/stats.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
-    src/math/catalog.cpp \
-    "$OUT/tinyexpr.o" \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_stats"
 
 echo "== Running test_math =="
@@ -77,6 +99,9 @@ echo "== Running test_graph =="
 
 echo "== Running test_lists =="
 "$OUT/test_lists"
+
+echo "== Running test_dist =="
+"$OUT/test_dist"
 
 echo "== Running test_stats =="
 "$OUT/test_stats"

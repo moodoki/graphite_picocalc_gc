@@ -13,6 +13,7 @@
 #include "math/lists.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
+#include "apps/dist_screen.hpp"
 #include "apps/files_screen.hpp"
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
@@ -252,6 +253,10 @@ bool HomeScreen::handle_command(const char* cmd) {
     }
     if (std::strcmp(cmd, "stats") == 0 || std::strcmp(cmd, "stat") == 0) {
         ui::screen_manager().push(&stats_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "dist") == 0) {
+        ui::screen_manager().push(&dist_screen());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {

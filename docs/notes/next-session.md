@@ -1,69 +1,48 @@
 # Start here — next session
 
-**Last session:** 2026-07-19 (Session 13). Worked the **on-device
-observation batch** (`phase3A-3B-observations-verbatim.md`) from the
-first real use of the 3A/3B firmware — all dispositions recorded as
-**D24**; suite now **508 checks**, lint clean, both boards build,
-**flashed to the Pico 2** (boot verified over serial). What landed:
+**Last session:** 2026-07-19 (Session 14). The Session 13 batch was
+**developer-verified on device** (fixes + features work; large-array
+stats feel OK; "Computing..." shows), then **sub-phase 3C shipped in
+full (3C.2-3C.8)**: suite now **625 checks**, lint clean, both boards
+build, **flashed to the Pico 2** (boot verified over serial).
+Conventions recorded as **D25** (resolves P3-4). What landed:
 
-- **Bug fixes**: brace-literal broadcast (`{1,2,3}+2`,
-  `{1,2,3}+{2,2,2}`) via the new **lift-operand** mechanism (literals
-  and wrapper calls bind as extra lift vars, so `cumsum(range(1,4))+1`
-  composes too); HOME-nav breakage (`switch_to` no longer replaces the
-  stack root); list-editor negative numbers no longer placeholder-gray.
-- **From the request list**: `range(lo,hi[,step])` (inclusive, default
-  step +/-1 toward hi); `mean`/`median`/`stdev` (+`std`) reductions;
-  reduction args generalized to any list expression
-  (`sum(range(1,10000))` — D22 bare-arg limitation lifted); `?`/`list`/
-  `stat` command aliases; stats **"Computing..." indicator** (D23
-  revisit closed); **pi glyph** baked at 0x7F (8x16) + pretty-print
-  substitution (`bdf_to_utft.py --map`).
-- **Parked on the wishlist** (D24.9): greek/subscript stats display,
-  JuliaMono, scientific constants, unit conversions, >6 lists / SD
-  list files.
+- **`math::dist`**: normal/t/chisq/F pdf+cdf+inv, binomial/poisson/
+  geometric pmf+cdf on the cephes primitives + lgamma closed forms.
+  **Two-sided CDFs** `cdf(lo, hi, ...)` (open tails +/-1e99),
+  lower-tail `inv`, real-valued df, NaN on domain errors, TI integer
+  rule for discrete args (pmf strict, cdf floors k).
+- **Catalog/help**: 18 new rows (47 total, `kMaxCatalogEntries` -> 56),
+  fp3/fp4 casts, FUNC-tab summary column yields to long signatures.
+- **`dist` typed command** -> guided form (Distribution/Function
+  cycles, InputLine param fields with shared named slots, Calculate
+  shows the equivalent call + result, **updates Ans**).
+- **Link fix worth knowing**: cephes had never actually linked before —
+  `lgam` needs an `isfinite()` *function* newlib/macOS don't export;
+  shim at `src/math/cephes_support.c` (in the cephes target + host
+  tests; see `drivers/cephes/README.md`).
+- **Python dev-deps rule (this session)**: use the gitignored `.venv`,
+  track packages in `requirements-dev.txt` (mpmath — reference-vector
+  generator `tests/host/gen_dist_vectors.py`).
 
 ## The next job
 
-1. **On-device eval of the 3A + 3B + 13 batches** (Session 11, 12,
-   **and 13** rows in worklog HW-PENDING): list editor + home list
-   syntax (now incl. literals/range/reductions and the bug-fix checks),
-   then the stats screen sweep (form feel, results, store→graph
-   overlay, error paths, the 10000-element 1-Var timing +
-   "Computing..." visibility).
-2. Then **continue sub-phase 3C** (`phase3-spec.md` §5, weeks 22-23).
-   **3C.1 is DONE (Session 12)**: cephes `cprob` subset vendored to
-   `drivers/cephes/` (see its `README.md`) — `ndtr`/`ndtri`,
-   `incbet`/`incbi`, `igam`/`igamc`/`igami` + deps, compiled as the
-   `cephes` CMake lib with `gamma`/`erf`/`erfc` renamed to `cephes_*`
-   (call them `extern "C"` under those names). The integer-df
-   convenience wrappers (`stdtr`/`chdtr`/`fdtr`/`bdtr`/`pdtr`) were
-   deliberately NOT vendored — build `math::dist` on the real-df
-   primitives: t/F via `incbet`/`incbi`, chi-square/Poisson via
-   `igam`/`igamc`/`igami`, binomial cdf via the `incbet` identity,
-   pdfs/pmfs via `std::lgamma` closed forms (no cephes needed).
-   Remaining 3C tasks:
-   - **3C.2-3C.6**: `src/math/dist.{hpp,cpp}` wrappers + host tests
-     (link `drivers/cephes/*.c` into the test with the same
-     `-Dgamma=cephes_gamma -Derf=cephes_erf -Derfc=cephes_erfc`
-     defines). Decide **P3-4** at 3C.2 (spec + D23 lean: TI-style
-     two-arg `cdf(lo, hi, ...)`).
-   - **3C.7**: catalog registration — `build_lookup` already does
-     `TE_FUNCTION0 + arity` so arity 3-4 works; catalog.cpp needs
-     fp3/fp4 helper casts, `kMaxCatalogEntries` bumped past ~43, and
-     the help FUNC tab needs its summary column to yield to long
-     signatures (`normal_cdf(lo,hi,mu,sd)` = 23 chars > the fixed
-     19-char `kSummaryCol` — draw summary at
-     `max(kSummaryCol, sig_width + 1)`).
-   - **3C.8**: `dist` typed command, guided-entry form following the
-     `stats` screen pattern (distribution + function + numeric param
-     fields → result; numeric fields need InputLine rows like
-     WINDOW's, not the L/R-cycle rows).
-   Record the naming/UI calls as **D25** when made (D24 was taken by
-   the Session 13 observation batch).
+1. **On-device eval** of the outstanding batches (worklog HW-PENDING):
+   Session 11 (3A lists sweep), Session 12 (3B stats sweep — timing
+   question already resolved), **Session 14 (3C distributions +
+   `dist` screen)**.
+2. Then **sub-phase 3D** (`phase3-spec.md` §6, weeks 24-25): inference
+   (hypothesis tests + confidence intervals over `math::stats` +
+   `math::dist`), inference UI, and the StatPlot layer. Open questions
+   to decide there: **P3-5** (stat plots vs Y-slots enable UI, task
+   3D.13) and **P3-6** (always-compute paired CIs, task 3D.8). The
+   sub-phase ends with **3D.14 — the combined Pico 1 pass (D18)**:
+   reflash `build/pico/…uf2` first; note Sessions 11-14 added static
+   SRAM and ~30 KB of text (cephes now really links) — re-check the
+   map file there (bss ~135 KB of 264 KB as of Session 14).
 
-Mind the §8 strip-safety rule (idempotent `render()` — StatsScreen
-follows it: compute in on_key, cached result lines) and task 3D.14
-(combined Pico 1 pass, D18).
+Mind the §8 strip-safety rule (idempotent `render()` — StatsScreen and
+DistScreen follow it: compute in on_key, cached result lines).
 
 ## D14 rail settle — NEXT BENCH SESSION
 
@@ -74,11 +53,11 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the Session 13 build** (observation-batch
-  fixes on top of 3A+3B; flashed 2026-07-19, `psram-bulk: OK` + battery
-  heartbeat seen on serial — the BOOTSEL volume mounted in ~5 s and cp
-  exited 0 again). The Pico 1 is still on Session 7 firmware; its pass
-  is deferred to post-Phase 3 (D18).
+- **Firmware on the unit is the Session 14 build** (3C distributions on
+  top of everything prior; flashed 2026-07-19, `psram-bulk: OK` +
+  battery heartbeat seen on serial — the BOOTSEL volume mounted in ~5 s
+  and cp exited 0 again). The Pico 1 is still on Session 7 firmware;
+  its pass is deferred to post-Phase 3 (D18/3D.14).
 - **`lists.dat` may not exist yet on the SD card** — first save creates
   it. If a load ever misbehaves, deleting the file resets all lists
   (magic PCL1; bump to PCL2 on layout change).

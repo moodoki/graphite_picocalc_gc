@@ -252,18 +252,27 @@ int main() {
                 continue;
             }
             ++g_checks;
-            if (cat[i].arity < 0 || cat[i].arity > 2) {
+            if (cat[i].arity < 0 || cat[i].arity > 7) {  // TE_FUNCTION7 cap
                 std::printf("FAIL: catalog entry %d bad arity\n", i);
                 ++g_failures;
                 continue;
             }
-            // Every signature must parse — the same registration path
-            // the calculator uses (a-z are variables, so "ncr(n, r)"
-            // is a valid expression as written).
-            const auto r = math::engine().evaluate(cat[i].signature);
+            // Every registered function must be callable at its
+            // declared arity — the same registration path the
+            // calculator uses. (The signatures themselves use
+            // descriptive parameter names since 3C — "normal_cdf(lo,
+            // hi,mu,sd)" — which are help text, not variables, so
+            // build a numeric call instead of parsing the signature.)
+            char call[64];
+            int pos = std::snprintf(call, sizeof(call), "%s(", cat[i].name);
+            for (int a = 0; a < cat[i].arity; ++a) {
+                pos += std::snprintf(call + pos, sizeof(call) - static_cast<size_t>(pos),
+                                     "%s0.5", a > 0 ? "," : "");
+            }
+            std::snprintf(call + pos, sizeof(call) - static_cast<size_t>(pos), ")");
+            const auto r = math::engine().evaluate(call);
             if (!r.ok) {
-                std::printf("FAIL: catalog signature '%s' does not parse: %s\n",
-                            cat[i].signature, r.error);
+                std::printf("FAIL: catalog call '%s' does not parse: %s\n", call, r.error);
                 ++g_failures;
             }
         }
@@ -295,6 +304,19 @@ int main() {
             ++g_failures;
         }
     }
+
+    // ---- 3C distributions through the parser (arity 2-4 registration;
+    // values themselves are covered by test_dist) ----
+    check_near("normal_cdf(-1, 1, 0, 1)", 0.6826894921370859, 1e-12);
+    check_near("normal_pdf(0, 0, 1)", 0.39894228040143268, 1e-12);
+    check_near("normal_inv(0.975, 0, 1)", 1.9599639845400542, 1e-8);
+    check_near("t_cdf(-2, 2, 5)", 0.89806052117014164, 1e-12);
+    check_near("chisq_inv(0.95, 1)", 3.841458820694126, 1e-7);
+    check_near("f_cdf(0, 2.5, 3, 12)", 0.89084528760499372, 1e-12);
+    check_near("binomial_pmf(3, 10, 0.5)", 0.1171875, 1e-15);
+    check_near("poisson_cdf(2, 3)", 0.42319008112684352, 1e-12);
+    check_near("geometric_cdf(3, 0.2)", 0.488, 1e-15);
+    check_near("2*normal_cdf(-1e99, 1.96, 0, 1)-1", 0.95000420970355911, 1e-12);
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

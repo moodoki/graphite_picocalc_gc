@@ -11,11 +11,11 @@ struct FnDescriptor {
     const char* summary;    // "Combinations: n choose r"
     const void* fn;         // Binding for build_lookup; nullptr = help-only
                             // (list functions live in list_expr, not tinyexpr)
-    int arity;              // 0..2 (TE_FUNCTION0 + arity)
+    int arity;              // 0..4 (TE_FUNCTION0 + arity; te caps at 7)
 };
 
 // Registration headroom for build_lookup's fixed-size table.
-constexpr int kMaxCatalogEntries = 32;
+constexpr int kMaxCatalogEntries = 56;
 
 // The full catalog, in display order.
 const FnDescriptor* catalog(int* count);

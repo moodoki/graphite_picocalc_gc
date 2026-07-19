@@ -18,6 +18,23 @@ Format:
 
 ---
 
+## D25: 3C distributions as-built — two-sided CDFs (P3-4), real-df wrappers, `dist` guided screen
+
+**Date**: 2026-07-19
+**Status**: Accepted (Session 14, sub-phase 3C conventions; resolves phase3-spec P3-4)
+**Context**: 3C.2-3C.8 needed the naming/convention calls the spec left open: one- vs two-tailed CDFs (P3-4), how discrete arguments behave, error signalling without exceptions, and the helper-screen shape.
+**Decision**:
+1. **P3-4: TI-style two-sided CDFs** for the continuous distributions — `cdf(lo, hi, ...)` = P(lo <= X <= hi), `hi < lo` is a domain error; open tails use +/-1e99 (any far value works — `normal_cdf` saturates |z| > 40 before cephes, whose `ndtr` overflows on 1e99). `inv(area, ...)` inverts the **lower tail**, area in (0,1) exclusive (chisq/F additionally accept area = 0 -> 0). Rationale: the two-arg form is what the stats workflows actually use, and it matches the TI the UI imitates; lower-tail inv matches invNorm/invT.
+2. **Spec naming kept** (`normal_pdf/cdf/inv`, `t_*`, `chisq_*`, `f_*`, `binomial_pmf/cdf`, `poisson_*`, `geometric_*`), registered **full-arity** (no default-arg shorthands; tinyexpr is fixed-arity — spec §5.3). Deviation from the spec sketch: discrete `k`/`n` parameters are `calc_t`, not `int`, so every function binds directly to the parser; the TI integer rule is enforced at runtime — **pmf arguments must be integers** (within 1e-9, else NaN), **cdf floors k** (P(X <= floor(k))). Geometric counts trials until first success (k >= 1). Domain errors return NaN (project error convention; the engine already displays NaN).
+3. **Real-valued degrees of freedom throughout**: t/chisq/F are built on `incbet`/`incbi`/`igam`/`igamc`/`igami` directly (the reason the integer-df cephes wrappers were not vendored, 3C.1); pdfs/pmfs are `std::lgamma` closed forms. No local bisection needed — cephes' own inverses cover all three inverse CDFs (`t_inv` via `incbi` + the symmetric-tail transform, `chisq_inv` = 2·igami(df/2, 1-area), `f_inv` via `incbi` + the beta-to-F transform).
+4. **`dist` typed command** (D20) → guided form: Distribution and Function rows (L/R cycle; pdf|pmf/cdf/inv per distribution), the combination's parameters as **InputLine full-expression fields** (WINDOW pattern, ENTER edit / DEL clear-and-edit), Calculate. Parameter values live in shared named slots, so switching pdf -> cdf keeps mu/sd. Calculate builds the equivalent catalog call, **evaluates it through the engine** (so Ans updates — TI DISTR paste-and-run behavior) and shows both the call and the result.
+5. **Registration mechanics**: catalog fp3/fp4 casts, `kMaxCatalogEntries` 32 -> 56 (18 new rows, 47 total), help FUNC summaries draw at `max(kSummaryCol, sig_width + 1)` so `normal_cdf(lo,hi,mu,sd)` doesn't overlap. Signatures now use descriptive parameter names; the host test correspondingly builds a numeric call at the declared arity instead of parsing the signature text.
+6. **`isfinite` link shim** (`src/math/cephes_support.c`, compiled into the cephes target): cephes `gamma.c` calls `isfinite()` as an extern function, but newlib and macOS libm only provide the macro — the cephes static lib had never been linked into a binary until `lgam` got referenced. Fix lives outside the read-only vendored tree per the AGENTS.md driver-workaround rule.
+7. **Reference-value infra**: `tests/host/gen_dist_vectors.py` generates the test vectors at 50-digit precision with mpmath; Python dev-deps go in the gitignored `.venv` and are tracked in `requirements-dev.txt` (developer rule, this session).
+**Rationale**: Matches the handheld conventions users know, keeps every function parser-bindable with one signature, and reuses cephes' inverses instead of writing a solver.
+**Tradeoffs**: No one-sided CDF shorthand (type `-1e99` for the lower tail); pmf integer strictness means `binomial_pmf(2.0000001,...)` errors rather than rounding; `chisq_inv` computes `1-area` (precision loss for area within ~1e-16 of 1 — irrelevant at calculator precision); Pico 1 text grew ~30 KB now that cephes really links.
+**Revisit when**: 3D inference needs additional tail conventions or vectorized (list-argument) distribution calls; a one-sided shorthand is repeatedly missed on device.
+
 ## D24: Session 13 usability batch — lift operands (literal broadcast fix), range(), reduction args, aliases, pi glyph
 
 **Date**: 2026-07-19

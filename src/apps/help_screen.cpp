@@ -1,6 +1,7 @@
 #include "apps/help_screen.hpp"
 
 #include <cstdio>
+#include <cstring>
 
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
@@ -35,6 +36,7 @@ const char* const kKeysLines[] = {
     "lists    data list editor",
     "stats    statistics screen",
     "         (list/stat also ok)",
+    "dist     distribution helper",
     "cls      clear screen (keeps",
     "         input history)",
     "clrhist  erase all history",
@@ -80,6 +82,12 @@ const char* const kKeysLines[] = {
     "LT/RT    change value",
     "ENTER    calculate (last row)",
     "results: UP/DOWN scroll",
+    "#DIST (dist cmd)",
+    "LT/RT    distribution / fn",
+    "ENTER    edit param field",
+    "DEL      clear + edit empty",
+    "ENTER    calculate (last row)",
+    "result -> ans; call shown",
     "#WINDOW / TABLE SETUP",
     "ENTER    edit value",
     "DEL      clear + edit empty",
@@ -142,6 +150,16 @@ const char* const kSyntaxLines[] = {
     "Logistic Sin Med-Med",
     "Store to fills a y slot",
     "with the fitted model",
+    "#DISTRIBUTIONS (dist cmd)",
+    "normal, t, chisq, f:",
+    " _pdf, _cdf(lo,hi,..), _inv",
+    "cdf is P(lo<=X<=hi); use",
+    "-1e99/1e99 for open tails",
+    "inv takes lower-tail area",
+    "binomial, poisson,",
+    "geometric: _pmf, _cdf(k..)",
+    "k, n must be integers",
+    "see FUNC tab for signatures",
 };
 constexpr int kSyntaxCount = sizeof(kSyntaxLines) / sizeof(kSyntaxLines[0]);
 
@@ -236,7 +254,11 @@ void HelpScreen::render(gfx::Framebuffer& fb) {
             int n = 0;
             const math::FnDescriptor* cat = math::catalog(&n);
             font.draw_string(fb, 4, y, cat[i].signature, kGreen);
-            font.draw_string(fb, 4 + kSummaryCol * font.width(), y, cat[i].summary, kWhite);
+            // Long signatures (normal_cdf(lo,hi,mu,sd) = 23 chars, 3C)
+            // push their summary right instead of overlapping.
+            const int sig = static_cast<int>(std::strlen(cat[i].signature));
+            const int col = sig + 1 > kSummaryCol ? sig + 1 : kSummaryCol;
+            font.draw_string(fb, 4 + col * font.width(), y, cat[i].summary, kWhite);
         } else {
             draw_text_line(fb, font, y, tab_ == 1 ? kKeysLines[i] : kSyntaxLines[i]);
         }

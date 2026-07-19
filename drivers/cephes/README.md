@@ -32,3 +32,9 @@ intra-library references stay consistent. Callers (`src/math/dist.cpp`)
 declare the renamed symbols `extern "C"`. Vendored code is compiled
 with warnings suppressed (`-w`) — it predates modern warning sets and
 is treated as read-only third-party code.
+
+`gamma.c` declares and calls `isfinite()` as an extern **function**;
+newlib and macOS libm provide only the `<math.h>` macro, so the link
+needs `src/math/cephes_support.c` (part of the `cephes` target and of
+`scripts/host-tests.sh`) to supply the symbol. The fix lives outside
+this directory per the AGENTS.md read-only-drivers rule (D25).

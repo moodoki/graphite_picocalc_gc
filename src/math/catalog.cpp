@@ -1,5 +1,6 @@
 #include "math/catalog.hpp"
 
+#include "math/dist.hpp"
 #include "math/functions.hpp"
 
 namespace math {
@@ -13,6 +14,12 @@ const void* fp2(double (*f)(double, double)) {
     return reinterpret_cast<const void*>(f);
 }
 const void* fp0(double (*f)()) {
+    return reinterpret_cast<const void*>(f);
+}
+const void* fp3(double (*f)(double, double, double)) {
+    return reinterpret_cast<const void*>(f);
+}
+const void* fp4(double (*f)(double, double, double, double)) {
     return reinterpret_cast<const void*>(f);
 }
 
@@ -52,6 +59,28 @@ const FnDescriptor kCatalog[] = {
     {"mean", "mean(l)", "Mean of elements", nullptr, 1},
     {"median", "median(l)", "Median of elements", nullptr, 1},
     {"stdev", "stdev(l)", "Sample stddev (Sx)", nullptr, 1},
+    // Distributions (Phase 3C, D25). Full arity — tinyexpr has no
+    // default args (spec §5.3). Continuous cdf = P(lo<=X<=hi),
+    // inv = lower-tail inverse; long signatures push the help summary
+    // column right, so keep these summaries short.
+    {"normal_pdf", "normal_pdf(x,mu,sd)", "Normal density", fp3(dist::normal_pdf), 3},
+    {"normal_cdf", "normal_cdf(lo,hi,mu,sd)", "P(lo<=X<=hi)", fp4(dist::normal_cdf), 4},
+    {"normal_inv", "normal_inv(area,mu,sd)", "Inverse CDF", fp3(dist::normal_inv), 3},
+    {"t_pdf", "t_pdf(x,df)", "Student t density", fp2(dist::t_pdf), 2},
+    {"t_cdf", "t_cdf(lo,hi,df)", "t P(lo<=X<=hi)", fp3(dist::t_cdf), 3},
+    {"t_inv", "t_inv(area,df)", "t inverse CDF", fp2(dist::t_inv), 2},
+    {"chisq_pdf", "chisq_pdf(x,df)", "Chi-sq density", fp2(dist::chisq_pdf), 2},
+    {"chisq_cdf", "chisq_cdf(lo,hi,df)", "P(lo<=X<=hi)", fp3(dist::chisq_cdf), 3},
+    {"chisq_inv", "chisq_inv(area,df)", "Chi-sq inv CDF", fp2(dist::chisq_inv), 2},
+    {"f_pdf", "f_pdf(x,d1,d2)", "F density", fp3(dist::f_pdf), 3},
+    {"f_cdf", "f_cdf(lo,hi,d1,d2)", "F P(lo<=X<=hi)", fp4(dist::f_cdf), 4},
+    {"f_inv", "f_inv(area,d1,d2)", "F inverse CDF", fp3(dist::f_inv), 3},
+    {"binomial_pmf", "binomial_pmf(k,n,p)", "P(X=k)", fp3(dist::binomial_pmf), 3},
+    {"binomial_cdf", "binomial_cdf(k,n,p)", "P(X<=k)", fp3(dist::binomial_cdf), 3},
+    {"poisson_pmf", "poisson_pmf(k,lam)", "P(X=k)", fp2(dist::poisson_pmf), 2},
+    {"poisson_cdf", "poisson_cdf(k,lam)", "P(X<=k)", fp2(dist::poisson_cdf), 2},
+    {"geometric_pmf", "geometric_pmf(k,p)", "P(1st success=k)", fp2(dist::geometric_pmf), 2},
+    {"geometric_cdf", "geometric_cdf(k,p)", "P(X<=k)", fp2(dist::geometric_cdf), 2},
 };
 
 constexpr int kCount = sizeof(kCatalog) / sizeof(kCatalog[0]);

@@ -76,6 +76,7 @@ add_library(cephes STATIC
     drivers/cephes/igami.c
     drivers/cephes/incbet.c
     drivers/cephes/incbi.c
+    src/math/cephes_support.c
 )
 target_compile_definitions(cephes PRIVATE gamma=cephes_gamma erf=cephes_erf erfc=cephes_erfc)
 target_compile_options(cephes PRIVATE -w)
@@ -107,6 +108,7 @@ add_executable(picocalc_graphcalc
     src/math/list_ops.cpp
     src/math/list_expr.cpp
     src/math/stats.cpp
+    src/math/dist.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -124,6 +126,7 @@ add_executable(picocalc_graphcalc
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/stats_screen.cpp
+    src/apps/dist_screen.cpp
     src/apps/graph_model.cpp
     src/apps/slot_editor.cpp
     src/apps/y_editor.cpp
