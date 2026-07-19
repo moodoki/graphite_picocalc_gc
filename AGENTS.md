@@ -124,8 +124,12 @@ The HAL wraps C drivers vendored from Coyote OS (PicoCalc calculator firmware). 
 
 ## Files to read first
 
+- `docs/notes/next-session.md` — start-here handoff; read at the start of every session
 - `README.md` — project overview, build instructions
 - `docs/phases/phase1-spec.md` — current implementation contract
 - `docs/architecture.md` — layer rules and rationale
 - `docs/dev-environment.md` — toolchain details (macOS Apple Silicon)
 - `src/config.hpp` — compile-time configuration, board detection
+
+Related handoff notes: `docs/notes/next-bench-session.md` (deferred hardware
+bench work), `docs/notes/wishlist.md` (desired-but-unplanned features).

@@ -165,10 +165,13 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/phases/phase1-spec.md](docs/phases/phase1-spec.md)** / **[phase1-plan.md](docs/phases/phase1-plan.md)** — Phase 1 design contract + plan (complete; retro in [docs/notes/phase1-retro.md](docs/notes/phase1-retro.md))
 - **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (current phase)
 - **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics)
-- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract (CAS, matrix, programming)
+- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract (matrix, graph analysis, complex numbers, CAS, MicroPython)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
 - **[docs/hardware.md](docs/hardware.md)** — hardware reference
 - **[docs/dev-environment.md](docs/dev-environment.md)** — macOS Apple Silicon dev setup
+- **[docs/notes/next-session.md](docs/notes/next-session.md)** — start-here handoff for the next dev session
+- **[docs/notes/next-bench-session.md](docs/notes/next-bench-session.md)** — deferred hardware bench work (D14 rail settle)
+- **[docs/notes/wishlist.md](docs/notes/wishlist.md)** — desired-but-unplanned features
 - **[docs/notes/decisions.md](docs/notes/decisions.md)** — architecture & design decision log
 - **[AGENTS.md](AGENTS.md)** — for AI coding agents
 
@@ -184,7 +187,7 @@ Background research:
 | 1: HAL + calculator + basic graphing | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase1-retro.md) |
 | 2: Graph modes + table + split + help | **Code complete** | Both boards build; 200+ host checks green; on-device test drive pending |
 | 3: Statistics | Specced | docs/phases/phase3-spec.md |
-| 4: CAS + matrix + MicroPython | Specced | ~10 weeks part-time |
+| 4: Matrix + graph analysis + complex + CAS + MicroPython | Specced | ~14 weeks part-time |
 | 5: App framework + polish | Not started | Spec pending |
 
 ## Acknowledgments
