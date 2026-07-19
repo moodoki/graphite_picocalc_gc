@@ -27,18 +27,35 @@ rows in worklog HW-PENDING). What landed (see **D23**):
    then the stats screen sweep (form feel, results, store→graph
    overlay, error paths, the 10000-element 1-Var timing feel — decide
    whether a "computing..." indicator is warranted, D23 revisit).
-2. Then **sub-phase 3C** (`phase3-spec.md` §5, weeks 22-23):
-   distributions. Start with 3C.1 — vendor the needed cephes sources
-   (`ndtr`, `incbet`, `igam`/`igamc`; public domain) into
-   `drivers/cephes/`, update `docs/dependencies.md` + NOTICE. Open
-   call **P3-4** (naming: TI two-arg `normal_cdf(lo, hi, ...)` vs
-   one-tailed standard) — spec leans TI two-arg for test usefulness;
-   decide at 3C.2. Registration goes through `math::catalog` (3C.7,
-   full-arity only — tinyexpr has no default args); local bisection
-   for inverse CDFs (no Phase 1 solver exists).
-3. KIV for 3C UI: distributions are scalar functions, so they mostly
-   ride the normal engine path + catalog/help; the guided-entry helper
-   (3C.8) could follow the `stats` form pattern.
+2. Then **continue sub-phase 3C** (`phase3-spec.md` §5, weeks 22-23).
+   **3C.1 is DONE (Session 12)**: cephes `cprob` subset vendored to
+   `drivers/cephes/` (see its `README.md`) — `ndtr`/`ndtri`,
+   `incbet`/`incbi`, `igam`/`igamc`/`igami` + deps, compiled as the
+   `cephes` CMake lib with `gamma`/`erf`/`erfc` renamed to `cephes_*`
+   (call them `extern "C"` under those names). The integer-df
+   convenience wrappers (`stdtr`/`chdtr`/`fdtr`/`bdtr`/`pdtr`) were
+   deliberately NOT vendored — build `math::dist` on the real-df
+   primitives: t/F via `incbet`/`incbi`, chi-square/Poisson via
+   `igam`/`igamc`/`igami`, binomial cdf via the `incbet` identity,
+   pdfs/pmfs via `std::lgamma` closed forms (no cephes needed).
+   Remaining 3C tasks:
+   - **3C.2-3C.6**: `src/math/dist.{hpp,cpp}` wrappers + host tests
+     (link `drivers/cephes/*.c` into the test with the same
+     `-Dgamma=cephes_gamma -Derf=cephes_erf -Derfc=cephes_erfc`
+     defines). Decide **P3-4** at 3C.2 (spec + D23 lean: TI-style
+     two-arg `cdf(lo, hi, ...)`).
+   - **3C.7**: catalog registration — `build_lookup` already does
+     `TE_FUNCTION0 + arity` so arity 3-4 works; catalog.cpp needs
+     fp3/fp4 helper casts, `kMaxCatalogEntries` bumped past ~43, and
+     the help FUNC tab needs its summary column to yield to long
+     signatures (`normal_cdf(lo,hi,mu,sd)` = 23 chars > the fixed
+     19-char `kSummaryCol` — draw summary at
+     `max(kSummaryCol, sig_width + 1)`).
+   - **3C.8**: `dist` typed command, guided-entry form following the
+     `stats` screen pattern (distribution + function + numeric param
+     fields → result; numeric fields need InputLine rows like
+     WINDOW's, not the L/R-cycle rows).
+   Record the naming/UI calls as **D24** when made.
 
 Mind the §8 strip-safety rule (idempotent `render()` — StatsScreen
 follows it: compute in on_key, cached result lines) and task 3D.14

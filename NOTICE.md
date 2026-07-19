@@ -22,6 +22,7 @@ portions remain individually reusable under MIT.
 | Reference headers (not compiled) | `drivers/coyote_reference/` | GPL-2.0 | Coyote OS |
 | FatFs — generic FAT filesystem | `drivers/fatfs/` | BSD-style 1-clause | [ChaN](http://elm-chan.org/fsw/ff/) |
 | tinyexpr — expression parser | `drivers/tinyexpr/` | zlib | [codeplea/tinyexpr](https://github.com/codeplea/tinyexpr) |
+| cephes special functions (`cprob` subset: ndtr, ndtri, incbet, incbi, igam, igami + deps) | `drivers/cephes/` | Free use per author's statement (© 1984-1995 Stephen L. Moshier; `drivers/cephes/readme-netlib.txt`) | [netlib cephes](https://www.netlib.org/cephes/) |
 | rp2040-psram — PIO SPI PSRAM driver | `drivers/rp2040-psram/` | MIT (© 2023 Ian Scott) | via Coyote OS, upstream [polpo/rp2040-psram](https://github.com/polpo/rp2040-psram) |
 | Raspberry Pi Pico SDK (incl. TinyUSB) | cloned alongside, linked | BSD-3-Clause (TinyUSB: MIT) | [raspberrypi/pico-sdk](https://github.com/raspberrypi/pico-sdk) |
 

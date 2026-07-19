@@ -47,12 +47,22 @@ side anyway (`src/math/functions.cpp`). tinyexpr++ pulls in `std::` machinery an
 `throw` sites we'd have to compile around. Vendored to `drivers/tinyexpr/`; built with
 `-DTE_POW_FROM_RIGHT` for TI-style right-associative `^`.
 
+## Source dependencies (Phase 3)
+
+| Library | Version | License | Source | Used for |
+|---------|---------|---------|--------|----------|
+| cephes (`cprob` subset, 12 files) | netlib release 2.7 (fetched 2026-07-19) | Moshier free-use statement (see `drivers/cephes/readme-netlib.txt`) | https://www.netlib.org/cephes/cprob.tgz | Special functions for 3C distributions: `ndtr`/`ndtri` (normal), `incbet`/`incbi` (t, F, binomial), `igam`/`igamc`/`igami` (chi-square, Poisson), plus their deps (`gamma`/`lgam`, `polevl`, `const`, `expx2`, `mtherr`) |
+
+Vendored per spec §5.3 ("cherry-pick from cephes" — task 3C.1) into
+`drivers/cephes/`; see its `README.md` for the file list, the
+not-vendored integer-df wrappers, and the CMake symbol renames
+(`gamma`/`erf`/`erfc` → `cephes_*`) that prevent libm collisions.
+
 ## Source dependencies (Phase 4 — planned)
 
 | Library | License | Source | Used for |
 |---------|---------|--------|----------|
 | MicroPython embed port | MIT | https://github.com/micropython/micropython | Embedded Python interpreter |
-| (optional) cephes | public domain | https://www.netlib.org/cephes/ | Statistical distribution functions, if needed |
 
 ## Reference projects (NOT linked or vendored, used for design only)
 

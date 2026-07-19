@@ -61,6 +61,25 @@ add_library(tinyexpr STATIC drivers/tinyexpr/tinyexpr.c)
 target_include_directories(tinyexpr PUBLIC drivers/tinyexpr)
 target_compile_definitions(tinyexpr PUBLIC TE_POW_FROM_RIGHT)
 
+# Cephes special functions (Phase 3C distributions — drivers/cephes/README.md).
+# Symbols that exist in libm are renamed at compile time so the two can
+# never collide; math::dist declares the cephes_* names extern "C".
+add_library(cephes STATIC
+    drivers/cephes/const.c
+    drivers/cephes/polevl.c
+    drivers/cephes/mtherr.c
+    drivers/cephes/gamma.c
+    drivers/cephes/ndtr.c
+    drivers/cephes/expx2.c
+    drivers/cephes/ndtri.c
+    drivers/cephes/igam.c
+    drivers/cephes/igami.c
+    drivers/cephes/incbet.c
+    drivers/cephes/incbi.c
+)
+target_compile_definitions(cephes PRIVATE gamma=cephes_gamma erf=cephes_erf erfc=cephes_erfc)
+target_compile_options(cephes PRIVATE -w)
+
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
     src/main.cpp
@@ -153,6 +172,7 @@ target_link_libraries(picocalc_graphcalc
     rp2040-psram
     fatfs
     tinyexpr
+    cephes
 )
 
 # Generate .uf2, .elf, .bin, .hex, .map alongside the binary.

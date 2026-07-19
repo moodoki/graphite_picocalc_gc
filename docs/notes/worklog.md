@@ -116,10 +116,22 @@ Conventions:
   host checks (every model string engine-compile-checked); lint clean;
   **Pico 2 flashed, boot verified over serial (HW eval pending — see
   HW-PENDING)**.
-- **Next up**: on-device eval of the 3A+3B batches, then sub-phase 3C
-  (distributions, spec §5) — vendor cephes special functions first
-  (3C.1), decide P3-4 naming. Note the §8 strip-safety rule and the
-  3D.14 combined Pico 1 pass.
+- **Session 12 addendum: 3C.1 done** — cephes `cprob` subset vendored
+  to `drivers/cephes/` (12 files; `incbet`/`incbi`/`igam`/`igami`/
+  `ndtr`/`ndtri` + deps; integer-df wrappers deliberately skipped —
+  `math::dist` will build on the real-df primitives). CMake `cephes`
+  static lib with `gamma`/`erf`/`erfc` → `cephes_*` renames (no libm
+  collisions), linked into the firmware; both boards compile it.
+  `docs/dependencies.md` + `NOTICE.md` updated; provenance in
+  `drivers/cephes/README.md` + `readme-netlib.txt`.
+- **Next up**: on-device eval of the 3A+3B batches; then continue 3C
+  (spec §5): `math::dist` wrappers (3C.2-3C.6) on the vendored
+  primitives, P3-4 naming call at 3C.2, catalog registration (3C.7 —
+  needs fp3/fp4 helpers, a `kMaxCatalogEntries` bump past 43, and a
+  help FUNC-tab tweak: long signatures like `normal_cdf(lo,hi,mu,sd)`
+  overflow the fixed 19-char summary column), `dist` helper screen
+  (3C.8). Note the §8 strip-safety rule and the 3D.14 combined Pico 1
+  pass.
 - KIV: F-key layout rethink (feedback item 7) — Session 8 shipped the
   uncontroversial part (home F1 mode-dependent); F3/F4 consistency and
   WINDOW-from-graph still open, help KEYS must move with them.
@@ -235,8 +247,15 @@ over serial — `psram-bulk: OK`, battery heartbeat).
   conventions and `converged` semantics per D23; `one_var` returns
   quartiles NaN for n=1.
 
-Next: on-device eval (Session 11 + 12 rows in HW-PENDING), then 3C
-distributions (cephes vendoring, P3-4 naming call).
+Same session, after the 3B commit: **task 3C.1 (cephes vendoring) —
+done** (see the status addendum above; commit `deps: ...`). The
+`TE_FUNCTION0 + arity` registration in `build_lookup` already
+generalizes to arity 3-4, so 3C.7 only needs catalog-side fp3/fp4
+helpers + headroom.
+
+Next: on-device eval (Session 11 + 12 rows in HW-PENDING), then the
+rest of 3C: `math::dist` wrappers (P3-4 naming call at 3C.2), catalog
+registration, `dist` helper screen.
 
 ## 2026-07-19 — Session 11: Phase 3 sub-phase 3A — Array, lists, list editor (D22)
 
