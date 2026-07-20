@@ -222,8 +222,113 @@ Still to verify on hardware:
 | Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine |
 | Session 17 — Phase 4B graph analysis / CALC menu (D29; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected |
 | Session 18 — Phase 4C complex numbers (D30; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface |
+| Session 19 — font system + real math glyphs, `eig` alias, list UX (D31; flashed 2026-07-21, **Terminus** default build, boots healthy, PSRAM/storage/battery telemetry clean) | This session's own on-device font comparison across all five builds is already done (D31: Terminus picked as the shipped default; Unifont good with the 2px lift; Spleen best if a thicker font is wanted; JuliaMono worst, Iosevka a bit unbalanced) — remaining is a **glyph-correctness sweep on the Terminus build in situ**: home-screen complex results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row (`a+bi`/`r∠θ`), pretty-printed expressions (`π`, `θ`, inline `√(x)`, `3+2i` via the plain-text fallback), stats σx/σy/Σx/Σx²/Σy/Σy²/Σxy/r², inference `≠`/μ/σ, distribution μ/λ, graph-trace + table polar label θ, and `…` truncation in list/matrix/complex history + slot editor. Also: `eig` as a drop-in alias for `eigenvals([A])` (whole-expression only, same as `eigenvals`/`dim`); list history LEFT/RIGHT horizontal scroll on the newest result when the input line is empty, using the new compact (4-sig-fig) number format so more list elements fit per screen. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis, table all unaffected |
 
 ---
+
+## 2026-07-21 — Session 19: Font system + real math glyphs, `eig` alias, list UX polish (D31)
+
+Large multi-part UI-polish + bugfix + font session, spanning 2026-07-20
+into 2026-07-21. Started from a testdrive papercut (ASCII `<` for the
+polar angle, plain `i`) and widened into a full pass: a build-time
+swappable 8x16 main font with a shared math-glyph slot map, real-glyph
+substitutions across every screen that had been using ASCII stand-ins,
+an `eig` alias for `eigenvals`, and a list-history UX fix. All recorded
+as **D31** in `decisions.md` (see there for the full as-built detail and
+the on-device font comparison notes) — this entry summarizes what
+landed and doesn't re-derive D31. Host suite grew **1206 -> 1219
+checks** (`test_math` 197->198, `test_layout` 41->46, `test_lists`
+133->134, `test_matrix` 219->225; all other suites unchanged), 0
+failures; lint clean; format clean; both boards build with no new
+warnings. Pico 1 text 362004 -> 364068 (+2064 B), bss 188684 -> 188820
+(+136 B, ~188.8 KB of 264 KB — still the D28/D29/D30 watch item,
+essentially flat). Pico 2 text 349068 -> 351164 (+2096 B), bss 382604
+-> 382740 (+136 B). **Flashed to the Pico 2 (Terminus default build);
+boots healthy, telemetry clean over serial.**
+
+- **`eig` alias for `eigenvals`** (`src/math/mat_expr.cpp`): added to
+  `kMatFns` and the whole-expression `eigenvals(...)`/`dim(...)` parse
+  path (`eig([A])` now resolves identically to `eigenvals([A])`); the
+  "must stand alone" rejection inside a larger expression covers it too.
+  `catalog.cpp` gained the help entry; `test_matrix.cpp` covers the
+  alias.
+- **List UX (testdrive 2026-07-20 follow-up)**: `format_number_compact`
+  (`math/format.{hpp,cpp}`) — a 4-significant-figure, ~5-character
+  variant used by `format_list` so more list elements fit on one line;
+  falls back to the full formatter for integers, FIX/SCI modes, and the
+  scientific-notation range. Home screen (`home_screen.{hpp,cpp}`) gained
+  **LEFT/RIGHT horizontal scroll of the newest result** when the input
+  line is empty and the view is pinned to newest (`result_full_` keeps
+  the untruncated string, `result_scroll_` is the pan offset, windowed
+  by `result_max_scroll()`); otherwise LEFT/RIGHT still move the input
+  cursor as before. A separate full-precision detail screen was
+  considered and left KIV.
+- **Swappable 8x16 main font + real math glyphs — the big one (D31)**:
+  build flag `-DPICOCALC_FONT=spleen|juliamono|iosevka|unifont|terminus`,
+  **default terminus** (`CMakeLists.txt`, `gfx/font.cpp`); the 5x8 small
+  font stays Spleen always. All five fonts carry the same 32..140 slot
+  map, including new high slots 127..140: π, ∠, θ, σ, Σ, χ, μ, imaginary
+  `i`, store-arrow ⇒, λ, ≠, …, ², √. New tooling: `scripts/ttf_to_utft.py`
+  (freetype raster) and `scripts/hex_to_utft.py` (native Unifont .hex);
+  `bdf_to_utft.py` gained `--extra`/`--hexfont`/`--hexmap`/`--hexshift`;
+  per-font `scripts/gen-{fonts,juliamono,iosevka,unifont,terminus}.sh`;
+  `scripts/mathglyphs-8x16.txt`; vendored OFL/dual licenses under
+  `drivers/{juliamono,iosevka,unifont,terminus}/` (README + license only
+  — font sources are fetched on demand, not committed); five committed
+  headers in `src/gfx/fonts/`; `requirements-dev.txt` pins `freetype-py`.
+- **Real-glyph substitutions across the UI**: `format_complex` polar
+  `<`->∠ and `i`->the imaginary-unit glyph; MODE Number row shows
+  `a+bi`/`r∠θ`; `render/layout_builder.cpp` gained a `preprocess_glyphs`
+  pass that rewrites `pi`/`i`/`theta` and the `->` store op up front, so
+  the substitution reaches the plain-text fallback too (e.g. `3+2i`
+  renders correctly even when it doesn't build a full layout tree);
+  `sqrt` deliberately stays a real function identifier (needed for the
+  fraction/call structure, e.g. `1/sqrt(2)`) but its rendered name is
+  √, so it prints inline as `√(x)` (a true radical vinculum over the
+  argument is KIV). Home-screen result store indicator `>`->⇒;
+  truncation `...`->… in `list_expr.cpp`, `mat_expr.cpp`, and
+  `slot_editor.cpp`; graph-trace + table polar label `th`->θ
+  (`graph_screen.cpp`, `table_model.cpp`); stats results σx/σy,
+  Σx/Σx²/Σy/Σy²/Σxy, r² (`stats_screen.cpp`); inference `!=`->≠ and
+  `mu`/`sigma`->μ/σ (`infer_screen.cpp`); distribution `mu`/`lambda`->
+  μ/λ (`dist_screen.cpp`). New display-byte constants: `gfx::kGlyph*`
+  (`gfx/font.hpp`) and `math::kAngleGlyph`/`kImagUnitGlyph`/
+  `kEllipsisGlyph` (`math/format.hpp`). Tests updated: `test_layout`,
+  `test_lists`, `test_matrix`, `test_graph`, `test_complex_expr`.
+- **Non-bug**: a reported "2-Var stats doesn't scroll" turned out not to
+  be one — all 17 result rows fit on screen, so no scroll is needed.
+  `kResVisible` was briefly changed then reverted to 17 (net: no change
+  there).
+
+Decisions recorded as **D31** (see `decisions.md`): the font-as-build-flag
+design, the shared 32..140 slot map and its glyph sourcing (Unifont for
+spleen/terminus/unifont, native TTF glyphs for JuliaMono/Iosevka), the
+full substitution list, and the on-device font comparison verdict
+(Terminus default; Unifont good; Spleen best-if-thicker; JuliaMono
+worst; Iosevka a bit unbalanced from rastering).
+
+Known limitations / deferred:
+- No true radical vinculum — √ is inline-only (`√(x)`), not drawn over
+  the argument.
+- No true subscripts (Sₓ, σₓ) in stats/inference displays — still text,
+  just with real Greek letters now instead of `mu`/`sigma` spelled out.
+- Rasterized fonts (JuliaMono, Iosevka) read worse than the bitmap fonts
+  at 8px 1bpp with no antialiasing; antialiasing / a higher-res panel /
+  a desktop emulator build would likely help — all unplanned, tracked
+  in `wishlist.md`.
+- Four non-default font build dirs (`build/pico2-jm|io|uni|term`) are
+  now stale relative to this session's other (non-font) changes; a
+  rebuild picks up everything. `build/pico2` is the canonical default
+  (Terminus) and is what's flashed.
+- Pruning the non-default fonts (if the selector is ever judged
+  unnecessary) is left as a future call, not made this session.
+
+Still HW-PENDING (unchanged from Session 18, plus this session's own
+glyph-correctness sweep, see the table row above): the Session 11/12/
+15/16/17/18 batches (lists, stats, storage health, inference/stat
+plots, matrices/solver, CALC menu, complex numbers) still await their
+on-device pass; then **3D.14** (the combined Pico 1 pass, D18); then
+**Phase 4D** (CAS engine, `phase4-spec.md` §6).
 
 ## 2026-07-20 — Session 18: Phase 4C — complex numbers (D30)
 

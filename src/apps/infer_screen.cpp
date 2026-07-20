@@ -20,6 +20,16 @@ namespace apps {
 
 namespace {
 
+// Real Greek glyphs for the population parameters, replacing the ASCII
+// spellings in the form labels (testdrive 2026-07-21). Display-only.
+const char kSigmaLabel[] = {gfx::kGlyphSigmaLower, 0};             // σ
+const char kMu0Label[] = {gfx::kGlyphMu, '0', 0};                  // μ0
+const char kH1MuLabel[] = {'H', '1', ':', ' ', gfx::kGlyphMu, 0};  // "H1: μ"
+const char kH1Mu12Label[] = {'H', '1', ':',           ' ', gfx::kGlyphMu,
+                             '1', '-', gfx::kGlyphMu, '2', 0};  // "H1: μ1-μ2"
+const char kH1MuDiffLabel[] = {'H', '1', ':', ' ', gfx::kGlyphMu,
+                               'd', 'i', 'f', 'f', 0};  // "H1: μdiff"
+
 constexpr int kTopY = 24;
 constexpr int kRowH = 23;
 constexpr int kResTopY = 24;
@@ -67,7 +77,10 @@ const char* const kKindNames[kKindCount] = {
     "2-Prop Z-Test", "Chi2 GOF",   "Chi2 2-Way",    "ANOVA",         "LinReg T-Test",
     "Z-Interval",    "T-Interval", "2-Samp T-Int",  "1-Prop Z-Int",  "2-Prop Z-Int",
 };
-const char* const kAltNames[3] = {"!=", "<", ">"};
+// H1 alternatives: not-equal uses the real ≠ glyph (testdrive
+// 2026-07-21); < and > stay ASCII.
+const char kNeLabel[] = {gfx::kGlyphNotEqual, 0};
+const char* const kAltNames[3] = {kNeLabel, "<", ">"};
 
 bool kind_has_source(int kind) {
     return kind == kTTest1 || kind == kTTest2 || kind == kTInt1 || kind == kTInt2;
@@ -104,10 +117,10 @@ int InferScreen::build_rows(Row* rows) const {
     switch (kind_) {
         case kZTest:
             rows[n++] = {kRowNum, kSXbar, "xbar"};
-            rows[n++] = {kRowNum, kSS, "sigma"};
+            rows[n++] = {kRowNum, kSS, kSigmaLabel};
             rows[n++] = {kRowNum, kSN, "n"};
-            rows[n++] = {kRowNum, kSMu0, "mu0"};
-            rows[n++] = {kRowAlt, 0, "H1: mu"};
+            rows[n++] = {kRowNum, kSMu0, kMu0Label};
+            rows[n++] = {kRowAlt, 0, kH1MuLabel};
             break;
         case kTTest1:
             if (data) {
@@ -117,8 +130,8 @@ int InferScreen::build_rows(Row* rows) const {
                 rows[n++] = {kRowNum, kSS, "s"};
                 rows[n++] = {kRowNum, kSN, "n"};
             }
-            rows[n++] = {kRowNum, kSMu0, "mu0"};
-            rows[n++] = {kRowAlt, 0, "H1: mu"};
+            rows[n++] = {kRowNum, kSMu0, kMu0Label};
+            rows[n++] = {kRowAlt, 0, kH1MuLabel};
             break;
         case kTTest2:
         case kTInt2:
@@ -135,7 +148,7 @@ int InferScreen::build_rows(Row* rows) const {
             }
             rows[n++] = {kRowPooled, 0, "Pooled"};
             if (kind_ == kTTest2) {
-                rows[n++] = {kRowAlt, 0, "H1: mu1-mu2"};
+                rows[n++] = {kRowAlt, 0, kH1Mu12Label};
             } else {
                 rows[n++] = {kRowNum, kSConf, "C-level"};
             }
@@ -143,7 +156,7 @@ int InferScreen::build_rows(Row* rows) const {
         case kTPaired:
             rows[n++] = {kRowListA, 0, "List 1"};
             rows[n++] = {kRowListB, 0, "List 2"};
-            rows[n++] = {kRowAlt, 0, "H1: mudiff"};
+            rows[n++] = {kRowAlt, 0, kH1MuDiffLabel};
             break;
         case kPropZ1:
             rows[n++] = {kRowNum, kSX1, "x"};
@@ -180,7 +193,7 @@ int InferScreen::build_rows(Row* rows) const {
             break;
         case kZInt:
             rows[n++] = {kRowNum, kSXbar, "xbar"};
-            rows[n++] = {kRowNum, kSS, "sigma"};
+            rows[n++] = {kRowNum, kSS, kSigmaLabel};
             rows[n++] = {kRowNum, kSN, "n"};
             rows[n++] = {kRowNum, kSConf, "C-level"};
             break;

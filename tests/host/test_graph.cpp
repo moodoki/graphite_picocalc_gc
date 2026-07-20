@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "gfx/font.hpp"
 #include "graph/function_source.hpp"
 #include "graph/graph_mode.hpp"
 #include "apps/table_model.hpp"
@@ -382,7 +383,8 @@ int main() {
         expect(apps::evaluate_table_row(po, 2.0, results, apps::kMaxTableColumns) == 1 &&
                    std::fabs(results[0] - 4.0) < 1e-12,
                "row at theta=2 -> [4]");
-        expect(std::strcmp(apps::table_independent_label(po), "th") == 0, "independent is th");
+        const char theta[2] = {gfx::kGlyphTheta, 0};
+        expect(std::strcmp(apps::table_independent_label(po), theta) == 0, "independent is theta");
 
         // Syntax error in a slot -> NaN column, others unaffected.
         std::snprintf(st.y.expr[0], sizeof(st.y.expr[0]), "x^^2");

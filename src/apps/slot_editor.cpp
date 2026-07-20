@@ -163,10 +163,13 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
             // (HW 2026-07-19).
             const int max_chars = (platform::kScreenW - 20 - expr_x) / font.width();
             char shown[40];
-            if (static_cast<int>(std::strlen(text)) > max_chars && max_chars > 3 &&
+            if (static_cast<int>(std::strlen(text)) > max_chars && max_chars > 1 &&
                 max_chars < static_cast<int>(sizeof(shown))) {
-                std::memcpy(shown, text, static_cast<size_t>(max_chars) - 3);
-                std::memcpy(shown + max_chars - 3, "...", 4);
+                // One ellipsis glyph instead of three ASCII dots, so one
+                // more character of the expression shows.
+                std::memcpy(shown, text, static_cast<size_t>(max_chars) - 1);
+                shown[max_chars - 1] = gfx::kGlyphEllipsis;
+                shown[max_chars] = 0;
                 font.draw_string(fb, expr_x, y, shown, color);
             } else {
                 font.draw_string(fb, expr_x, y, text, color);

@@ -108,11 +108,27 @@ void test_errors() {
     check_err("bogusfn(1+i)", "Syntax error", "unknown fn with complex arg");
 }
 
+// format_complex now emits the font's real angle/imag-i glyph bytes
+// (testdrive 2026-07-20). Expected strings stay readable ASCII here;
+// this maps the ASCII 'i'/'<' placeholders to those glyph bytes so the
+// comparison verifies the glyphs are actually emitted.
+void to_glyphs(const char* ascii, char* out, size_t out_len) {
+    size_t i = 0;
+    for (; ascii[i] != 0 && i + 1 < out_len; ++i) {
+        out[i] = ascii[i] == 'i'   ? math::kImagUnitGlyph
+                 : ascii[i] == '<' ? math::kAngleGlyph
+                                   : ascii[i];
+    }
+    out[i] = 0;
+}
+
 void check_fmt_rect(double re, double im, const char* expected, const char* what) {
     ++g_checks;
     char buf[32];
+    char want[32];
+    to_glyphs(expected, want, sizeof(want));
     math::format_complex(math::Complex(re, im), math::NumberMode::kRectangular, buf, sizeof(buf));
-    if (std::strcmp(buf, expected) != 0) {
+    if (std::strcmp(buf, want) != 0) {
         std::printf("FAIL: format_complex(%.9g,%.9g) -> '%s' (expected '%s') [%s]\n", re, im, buf,
                     expected, what);
         ++g_failures;
@@ -129,8 +145,10 @@ void test_format_complex() {
     check_fmt_rect(1, 1, "1 + i", "unit imag with real part");
 
     char buf[32];
+    char want[32];
     math::format_complex(math::Complex(2, 2), math::NumberMode::kPolar, buf, sizeof(buf));
-    check(std::strcmp(buf, "2.828427125<0.7853981634") == 0, "polar 2+2i");
+    to_glyphs("2.828427125<0.7853981634", want, sizeof(want));
+    check(std::strcmp(buf, want) == 0, "polar 2+2i");
 }
 
 void test_number_mode_default() {

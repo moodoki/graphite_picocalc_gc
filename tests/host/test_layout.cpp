@@ -114,6 +114,35 @@ int main() {
                "'pit' is not substituted");
     }
 
+    // Complex 'i' and polar 'theta' render as their glyphs; a lone 'i'
+    // is always the imaginary unit (testdrive 2026-07-21).
+    {
+        auto* n = build("i");
+        expect(n != nullptr && n->type == NodeType::kText &&
+                   n->t.text[0] == gfx::kGlyphImagI && n->t.text[1] == 0,
+               "'i' is the imaginary-unit glyph");
+        // "3+2i" uses implicit multiply, so it renders via the plain-text
+        // fallback — but preprocessing still swaps the trailing 'i'.
+        auto* h = build("3+2i");
+        expect(h != nullptr && h->type == NodeType::kText &&
+                   h->t.text[std::strlen(h->t.text) - 1] == gfx::kGlyphImagI,
+               "'3+2i' ends in the imaginary glyph");
+        auto* t = build("theta");
+        expect(t != nullptr && t->type == NodeType::kText &&
+                   t->t.text[0] == gfx::kGlyphTheta && t->t.text[1] == 0,
+               "'theta' is the theta glyph");
+        // Identifiers merely containing 'i'/'theta' are untouched.
+        auto* s = build("sin");
+        expect(s != nullptr && s->type == NodeType::kText && std::strcmp(s->t.text, "sin") == 0,
+               "'sin' is not substituted");
+        // "sqrt(9)" renders as the radical glyph + (9) — a real call, not
+        // a text fallback (big radical over the arg is KIV).
+        auto* q = build("sqrt(9)");
+        expect(q != nullptr && q->type == NodeType::kHBox && q->h.count == 2 &&
+                   q->h.items[0]->t.text[0] == gfx::kGlyphSqrt,
+               "'sqrt(9)' uses the radical glyph");
+    }
+
     // Function call sin(x) -> HBox[Text("sin"), Paren(x)]
     {
         auto* n = build("sin(x)");
@@ -132,7 +161,7 @@ int main() {
                "'1/sqrt(2)' is Fraction");
         expect(n != nullptr && n->bin.b->type == NodeType::kHBox &&
                    n->bin.b->h.count == 2 &&
-                   std::strcmp(n->bin.b->h.items[0]->t.text, "sqrt") == 0,
+                   n->bin.b->h.items[0]->t.text[0] == gfx::kGlyphSqrt,
                "denominator is the sqrt call");
     }
     {
@@ -185,13 +214,14 @@ int main() {
                "'2e' falls back to whole-string text");
     }
 
-    // Unconsumed input falls back to the whole string as plain text
-    // rather than a silently truncated tree.
+    // Store "2->A": the "->" collapses to the store-arrow glyph in
+    // preprocessing; the result renders via the plain-text fallback
+    // (testdrive 2026-07-21).
     {
         auto* n = build("2->A");
-        expect(n != nullptr && n->type == NodeType::kText &&
-                   std::strcmp(n->t.text, "2->A") == 0,
-               "'2->A' falls back to whole-string text");
+        const char store[2] = {gfx::kGlyphStore, 0};
+        expect(n != nullptr && n->type == NodeType::kText && std::strstr(n->t.text, store) != nullptr,
+               "'2->A' renders with the store-arrow glyph");
     }
     {
         auto* n = build("ncr(10,3)");

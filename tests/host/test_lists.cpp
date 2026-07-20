@@ -8,6 +8,7 @@
 
 #include "math/array.hpp"
 #include "math/engine.hpp"
+#include "math/format.hpp"
 #include "math/list_expr.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
@@ -356,7 +357,14 @@ void test_list_expr() {
     char tiny[12];
     eval_list("{111111,222222,333333}->l6");
     math::listexpr::format_list(math::lists().list(5), tiny, sizeof(tiny));
-    check(std::strstr(tiny, "...") != nullptr, "format_list truncates");
+    check(std::strchr(tiny, math::kEllipsisGlyph) != nullptr, "format_list truncates");
+
+    // Compact per-element formatting (testdrive 2026-07-20): fractional
+    // values round to 4 significant figures so more fit before truncation;
+    // integers and short decimals are unchanged.
+    eval_list("{1/3,2/3,4}->l6");
+    math::listexpr::format_list(math::lists().list(5), buf, sizeof(buf));
+    check(std::strcmp(buf, "{0.3333,0.6667,4}") == 0, "format_list compact float");
 
     // PSRAM-tier lists through the lift path.
     eval_list("seq(x, x, 1, 1000, 1)->l1");

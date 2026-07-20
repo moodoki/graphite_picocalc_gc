@@ -52,6 +52,14 @@ private:
     int hist_nav_ = -1;
     char pending_[ui::InputLine::kCapacity] = {};  // Stashed unsent input
 
+    // Horizontal scroll of the newest result (testdrive 2026-07-20): long
+    // list/matrix results are truncated on the history line; when the
+    // input is empty and the view is pinned to newest, LEFT/RIGHT pan a
+    // window across the full untruncated text kept here. Reset on every
+    // new result and on cls.
+    char result_full_[128] = {};
+    int result_scroll_ = 0;  // Char offset of the visible window's left edge
+
     ui::InputLine input_;
 
     void invalidate_input();
@@ -60,6 +68,7 @@ private:
     void evaluate_input();
     bool handle_command(const char* cmd);
     int visible_count() const;
+    int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_
     void push_entry(const char* expr, const char* result, bool error);
     void persist_history_line(const char* expr, const char* result);
     void save_variables();

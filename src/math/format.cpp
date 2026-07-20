@@ -130,6 +130,23 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
     return strip_zeros(buf);
 }
 
+int format_number_compact(calc_t x, char* buf, size_t buf_len) {
+    if (buf_len == 0) {
+        return 0;
+    }
+    const double ax = std::fabs(x);
+    // Defer to the full formatter for everything that is already short or
+    // where the user picked the precision: non-finite, FIX/SCI modes,
+    // integers, and the scientific-notation range. Only ordinary
+    // fractional floats in FLOAT mode get shortened.
+    if (g_mode != DisplayMode::kFloat || !std::isfinite(x) || (x == std::floor(x) && ax < 1e10) ||
+        ax >= 1e10 || (ax > 0 && ax < 1e-4)) {
+        return format_number(x, buf, buf_len);
+    }
+    std::snprintf(buf, buf_len, "%.4g", x);
+    return strip_zeros(buf);
+}
+
 int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len) {
     if (buf_len == 0) {
         return 0;
@@ -143,7 +160,7 @@ int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len)
         char tbuf[24];
         format_number(z.modulus(), rbuf, sizeof(rbuf));
         format_number(theta, tbuf, sizeof(tbuf));
-        return std::snprintf(buf, buf_len, "%s<%s", rbuf, tbuf);
+        return std::snprintf(buf, buf_len, "%s%c%s", rbuf, kAngleGlyph, tbuf);
     }
 
     if (z.is_real()) {
@@ -155,11 +172,12 @@ int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len)
         format_number(std::fabs(z.im), imag, sizeof(imag));
     }
     if (z.re == 0.0) {
-        return std::snprintf(buf, buf_len, "%s%si", z.im < 0 ? "-" : "", imag);
+        return std::snprintf(buf, buf_len, "%s%s%c", z.im < 0 ? "-" : "", imag, kImagUnitGlyph);
     }
     char rebuf[24];
     format_number(z.re, rebuf, sizeof(rebuf));
-    return std::snprintf(buf, buf_len, "%s %s %si", rebuf, z.im < 0 ? "-" : "+", imag);
+    return std::snprintf(buf, buf_len, "%s %s %s%c", rebuf, z.im < 0 ? "-" : "+", imag,
+                         kImagUnitGlyph);
 }
 
 }  // namespace math

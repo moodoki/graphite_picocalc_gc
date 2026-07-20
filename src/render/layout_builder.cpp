@@ -11,9 +11,54 @@ namespace render {
 
 namespace {
 
-// Display form of the identifier "pi" (D24) — the Greek glyph the main
-// font bakes at gfx::kGlyphPi.
-const char kPiGlyph[2] = {gfx::kGlyphPi, 0};
+// The radical glyph, used as the display name of the `sqrt` call (see
+// parse_atom). Kept out of preprocess_glyphs so `sqrt(x)` still parses as
+// a function call.
+const char kSqrtGlyph[2] = {gfx::kGlyphSqrt, 0};
+
+// Rewrite known identifiers/operators to the real math glyphs the main
+// font bakes at high slots, before parsing (D24 pi; complex i, polar
+// theta, and the store arrow added testdrive 2026-07-21). Doing it as a
+// string pass — rather than per-atom — means the substitution also
+// reaches the plain-text fallback path (e.g. "3+2i", where the implicit
+// multiply stops the parser). Identifiers are matched whole, so 'i' in
+// "sin" or "pi" in "pit" is untouched; a lone 'i' is always the
+// imaginary unit. The output never grows (multi-char names collapse to
+// one glyph), so out_len == input capacity is safe.
+void preprocess_glyphs(const char* in, char* out, size_t out_len) {
+    size_t o = 0;
+    const auto put = [&](char c) {
+        if (o + 1 < out_len) {
+            out[o++] = c;
+        }
+    };
+    for (const char* p = in; *p != 0;) {
+        if (std::isalpha(static_cast<unsigned char>(*p)) != 0) {
+            const char* start = p;
+            while (std::isalnum(static_cast<unsigned char>(*p)) != 0) {
+                ++p;
+            }
+            const auto len = static_cast<size_t>(p - start);
+            if (len == 2 && std::memcmp(start, "pi", 2) == 0) {
+                put(gfx::kGlyphPi);
+            } else if (len == 1 && start[0] == 'i') {
+                put(gfx::kGlyphImagI);
+            } else if (len == 5 && std::memcmp(start, "theta", 5) == 0) {
+                put(gfx::kGlyphTheta);
+            } else {
+                for (size_t i = 0; i < len; ++i) {
+                    put(start[i]);
+                }
+            }
+        } else if (p[0] == '-' && p[1] == '>') {
+            put(gfx::kGlyphStore);
+            p += 2;
+        } else {
+            put(*p++);
+        }
+    }
+    out[o < out_len ? o : out_len - 1] = 0;
+}
 
 // ---- Node factories (compute size at construction) ----
 
@@ -35,9 +80,12 @@ LayoutNode* make_text(const char* s, int len, const Metrics& m) {
 // A function call parses to HBox[name, paren-args]. Recognize that shape
 // structurally — the name check keeps unary-minus HBoxes ("-(x)") out.
 bool is_call(const LayoutNode* n) {
+    // name(args): a Text name followed by a Paren. The name is normally
+    // alphabetic, but sqrt renders as the single radical glyph.
     return n->type == NodeType::kHBox && n->h.count == 2 &&
            n->h.items[0]->type == NodeType::kText &&
-           std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 &&
+           (std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 ||
+            n->h.items[0]->t.text[0] == gfx::kGlyphSqrt) &&
            n->h.items[1]->type == NodeType::kParen;
 }
 
@@ -176,8 +224,15 @@ struct Parser {
                 ++p;
             }
             const int ident_len = static_cast<int>(p - start);
-            const bool is_pi = ident_len == 2 && start[0] == 'p' && start[1] == 'i';
-            LayoutNode* name = is_pi ? make_text(kPiGlyph, 1, m) : make_text(start, ident_len, m);
+            // Most known-name glyph substitution (pi/i/theta) happens up
+            // front in preprocess_glyphs(). `sqrt` is special: it's a
+            // function, so it stays an identifier here (the call parsing
+            // below keeps the "(args)") but its name renders as the radical
+            // glyph — an inline "√(x)". (A big radical over the argument is
+            // KIV — testdrive 2026-07-21.)
+            const bool is_sqrt = ident_len == 4 && std::memcmp(start, "sqrt", 4) == 0;
+            LayoutNode* name =
+                is_sqrt ? make_text(kSqrtGlyph, 1, m) : make_text(start, ident_len, m);
             skip_spaces();
             if (*p == '(') {  // Function call: name followed by (args)
                 ++p;
@@ -296,7 +351,11 @@ LayoutNode* build_layout(const char* expr, const Metrics& m) {
     if (expr == nullptr || *expr == 0) {
         return nullptr;
     }
-    Parser parser{expr, m};
+    // Substitute the math glyphs first, then parse/fall back on the
+    // rewritten string so glyphs show in both cases (testdrive 2026-07-21).
+    char pre[256];
+    preprocess_glyphs(expr, pre, sizeof(pre));
+    Parser parser{pre, m};
     LayoutNode* root = parser.parse_expr();
     parser.skip_spaces();
     if (root == nullptr || *parser.p != 0) {
@@ -305,7 +364,7 @@ LayoutNode* build_layout(const char* expr, const Metrics& m) {
         // string as plain text rather than a silently-truncated tree
         // (HW-found 2026-07-11: "1e10" displayed as just "1").
         pool_reset();
-        root = make_text(expr, static_cast<int>(std::strlen(expr)), m);
+        root = make_text(pre, static_cast<int>(std::strlen(pre)), m);
     }
     return root;
 }

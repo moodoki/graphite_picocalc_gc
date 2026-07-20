@@ -28,6 +28,17 @@ constexpr int kResTopY = 24;
 constexpr int kResRowH = 16;
 constexpr int kSoftkeyY = 300;
 
+// Result-line labels in real math notation (testdrive 2026-07-21):
+// lowercase sigma for population stddev, uppercase Sigma for the sums.
+const char kSigX[] = {gfx::kGlyphSigmaLower, 'x', 0};                        // σx
+const char kSigY[] = {gfx::kGlyphSigmaLower, 'y', 0};                        // σy
+const char kSumX[] = {gfx::kGlyphSigmaUpper, 'x', 0};                        // Σx
+const char kSumX2[] = {gfx::kGlyphSigmaUpper, 'x', gfx::kGlyphSuperTwo, 0};  // Σx²
+const char kSumY[] = {gfx::kGlyphSigmaUpper, 'y', 0};                        // Σy
+const char kSumY2[] = {gfx::kGlyphSigmaUpper, 'y', gfx::kGlyphSuperTwo, 0};  // Σy²
+const char kSumXY[] = {gfx::kGlyphSigmaUpper, 'x', 'y', 0};                  // Σxy
+const char kRSq[] = {'r', gfx::kGlyphSuperTwo, 0};                           // r²
+
 using math::stats::RegressionType;
 
 // Only meaningful for analysis >= 2; the clamp keeps the enum cast in
@@ -131,9 +142,9 @@ void StatsScreen::calculate() {
         add_kv("n", s.n);
         add_kv("mean", s.mean);
         add_kv("Sx", s.sample_stddev);
-        add_kv("sigx", s.pop_stddev);
-        add_kv("sum_x", s.sum);
-        add_kv("sum_x2", s.sum_sq);
+        add_kv(kSigX, s.pop_stddev);
+        add_kv(kSumX, s.sum);
+        add_kv(kSumX2, s.sum_sq);
         add_kv("min", s.min_val);
         add_kv("Q1", s.q1);
         add_kv("med", s.median);
@@ -151,19 +162,19 @@ void StatsScreen::calculate() {
         add_kv("n", s.n);
         add_kv("mean_x", s.mean_x);
         add_kv("Sx", s.sample_stddev_x);
-        add_kv("sigx", s.pop_stddev_x);
-        add_kv("sum_x", s.sum_x);
-        add_kv("sum_x2", s.sum_x2);
+        add_kv(kSigX, s.pop_stddev_x);
+        add_kv(kSumX, s.sum_x);
+        add_kv(kSumX2, s.sum_x2);
         add_kv("min_x", s.min_x);
         add_kv("max_x", s.max_x);
         add_kv("mean_y", s.mean_y);
         add_kv("Sy", s.sample_stddev_y);
-        add_kv("sigy", s.pop_stddev_y);
-        add_kv("sum_y", s.sum_y);
-        add_kv("sum_y2", s.sum_y2);
+        add_kv(kSigY, s.pop_stddev_y);
+        add_kv(kSumY, s.sum_y);
+        add_kv(kSumY2, s.sum_y2);
         add_kv("min_y", s.min_y);
         add_kv("max_y", s.max_y);
-        add_kv("sum_xy", s.sum_xy);
+        add_kv(kSumXY, s.sum_xy);
     } else {
         const auto type = reg_type(analysis_);
         const auto r = math::stats::regress(ls.list(x_list_), ls.list(y_list_), type);
@@ -181,7 +192,7 @@ void StatsScreen::calculate() {
             add_kv("r", r.r);
         }
         if (!std::isnan(r.r_squared)) {
-            add_kv("r^2", r.r_squared);
+            add_kv(kRSq, r.r_squared);
         }
         add_kv("n", r.n);
         if (!r.converged) {
@@ -206,7 +217,7 @@ void StatsScreen::calculate() {
             std::snprintf(y.expr[store_slot_], sizeof(y.expr[store_slot_]), "%s", model);
             y.enabled[store_slot_] = true;
             save_graph_state();
-            std::snprintf(buf, sizeof(buf), "stored -> y%d", store_slot_ + 1);
+            std::snprintf(buf, sizeof(buf), "stored %c y%d", gfx::kGlyphStore, store_slot_ + 1);
             add_line(buf);
         }
     }

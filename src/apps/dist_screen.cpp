@@ -37,8 +37,12 @@ constexpr uint8_t kPK = 9;
 constexpr uint8_t kPN = 10;
 constexpr uint8_t kPP = 11;
 constexpr uint8_t kPLam = 12;
-const char* const kParamNames[] = {"x",   "lo",  "hi", "area", "mu", "sd",    "df",
-                                   "df1", "df2", "k",  "n",    "p",  "lambda"};
+// Normal-distribution mean and Poisson rate shown as the real Greek μ/λ
+// glyphs (testdrive 2026-07-21).
+const char kMuLabel[] = {gfx::kGlyphMu, 0};
+const char kLambdaLabel[] = {gfx::kGlyphLambda, 0};
+const char* const kParamNames[] = {"x",   "lo",  "hi", "area", kMuLabel, "sd",        "df",
+                                   "df1", "df2", "k",  "n",    "p",      kLambdaLabel};
 constexpr double kParamDefaults[] = {0, -1e99, 1e99, 0.95, 0, 1, 10, 3, 10, 1, 10, 0.5, 3};
 
 struct FnSpec {

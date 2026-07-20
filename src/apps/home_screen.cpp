@@ -86,6 +86,16 @@ void HomeScreen::push_entry(const char* expr, const char* result, bool error) {
         ++history_count_;
     }
     scroll_ = 0;
+    // Keep the full (untruncated) newest result for LEFT/RIGHT panning.
+    std::strncpy(result_full_, result, sizeof(result_full_) - 1);
+    result_full_[sizeof(result_full_) - 1] = 0;
+    result_scroll_ = 0;
+}
+
+int HomeScreen::result_max_scroll() const {
+    const int win = (platform::kScreenW - 8) / gfx::main_font().width();
+    const int len = static_cast<int>(std::strlen(result_full_));
+    return len > win ? len - win : 0;
 }
 
 void HomeScreen::persist_history_line(const char* expr, const char* result) {
@@ -93,7 +103,7 @@ void HomeScreen::persist_history_line(const char* expr, const char* result) {
     if (!fs.mounted()) {
         return;
     }
-    char line[160];
+    char line[256];
     const int n = std::snprintf(line, sizeof(line), "%s\t%s\n", expr, result);
     fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
 }
@@ -158,7 +168,7 @@ void format_scalar_result(const math::EvalResult& res, char* out, size_t out_len
     if (res.stored_var >= 0) {
         const char name =
             res.stored_var < 26 ? static_cast<char>('a' + res.stored_var) : 't';  // theta
-        std::snprintf(out, out_len, "%s>%c", num, name);
+        std::snprintf(out, out_len, "%s%c%c", num, gfx::kGlyphStore, name);
     } else {
         std::snprintf(out, out_len, "%s", num);
     }
@@ -191,7 +201,7 @@ void HomeScreen::evaluate_input() {
     // unambiguous. Kind::kNone means "not matrix syntax".
     const auto mres = math::matexpr::evaluate(expr);
     if (mres.kind != math::matexpr::Kind::kNone) {
-        char result[48];
+        char result[128];
         bool error = false;
         if (mres.kind == math::matexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", mres.error);
@@ -200,10 +210,10 @@ void HomeScreen::evaluate_input() {
             format_scalar_result(mres.scalar, result, sizeof(result));
             error = !mres.scalar.ok;
         } else if (mres.kind == math::matexpr::Kind::kList) {
-            char text[40];
+            char text[120];
             math::listexpr::format_list(*mres.list, text, sizeof(text));
             if (mres.stored_list >= 0) {
-                std::snprintf(result, sizeof(result), "%s>l%c", text,
+                std::snprintf(result, sizeof(result), "%s%cl%c", text, gfx::kGlyphStore,
                               static_cast<char>('1' + mres.stored_list));
             } else {
                 std::snprintf(result, sizeof(result), "%s", text);
@@ -211,10 +221,10 @@ void HomeScreen::evaluate_input() {
         } else if (mres.kind == math::matexpr::Kind::kText) {
             std::snprintf(result, sizeof(result), "%s", mres.text);
         } else {
-            char text[40];
+            char text[120];
             math::matexpr::format_matrix(*mres.matrix, text, sizeof(text));
             if (mres.stored_matrix >= 0) {
-                std::snprintf(result, sizeof(result), "%s>[%c]", text,
+                std::snprintf(result, sizeof(result), "%s%c[%c]", text, gfx::kGlyphStore,
                               static_cast<char>('A' + mres.stored_matrix));
             } else {
                 std::snprintf(result, sizeof(result), "%s", text);
@@ -241,7 +251,7 @@ void HomeScreen::evaluate_input() {
     // "not list syntax" and falls through to the scalar engine.
     const auto lres = math::listexpr::evaluate(expr);
     if (lres.kind != math::listexpr::Kind::kNone) {
-        char result[48];
+        char result[128];
         bool error = false;
         if (lres.kind == math::listexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", lres.error);
@@ -250,10 +260,10 @@ void HomeScreen::evaluate_input() {
             format_scalar_result(lres.scalar, result, sizeof(result));
             error = !lres.scalar.ok;
         } else {
-            char text[40];
+            char text[120];
             math::listexpr::format_list(*lres.list, text, sizeof(text));
             if (lres.stored_list >= 0) {
-                std::snprintf(result, sizeof(result), "%s>l%c", text,
+                std::snprintf(result, sizeof(result), "%s%cl%c", text, gfx::kGlyphStore,
                               static_cast<char>('1' + lres.stored_list));
             } else {
                 std::snprintf(result, sizeof(result), "%s", text);
@@ -280,7 +290,7 @@ void HomeScreen::evaluate_input() {
     // sqrt(-4) etc. get "Non-real result" instead, without committing
     // Ans/a store twice (math::complexexpr::evaluate never mutates
     // engine state; only this dispatch does, exactly once).
-    char result[48];
+    char result[128];
     bool error = false;
     const bool force_complex =
         math::number_mode() != math::NumberMode::kReal || math::complexexpr::mentions_i(expr);
@@ -337,6 +347,8 @@ bool HomeScreen::handle_command(const char* cmd) {
         // recall walk and history.txt intact.
         cls_mark_ = entries_total_;
         scroll_ = 0;
+        result_full_[0] = 0;
+        result_scroll_ = 0;
         return true;
     }
     if (std::strcmp(cmd, "clrhist") == 0) {
@@ -346,6 +358,8 @@ bool HomeScreen::handle_command(const char* cmd) {
         cls_mark_ = 0;
         scroll_ = 0;
         hist_nav_ = -1;
+        result_full_[0] = 0;
+        result_scroll_ = 0;
         auto& fs = platform::storage();
         if (fs.mounted()) {
             fs.delete_file(kHistoryPath);
@@ -479,6 +493,31 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
                 invalidate_input();
             }
             return true;
+        case Key::kLeft:
+        case Key::kRight:
+            // With the input empty and the view pinned to newest, arrows
+            // pan the (possibly truncated) newest result instead of moving
+            // a cursor: RIGHT reveals later elements, LEFT walks back
+            // toward the start (testdrive 2026-07-20). Otherwise they fall
+            // through to the input line's cursor movement.
+            if (input_.empty() && scroll_ == 0) {
+                const int maxs = result_max_scroll();
+                if (maxs > 0) {
+                    if (ev.key == Key::kRight && result_scroll_ < maxs) {
+                        ++result_scroll_;
+                        invalidate_history();
+                    } else if (ev.key == Key::kLeft && result_scroll_ > 0) {
+                        --result_scroll_;
+                        invalidate_history();
+                    }
+                    return true;
+                }
+            }
+            if (input_.on_key(ev)) {
+                invalidate_input();
+                return true;
+            }
+            return false;
         case Key::kEscape:
             input_.clear();
             hist_nav_ = -1;
@@ -539,10 +578,27 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
             break;
         }
 
-        // Result line (plain text).
+        // Result line (plain text). The newest result can overflow the
+        // display; when it does, LEFT/RIGHT pan a left-anchored window
+        // across the full text (testdrive 2026-07-20). Everything else
+        // stays right-aligned and truncated.
         y -= lh;
-        const int rx = platform::kScreenW - font.text_width(e->result) - 4;
-        font.draw_string(fb, rx, y, e->result, e->error ? kRed : kWhite);
+        if (n == 0 && result_max_scroll() > 0) {
+            const int win = (platform::kScreenW - 8) / font.width();
+            int off = result_scroll_;
+            const int maxs = result_max_scroll();
+            off = off > maxs ? maxs : (off < 0 ? 0 : off);
+            char window[64];
+            const int w = win < static_cast<int>(sizeof(window)) - 1
+                              ? win
+                              : static_cast<int>(sizeof(window)) - 1;
+            std::strncpy(window, result_full_ + off, static_cast<size_t>(w));
+            window[w] = 0;
+            font.draw_string(fb, 4, y, window, e->error ? kRed : kWhite);
+        } else {
+            const int rx = platform::kScreenW - font.text_width(e->result) - 4;
+            font.draw_string(fb, rx, y, e->result, e->error ? kRed : kWhite);
+        }
 
         // Expression line(s), rendered immediately (the pool is reset
         // on the next build).

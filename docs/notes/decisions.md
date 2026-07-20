@@ -18,6 +18,21 @@ Format:
 
 ---
 
+## D31: Real math glyphs + a swappable 8x16 main font — Terminus default (testdrive)
+
+**Date**: 2026-07-21
+**Status**: Accepted (font test-drive session; supersedes D30 item 6's ASCII `<` polar stand-in and D24's pi-only glyph)
+**Context**: On-device 4C testdrive (docs/notes/testdrive-2026-07-20-observations.md) flagged the ASCII `<` polar separator and plain `i` as papercuts, and asked to try a real font. Widened into a full pass over ASCII stand-ins used for math symbols across the UI, plus a font comparison.
+**Decision**:
+1. **The 8x16 main font is now a build-time choice** — `-DPICOCALC_FONT=spleen|juliamono|iosevka|unifont|terminus`, **default `terminus`**. The 5x8 small font stays Spleen always. Every variant ships the **same 32..140 slot map**, so the glyphs below work identically regardless of font. Rasters regenerate via `scripts/gen-<name>.sh`; external fonts are OFL/dual-licensed and vendored under `drivers/{juliamono,iosevka,unifont,terminus}/` (README + license only — the TTF/hex/BDF sources are fetched on demand, not committed).
+2. **High-slot glyph map (127..140)**, baked into every font: 127 π, 128 ∠, 129 θ, 130 σ, 131 Σ, 132 χ, 133 μ, 134 imaginary-unit `i`, 135 store-arrow ⇒ (U+21D2), 136 λ, 137 ≠ (U+2260), 138 … (U+2026), 139 ² (U+00B2), 140 √ (U+221A). Sourced from Unifont for spleen/terminus/unifont (Unifont sits 2px low, lifted via `--hexshift`/`--shift 2`); JuliaMono/Iosevka use their own TTF glyphs. The imaginary `i` is Unifont's serif **U+2139** for spleen/terminus/unifont (a slanted hand-drawn one "looked horrible" on device); JuliaMono/Iosevka use math-italic **U+1D456**.
+3. **Substitutions applied** (see worklog): `format_complex` polar `<`→∠ and `i`→glyph; MODE Number row `a+bi`/`r∠θ`; pretty-print (`render/layout_builder`) rewrites `pi`/`i`/`theta` and the `->` store op up front in a `preprocess_glyphs` pass (so glyphs reach the plain-text fallback too, e.g. `3+2i`), while `sqrt` stays a real function identifier whose **name** renders as √ (inline `√(x)`; big radical over the argument is KIV); home-screen result store indicator `>`→⇒; truncation `...`→… (`format_list`, matrix/complex text, slot editor); graph-trace/table polar label `th`→θ; stats results σx/σy, Σx/Σx²/…/Σxy, r²; inference `!=`→≠, `mu`/`sigma`→μ/σ; distribution `mu`/`lambda`→μ/λ.
+4. **Tooling**: `bdf_to_utft.py` gained `--extra` (hand-drawn glyphs), `--hexfont`/`--hexmap`/`--hexshift` (bake 8-wide Unifont glyphs into a BDF font). New `scripts/ttf_to_utft.py` (freetype raster, `requirements-dev.txt` pins `freetype-py`) and `scripts/hex_to_utft.py` (native Unifont .hex, `--shift`).
+**On-device font comparison (user, 2026-07-21)**: **Terminus + glyphs = preferred look.** Unifont looks good too but needed the 2px lift (done). Spleen + glyphs is the best pick if a thicker font is wanted. **JuliaMono looks worst** on the PicoCalc; Iosevka is ok but a little unbalanced from the rastering. The rasterized fonts would likely look good with antialiasing, a higher-res display, or a desktop emulator — all currently unplanned (see wishlist).
+**Rationale**: a slot-map shared across fonts keeps every substitution font-agnostic and lets the font be a pure build flag; doing pretty-print glyph substitution as a string pass reaches the fallback path (implicit-multiply expressions like `3+2i`) that per-atom substitution misses; `sqrt` must stay an identifier or `1/sqrt(2)` loses its call/fraction structure (ASan-caught regression).
+**Tradeoffs**: five committed 8x16 headers + four vendored license dirs (kept as a real selector, user's call — easy re-comparison); rasterized fonts read worse than the bitmap fonts at 8px with no antialiasing; `√` is inline-only (no radical vinculum yet); the JuliaMono/Iosevka `i`/glyphs use their own TTF shapes, not Unifont's, so the arrow/`i` differ slightly between fonts.
+**Revisit when**: antialiasing / a higher-res panel / a desktop emulator makes the rasterized fonts viable (wishlist); the big-radical √ display is wanted; someone wants to prune the non-default fonts.
+
 ## D30: 4C complex numbers as-built — complexexpr scalar-span reuse, i reservation, kText eigenvalues (P4-9, P4-7)
 
 **Date**: 2026-07-20

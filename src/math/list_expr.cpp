@@ -865,11 +865,14 @@ void format_list(const Array& a, char* buf, size_t buf_len) {
     const int n = a.size();
     for (int i = 0; i < n; ++i) {
         char num[24];
-        format_number(a.get(i), num, sizeof(num));
+        // Compact per-element formatting so more values fit before the
+        // ",..." cutoff (testdrive 2026-07-20); the home screen lets you
+        // pan the full list with LEFT/RIGHT.
+        format_number_compact(a.get(i), num, sizeof(num));
         const size_t need = std::strlen(num) + (i > 0 ? 1 : 0);
-        if (pos + need + 6 > buf_len) {  // Room for ",...}" + NUL
-            std::memcpy(buf + pos, ",...", 5);
-            pos += 4;
+        if (pos + need + 6 > buf_len) {  // Room for ",<ellipsis>}" + NUL
+            buf[pos++] = ',';
+            buf[pos++] = kEllipsisGlyph;
             break;
         }
         if (i > 0) {

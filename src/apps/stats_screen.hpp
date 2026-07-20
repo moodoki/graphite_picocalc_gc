@@ -24,6 +24,8 @@ private:
     static constexpr int kAnalysisCount = 12;
     static constexpr int kMaxLines = 22;
     static constexpr int kLineChars = 40;
+    // Rows shown at once in the results view; 2-Var Stats emits exactly
+    // this many and all fit, so no scroll is needed there.
     static constexpr int kResVisible = 17;
 
     enum RowKind : uint8_t { kRowAnalysis, kRowXList, kRowYList, kRowFreq, kRowStore, kRowCalc };

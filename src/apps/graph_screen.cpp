@@ -28,6 +28,10 @@
 namespace apps {
 
 namespace {
+// Polar independent-variable label: the real theta glyph, was ASCII
+// "th" (testdrive 2026-07-21).
+const char kThetaLabel[] = {gfx::kGlyphTheta, 0};
+
 // Clamp a pixel coordinate for the int16 caches (far-offscreen values
 // keep line joins sane; truly undefined points use kOffscreen).
 int16_t clamp_px(int v) {
@@ -163,7 +167,7 @@ void GraphScreen::finish_analysis() {
         vname = "t";
     } else if (mode() == graph::Mode::kPolar) {
         vslot = math::Variables::kTheta;
-        vname = "th";
+        vname = kThetaLabel;
     }
     vars.vars[vslot] = r.indep;
     switch (op) {
@@ -700,7 +704,7 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         math::format_number(py == kOffscreen ? nan : vp.data_x(px), xb, sizeof(xb));
         math::format_number(py == kOffscreen ? nan : vp.data_y(py), yb, sizeof(yb));
         std::snprintf(line, sizeof(line), "%s%d  %s=%s x=%s y=%s", polar ? "r" : "P", p + 1,
-                      polar ? "th" : "t", tb, xb, yb);
+                      polar ? kThetaLabel : "t", tb, xb, yb);
     } else {
         px = trace_.index;
         py = plot_y_[trace_.slot][px];

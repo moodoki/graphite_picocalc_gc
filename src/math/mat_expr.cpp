@@ -196,12 +196,15 @@ struct MatFn {
 // results) are here too; dim/eigenvals are whole-expression forms
 // handled in evaluate() and rejected here.
 const MatFn kMatFns[] = {
-    {"inverse", 1},  {"transpose", 1}, {"rref", 1}, {"ref", 1}, {"augment", 2},
-    {"identity", 1}, {"det", 1},       {"rank", 1}, {"dim", 1}, {"eigenvals", 1},
+    {"inverse", 1}, {"transpose", 1}, {"rref", 1}, {"ref", 1},
+    {"augment", 2}, {"identity", 1},  {"det", 1},  {"rank", 1},
+    {"dim", 1},     {"eigenvals", 1}, {"eig", 1},  // alias of eigenvals (whole-expression form
+                                                   // only)
 };
 
 Value parse_matrix_fn(P& p, const MatFn& fn) {
-    if (std::strcmp(fn.name, "dim") == 0 || std::strcmp(fn.name, "eigenvals") == 0) {
+    if (std::strcmp(fn.name, "dim") == 0 || std::strcmp(fn.name, "eigenvals") == 0 ||
+        std::strcmp(fn.name, "eig") == 0) {
         return fail(p, "dim/eigenvals must stand alone");
     }
     ++p.s;  // '('
@@ -696,11 +699,18 @@ Result evaluate(const char* input) {
 
     // Whole-expression list forms: dim(...) and eigenvals(...).
     for (int which = 0; which < 2; ++which) {
-        const char* name = which == 0 ? "dim" : "eigenvals";
         const char* inner = nullptr;
         size_t inner_len = 0;
-        if (!whole_call(body, name, &inner, &inner_len)) {
-            continue;
+        if (which == 0) {
+            if (!whole_call(body, "dim", &inner, &inner_len)) {
+                continue;
+            }
+        } else {
+            // eigenvals(...) or its alias eig(...).
+            if (!whole_call(body, "eigenvals", &inner, &inner_len) &&
+                !whole_call(body, "eig", &inner, &inner_len)) {
+                continue;
+            }
         }
         char arg[kMaxLen];
         if (inner_len >= sizeof(arg)) {
@@ -782,8 +792,7 @@ Result evaluate(const char* input) {
                 const size_t need = std::strlen(num) + (i > 0 ? 1 : 0);
                 // Room for the number plus "...}" + NUL in the worst case.
                 if (pos + need + 5 > sizeof(g_ctext)) {
-                    std::memcpy(g_ctext + pos, "...", 3);
-                    pos += 3;
+                    g_ctext[pos++] = kEllipsisGlyph;
                     break;
                 }
                 if (i > 0) {
@@ -920,8 +929,7 @@ void format_matrix(const Array& m, char* buf, size_t buf_len) {
             const size_t need = std::strlen(num) + (c > 0 ? 1 : 0);
             // Room for the number plus "...]]" + NUL in the worst case
             if (pos + need + 7 > buf_len) {
-                std::memcpy(buf + pos, "...", 3);
-                pos += 3;
+                buf[pos++] = kEllipsisGlyph;
                 truncated = true;
                 break;
             }

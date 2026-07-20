@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <limits>
 
+#include "gfx/font.hpp"
 #include "math/engine.hpp"
 
 namespace apps {
@@ -10,6 +11,10 @@ namespace apps {
 namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+
+// Real theta glyph for the polar table column header (was ASCII "th",
+// testdrive 2026-07-21).
+const char kThetaLabel[] = {gfx::kGlyphTheta, 0};
 
 // Function-mode column c -> Y slot index (enabled slots in order).
 // Returns -1 when out of range.
@@ -136,7 +141,7 @@ const char* table_independent_label(const graph::GraphState& state) {
         case graph::Mode::kParametric:
             return "T";
         case graph::Mode::kPolar:
-            return "th";
+            return kThetaLabel;
         default:
             return "x";
     }

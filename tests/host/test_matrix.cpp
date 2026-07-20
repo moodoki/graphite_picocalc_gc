@@ -8,6 +8,7 @@
 
 #include "math/array.hpp"
 #include "math/engine.hpp"
+#include "math/format.hpp"
 #include "math/lists.hpp"
 #include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
@@ -619,12 +620,32 @@ void test_expr_store() {
     // eigenvals() with a complex-conjugate pair (Phase 4C, D30/P4-7):
     // Kind::kText instead of Kind::kList, and a store target errors.
     const double vrot2[4] = {0, -1, 1, 0};
+    // format_complex emits the font's slanted imaginary-unit glyph, not a
+    // literal ASCII 'i' (testdrive 2026-07-20).
+    char cpx_pair[12];
+    std::snprintf(cpx_pair, sizeof(cpx_pair), "{%c,-%c}", math::kImagUnitGlyph,
+                  math::kImagUnitGlyph);
     check(fill(matrices().matrix(4), 2, 2, vrot2), "fill [E] rotation");
     res = eval_mat("eigenvals([E])");
     check(res.kind == matexpr::Kind::kText, "eigenvals complex kind");
-    check(res.text != nullptr && std::strcmp(res.text, "{i,-i}") == 0, "eigenvals complex text");
+    check(res.text != nullptr && std::strcmp(res.text, cpx_pair) == 0, "eigenvals complex text");
     check_mat_error("eigenvals([E]) -> l3", "Complex results can't be stored",
                     "eigenvals complex store rejected");
+
+    // eig(...) is an alias of eigenvals(...) — same list result, same
+    // complex-text form, same "must stand alone" rejection.
+    check(fill(matrices().matrix(4), 3, 3, vs), "fill [E] sym (eig alias)");
+    res = eval_mat("eig([E]) -> l2");
+    check(res.kind == matexpr::Kind::kList && res.stored_list == 1 && res.lists_modified,
+          "eig alias -> l2");
+    check_near(lists().list(1).get(0), 2.0 + std::sqrt(2.0), "eig alias l2[0]", 1e-8);
+    check(fill(matrices().matrix(4), 2, 2, vrot2), "fill [E] rotation (eig alias)");
+    res = eval_mat("eig([E])");
+    check(res.kind == matexpr::Kind::kText && res.text != nullptr &&
+              std::strcmp(res.text, cpx_pair) == 0,
+          "eig alias complex text");
+    check_mat_error("2*eig([A])", "dim/eigenvals must stand alone",
+                    "eig alias must stand alone");
 
     // Store mismatches
     check_mat_error("[A] -> l1", "Store target mismatch", "matrix to list target");
@@ -673,7 +694,7 @@ void test_format_matrix() {
     check(matops::identity(10, big, &err), "identity(10)");
     char small[24];
     matexpr::format_matrix(big, small, sizeof(small));
-    check(std::strstr(small, "...") != nullptr, "format truncates");
+    check(std::strchr(small, math::kEllipsisGlyph) != nullptr, "format truncates");
     check(small[std::strlen(small) - 1] == ']', "format truncation closes");
 }
 

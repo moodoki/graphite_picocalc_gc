@@ -143,11 +143,16 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     } else if (graph::state().mode == graph::Mode::kPolar) {
         gmode_val = "POLAR";
     }
+    char number_buf[8];
     const char* number_val = "REAL";
     if (math::number_mode() == math::NumberMode::kRectangular) {
-        number_val = "a+bi";
+        // "a+bi" with the real imaginary-unit glyph.
+        std::snprintf(number_buf, sizeof(number_buf), "a+b%c", gfx::kGlyphImagI);
+        number_val = number_buf;
     } else if (math::number_mode() == math::NumberMode::kPolar) {
-        number_val = "r<t";
+        // "r∠θ" with the real angle and theta glyphs (was ASCII "r<t").
+        std::snprintf(number_buf, sizeof(number_buf), "r%c%c", gfx::kGlyphAngle, gfx::kGlyphTheta);
+        number_val = number_buf;
     }
 
     const char* const values[kNumRows] = {angle_val, disp_val,   fix_val,
