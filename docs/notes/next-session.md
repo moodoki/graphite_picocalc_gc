@@ -4,7 +4,7 @@
 session, **code-complete (D31)**: a build-time swappable 8x16 main font
 (`-DPICOCALC_FONT=spleen|juliamono|iosevka|unifont|terminus`, default
 **terminus**) with a shared math-glyph slot map, real-glyph
-substitutions across the whole UI (∠/θ/σ/Σ/μ/i/⇒/λ/≠/…/²/√ replacing
+substitutions across the whole UI (`∠/θ/σ/Σ/μ/i/⇒/λ/≠/…/²/√` replacing
 old ASCII stand-ins), an `eig` alias for `eigenvals`, and a list-history
 LEFT/RIGHT horizontal-scroll fix. Suite **1219 checks**, lint clean,
 both boards build clean. **Flashed to the Pico 2 (Terminus default
@@ -38,8 +38,8 @@ stand-in. What landed:
    spot-check the glyph substitutions in situ — home-screen complex
    results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row
    (`a+bi`/`r∠θ`), pretty-printed `π`/`θ`/inline `√(x)`, stats
-   σ/Σ/r², inference `≠`/μ/σ, distribution μ/λ, graph-trace/table polar
-   θ label, and `…` truncation. Also spot-check the new `eig` alias and
+   `σ`/Σ/r², inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace/table
+   polar `θ` label, and `…` truncation. Also spot-check the new `eig` alias and
    the list-history LEFT/RIGHT scroll feel.
 2. **On-device evals** (worklog HW-PENDING; the flashed build is now
    Session 19's font/glyph build, layered on top of Session 16-18 —
@@ -161,14 +161,23 @@ essentially flat) — re-check the map file then; the knob is
   stand-in is now a real ∠ glyph, Terminus default.)
 - **Font/glyph watch-items (Session 19, judge on device)**: the
   glyph-correctness sweep across screens (see "The next job" above) —
-  whether √ read as inline-only (`√(x)`, no vinculum) is acceptable;
+  whether `√` read as inline-only (`√(x)`, no vinculum) is acceptable;
   whether the shared Unifont-derived `i`/⇒ glyphs look consistent
   against Terminus's own glyph shapes; big-radical display and true
-  subscripts (Sₓ, σₓ) remain KIV/wishlist items (D31).
+  subscripts (`Sₓ`, `σₓ`) remain KIV/wishlist items (D31).
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —
   the last deferred HW item); 340-point curve cache cap; audio HAL; licensing (D17 —
   display/keyboard rewrites remain); dual-core display service (D10
-  addendum).
+  addendum); **stale diag-screen label** (`src/main.cpp:213`) — still
+  hardcoded `"[milestone 1]"` from the Phase 1 bootstrap, never updated
+  through milestones 2-5 or phases 2-4. Replace with the current phase
+  (e.g. "Phase 4") and a build identifier: git short hash if the tree is
+  clean, else `dev` — so GitHub Actions builds show a traceable hash and
+  local dev builds (usually dirty) show `dev`. Needs CMake to capture
+  `git rev-parse --short HEAD` + a clean/dirty check (`git status
+  --porcelain`) and pass it through as a compile definition; the
+  `main.cpp:6-8` header comment describing "Milestone 1 state" is also
+  stale and should go.
 
 ## Feature wishlist
 

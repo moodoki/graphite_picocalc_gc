@@ -12,7 +12,7 @@ The PicoCalc's ClockworkPi v2.0 mainboard augments whichever Pico module is inst
 
 | Component | Detail |
 |-----------|--------|
-| Display | 4" IPS LCD, 320$\times$320 px, ST7365P controller (ILI9488-compatible), SPI |
+| Display | 4" IPS LCD, $320\times320$ px, ST7365P controller (ILI9488-compatible), SPI |
 | Keyboard | 67-key QWERTY, managed by STM32 co-processor over I2C |
 | External PSRAM | 8 MB, SPI-attached |
 | SD card | Full-size slot, 32 GB FAT32 card included |
@@ -31,7 +31,7 @@ The PicoCalc's ClockworkPi v2.0 mainboard augments whichever Pico module is inst
 
 The two constraints that dominate every architectural decision are:
 
-1. **SRAM pressure**: a single 320$\times$320 RGB565 framebuffer is ~200 KB, which is 76% of Pico 1's total SRAM. The 8 MB PSRAM (accessed via SPI at ~30–40 Mbit/s) is the escape valve — it is slow for random access (~30x slower writes than SRAM) but perfectly adequate for framebuffer storage, since pixel data flows unidirectionally to the display controller.
+1. **SRAM pressure**: a single $320\times320$ RGB565 framebuffer is ~200 KB, which is 76% of Pico 1's total SRAM. The 8 MB PSRAM (accessed via SPI at ~30–40 Mbit/s) is the escape valve — it is slow for random access (~30x slower writes than SRAM) but perfectly adequate for framebuffer storage, since pixel data flows unidirectionally to the display controller.
 2. **FPU absence on Pico 1**: the RP2040's bootrom ships hand-optimized softfloat routines (QFPLIB-derived, using hardware interpolators) that achieve roughly 1.5 MFLOPS at 125 MHz. Trig functions take ~200–400 cycles each, yielding around 400K evaluations/second/core. This is sufficient for interactive graphing (plotting 320 points of $\sin(x)$ takes <1 ms) but becomes a bottleneck for heavy numerical work (large matrix operations, iterative solvers). On Pico 2, the hardware FPU eliminates this concern.
 
 ### Dual-target strategy: compile-time abstraction
@@ -72,7 +72,7 @@ Coyote OS by laingcc is a dedicated calculator firmware for the PicoCalc. It pro
 
 **Language**: Rust | **License**: MIT | **Status**: complete (2022), not actively maintained
 
-Delta Pico by Aaron Christiansen is a standalone RP2040 graphing calculator (custom PCB, not PicoCalc) with a 240$\times$320 color display. Key features include:
+Delta Pico by Aaron Christiansen is a standalone RP2040 graphing calculator (custom PCB, not PicoCalc) with a $240\times320$ color display. Key features include:
 
 - **Natural math input**: textbook-style rendering of fractions, exponents, roots, and parentheses via a custom engine called `rbop` (Rust-Based Operator Precedence).
 - **Multi-graph plotting**: multiple $f(x)$ functions plotted simultaneously with configurable axis bounds, trace cursor, and zoom.
@@ -143,9 +143,9 @@ For **distribution functions** specifically, the `cephes` library (public domain
 
 ### Matrix operations
 
-The TI-83/84 supports matrices up to 99$\times$99 with operations: arithmetic, determinant, inverse, transpose, row echelon form, eigenvalues (limited). A minimal dense matrix class in C++ with Gaussian elimination covers 90% of use cases. For eigenvalues, a QR algorithm implementation adds ~500 LOC.
+The TI-83/84 supports matrices up to $99\times99$ with operations: arithmetic, determinant, inverse, transpose, row echelon form, eigenvalues (limited). A minimal dense matrix class in C++ with Gaussian elimination covers 90% of use cases. For eigenvalues, a QR algorithm implementation adds ~500 LOC.
 
-Memory constraint: a 99$\times$99 `float` matrix is ~38 KB. On Pico 1 this is feasible only one at a time (with framebuffer in PSRAM); on Pico 2, two or three can coexist. Storing matrices on SD card and loading on demand is the practical solution for the full TI-compatible "10 matrix variables" model.
+Memory constraint: a $99\times99$ `float` matrix is ~38 KB. On Pico 1 this is feasible only one at a time (with framebuffer in PSRAM); on Pico 2, two or three can coexist. Storing matrices on SD card and loading on demand is the practical solution for the full TI-compatible "10 matrix variables" model.
 
 ---
 
@@ -197,9 +197,9 @@ Core concepts:
 - **Widget set**: text labels, input fields (with cursor), menus (horizontal softkey bar at bottom like TI-84, vertical context menus), scrollable lists, toggle switches, number spinners.
 - **Natural math renderer**: renders expression trees as 2D typeset math (fractions with horizontal bars, superscript exponents, radical symbols, absolute value bars). This is the single most complex UI component. Delta Pico's `rbop` engine is an excellent design reference — it uses a tree of "layout nodes" where each node knows its bounding box and renders recursively.
 - **Theme / style system**: a small set of compile-time constants controlling colors, fonts, spacing. Allows a "TI Classic" dark-on-light theme and a "Modern" theme.
-- **Font rendering**: bitmap fonts (no TTF — too heavy for Pico 1). A 8$\times$16 monospace font for the home screen and program editor; a proportional font for menus and labels. Font data stored in flash as `const` arrays.
+- **Font rendering**: bitmap fonts (no TTF — too heavy for Pico 1). A $8\times16$ monospace font for the home screen and program editor; a proportional font for menus and labels. Font data stored in flash as `const` arrays.
 
-The TI-83/84's display is 96$\times$64 monochrome. PicoCalc's 320$\times$320 color display offers dramatically more space. The "modernized" approach should use this space for:
+The TI-83/84's display is $96\times64$ monochrome. PicoCalc's $320\times320$ color display offers dramatically more space. The "modernized" approach should use this space for:
 
 - Larger, clearer graph viewport
 - Status bar (battery, mode indicators, 2nd/Alpha state)
@@ -250,7 +250,7 @@ Two tiers:
 
 | Allocation | Location | Size |
 |-----------|----------|------|
-| Framebuffer (320$\times$320 RGB565) | PSRAM | 200 KB |
+| Framebuffer ($320\times320$ RGB565) | PSRAM | 200 KB |
 | Line-buffer DMA (20 scanlines) | SRAM | 12.5 KB |
 | Stack (both cores) | SRAM | 16 KB |
 | Math engine (parser, evaluator, state) | SRAM | 20–30 KB |
@@ -371,9 +371,9 @@ Fork the PicoCalc reference firmware or Coyote OS's HAL layer. Establish a C++ p
 
 ### Risk 2: Softfloat performance on Pico 1 for heavy computation
 
-**Problem**: operations like matrix inversion, nonlinear regression, and distribution CDF evaluation are compute-heavy. A 20$\times$20 matrix inverse involves ~$O(n^3)$ floating-point operations — ~24,000 multiply-adds — which at softfloat speeds could take ~50–100 ms on Pico 1.
+**Problem**: operations like matrix inversion, nonlinear regression, and distribution CDF evaluation are compute-heavy. A $20\times20$ matrix inverse involves ~$O(n^3)$ floating-point operations — ~24,000 multiply-adds — which at softfloat speeds could take ~50–100 ms on Pico 1.
 
-**Mitigation**: 50–100 ms is acceptable (TI-83 itself took similar or longer times for these operations at 6 MHz). For truly expensive computations (large matrices, iterative solvers), use `#ifdef PICOCALC_PICO2` to enable optimized paths leveraging the hardware FPU, and accept slower performance on Pico 1 as a known tradeoff. Consider fixed-point arithmetic for graphing specifically (where $\pm$10 bits of precision suffice for pixel mapping).
+**Mitigation**: 50–100 ms is acceptable (TI-83 itself took similar or longer times for these operations at 6 MHz). For truly expensive computations (large matrices, iterative solvers), use `#ifdef PICOCALC_PICO2` to enable optimized paths leveraging the hardware FPU, and accept slower performance on Pico 1 as a known tradeoff. Consider fixed-point arithmetic for graphing specifically (where $\pm10$ bits of precision suffice for pixel mapping).
 
 ### Risk 3: Flash space on Pico 1 (2 MB)
 

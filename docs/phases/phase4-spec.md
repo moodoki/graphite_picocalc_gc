@@ -130,7 +130,7 @@ private:
 }  // namespace math
 ```
 
-**Memory strategy**: unchanged from the Array primitive's model. The calculator exposes 10 matrix variables ($[A]$ through $[J]$) of up to 99$\times$99. A 99$\times$99 `double` matrix is ~76 KB, living in PSRAM (Array chooses PSRAM above its size threshold). Small matrices (up to ~16$\times$16) stay in the SRAM pool for speed. With 8 MB PSRAM, even ten full-size matrices use under 1 MB.
+**Memory strategy**: unchanged from the Array primitive's model. The calculator exposes 10 matrix variables ($[A]$ through $[J]$) of up to $99\times99$. A $99\times99$ `double` matrix is ~76 KB, living in PSRAM (Array chooses PSRAM above its size threshold). Small matrices (up to ~$16\times16$) stay in the SRAM pool for speed. With 8 MB PSRAM, even ten full-size matrices use under 1 MB.
 
 Matrix variables are stored in a `MatrixStore` parallel to Phase 3's `ListStore`, both consuming `Array`:
 
@@ -1088,12 +1088,12 @@ Solo developer, part-time (~20 hrs/week).
 
 | # | Task | Est. hrs | Acceptance |
 |---|------|---|---|
-| 4A.1 | `Matrix` view over 2-D `Array`; `MatrixStore` ([A]–[J]) | 6 | Create 10$\times$10 matrix, read/write elements |
+| 4A.1 | `Matrix` view over 2-D `Array`; `MatrixStore` ([A]–[J]) | 6 | Create $10\times10$ matrix, read/write elements |
 | 4A.2 | Matrix arithmetic (add, subtract, multiply, scalar) | 4 | `[A]*[B]` correct for known cases |
-| 4A.3 | Transpose, determinant (LU) | 4 | `det(identity(5))` = 1.0; known 3$\times$3 correct |
+| 4A.3 | Transpose, determinant (LU) | 4 | `det(identity(5))` = 1.0; known $3\times3$ correct |
 | 4A.4 | Inverse (Gauss-Jordan), rref | 6 | `[A]*inverse([A])` ≈ identity |
 | 4A.5 | Eigenvalues (QR, real, $n \leq 10$) | 6 | Diagonal/symmetric eigenvalues correct |
-| 4A.6 | Matrix editor screen | 8 | Enter 3$\times$3, save, reload, verify |
+| 4A.6 | Matrix editor screen | 8 | Enter $3\times3$, save, reload, verify |
 | 4A.7 | Matrix functions in home-screen parser | 4 | `det([A])` evaluates from home screen |
 | 4A.8 | Matrix persistence (`MatrixStore::save/load`) | 2 | Survives power cycle |
 | 4A.9 | Numeric equation solver + solver screen | 6 | Solve $x^3 - 2x - 5 = 0$ → $x \approx 2.0946$ |
@@ -1209,7 +1209,7 @@ All interactive-grade. fnInt on a hard integrand (many subdivisions) is the wors
 
 ### Complex numbers (4C)
 
-Complex arithmetic is 2–6$\times$ the cost of real (a complex multiply is 4 real multiplies + 2 adds). Since complex evaluation is confined to the home-screen path (never graphing), this is imperceptible for single expressions. Complex elementary functions (`c_exp`, `c_ln`) cost ~2–3$\times$ their real counterparts.
+Complex arithmetic is 2–$6\times$ the cost of real (a complex multiply is 4 real multiplies + 2 adds). Since complex evaluation is confined to the home-screen path (never graphing), this is imperceptible for single expressions. Complex elementary functions (`c_exp`, `c_ln`) cost ~2–$3\times$ their real counterparts.
 
 ### CAS operation benchmarks (estimated)
 
@@ -1230,13 +1230,13 @@ Worst-case complex simplification approaches ~0.5 s on Pico 1 — perceptible bu
 
 | Operation | Size | Pico 1 | Pico 2 |
 |-----------|------|--------|--------|
-| Multiply | 10$\times$10 | ~10 ms | ~2 ms |
-| Determinant | 10$\times$10 | ~5 ms | ~1 ms |
-| Inverse | 10$\times$10 | ~15 ms | ~3 ms |
-| Eigenvalues (QR) | 10$\times$10 | ~200 ms | ~40 ms |
-| Inverse | 50$\times$50 | ~8 s | ~1.5 s |
+| Multiply | $10\times10$ | ~10 ms | ~2 ms |
+| Determinant | $10\times10$ | ~5 ms | ~1 ms |
+| Inverse | $10\times10$ | ~15 ms | ~3 ms |
+| Eigenvalues (QR) | $10\times10$ | ~200 ms | ~40 ms |
+| Inverse | $50\times50$ | ~8 s | ~1.5 s |
 
-Large matrices ($>$ 20$\times$20) are slow on Pico 1 — acceptable, as these are uncommon in handheld use.
+Large matrices ($>$ $20\times20$) are slow on Pico 1 — acceptable, as these are uncommon in handheld use.
 
 ---
 
@@ -1252,7 +1252,7 @@ Expanding $(x+y+z)^{15}$ produces thousands of nodes. **Mitigation**: check pool
 
 ### Risk 3: Complex evaluation slowing the hot path
 
-If the numeric evaluator became complex-by-default, graphing would slow 2–6$\times$. **Mitigation**: dual entry points — `evaluate_real()` (fast, used by graphing/tables/stats) and `evaluate_complex()` (home screen only). Graphing never touches the complex path. This is a firm architectural rule, documented in `AGENTS.md`.
+If the numeric evaluator became complex-by-default, graphing would slow 2–$6\times$. **Mitigation**: dual entry points — `evaluate_real()` (fast, used by graphing/tables/stats) and `evaluate_complex()` (home screen only). Graphing never touches the complex path. This is a firm architectural rule, documented in `AGENTS.md`.
 
 ### Risk 4: Numeric integration accuracy vs. speed (4B fnInt)
 

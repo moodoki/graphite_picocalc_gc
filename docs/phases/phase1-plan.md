@@ -33,7 +33,7 @@ This is the active working document for Phase 1 — task list, status tracking, 
 | 1.5 | `platform::Storage` wrapper (FatFs) | 4 | [x] | Own SD SPI driver + diskio glue; LFN (D8). HW-PENDING (needs FAT32 card) |
 | 1.6 | `platform::Psram` wrapper | 3 | [x] | Word r/w **HW-verified**; bulk path hangs on HW, quarantined (D10) |
 | 1.7 | Line-buffer renderer + DMA on core 1 | 8 | [x] | Strip render **HW-verified**; runs synchronously on core 0, dual-core/DMA deferred (D10) |
-| 1.8 | `gfx::Font` with 8$\times$16 font | 4 | [x] | Interim 8x12 font1 — see D9 |
+| 1.8 | `gfx::Font` with $8\times16$ font | 4 | [x] | Interim 8x12 font1 — see D9 |
 | 1.9 | Basic `ScreenManager` | 3 | [x] | Fixed-depth stack; DiagScreen demo in main.cpp |
 
 **Acceptance**: PicoCalc boots, shows text, responds to keyboard, reads/writes SD card. Both `.uf2` files functional on hardware.

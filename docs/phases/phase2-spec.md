@@ -361,7 +361,7 @@ A mode where the graph occupies the left half and the table the right half (or t
 
 - Trace on the graph moves the highlighted row in the table in sync — tracing to $x = 1$ highlights the $x = 1$ table row.
 - The table's selected row places a trace cursor on the graph at that point.
-- The split can be vertical (side by side) or horizontal (stacked). TI-84 uses vertical; we'll default to vertical given the square 320$\times$320 display gives each half a 160$\times$280 area.
+- The split can be vertical (side by side) or horizontal (stacked). TI-84 uses vertical; we'll default to vertical given the square $320\times320$ display gives each half a $160\times280$ area.
 
 ### 8.1 Split-screen implementation
 
@@ -551,7 +551,7 @@ Parametric and polar modes evaluate functions at every parameter step, not every
 
 Phase 1's graph-profiling numbers (task 5.6) are still HW-PENDING, so there is no measured evals/sec figure yet. Even pessimistically assuming ~100K compiled evals/sec on Pico 1 softfloat, 1257 evaluations is ~13 ms — display rendering (~200 ms full-frame as measured in bring-up) dominates either way. No special optimization needed, but expose `Tstep` / $\theta_{\text{step}}$ to the user so they can trade smoothness for speed on very complex curves.
 
-Split-screen renders two views per frame. With line-buffer rendering, each pane covers half the strips, so total pixel work is unchanged — the cost is re-traversing two view trees. Budget for ~1.5$\times$ a single-view frame time. Still comfortably interactive.
+Split-screen renders two views per frame. With line-buffer rendering, each pane covers half the strips, so total pixel work is unchanged — the cost is re-traversing two view trees. Budget for ~$1.5\times$ a single-view frame time. Still comfortably interactive.
 
 ---
 

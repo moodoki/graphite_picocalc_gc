@@ -32,18 +32,18 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 - **Phase 4 (planned)**: Matrix operations, symbolic math (CAS — differentiation, simplification, factoring, equation solving, basic integration), MicroPython programming environment.
 - **Phase 5 (planned)**: App framework, polish, release.
 
-The TI-83/84 design language is the reference, but the UI is modernized to take advantage of the PicoCalc's 320$\times$320 color display.
+The TI-83/84 design language is the reference, but the UI is modernized to take advantage of the PicoCalc's $320\times320$ color display.
 
 ## Hardware
 
 | | Pico 1 H (RP2040) | Pico 2 H (RP2350) |
 |---|---|---|
-| CPU | 2$\times$ Cortex-M0+ @ 133 MHz | 2$\times$ Cortex-M33 @ 150 MHz |
+| CPU | $2\times$ Cortex-M0+ @ 133 MHz | $2\times$ Cortex-M33 @ 150 MHz |
 | SRAM | 264 KB | 520 KB |
 | Flash | 2 MB | 4 MB |
 | FPU | None (ROM softfloat) | Single-precision hardware |
 
-Mainboard (shared): 4" 320$\times$320 IPS LCD (ST7365P over SPI), 67-key QWERTY (STM32 co-processor over I2C), 8 MB PSRAM, 32 GB SD card, piezo buzzer.
+Mainboard (shared): 4" $320\times320$ IPS LCD (ST7365P over SPI), 67-key QWERTY (STM32 co-processor over I2C), 8 MB PSRAM, 32 GB SD card, piezo buzzer.
 
 ## Quick start
 

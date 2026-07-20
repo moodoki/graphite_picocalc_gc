@@ -377,7 +377,7 @@ Two symptoms, one root: `GraphScreen::render` never draws the status
 bar even though the layout reserves 16 rows for it (`kTopDefault = 16`,
 "content between status bar and softkeys", graph_screen.hpp:50) — the
 reserved band is just cleared to black. And curve pixels are clamped
-only to ±`Plotter::kClampPy` (±1000, for line-join sanity), not to the
+only to $\pm$`Plotter::kClampPy` ($\pm1000$, for line-join sanity), not to the
 plot rows; in full-screen mode the framebuffer pane is the whole
 screen, so segments heading off the top of the window land in rows
 0-15 and are visible. The same bleed exists at the *bottom*, but the
@@ -401,11 +401,11 @@ MODE, FILES do) — decide whether the fix should generalize.
 so pixels-per-unit is 16 horizontal vs 14 vertical — circles render
 ~12.5% squashed. Proposed fix: make the standard window square *as
 displayed*: keep x = -10..10 and derive y from the aspect ratio —
-y = ±10·(height/width) = **±8.75** at full-screen geometry. Changing
+y = $\pm10$·(height/width) = **$\pm8.75$** at full-screen geometry. Changing
 the `GraphWindow{}` defaults gets both the first-boot window and
 ZStandard; alternatively `zoom_standard()` could compute from the live
 pane height (TI-ZSquare-style), which would also stay square inside
-the split pane (138 px → y = ±4.3125). Decide: fixed 8.75 default vs
+the split pane (138 px → y = $\pm4.3125$). Decide: fixed 8.75 default vs
 live-geometry compute (or both: defaults 8.75, 'S' recomputes live).
 
 ### 3. `cls` command — clear the screen, retain command history

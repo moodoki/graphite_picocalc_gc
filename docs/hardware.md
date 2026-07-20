@@ -8,7 +8,7 @@ The PicoCalc consists of a swappable Raspberry Pi Pico module mounted on the **C
 
 | | Pico 1 H (RP2040) | Pico 2 H (RP2350) |
 |---|---|---|
-| **CPU** | 2$\times$ Cortex-M0+ | 2$\times$ Cortex-M33 |
+| **CPU** | $2\times$ Cortex-M0+ | $2\times$ Cortex-M33 |
 | **Clock** | 133 MHz (overclockable to 200–250 MHz) | 150 MHz (stock) |
 | **SRAM** | 264 KB | 520 KB |
 | **Flash** | 2 MB onboard | 4 MB onboard |
@@ -16,13 +16,13 @@ The PicoCalc consists of a swappable Raspberry Pi Pico module mounted on the **C
 | **DSP** | None | SIMD, saturating math |
 | **GPIO** | 26 exposed | 26 exposed |
 | **Bootrom math** | Hand-optimized softfloat (QFPLIB-derived) | Standard with FPU |
-| **PIO** | 2$\times$ state machines (4 each) | 3$\times$ state machines (4 each) |
+| **PIO** | $2\times$ state machines (4 each) | $3\times$ state machines (4 each) |
 
 ## Mainboard peripherals (constant across modules)
 
 ### Display
 
-- **Panel**: 4-inch IPS LCD, 320$\times$320 pixels, RGB565
+- **Panel**: 4-inch IPS LCD, $320\times320$ pixels, RGB565
 - **Controller**: ST7365P (~99% command-compatible with ILI9488)
 - **Interface**: 4-wire SPI
 - **Backlight**: PWM-controlled via STM32 co-processor
@@ -41,7 +41,7 @@ The PicoCalc consists of a swappable Raspberry Pi Pico module mounted on the **C
 
 - **PSRAM**: 8 MB, SPI-attached
   - Read/write speed: ~30–40 Mbit/s sequential
-  - Random-access write: ~30$\times$ slower than SRAM
+  - Random-access write: ~$30\times$ slower than SRAM
   - Use cases: framebuffer (Pico 1), large data, CAS pool, MicroPython heap (Pico 2 optional)
 - **SD card**: full-size slot, 32 GB FAT32 card included
   - File system: FatFs (vendored as `drivers/fatfs/`)
@@ -101,7 +101,7 @@ Empirical numbers gathered during development. Update with measurements from eac
 
 | Operation | Pico 1 | Pico 2 |
 |-----------|--------|--------|
-| Full screen clear (320$\times$320) | TBD | TBD |
+| Full screen clear ($320\times320$) | TBD | TBD |
 | 320-point function plot | TBD | TBD |
 | Full frame line-buffer DMA | TBD | TBD |
 
@@ -121,6 +121,6 @@ Canonical hardware references:
 ## Known limitations
 
 - The on-board LED GPIO differs between Pico 1 (GPIO 25) and Pico 2 (different pin and connection — verify from board files). Use the `PICO_DEFAULT_LED_PIN` macro from the SDK rather than hard-coding.
-- Without a hardware FPU, `double` operations on Pico 1 are ~5$\times$ slower than on Pico 2. Profile heavy compute paths and consider `float` for graph-evaluation hot loops if needed.
+- Without a hardware FPU, `double` operations on Pico 1 are ~$5\times$ slower than on Pico 2. Profile heavy compute paths and consider `float` for graph-evaluation hot loops if needed.
 - PSRAM access is SPI-mediated; random-access patterns are dramatically slower than sequential. Layout data structures with sequential access in mind when stored in PSRAM.
 - The keyboard co-processor introduces ~1–5 ms latency on key events. Not noticeable for typing, but be aware for fast-input scenarios (key-repeat tuning).

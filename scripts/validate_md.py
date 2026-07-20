@@ -97,8 +97,12 @@ def validate(path: Path) -> int:
         if in_code or line.strip().startswith("$$"):
             continue
 
+        # Strip inline code spans (`...`) — a unicode char quoted verbatim
+        # in code (e.g. a literal glyph reference) isn't loose math prose.
+        check_line = re.sub(r"`[^`]*`", "", line)
+
         for sym, name in UNICODE_MATH.items():
-            if sym in line:
+            if sym in check_line:
                 pos = line.find(sym)
                 before = line[:pos]
                 # Check if inside $...$ on this line

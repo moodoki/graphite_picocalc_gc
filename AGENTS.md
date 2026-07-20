@@ -96,7 +96,7 @@ Read `docs/architecture.md` before structural changes.
 
 ## Hardware
 
-- **Display**: 320$\times$320 RGB565 IPS via SPI, ST7365P controller (~ILI9488-compatible).
+- **Display**: $320\times320$ RGB565 IPS via SPI, ST7365P controller (~ILI9488-compatible).
 - **Keyboard**: 67-key matrix, scanned by an STM32 co-processor on the mainboard, exposed over I2C.
 - **Memory**: 8 MB SPI PSRAM and 32 GB SD card on the mainboard, available regardless of which Pico module is installed.
 - **Module differences**: see `docs/hardware.md` for the Pico 1 vs Pico 2 spec table.

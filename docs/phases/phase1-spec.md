@@ -8,7 +8,7 @@
 
 **Starting point**: Fork Coyote OS's peripheral drivers (`lcdspi/`, `i2ckbd/`, `rp2040-psram/`, `pwm_sound/`) as the HAL foundation. Rewrite the application layer from scratch in C++. Use Delta Pico's `rbop` layout-node architecture as the design reference for the natural math renderer.
 
-**End state**: a UF2 firmware that boots to a home screen where you can type expressions, see pretty-printed results, define $Y_1 \ldots Y_n$ functions, and graph them on a 320$\times$320 color display with trace, zoom, and window controls.
+**End state**: a UF2 firmware that boots to a home screen where you can type expressions, see pretty-printed results, define $Y_1 \ldots Y_n$ functions, and graph them on a $320\times320$ color display with trace, zoom, and window controls.
 
 ---
 
@@ -386,7 +386,7 @@ In Phase 1, PSRAM is used primarily for framebuffer storage on Pico 1 (if full-f
 
 The core rendering pipeline operates in two modes controlled by `config.hpp`:
 
-**Line-buffer mode (Pico 1 default)**: a 320$\times$16 pixel SRAM buffer (~10 KB). The render loop works in vertical strips:
+**Line-buffer mode (Pico 1 default)**: a $320\times16$ pixel SRAM buffer (~10 KB). The render loop works in vertical strips:
 
 ```
 for each strip of 16 scanlines:
@@ -397,7 +397,7 @@ for each strip of 16 scanlines:
 
 This means every renderable object must support **clipped rendering** — given a rectangle representing the current strip, draw only the pixels that fall within it. This is straightforward for rectangles, lines, and text (just skip rows/chars outside the clip region). The main cost is that complex scenes require re-traversing the UI tree for each strip, but with only 20 strips per frame and a simple UI, this completes in <15 ms.
 
-**Full-framebuffer mode (Pico 2 option)**: a 320$\times$320 RGB565 buffer in SRAM (~200 KB). Draw freely, then DMA the entire buffer. Simpler code path but uses significant SRAM.
+**Full-framebuffer mode (Pico 2 option)**: a $320\times320$ RGB565 buffer in SRAM (~200 KB). Draw freely, then DMA the entire buffer. Simpler code path but uses significant SRAM.
 
 ### 3.2 Fonts
 
@@ -405,13 +405,13 @@ Three bitmap fonts embedded as `const` arrays in flash:
 
 | Font | Size | Use |
 |------|------|-----|
-| `font_8x16` | 8$\times$16 px, monospace | Home screen expressions, history, program editor |
-| `font_6x8` | 6$\times$8 px, monospace | Status bar, axis labels, small annotations |
+| `font_8x16` | $8\times16$ px, monospace | Home screen expressions, history, program editor |
+| `font_6x8` | $6\times8$ px, monospace | Status bar, axis labels, small annotations |
 | `font_prop` | Variable-width, ~10px height | Menu items, dialog text, softkey labels |
 
 Font data format: each character is a bitmap stored as an array of bytes, one byte per row, MSB-left. The proportional font additionally stores a width table.
 
-**Source**: extract font data from Coyote OS's existing font header (`font6x8e500.h` in the MicroPython driver project) for the small font. Generate the 8$\times$16 font from a public-domain bitmap font (e.g., Terminus, Cozette, or GNU Unifont) using a Python script that converts BDF/PCF to C header arrays.
+**Source**: extract font data from Coyote OS's existing font header (`font6x8e500.h` in the MicroPython driver project) for the small font. Generate the $8\times16$ font from a public-domain bitmap font (e.g., Terminus, Cozette, or GNU Unifont) using a Python script that converts BDF/PCF to C header arrays.
 
 ---
 
@@ -497,7 +497,7 @@ The softkey bar renders as: `| F1:LABEL | F2:LABEL | F3:LABEL | F4:LABEL | F5:LA
 
 The top 16 pixels display: battery icon (placeholder in Phase 1), 2nd/Alpha mode indicators, current screen title (left-aligned), and clock or calculation progress indicator (right-aligned).
 
-### 4.4 Screen layout map (320$\times$320)
+### 4.4 Screen layout map ($320\times320$)
 
 ```
 ┌──────────────────────────────────┐  y=0
@@ -512,7 +512,7 @@ The top 16 pixels display: battery icon (placeholder in Phase 1), 2nd/Alpha mode
 └──────────────────────────────────┘  y=320
 ```
 
-Usable content area: 320$\times$280 pixels.
+Usable content area: $320\times280$ pixels.
 
 ---
 
@@ -790,7 +790,7 @@ A list of 7 function slots ($Y_1$ through $Y_7$):
 
 Renders all enabled Y-functions on a coordinate plane.
 
-**Graph viewport**: the full 320$\times$280 content area (between status bar and softkeys).
+**Graph viewport**: the full $320\times280$ content area (between status bar and softkeys).
 
 ```cpp
 struct GraphWindow {
@@ -837,7 +837,7 @@ Each Y-function gets a distinct color from a predefined palette: blue, red, gree
 - **WINDOW** (F5): push to window settings screen
 - **Y=** (F6): push to Y editor
 
-**Performance target**: full graph render (7 functions, 320 points each) in <50 ms on Pico 1, <20 ms on Pico 2. Based on ~400K evals/sec on RP2040, 7$\times$320 = 2240 evaluations takes ~5.6 ms. Display rendering dominates at ~10–30 ms.
+**Performance target**: full graph render (7 functions, 320 points each) in <50 ms on Pico 1, <20 ms on Pico 2. Based on ~400K evals/sec on RP2040, $7\times320$ = 2240 evaluations takes ~5.6 ms. Display rendering dominates at ~10–30 ms.
 
 ### 7.4 Window settings (`apps/window_screen.hpp`)
 
@@ -898,7 +898,7 @@ Estimated as a **solo developer, part-time (~20 hrs/week)**. Total: ~8–10 week
 | 1.5 | Implement `platform::Storage` wrapper | 4 | Read/write a test file on SD card |
 | 1.6 | Implement `platform::Psram` wrapper | 3 | Allocate + read-back a 1KB test buffer |
 | 1.7 | Implement line-buffer renderer + DMA on core 1 | 8 | 30+ fps color gradient animation on screen |
-| 1.8 | Implement `gfx::Font` with 8$\times$16 font | 4 | "Hello PicoCalc" displayed cleanly |
+| 1.8 | Implement `gfx::Font` with $8\times16$ font | 4 | "Hello PicoCalc" displayed cleanly |
 | 1.9 | Implement basic `ScreenManager` | 3 | Push/pop between two blank screens via F-keys |
 | | **Subtotal** | **~41 hrs** | |
 
