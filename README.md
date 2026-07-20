@@ -2,11 +2,15 @@
 
 TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](https://www.clockworkpi.com/picocalc), written in C++17 using the Raspberry Pi Pico SDK. Targets both the Pico 1 H (RP2040) and Pico 2 H (RP2350) modules. Personal-use project.
 
-> **Status**: Phase 1 complete and hardware-verified on both boards. Phase 2
-> code-complete (parametric/polar modes, tables, split-screen, built-in help,
-> unified persistence); on-device verification pending — see
-> [`docs/notes/next-session.md`](docs/notes/next-session.md) for the test-drive
-> checklist and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
+> **Status**: Phases 0–2 complete and hardware-verified on Pico 2 (parametric/
+> polar modes, tables, split-screen, built-in help, unified persistence; the
+> Pico 1 verification pass is deferred to task 3D.14). Phase 3 (statistics:
+> lists, regression, distributions, inference, stat plots) and Phase 4
+> sub-phases 4A–4C (matrices, graph-analysis CALC menu, complex numbers) are
+> code-complete and flashed to Pico 2 — on-device verification of these newer
+> surfaces and the combined Pico 1 pass are still pending. See
+> [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
+> handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
 ## Features
 
@@ -19,17 +23,36 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   the SD card. The status bar shows angle/display mode and battery level (cached
   STM32 read, refreshed every 30 s; cyan while charging; shows `--` on units whose
   STM32 keyboard firmware predates the battery register).
-- **Phase 2 (code-complete)**: Graph modes — **parametric** ($X_{nT}(t), Y_{nT}(t)$
-  pairs) and **polar** ($r_n(\theta)$, angle-mode aware) alongside function mode,
-  selected from the MODE screen; mode-aware Y=/parametric/polar editors and window
-  screen (Tmin/Tmax/Tstep, $\theta$ range); **value table** for every mode with auto
-  (infinite scroll) and ask modes plus horizontal column scrolling; **split-screen
-  graph|table** with pane focus and trace↔row sync; **built-in help browser**
-  (function catalog driven by the same table the parser registers from, key
-  reference, syntax notes); all graphing state persists in one SD file with
-  automatic migration from the Phase 1 format.
-- **Phase 3 (planned)**: Lists, statistics, regression, distributions, statistical plots.
-- **Phase 4 (planned)**: Matrix operations, symbolic math (CAS — differentiation, simplification, factoring, equation solving, basic integration), MicroPython programming environment.
+- **Phase 2 (complete, HW-verified on Pico 2)**: Graph modes — **parametric**
+  ($X_{nT}(t), Y_{nT}(t)$ pairs) and **polar** ($r_n(\theta)$, angle-mode aware)
+  alongside function mode, selected from the MODE screen; mode-aware
+  Y=/parametric/polar editors and window screen (Tmin/Tmax/Tstep, $\theta$
+  range); **value table** for every mode with auto (infinite scroll) and ask
+  modes plus horizontal column scrolling; **split-screen graph|table** with
+  pane focus and trace↔row sync; **built-in help browser** (function catalog
+  driven by the same table the parser registers from, key reference, syntax
+  notes); all graphing state persists in one SD file with automatic migration
+  from the Phase 1 format. Pico 1 verification pass deferred to task 3D.14.
+- **Phase 3 (code-complete)**: Six data lists ($L_1 \ldots L_6$) backed by a
+  shared `Array` primitive with a spreadsheet-style list editor; 1-var/2-var
+  descriptive statistics and all ten TI-style regression models; probability
+  distributions (PDF/CDF/inverse) for normal, $t$, $\chi^2$, $F$, binomial,
+  Poisson, and geometric; the full inference suite (hypothesis tests,
+  confidence intervals, ANOVA); statistical plots (histogram, box plot,
+  scatter) overlaid on the graphing engine. On-device verification and the
+  Pico 1 pass (3D.14) pending.
+- **Phase 4 (sub-phases 4A–4C code-complete, flashed to Pico 2)**: 10 matrix
+  variables (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
+  row-echelon form, eigenvalues, and a numeric equation solver (4A); a
+  TI-84-style **CALC menu** on the graph screen — value, zero, min/max,
+  intersect, `dy/dx`, numeric integral — across function/parametric/polar
+  modes (4B); **complex numbers** with `a+bi`/polar (`r∠θ`) display modes,
+  complex-aware arithmetic and elementary functions, and complex matrix
+  eigenvalue spectra (4C). A swappable 8x16 font system with real math glyphs
+  (`π θ σ Σ μ λ ≠ √ ∠ ⇒ …`) ships alongside this work. Symbolic math (CAS —
+  differentiation, simplification, factoring, equation solving, basic
+  integration; 4D) and a MicroPython programming environment (4E) are
+  specced but not started. On-device verification of 4A–4C pending.
 - **Phase 5 (planned)**: App framework, polish, release.
 
 The TI-83/84 design language is the reference, but the UI is modernized to take advantage of the PicoCalc's $320\times320$ color display.
@@ -56,7 +79,7 @@ brew install --cask gcc-arm-embedded   # ARM GNU Toolchain → /Applications/Arm
 
 # 2. Clone this repo, plus the Pico SDK next to it
 git clone <this-repo>
-cd picocalc-graphcalc
+cd picocalc_gc
 git clone -b 2.2.0 --recurse-submodules https://github.com/raspberrypi/pico-sdk.git
 
 # 3. Set environment (adjust the toolchain version to what's installed)
@@ -83,15 +106,19 @@ The math engine, layout builder, and graph subsystem have host-side unit tests
 that run on your development machine (no Pico hardware or cross-toolchain needed):
 
 ```bash
-./scripts/host-tests.sh   # test_math + test_layout + test_graph (200+ checks)
+./scripts/host-tests.sh   # test_math, test_layout, test_graph, test_lists, test_stats,
+                           # test_dist, test_infer, test_analysis, test_matrix,
+                           # test_complex(_expr), test_solve — 1200+ checks
 ./scripts/lint.sh         # clang-format check + clang-tidy (warnings are errors)
 ```
 
 The tests cover expression evaluation, the function catalog (the same table the
 parser registers from), angle modes, number formatting (FLOAT/FIX/SCI),
 variables/store, viewport transforms, the function/parametric/polar point
-sources, trace stepping, and the mode-aware table model. They are the primary
-correctness check between on-device sessions.
+sources, trace stepping, the mode-aware table model, lists/statistics/
+regression, distributions and inference, matrices and the numeric solver,
+graph-analysis (CALC menu), and complex-number arithmetic/display. They are
+the primary correctness check between on-device sessions.
 
 ## Using the calculator
 
@@ -105,7 +132,8 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
   `F1` Y= editor, `F2` window, `F3` graph, `F4` mode, `F5` help, `F6` (= `Shift+F1`)
   hardware diagnostics. `HOME` returns here from anywhere; `F6`/`ESC` exits diagnostics.
 - **Mode**: angle (RAD/DEG), display format (FLOAT/FIX/SCI), fix digits,
-  **graph mode (FUNC/PARAM/POLAR)**, and reboot to the USB bootloader for flashing.
+  **graph mode (FUNC/PARAM/POLAR)**, **number mode (REAL/`a+bi`/`r∠θ`)**, and
+  reboot to the USB bootloader for flashing.
 - **Editors** (`F5` from the graph opens the active mode's editor): `UP`/`DOWN`
   select, `ENTER`/`F1` edit, `F2` toggle enable, `F3` clear, `F4` graph. The
   parametric editor shows six $X_{nT}/Y_{nT}$ pairs (committing an X expression
@@ -123,6 +151,22 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **Split-screen** (`F9` from graph or table): graph pane above, table below;
   `F4` switches the focused pane, trace and table row stay in sync, `F9`/`ESC`
   exits.
+- **Lists & stats** (typed `lists`/`stats`, or `list`/`stat`): a spreadsheet-style
+  editor for six lists ($L_1 \ldots L_6$); 1-var/2-var descriptive stats,
+  regression models, distributions (PDF/CDF/inverse), the inference suite, and
+  stat plots (histogram/box/scatter) overlaid on the graph engine.
+- **Matrices** (TI-style `[A]` … `[J]` bracket typing, or the matrix editor):
+  arithmetic, determinant, inverse, transpose, row-echelon form, `eigenvals`/
+  `eig`, and a numeric equation solver.
+- **CALC menu** (`F6` on the graph screen, or typed `calc`/`analyze`): value,
+  zero, min/max, intersect, `dy/dx`, and numeric `fnInt`, cursor-driven on the
+  graph curve across function/parametric/polar modes.
+- **Complex numbers**: home-screen expressions like `3+2i` or `sqrt(-4)`
+  evaluate per the MODE Number row (REAL results say "Non-real result" instead
+  of `NaN`; `a+bi`/`r∠θ` modes display the complex value).
+- **Fonts**: the 8x16 main font is a build-time choice —
+  `-DPICOCALC_FONT=spleen|juliamono|iosevka|unifont|terminus` (default
+  `terminus`) — all carrying the same math-glyph slot map.
 
 ## Repository layout
 
@@ -137,8 +181,9 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 │   ├── platform/          # HAL — only layer that touches hardware
 │   ├── gfx/               # Framebuffer, fonts, drawing primitives
 │   ├── ui/                # Screen manager, widgets
-│   ├── math/              # Expression engine, function catalog, numeric eval
-│   │   └── cas/           # (Phase 4) symbolic math
+│   ├── math/              # Expression engine, function catalog, numeric eval,
+│   │                      #   lists/stats/distributions/inference, matrices,
+│   │                      #   complex numbers (cas/ lands with Phase 4D)
 │   ├── render/            # Natural math layout-node renderer
 │   ├── graph/             # Graphing subsystem: viewport, plotter, modes,
 │   │                      #   point sources, trace, persisted GraphState
@@ -163,9 +208,9 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 
 - **[docs/phases/phase0-prep.md](docs/phases/phase0-prep.md)** — environment setup, repo bootstrap (do this first)
 - **[docs/phases/phase1-spec.md](docs/phases/phase1-spec.md)** / **[phase1-plan.md](docs/phases/phase1-plan.md)** — Phase 1 design contract + plan (complete; retro in [docs/notes/phase1-retro.md](docs/notes/phase1-retro.md))
-- **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (current phase)
-- **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics)
-- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract (matrix, graph analysis, complex numbers, CAS, MicroPython)
+- **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (complete; retro in [docs/notes/phase2-retro.md](docs/notes/phase2-retro.md))
+- **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics; code-complete)
+- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract (matrix, graph analysis, complex numbers, CAS, MicroPython; current phase — 4A–4C code-complete, 4D/4E not started)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
 - **[docs/hardware.md](docs/hardware.md)** — hardware reference
 - **[docs/dev-environment.md](docs/dev-environment.md)** — macOS Apple Silicon dev setup
@@ -185,10 +230,16 @@ Background research:
 |-------|--------|-------|
 | 0: Prep | Complete | Environment, repo, vendored drivers |
 | 1: HAL + calculator + basic graphing | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase1-retro.md) |
-| 2: Graph modes + table + split + help | **Code complete** | Both boards build; 200+ host checks green; on-device test drive pending |
-| 3: Statistics | Specced | docs/phases/phase3-spec.md |
-| 4: Matrix + graph analysis + complex + CAS + MicroPython | Specced | ~14 weeks part-time |
+| 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 2 (retro: docs/notes/phase2-retro.md); Pico 1 pass folded into task 3D.14 |
+| 3: Statistics | **Code complete** | Lists, regression, distributions, inference, stat plots; on-device eval + Pico 1 pass (3D.14) pending |
+| 4A–4C: Matrix + graph analysis + complex numbers | **Code complete** | Flashed to Pico 2 (D28/D29/D30); on-device eval pending |
+| 4D: CAS (symbolic math) | Specced, not started | docs/phases/phase4-spec.md §6 |
+| 4E: MicroPython | Specced, not started | docs/phases/phase4-spec.md §7 |
 | 5: App framework + polish | Not started | Spec pending |
+
+Both boards build clean and the host test suite (1200+ checks) passes. See
+[docs/notes/next-session.md](docs/notes/next-session.md) for exactly what's
+HW-PENDING right now.
 
 ## Acknowledgments
 
