@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "math/functions.hpp"
+
 namespace math {
 
 namespace {
@@ -126,6 +128,38 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
 
     std::snprintf(buf, buf_len, "%.10g", x);
     return strip_zeros(buf);
+}
+
+int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len) {
+    if (buf_len == 0) {
+        return 0;
+    }
+    if (mode == NumberMode::kPolar) {
+        calc_t theta = z.argument();
+        if (angle_mode() == AngleMode::kDegrees) {
+            theta = fn::deg(theta);
+        }
+        char rbuf[24];
+        char tbuf[24];
+        format_number(z.modulus(), rbuf, sizeof(rbuf));
+        format_number(theta, tbuf, sizeof(tbuf));
+        return std::snprintf(buf, buf_len, "%s<%s", rbuf, tbuf);
+    }
+
+    if (z.is_real()) {
+        return format_number(z.re, buf, buf_len);
+    }
+
+    char imag[24] = {};
+    if (std::fabs(z.im) != 1.0) {
+        format_number(std::fabs(z.im), imag, sizeof(imag));
+    }
+    if (z.re == 0.0) {
+        return std::snprintf(buf, buf_len, "%s%si", z.im < 0 ? "-" : "", imag);
+    }
+    char rebuf[24];
+    format_number(z.re, rebuf, sizeof(rebuf));
+    return std::snprintf(buf, buf_len, "%s %s %si", rebuf, z.im < 0 ? "-" : "+", imag);
 }
 
 }  // namespace math

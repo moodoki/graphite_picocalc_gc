@@ -1,6 +1,7 @@
 #pragma once
 
 #include "math/array.hpp"
+#include "math/complex.hpp"
 
 namespace platform {
 class Storage;
@@ -57,9 +58,16 @@ bool power(const Array& a, int p, Array& out, const char** err);
 
 // Real eigenvalues via Hessenberg + shifted QR, n <= kMaxEigen. `out`
 // is a 1-D list (descending), so results flow into l1..l6 and list
-// expressions. A complex conjugate pair is an error by decision
-// (2026-07-20): a partial answer would mislead; complex support is 4C.
+// expressions. A complex conjugate pair is an error (D28): lists are
+// real-only, so a partial answer would mislead — use
+// eigenvalues_complex for the full spectrum (Phase 4C, D30/P4-7).
 bool eigenvalues(const Array& a, Array& out, const char** err);
+
+// Full spectrum (real + complex-conjugate pairs) via the same
+// Hessenberg + shifted QR core, n <= kMaxEigen. `out` must hold at
+// least kMaxEigen entries; *count is the number written, descending by
+// real part (a conjugate pair's +i entry precedes its -i entry).
+bool eigenvalues_complex(const Array& a, Complex* out, int* count, const char** err);
 
 }  // namespace math::matops
 

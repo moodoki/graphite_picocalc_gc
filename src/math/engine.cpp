@@ -119,7 +119,7 @@ namespace {
 // The lookup array is only needed during te_compile — the pointers it
 // captures (into vars and static function code) outlive it. Returns the
 // number of entries written; `lookup` must hold at least kLookupCount.
-constexpr int kLookupCount = 25 + 2 + kMaxCatalogEntries;
+constexpr int kLookupCount = 24 + 2 + kMaxCatalogEntries;
 
 int build_lookup(Variables& vars, te_variable* lookup) {
     static char names[26][2];
@@ -127,6 +127,12 @@ int build_lookup(Variables& vars, te_variable* lookup) {
     for (int i = 0; i < 26; ++i) {
         if (i == 'e' - 'a') {
             continue;  // 'e' = Euler's constant, not a variable
+        }
+        if (i == 'i' - 'a') {
+            continue;  // 'i' = imaginary unit (Phase 4C); the real engine
+                       // has no complex type, so it stays unbound here —
+                       // referencing bare 'i' outside math::complexexpr
+                       // is a plain unknown-identifier parse error.
         }
         names[i][0] = static_cast<char>('a' + i);
         names[i][1] = 0;
@@ -274,6 +280,11 @@ EvalResult Engine::evaluate(const char* expr) {
         if (store_index == 'e' - 'a') {
             EvalResult res;
             res.error = "e is reserved (Euler's e)";
+            return res;
+        }
+        if (store_index == 'i' - 'a') {
+            EvalResult res;
+            res.error = "i is reserved (imaginary unit)";
             return res;
         }
         if (store_index >= 0) {

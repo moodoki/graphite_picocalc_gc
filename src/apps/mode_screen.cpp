@@ -23,7 +23,8 @@ constexpr int kRowAngle = 0;
 constexpr int kRowDisplay = 1;
 constexpr int kRowFixDigits = 2;
 constexpr int kRowGraphMode = 3;
-constexpr int kRowReboot = 4;
+constexpr int kRowNumber = 4;
+constexpr int kRowReboot = 5;
 }  // namespace
 
 void ModeScreen::adjust(int dir) const {
@@ -54,6 +55,15 @@ void ModeScreen::adjust(int dir) const {
             int m = static_cast<int>(graph::state().mode) + dir;
             m = (m % kModeCount + kModeCount) % kModeCount;
             graph::state().mode = static_cast<graph::Mode>(m);
+            save_graph_state();
+            break;
+        }
+        case kRowNumber: {
+            constexpr int kCount = 3;  // REAL, RECTANGULAR, POLAR
+            int m = static_cast<int>(math::number_mode()) + dir;
+            m = (m % kCount + kCount) % kCount;
+            math::set_number_mode(static_cast<math::NumberMode>(m));
+            graph::state().number = math::number_mode();
             save_graph_state();
             break;
         }
@@ -113,11 +123,8 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     ui::draw_status_bar(fb, "MODE");
 
     const char* const rows[kNumRows][2] = {
-        {"Angle", nullptr},
-        {"Display", nullptr},
-        {"Fix digits", nullptr},
-        {"Graph mode", nullptr},
-        {"Reboot to bootloader", nullptr},
+        {"Angle", nullptr},      {"Display", nullptr}, {"Fix digits", nullptr},
+        {"Graph mode", nullptr}, {"Number", nullptr},  {"Reboot to bootloader", nullptr},
     };
 
     char angle_val[8];
@@ -136,8 +143,15 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     } else if (graph::state().mode == graph::Mode::kPolar) {
         gmode_val = "POLAR";
     }
+    const char* number_val = "REAL";
+    if (math::number_mode() == math::NumberMode::kRectangular) {
+        number_val = "a+bi";
+    } else if (math::number_mode() == math::NumberMode::kPolar) {
+        number_val = "r<t";
+    }
 
-    const char* const values[kNumRows] = {angle_val, disp_val, fix_val, gmode_val, "[ENTER]"};
+    const char* const values[kNumRows] = {angle_val, disp_val,   fix_val,
+                                          gmode_val, number_val, "[ENTER]"};
 
     for (int i = 0; i < kNumRows; ++i) {
         const int y = kTopY + i * kRowH;

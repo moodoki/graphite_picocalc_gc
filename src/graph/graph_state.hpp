@@ -112,6 +112,10 @@ struct GraphState {
     math::DisplayMode display = math::DisplayMode::kFloat;
     int fix_digits = 2;
 
+    // Number mode (Phase 4C, D30). Default REAL (P4-9, TI parity);
+    // persisted since PCG5.
+    math::NumberMode number = math::NumberMode::kReal;
+
     // Numeric axis tick labels ('L' on the graph screen). Kept after the
     // Session 10 on-device eval; persisted since PCG3.
     bool axis_labels = true;

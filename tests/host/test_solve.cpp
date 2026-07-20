@@ -138,7 +138,7 @@ void test_solve_expr() {
 
     check_subst_error("solve(x^2-2, x)", "solve needs (expr, var, guess) or (expr, var, lo, hi)",
                       "too few args");
-    check_subst_error("solve(x^2-2, xy, 0, 2)", "solve var must be a-z (not e) or theta",
+    check_subst_error("solve(x^2-2, xy, 0, 2)", "solve var must be a-z (not e/i) or theta",
                       "bad variable");
     check_subst_error("solve(x^2+1, x, 0, 1)", "No solution found", "no root propagates");
     check_subst_error("solve(x^2-2, x, foo, 2)", "Bad solve bound", "bad bound");

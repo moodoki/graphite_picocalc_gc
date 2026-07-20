@@ -336,7 +336,7 @@ void test_list_expr() {
     eval_list("{1,2}->l6");
     check_list_error("l1+l6", "List length mismatch");
     check_list_error("seq(x,x,1,5)", "seq needs (expr, var, lo, hi, step)");
-    check_list_error("seq(x,e,1,5,1)", "seq var must be a-z (not e) or theta");
+    check_list_error("seq(x,e,1,5,1)", "seq var must be a-z (not e/i) or theta");
     check_list_error("{1,foo}", "Bad list element");
     check_list_error("l1+*2", "Syntax error");
 

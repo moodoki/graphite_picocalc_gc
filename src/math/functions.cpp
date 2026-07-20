@@ -8,6 +8,7 @@ namespace math {
 
 namespace {
 AngleMode g_angle_mode = AngleMode::kRadians;
+NumberMode g_number_mode = NumberMode::kReal;
 constexpr double kPi = 3.14159265358979323846;
 }  // namespace
 
@@ -16,6 +17,13 @@ AngleMode angle_mode() {
 }
 void set_angle_mode(AngleMode m) {
     g_angle_mode = m;
+}
+
+NumberMode number_mode() {
+    return g_number_mode;
+}
+void set_number_mode(NumberMode m) {
+    g_number_mode = m;
 }
 
 namespace fn {

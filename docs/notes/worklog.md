@@ -221,8 +221,111 @@ Still to verify on hardware:
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 | Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine |
 | Session 17 — Phase 4B graph analysis / CALC menu (D29; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected |
+| Session 18 — Phase 4C complex numbers (D30; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface |
 
 ---
+
+## 2026-07-20 — Session 18: Phase 4C — complex numbers (D30)
+
+All of 4C.1-4C.9 plus P4-7 (complex matrix eigenvalues, user pick — the
+spec's own note said "likely defer") in one pass. Two user decisions taken
+upfront: **P4-9 default number mode = REAL**, **P4-7 = add conjugate-pair
+eigenvalues now**, both recorded with the rest of the as-built calls as
+**D30**. No hardware was connected this session — **nothing was flashed**;
+the Pico 2 stays on the Session 16 (4A) build. Host suite grew **1070 ->
+1206 checks** (two new binaries: `test_complex` 66, `test_complex_expr`
+50; `test_matrix` 199 -> 219), 0 failures; lint clean (two real
+clang-tidy findings fixed: a De Morgan simplification, three
+`modernize-return-braced-init-list`, one dead store); format applied; both
+boards build clean. Pico 1 text 354036 -> 362004 (+7968 B), bss 188616 ->
+188684 (+68 B, ~188.7 KB of 264 KB — unchanged watch item from D28/D29).
+Pico 2 text 341420 -> 349068, bss 382536 -> 382604.
+
+- **`Complex` type + math** (`src/math/complex.{hpp,cpp}`): arithmetic
+  (Smith's algorithm for division — stable across extreme magnitudes),
+  modulus/argument/from_polar, and the elementary set from the spec:
+  `c_sqrt` (Numerical Recipes' cancellation-safe form), `c_exp`, `c_ln`
+  (principal branch), `c_pow`, `c_sin/cos/tan`, `c_asin/acos/atan`
+  (log-form identities), `c_abs/arg/conj/real/imag`. Fully host-tested
+  against known values (Euler's identity, sqrt(3+4i)=2+i, round-trips
+  through the inverse trig identities).
+- **`NumberMode`** (`math/types.hpp`): `{kReal, kRectangular, kPolar}`,
+  storage/persistence/MODE-screen row all mirror the existing `AngleMode`
+  pattern exactly (D30 item 1) — new "Number" row on the MODE screen,
+  `GraphState` shadow field, persisted GraphState bumps to **PCG5** (a
+  one-time reset on first boot after this build, like PCG3/PCG4 before
+  it).
+- **`math::complexexpr`** (`src/math/complex_expr.{hpp,cpp}`): the
+  home-screen complex evaluator, a recursive-descent parser over
+  `Complex` mirroring `matexpr`'s shape (D28) since `Complex` can't flow
+  through tinyexpr either. Special-cases only `i` (+ the `2i` literal
+  shorthand) and the complex-aware function set; everything else —
+  `pi`/`e`/`theta`/`ans`, bare variables, and the rest of the real
+  catalog — reuses `eval_field` as an opaque real span (the same
+  technique `matexpr::parse_scalar_span` already uses), so switching
+  to a+bi/polar mode doesn't lose access to `ncr`/`round`/the
+  distributions/etc. as long as their own arguments stay real.
+  Deliberately **side-effect-free** (unlike `matexpr`/`listexpr`) so the
+  home screen can use it as a cheap probe in plain REAL mode: a would-be
+  `NaN` (`sqrt(-4)`) upgrades to a proper "Non-real result" domain error
+  without double-committing Ans/a store (D30 item 4). `i` is now a
+  globally reserved identifier (D30 item 2), same tier as `e` — blocked
+  as a store target in the real engine, `matexpr`, `listexpr`'s `seq`,
+  and `solve_expr`'s solve-variable parsing, all with pointed error text.
+- **`format_complex`** (`math/format.{hpp,cpp}`): rectangular ("3 + 2i",
+  pure-real/imag, unit-coefficient elision) and polar. No angle glyph was
+  baked — the vendored Spleen BDF has no true U+2220 (checked; nearest
+  are angle *quotation marks*, wrong shape) — polar uses ASCII `<`
+  (`"2<60"`, the common EE phasor-notation convention) as a stand-in,
+  flagged to revisit if it reads badly on hardware.
+- **P4-7: matrix eigenvalues, full spectrum** (`src/math/matrix.cpp`):
+  the D28 Hessenberg+Wilkinson-QR core is now `eigen_core`, filling
+  `Complex` and never erroring on a conjugate pair (that's a legitimate
+  result now, not a domain error). Two public entry points:
+  `eigenvalues(Array&)` keeps its **exact old contract** (still errors
+  "Complex eigenvalues" on any complex pair — existing tests/callers
+  untouched) and the new `eigenvalues_complex(Complex*, int*)`.
+  `mat_expr.cpp`'s `eigenvals([A])` now calls the complex-capable one: an
+  all-real spectrum is still `Kind::kList` (storable into l1..l6,
+  unchanged); a spectrum with a conjugate pair is a new `Kind::kText`
+  (`matexpr::Result` gained a `text` field) — an unstorable formatted
+  string like `{i,-i}`.
+- **Home-screen dispatch** (`apps/home_screen.cpp`): the final scalar
+  step in `evaluate_input` now branches on `number_mode()` /
+  `complexexpr::mentions_i()` — non-REAL mode or a literal `i` routes
+  through `complexexpr` (applying its own Ans/store once); plain REAL
+  mode still hits the unchanged real engine, with the one-shot probe
+  described above layered in front for the NaN-upgrade case.
+- New host suites: `tests/host/test_complex.cpp` (66 checks, the
+  `Complex` type standalone) and `tests/host/test_complex_expr.cpp` (50
+  checks — the parser, `mentions_i`, store rules, `format_complex`,
+  `NumberMode` plumbing); `test_matrix.cpp` grew 20 checks for
+  `eigenvalues_complex` and the `eigenvals()` `Kind::kText` path.
+
+Decisions recorded as **D30** (see `decisions.md`) — full detail there;
+summary: REAL default (P4-9), `i` globally reserved, complex results
+can't be stored (Variables/Ans stay real-only — widening them is out of
+scope), no baked angle glyph (ASCII `<`), `eigenvalues()`'s old contract
+frozen while `eigenvals([A])` gains the richer text form (P4-7).
+
+Known limitations / deferred:
+- No complex-valued variable storage — `5->a` works if real, `2i->a`
+  errors. Would need widening `Variables::vars` past `calc_t`.
+- No baked ∠ glyph; polar display uses ASCII `<` (`"2<60"`).
+- `eigenvals([A])`'s complex form can't be stored into l1..l6 or nest
+  inside a larger matrix expression (same limitation `dim`/`eigenvals`
+  already had for lists).
+- The REAL-mode NaN-upgrade probe re-parses every plain REAL home-screen
+  expression once through `complexexpr` on Enter — home-screen-only cost
+  (Enter-rate, not frame-rate; graphing never touches this path).
+
+Still HW-PENDING: the full 4C on-device batch (MODE Number row cycle,
+non-real domain errors reading clearly, a+bi/polar display and store
+rules, the `<` polar stand-in, `eigenvals()` complex text) — plus the
+older Session 11/12/15/16/17 batches; then **3D.14** (the combined Pico 1
+pass, D18); then **Phase 4D** (CAS engine, `phase4-spec.md` §6 — weeks
+32-36), which per the spec's own §5.5 hook uses this session's `Complex`
+type as its numeric backing for complex roots.
 
 ## 2026-07-20 — Session 17: Phase 4B — graph analysis / CALC menu (D29)
 

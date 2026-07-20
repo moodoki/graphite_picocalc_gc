@@ -343,6 +343,47 @@ void test_eigenvalues() {
     err = nullptr;
     check_err(matops::eigenvalues(a, out, &err), err, "Complex eigenvalues", "eigen mixed complex");
 
+    // eigenvalues_complex (Phase 4C, D30/P4-7): the full spectrum,
+    // conjugate pairs included, on the same fixtures above.
+    {
+        Complex ceig[matops::kMaxEigen];
+        int ccount = 0;
+        check(fill(a, 2, 2, vrot), "fill rotation (complex)");
+        err = nullptr;
+        check(matops::eigenvalues_complex(a, ceig, &ccount, &err), "eigen_c rotation ok");
+        check(ccount == 2, "eigen_c rotation count");
+        check_near(ceig[0].re, 0.0, "eigen_c rotation [0].re");
+        check_near(ceig[0].im, 1.0, "eigen_c rotation [0].im");
+        check_near(ceig[1].re, 0.0, "eigen_c rotation [1].re");
+        check_near(ceig[1].im, -1.0, "eigen_c rotation [1].im");
+
+        check(fill(a, 5, 5, v5), "fill mixed 5x5 (complex)");
+        err = nullptr;
+        check(matops::eigenvalues_complex(a, ceig, &ccount, &err), "eigen_c mixed ok");
+        check(ccount == 5, "eigen_c mixed count");
+        // Descending by real part; the conjugate pair (re=0) sorts
+        // after the positive reals and before/among the rest by im.
+        int real_count = 0;
+        int complex_count = 0;
+        for (int i = 0; i < ccount; ++i) {
+            if (ceig[i].is_real()) {
+                ++real_count;
+            } else {
+                ++complex_count;
+            }
+        }
+        check(real_count == 3 && complex_count == 2, "eigen_c mixed real/complex split");
+
+        // All-real input still yields an all-real spectrum via the
+        // complex-capable entry point too.
+        check(fill(a, 2, 2, vn), "fill nonsym (complex)");
+        err = nullptr;
+        check(matops::eigenvalues_complex(a, ceig, &ccount, &err), "eigen_c nonsym ok");
+        check(ccount == 2 && ceig[0].is_real() && ceig[1].is_real(), "eigen_c nonsym all real");
+        check_near(ceig[0].re, 5.0, "eigen_c nonsym [0]", 1e-8);
+        check_near(ceig[1].re, 2.0, "eigen_c nonsym [1]", 1e-8);
+    }
+
     // Size cap
     Array big;
     check(big.resize(11, 11), "resize 11x11");
@@ -574,6 +615,16 @@ void test_expr_store() {
     check(res.kind == matexpr::Kind::kList && res.stored_list == 1 && res.lists_modified,
           "eigenvals -> l2");
     check_near(lists().list(1).get(0), 2.0 + std::sqrt(2.0), "eigenvals l2[0]", 1e-8);
+
+    // eigenvals() with a complex-conjugate pair (Phase 4C, D30/P4-7):
+    // Kind::kText instead of Kind::kList, and a store target errors.
+    const double vrot2[4] = {0, -1, 1, 0};
+    check(fill(matrices().matrix(4), 2, 2, vrot2), "fill [E] rotation");
+    res = eval_mat("eigenvals([E])");
+    check(res.kind == matexpr::Kind::kText, "eigenvals complex kind");
+    check(res.text != nullptr && std::strcmp(res.text, "{i,-i}") == 0, "eigenvals complex text");
+    check_mat_error("eigenvals([E]) -> l3", "Complex results can't be stored",
+                    "eigenvals complex store rejected");
 
     // Store mismatches
     check_mat_error("[A] -> l1", "Store target mismatch", "matrix to list target");

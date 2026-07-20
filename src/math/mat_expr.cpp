@@ -24,6 +24,10 @@ Array g_temp[kMaxTemps];
 // across calls so the home screen and editor can read them.
 Array g_mresult;
 Array g_lresult;
+// eigenvals() text form when the spectrum has a complex-conjugate
+// pair (Phase 4C, D30/P4-7) — lists are real-only, so this can't be a
+// g_lresult the way an all-real spectrum is.
+char g_ctext[64];
 
 bool ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
@@ -586,7 +590,7 @@ StoreTarget parse_store_target(const char* rhs) {
     } else if (std::strcmp(rhs, "theta") == 0) {
         t.var = Variables::kTheta;
         t.valid = true;
-    } else if (len == 1 && rhs[0] >= 'a' && rhs[0] <= 'z' && rhs[0] != 'e') {
+    } else if (len == 1 && rhs[0] >= 'a' && rhs[0] <= 'z' && rhs[0] != 'e' && rhs[0] != 'i') {
         t.var = rhs[0] - 'a';
         t.valid = true;
     }
@@ -712,30 +716,103 @@ Result evaluate(const char* input) {
             release_temps();
             return res;
         }
-        bool ok = false;
         if (which == 0) {
-            ok = g_lresult.resize(2);
-            if (ok) {
-                g_lresult.set(0, v.m->dim(0));
-                g_lresult.set(1, v.m->dim(1));
-            } else {
+            const bool ok = g_lresult.resize(2);
+            release_temps();
+            if (!ok) {
                 res.error = "Out of list memory";
+                return res;
             }
-        } else {
-            ok = matops::eigenvalues(*v.m, g_lresult, &res.error);
+            g_lresult.set(0, v.m->dim(0));
+            g_lresult.set(1, v.m->dim(1));
+            res.kind = Kind::kList;
+            res.error = nullptr;
+            res.list = &g_lresult;
+            if (store.matrix >= 0 || store.var >= 0) {
+                res.kind = Kind::kError;
+                res.error = "Store target mismatch";
+                return res;
+            }
+            if (store.list >= 0) {
+                if (!listops::copy(g_lresult, lists().list(store.list))) {
+                    res.kind = Kind::kError;
+                    res.error = "Out of list memory";
+                    return res;
+                }
+                res.stored_list = store.list;
+                res.lists_modified = true;
+                res.list = &lists().list(store.list);
+            }
+            return res;
         }
+
+        // eigenvals(): full spectrum (Phase 4C, D30/P4-7). All-real
+        // stays a Kind::kList (unchanged, storable into l1..l6); a
+        // complex-conjugate pair formats as unstorable text instead.
+        Complex ceig[matops::kMaxEigen];
+        int ccount = 0;
+        const bool ok = matops::eigenvalues_complex(*v.m, ceig, &ccount, &res.error);
         release_temps();
         if (!ok) {
             return res;
         }
-        res.kind = Kind::kList;
-        res.error = nullptr;
-        res.list = &g_lresult;
+        bool all_real = true;
+        for (int i = 0; i < ccount; ++i) {
+            if (!ceig[i].is_real()) {
+                all_real = false;
+                break;
+            }
+        }
         if (store.matrix >= 0 || store.var >= 0) {
             res.kind = Kind::kError;
             res.error = "Store target mismatch";
             return res;
         }
+        if (!all_real) {
+            if (store.list >= 0) {
+                res.kind = Kind::kError;
+                res.error = "Complex results can't be stored";
+                return res;
+            }
+            size_t pos = 0;
+            g_ctext[pos++] = '{';
+            for (int i = 0; i < ccount; ++i) {
+                char num[24];
+                format_complex(ceig[i], NumberMode::kRectangular, num, sizeof(num));
+                const size_t need = std::strlen(num) + (i > 0 ? 1 : 0);
+                // Room for the number plus "...}" + NUL in the worst case.
+                if (pos + need + 5 > sizeof(g_ctext)) {
+                    std::memcpy(g_ctext + pos, "...", 3);
+                    pos += 3;
+                    break;
+                }
+                if (i > 0) {
+                    g_ctext[pos++] = ',';
+                }
+                std::memcpy(g_ctext + pos, num, std::strlen(num));
+                pos += std::strlen(num);
+            }
+            g_ctext[pos++] = '}';
+            g_ctext[pos] = 0;
+            res.kind = Kind::kText;
+            res.error = nullptr;
+            res.text = g_ctext;
+            return res;
+        }
+
+        calc_t real_eig[matops::kMaxEigen];
+        for (int i = 0; i < ccount; ++i) {
+            real_eig[i] = ceig[i].re;
+        }
+        if (!g_lresult.resize(ccount)) {
+            res.kind = Kind::kError;
+            res.error = "Out of list memory";
+            return res;
+        }
+        g_lresult.write_range(0, ccount, real_eig);
+        res.kind = Kind::kList;
+        res.error = nullptr;
+        res.list = &g_lresult;
         if (store.list >= 0) {
             if (!listops::copy(g_lresult, lists().list(store.list))) {
                 res.kind = Kind::kError;

@@ -115,6 +115,8 @@ add_executable(picocalc_graphcalc
     src/math/mat_expr.cpp
     src/math/numeric_solve.cpp
     src/math/solve_expr.cpp
+    src/math/complex.cpp
+    src/math/complex_expr.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp

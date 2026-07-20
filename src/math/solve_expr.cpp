@@ -87,10 +87,11 @@ bool eval_solve_call(const char* inner, size_t inner_len, char* num_out, size_t 
     int var_slot = -1;
     if (std::strcmp(arg[1], "theta") == 0) {
         var_slot = Variables::kTheta;
-    } else if (arg[1][0] >= 'a' && arg[1][0] <= 'z' && arg[1][1] == 0 && arg[1][0] != 'e') {
+    } else if (arg[1][0] >= 'a' && arg[1][0] <= 'z' && arg[1][1] == 0 && arg[1][0] != 'e' &&
+               arg[1][0] != 'i') {
         var_slot = arg[1][0] - 'a';
     } else {
-        *err = "solve var must be a-z (not e) or theta";
+        *err = "solve var must be a-z (not e/i) or theta";
         return false;
     }
 

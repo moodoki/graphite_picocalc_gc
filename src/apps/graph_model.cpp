@@ -106,6 +106,7 @@ void load_graph_state() {
         math::set_angle_mode(graph::state().angle);
         math::set_display_mode(graph::state().display);
         math::set_fix_digits(graph::state().fix_digits);
+        math::set_number_mode(graph::state().number);
         return;
     }
     // No (or stale) unified image: migrate Phase 1 files and write the

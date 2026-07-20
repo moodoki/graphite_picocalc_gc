@@ -28,7 +28,7 @@
 // falls through to the list/scalar paths.
 namespace math::matexpr {
 
-enum class Kind : uint8_t { kNone, kScalar, kMatrix, kList, kError };
+enum class Kind : uint8_t { kNone, kScalar, kMatrix, kList, kText, kError };
 
 struct Result {
     Kind kind = Kind::kNone;
@@ -39,6 +39,11 @@ struct Result {
     const Array* matrix = nullptr;
     // kList: dim()/eigenvals() output, or the stored list slot.
     const Array* list = nullptr;
+    // kText: a pre-formatted, unstorable display string — currently
+    // only eigenvals() when the spectrum has a complex-conjugate pair
+    // (Phase 4C, D30/P4-7): lists are real-only, so it can't become a
+    // kList the way an all-real spectrum does.
+    const char* text = nullptr;
     int stored_matrix = -1;          // ->[X] target index, else -1
     int stored_list = -1;            // ->lk target, else -1
     bool matrices_modified = false;  // Caller should persist matrices.dat

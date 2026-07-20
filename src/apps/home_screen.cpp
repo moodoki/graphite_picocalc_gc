@@ -7,6 +7,7 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/list_expr.hpp"
@@ -207,6 +208,8 @@ void HomeScreen::evaluate_input() {
             } else {
                 std::snprintf(result, sizeof(result), "%s", text);
             }
+        } else if (mres.kind == math::matexpr::Kind::kText) {
+            std::snprintf(result, sizeof(result), "%s", mres.text);
         } else {
             char text[40];
             math::matexpr::format_matrix(*mres.matrix, text, sizeof(text));
@@ -270,12 +273,53 @@ void HomeScreen::evaluate_input() {
         return;
     }
 
-    const auto res = math::engine().evaluate(expr);
+    // Scalar path (Phase 4C, D30): complex-aware whenever the number
+    // mode isn't REAL or the input names `i`. In plain REAL mode, the
+    // complex evaluator still runs once as a side-effect-free probe —
+    // only when the real engine would otherwise show a bare NaN — so
+    // sqrt(-4) etc. get "Non-real result" instead, without committing
+    // Ans/a store twice (math::complexexpr::evaluate never mutates
+    // engine state; only this dispatch does, exactly once).
     char result[48];
-    format_scalar_result(res, result, sizeof(result));
+    bool error = false;
+    const bool force_complex =
+        math::number_mode() != math::NumberMode::kReal || math::complexexpr::mentions_i(expr);
 
-    push_entry(input_.text(), result, !res.ok);
-    if (res.ok) {
+    if (force_complex) {
+        const auto cres = math::complexexpr::evaluate(expr);
+        if (!cres.ok) {
+            std::snprintf(result, sizeof(result), "%s", cres.error);
+            error = true;
+        } else if (math::number_mode() == math::NumberMode::kReal && !cres.value.is_real()) {
+            std::snprintf(result, sizeof(result), "Non-real result");
+            error = true;
+        } else if (cres.value.is_real()) {
+            math::engine().vars().ans() = cres.value.re;
+            if (cres.stored_var >= 0) {
+                math::engine().vars().vars[cres.stored_var] = cres.value.re;
+            }
+            math::EvalResult r;
+            r.ok = true;
+            r.value = cres.value.re;
+            r.stored_var = cres.stored_var;
+            format_scalar_result(r, result, sizeof(result));
+        } else {
+            math::format_complex(cres.value, math::number_mode(), result, sizeof(result));
+        }
+    } else {
+        const auto probe = math::complexexpr::evaluate(expr);
+        if (probe.ok && !probe.value.is_real()) {
+            std::snprintf(result, sizeof(result), "Non-real result");
+            error = true;
+        } else {
+            const auto res = math::engine().evaluate(expr);
+            format_scalar_result(res, result, sizeof(result));
+            error = !res.ok;
+        }
+    }
+
+    push_entry(input_.text(), result, error);
+    if (!error) {
         persist_history_line(input_.text(), result);
         save_variables();
     }

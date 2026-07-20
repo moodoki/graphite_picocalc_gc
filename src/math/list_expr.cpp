@@ -372,10 +372,11 @@ bool eval_seq(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
     int var_slot = -1;
     if (std::strcmp(arg[1], "theta") == 0) {
         var_slot = Variables::kTheta;
-    } else if (arg[1][0] >= 'a' && arg[1][0] <= 'z' && arg[1][1] == 0 && arg[1][0] != 'e') {
+    } else if (arg[1][0] >= 'a' && arg[1][0] <= 'z' && arg[1][1] == 0 && arg[1][0] != 'e' &&
+               arg[1][0] != 'i') {
         var_slot = arg[1][0] - 'a';
     } else {
-        ctx.err = "seq var must be a-z (not e) or theta";
+        ctx.err = "seq var must be a-z (not e/i) or theta";
         return false;
     }
     calc_t lo = 0;

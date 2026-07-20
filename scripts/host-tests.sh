@@ -37,6 +37,7 @@ echo "== Compiling + linking test_math =="
     -Isrc -Idrivers/tinyexpr \
     tests/host/test_math.cpp src/math/engine.cpp src/math/functions.cpp \
     src/math/format.cpp src/math/catalog.cpp src/math/dist.cpp \
+    src/math/complex.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_math"
 
@@ -56,6 +57,7 @@ echo "== Compiling + linking test_graph =="
     src/graph/polar_source.cpp src/graph/trace.cpp \
     src/apps/table_model.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_graph"
@@ -67,6 +69,7 @@ echo "== Compiling + linking test_lists =="
     src/math/array.cpp src/math/lists.cpp src/math/list_ops.cpp \
     src/math/list_expr.cpp src/math/stats.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_lists"
@@ -93,6 +96,7 @@ echo "== Compiling + linking test_matrix =="
     src/math/array.cpp src/math/matrix.cpp src/math/mat_expr.cpp \
     src/math/lists.cpp src/math/list_ops.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_matrix"
@@ -103,6 +107,7 @@ echo "== Compiling + linking test_solve =="
     tests/host/test_solve.cpp \
     src/math/numeric_solve.cpp src/math/solve_expr.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_solve"
@@ -115,9 +120,26 @@ echo "== Compiling + linking test_analysis =="
     src/graph/graph_mode.cpp \
     src/math/numeric_solve.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_analysis"
+
+echo "== Compiling + linking test_complex =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_complex.cpp src/math/complex.cpp \
+    -o "$OUT/test_complex"
+
+echo "== Compiling + linking test_complex_expr =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_complex_expr.cpp \
+    src/math/complex.cpp src/math/complex_expr.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_complex_expr"
 
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
@@ -125,6 +147,7 @@ echo "== Compiling + linking test_stats =="
     tests/host/test_stats.cpp tests/host/host_psram_backend.cpp \
     src/math/array.cpp src/math/stats.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_stats"
@@ -158,3 +181,9 @@ echo "== Running test_analysis =="
 
 echo "== Running test_stats =="
 "$OUT/test_stats"
+
+echo "== Running test_complex =="
+"$OUT/test_complex"
+
+echo "== Running test_complex_expr =="
+"$OUT/test_complex_expr"

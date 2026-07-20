@@ -538,7 +538,14 @@ bool power(const Array& a, int p, Array& out, const char** err) {
     return ok;
 }
 
-bool eigenvalues(const Array& a, Array& out, const char** err) {
+namespace {
+
+// Shared Hessenberg + shifted-QR core (D28/D30): finds the full
+// spectrum as Complex (real results carry im == 0), never erroring on
+// a complex-conjugate pair itself — that's now a legitimate spectrum
+// entry rather than a domain error. `eig` must hold at least
+// kMaxEigen entries.
+bool eigen_core(const Array& a, Complex* eig, int* out_count, const char** err) {
     if (!valid(a)) {
         *err = kErrNotMatrix;
         return false;
@@ -598,18 +605,17 @@ bool eigenvalues(const Array& a, Array& out, const char** err) {
     }
 
     // Shifted QR iteration with deflation from the bottom.
-    calc_t eig[kMaxEigen];
     int found = 0;
     int m = n - 1;  // Active block is h[0..m][0..m]
     int iters = 0;
     const int max_iters = 30 * n + 30;
     while (m >= 0) {
         if (m == 0) {
-            eig[found++] = h[0][0];
+            eig[found++] = Complex(h[0][0]);
             break;
         }
         if (std::fabs(h[m][m - 1]) <= eps) {
-            eig[found++] = h[m][m];
+            eig[found++] = Complex(h[m][m]);
             --m;
             continue;
         }
@@ -623,12 +629,17 @@ bool eigenvalues(const Array& a, Array& out, const char** err) {
         const bool isolated = m == 1 || std::fabs(h[m - 1][m - 2]) <= eps;
         if (isolated) {
             if (disc < 0) {
-                *err = "Complex eigenvalues";  // Deferred to 4C by decision
-                return false;
+                // Complex-conjugate pair (Phase 4C, D30 — was an error
+                // pre-4C/D28). +i entry first, matching the display sort
+                // below.
+                const calc_t sq = std::sqrt(-disc);
+                eig[found++] = Complex(0.5 * tr, 0.5 * sq);
+                eig[found++] = Complex(0.5 * tr, -0.5 * sq);
+            } else {
+                const calc_t sq = std::sqrt(disc);
+                eig[found++] = Complex(0.5 * (tr + sq));
+                eig[found++] = Complex(0.5 * (tr - sq));
             }
-            const calc_t sq = std::sqrt(disc);
-            eig[found++] = 0.5 * (tr + sq);
-            eig[found++] = 0.5 * (tr - sq);
             m -= 2;
             continue;
         }
@@ -685,22 +696,48 @@ bool eigenvalues(const Array& a, Array& out, const char** err) {
         }
     }
 
-    // Descending order for a deterministic display.
+    // Descending by real part; a conjugate pair's +i entry precedes -i.
     for (int i = 1; i < found; ++i) {
-        const calc_t v = eig[i];
+        const Complex v = eig[i];
         int j = i;
-        while (j > 0 && eig[j - 1] < v) {
+        while (j > 0 && (eig[j - 1].re < v.re || (eig[j - 1].re == v.re && eig[j - 1].im < v.im))) {
             eig[j] = eig[j - 1];
             --j;
         }
         eig[j] = v;
     }
+    *out_count = found;
+    return true;
+}
+
+}  // namespace
+
+bool eigenvalues(const Array& a, Array& out, const char** err) {
+    Complex eig[kMaxEigen];
+    int found = 0;
+    if (!eigen_core(a, eig, &found, err)) {
+        return false;
+    }
+    for (int i = 0; i < found; ++i) {
+        if (!eig[i].is_real()) {
+            *err = "Complex eigenvalues";
+            return false;
+        }
+    }
+    calc_t real_eig[kMaxEigen];
+    for (int i = 0; i < found; ++i) {
+        real_eig[i] = eig[i].re;
+    }
     if (!out.resize(found)) {
         *err = kErrMemory;
         return false;
     }
-    out.write_range(0, found, eig);
+    out.write_range(0, found, real_eig);
     return true;
+}
+
+bool eigenvalues_complex(const Array& a, Complex* out, int* count, const char** err) {
+    return eigen_core(a, out, count, err);
 }
 
 }  // namespace math::matops
