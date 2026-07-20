@@ -18,6 +18,25 @@ Format:
 
 ---
 
+## D29: 4B graph analysis / CALC menu as-built — cursor-cycle intersect (P4-6), polar fnInt area-only (P4-8)
+
+**Date**: 2026-07-20
+**Status**: Accepted (Session 17, sub-phase 4B; resolves phase4-spec P4-6 and P4-8)
+**Context**: 4B needed the two calls the spec left open — how CALC intersect picks curves when more than two are graphed, and whether polar `fnInt` is area-only or also offers arc length — plus the numeric calculus primitives (extremum, derivative, integral) that 4B needs and didn't exist yet.
+**Decision**:
+1. **P4-6: intersect curve picking is cursor-cycle (TI-84 behavior)**, not a list/explicit picker. `graph::AnalysisSession` (`src/graph/analysis_cursor.{hpp,cpp}`) drives it: Up/Down rides curves through "First curve?"/"Second curve?" prompts, ENTER locks each pick, and picking the same curve twice is refused. Once bounds are being collected the cursor locks to the chosen curve (no more slot cycling), matching the rest of the CALC flow.
+2. **P4-8: polar `fnInt` computes area only** ($\frac{1}{2}\int r^2\,d\theta$), matching TI; no arc-length option. The integral always runs in radians internally regardless of the active angle mode, so the result is a true area even in DEGREE mode.
+3. **Numeric calculus primitives** added to `src/math/numeric_solve.{hpp,cpp}` (the 4A solver file, per the spec's own file plan), each with a callback-based core (`EvalFn`) plus an expr-string wrapper — the callback form is required because parametric/polar integrands (e.g. `Y(t)*X'(t)`) aren't expressible as a single expression string:
+   - `numeric_extremum`/`numeric_extremum_fn` — Brent's method (golden section + parabolic interpolation, derivative-free).
+   - `numeric_derivative`/`numeric_derivative_fn` — central difference + one Richardson extrapolation step (O(h⁴)).
+   - `numeric_integral`/`numeric_integral_fn` — adaptive Gauss-Kronrod G7-K15, depth-capped (`kMaxIntegralDepth` = 12) so oscillatory/singular integrands can't hang rather than converging exactly; Kronrod nodes skip panel endpoints, so endpoint singularities (`1/sqrt(x)`) integrate cleanly.
+4. **Graph analysis engine** (`src/graph/analysis.{hpp,cpp}`) is mode-aware: parametric slope = (dy/dt)/(dx/dt); polar slope differentiates the Cartesian forms r·cos(θ)/r·sin(θ), which stays correct in degree mode without a separate formula; intersect only finds same-independent-variable crossings — documented as a limitation for parametric/polar (won't find curves that cross at different parameter values).
+5. **UI**: a new F6 softkey labeled "CALC" on the graph screen opens `apps::CalcMenuScreen` (7 ops, form-list); typed commands `calc`/`analyze` jump straight there. The interactive flow reuses the graph screen's existing `TraceCursor`-riding machinery, driven by `AnalysisSession`. Min/max keep the TI "Guess?" step in the UI for parity, but Brent's method underneath only uses the bracket and ignores the guess value — a judgment call, flagged to revisit if it feels wrong on hardware.
+6. **Spec correction**: phase4-spec.md §4.3/4.5 assumed a Phase 3 shaded-region primitive existed to reuse for `fnInt` shading — it doesn't exist anywhere in the codebase (verified by exploration). Shading was built new in `graph_screen.cpp`: a column-based fill reading the existing cached plot-y column array (function mode only), respecting the §8 strip-safety idempotent-render rule.
+**Rationale**: cursor-cycle intersect and area-only polar `fnInt` match TI-84 muscle memory the rest of the app already follows; callback-based numeric cores are the only way to support parametric/polar integrands without inventing a second expression grammar; depth-capped adaptive quadrature bounds worst-case runtime instead of hanging on pathological integrands.
+**Tradeoffs**: intersect can't find parametric/polar curves that cross at different parameter values; the min/max Guess step is UI-only and not fed to the solver; polar `fnInt` has no arc-length option.
+**Revisit when**: on-device eval judges the Guess-step cosmetic mismatch as confusing; arc length gets requested; multi-curve intersect at different parameter values becomes a real need.
+
 ## D28: 4A matrices + numeric solver as-built — TI [A]-[J] syntax, eigen errors on complex, dual solver surface
 
 **Date**: 2026-07-20

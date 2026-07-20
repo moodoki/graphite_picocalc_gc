@@ -12,6 +12,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "apps/calc_menu.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
@@ -47,6 +48,10 @@ bool param_style() {
 
 void GraphScreen::on_activate() {
     dirty_ = true;
+    // A fresh activation never resumes a half-collected CALC session;
+    // CalcMenuScreen pops (activating us) before starting the new one.
+    analysis_.cancel();
+    analysis_line_[0] = 0;
 }
 
 void GraphScreen::start_trace() {
@@ -59,6 +64,151 @@ void GraphScreen::start_trace() {
         }
     }
     trace_.clamp(trace_max_index());
+}
+
+void GraphScreen::begin_analysis(graph::AnalysisOp op) {
+    if (dirty_) {
+        recompute();  // Typed-command entry: slot caches may be stale
+    }
+    int first = -1;
+    for (int i = 0; i < slot_count(); ++i) {
+        if (slot_active(i)) {
+            first = i;
+            break;
+        }
+    }
+    if (first < 0) {
+        return;  // Nothing plots — the on-screen hint already says so
+    }
+    trace_.active = false;
+    trace_.slot = first;
+    trace_.clamp(trace_max_index());
+    analysis_.begin(op, first);
+    analysis_line_[0] = 0;
+}
+
+// Modal key handling while a CALC session collects inputs or shows its
+// result: arrows ride the cursor, ENTER commits, ESC cancels;
+// everything else is swallowed (zoom or screen switches would
+// invalidate the collected world-space inputs).
+bool GraphScreen::handle_analysis_key(const platform::KeyEvent& ev) {
+    using platform::Key;
+    if (analysis_.done) {
+        if (ev.key == Key::kF6) {  // Straight back to the menu
+            ui::screen_manager().push(&calc_menu());
+            return true;
+        }
+        if (ev.key == Key::kEscape || ev.key == Key::kEnter) {
+            analysis_.cancel();
+            analysis_line_[0] = 0;
+        }
+        return true;
+    }
+    switch (ev.key) {
+        case Key::kLeft:
+            trace_.step(-1, trace_max_index());
+            return true;
+        case Key::kRight:
+            trace_.step(+1, trace_max_index());
+            return true;
+        case Key::kUp:
+        case Key::kDown:
+            // Cycle curves until the operation locks onto one (TI
+            // behavior; intersect keeps cycling through both picks).
+            if (!analysis_.slot_locked()) {
+                for (int step = 0; step < slot_count(); ++step) {
+                    trace_.slot = (trace_.slot + 1) % slot_count();
+                    if (slot_active(trace_.slot)) {
+                        break;
+                    }
+                }
+                trace_.clamp(trace_max_index());
+            }
+            return true;
+        case Key::kEnter:
+            if (analysis_.commit(trace_.slot, trace_value())) {
+                analysis_.compute(graph::state());
+                finish_analysis();
+            }
+            return true;
+        case Key::kEscape:
+            analysis_.cancel();
+            return true;
+        default:
+            return true;
+    }
+}
+
+void GraphScreen::finish_analysis() {
+    const auto& r = analysis_.result;
+    const auto op = analysis_.op;
+    char ib[24];
+    char xb[24];
+    char yb[24];
+    if (!r.ok) {
+        std::snprintf(analysis_line_, sizeof(analysis_line_), "%s: %s", graph::analysis_op_name(op),
+                      r.error != nullptr ? r.error : "Error");
+        return;
+    }
+
+    // Park the cursor on the result and store it TI-style: the mode's
+    // independent variable gets the location, Ans the headline value.
+    sync_trace_to_value(r.indep);
+    trace_.active = false;
+    auto& vars = math::engine().vars();
+    int vslot = 'x' - 'a';
+    const char* vname = "x";
+    if (mode() == graph::Mode::kParametric) {
+        vslot = 't' - 'a';
+        vname = "t";
+    } else if (mode() == graph::Mode::kPolar) {
+        vslot = math::Variables::kTheta;
+        vname = "th";
+    }
+    vars.vars[vslot] = r.indep;
+    switch (op) {
+        case graph::AnalysisOp::kZero:
+        case graph::AnalysisOp::kIntersect:
+            vars.ans() = r.indep;
+            break;
+        case graph::AnalysisOp::kDerivative:
+        case graph::AnalysisOp::kIntegral:
+            vars.ans() = r.aux;
+            break;
+        default:  // value, min, max
+            vars.ans() = r.y;
+            break;
+    }
+
+    math::format_number(r.indep, ib, sizeof(ib));
+    math::format_number(r.x, xb, sizeof(xb));
+    math::format_number(r.y, yb, sizeof(yb));
+    switch (op) {
+        case graph::AnalysisOp::kDerivative: {
+            char ab[24];
+            math::format_number(r.aux, ab, sizeof(ab));
+            std::snprintf(analysis_line_, sizeof(analysis_line_), "dy/dx=%s  %s=%s", ab, vname, ib);
+            break;
+        }
+        case graph::AnalysisOp::kIntegral: {
+            char ab[24];
+            char lb[24];
+            math::format_number(r.aux, ab, sizeof(ab));
+            math::format_number(analysis_.vals[0], lb, sizeof(lb));
+            std::snprintf(analysis_line_, sizeof(analysis_line_), "Int=%s  %s=%s..%s", ab, vname,
+                          lb, ib);
+            break;
+        }
+        default:
+            if (mode() == graph::Mode::kFunction) {
+                std::snprintf(analysis_line_, sizeof(analysis_line_), "%s  x=%s y=%s",
+                              graph::analysis_op_name(op), xb, yb);
+            } else {
+                std::snprintf(analysis_line_, sizeof(analysis_line_), "%s  %s=%s x=%s y=%s",
+                              graph::analysis_op_name(op), vname, ib, xb, yb);
+            }
+            break;
+    }
 }
 
 graph::Viewport GraphScreen::viewport() const {
@@ -577,10 +727,148 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
     font.draw_string(fb, 4, ty, line, kWhite);
 }
 
+int GraphScreen::indep_px(double v) const {
+    const auto& st = graph::state();
+    switch (mode()) {
+        case graph::Mode::kParametric:
+        case graph::Mode::kPolar: {
+            const bool polar = mode() == graph::Mode::kPolar;
+            const double mn = polar ? st.theta_min : st.t_min;
+            const double stp = polar ? st.theta_step : st.t_step;
+            const int p = analysis_.slot;
+            if (stp <= 0) {
+                return -1;
+            }
+            const int i = static_cast<int>(std::lround((v - mn) / stp));
+            if (i < 0 || i >= pcount_[p] || ppy_[p][i] == kOffscreen) {
+                return -1;
+            }
+            return ppx_[p][i];
+        }
+        default:
+            return viewport().px_x(v);
+    }
+}
+
+void GraphScreen::cursor_point(int* px, int* py) const {
+    if (param_style()) {
+        const int p = trace_.slot;
+        if (pcount_[p] == 0) {
+            *px = 0;
+            *py = kOffscreen;
+            return;
+        }
+        *px = ppx_[p][trace_.index];
+        *py = ppy_[p][trace_.index];
+        return;
+    }
+    *px = trace_.index;
+    *py = plot_y_[trace_.slot][*px];
+}
+
+void GraphScreen::draw_readout_strip(gfx::Framebuffer& fb, const char* line) const {
+    const auto& font = gfx::main_font();
+    const int ty = top_ + height_ - font.height() - 2;
+    fb.fill_rect(0, ty - 2, platform::kScreenW, font.height() + 4,
+                 platform::Color::from_rgb(20, 20, 20));
+    font.draw_string(fb, 4, ty, line, platform::colors::kWhite);
+}
+
+void GraphScreen::draw_analysis(gfx::Framebuffer& fb) const {
+    using namespace platform::colors;
+    const graph::Viewport vp = viewport();
+    const auto& s = analysis_;
+
+    if (s.done) {
+        const auto& r = s.result;
+        if (r.ok) {
+            if (s.op == graph::AnalysisOp::kIntegral && mode() == graph::Mode::kFunction) {
+                // Shade between the curve and the x-axis over [a, b],
+                // then repaint the curve on top. Reads only the column
+                // cache — strip-safe.
+                const platform::Color shade = platform::Color::from_rgb(0, 70, 110);
+                int c0 = vp.px_x(s.vals[0]);
+                int c1 = vp.px_x(s.vals[1]);
+                if (c1 < c0) {
+                    const int t = c0;
+                    c0 = c1;
+                    c1 = t;
+                }
+                c0 = c0 < 0 ? 0 : c0;
+                c1 = c1 >= kWidth ? kWidth - 1 : c1;
+                const int axis = clamp_px(vp.px_y(0.0));
+                for (int c = c0; c <= c1; ++c) {
+                    const int py = plot_y_[s.slot][c];
+                    if (py == kOffscreen) {
+                        continue;
+                    }
+                    const int y0 = py < axis ? py : axis;
+                    const int len = (py < axis ? axis - py : py - axis) + 1;
+                    fb.draw_vline(c, y0, len, shade);
+                }
+                draw_function(fb, s.slot);
+            }
+            if (s.op == graph::AnalysisOp::kDerivative && std::isfinite(r.aux)) {
+                // Tangent line through the point (slope is dy/dx in
+                // plot space, so this is mode-independent).
+                const auto& w = graph_window();
+                const double yl = r.y + r.aux * (w.x_min - r.x);
+                const double yr = r.y + r.aux * (w.x_max - r.x);
+                fb.draw_line(vp.px_x(w.x_min), clamp_px(vp.px_y(yl)), vp.px_x(w.x_max),
+                             clamp_px(vp.px_y(yr)), kCursor);
+            }
+            fb.fill_rect(vp.px_x(r.x) - 2, clamp_px(vp.px_y(r.y)) - 2, 5, 5, kWhite);
+        }
+        draw_readout_strip(fb, analysis_line_);
+        return;
+    }
+
+    // Input phase. Committed bound markers (top ticks) — intersect's
+    // early steps pick curves, not bounds, so it has none to mark.
+    if (s.op != graph::AnalysisOp::kIntersect) {
+        for (int i = 0; i < s.step && i < 2; ++i) {
+            const int px = indep_px(s.vals[i]);
+            if (px >= 0) {
+                fb.draw_vline(px, top_, 7, kGreen);
+                fb.fill_rect(px - 1, top_ + 7, 3, 3, kGreen);
+            }
+        }
+    }
+
+    // Cursor riding the active curve (trace visuals).
+    int cx = 0;
+    int cy = kOffscreen;
+    cursor_point(&cx, &cy);
+    fb.draw_vline(cx, top_, height_, kCursor);
+    if (cy != kOffscreen) {
+        fb.fill_rect(cx - 2, cy - 2, 5, 5, function_color(trace_.slot));
+    }
+
+    // Prompt strip with the live cursor coordinates.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    char xb[24];
+    char yb[24];
+    math::format_number(cy == kOffscreen ? nan : vp.data_x(cx), xb, sizeof(xb));
+    math::format_number(cy == kOffscreen ? nan : vp.data_y(cy), yb, sizeof(yb));
+    const char* prefix = "Y";
+    if (mode() == graph::Mode::kParametric) {
+        prefix = "P";
+    } else if (mode() == graph::Mode::kPolar) {
+        prefix = "r";
+    }
+    char line[96];
+    std::snprintf(line, sizeof(line), "%s%d  %s  x=%s y=%s", prefix, trace_.slot + 1,
+                  s.prompt(mode()), xb, yb);
+    draw_readout_strip(fb, line);
+}
+
 bool GraphScreen::on_key(const platform::KeyEvent& ev) {
     using platform::Key;
     if (!ev.pressed) {
         return false;
+    }
+    if (analysis_.active || analysis_.done) {
+        return handle_analysis_key(ev);
     }
     // Global F-key scheme (2026-07-18 remap, TI-84-shaped):
     // F1 editor, F2 window, F3 mode, F4 trace, F5 table toggle,
@@ -608,6 +896,9 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             } else {
                 ui::screen_manager().push(&table_screen());
             }
+            return true;
+        case Key::kF6:  // CALC menu (4B; F6 = Shift+F1 on the unit)
+            ui::screen_manager().push(&calc_menu());
             return true;
         case Key::kMinus:
             zoom_out();
@@ -727,6 +1018,9 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     if (trace_.active) {
         draw_trace(fb);
     }
+    if (analysis_.active || analysis_.done) {
+        draw_analysis(fb);
+    }
 
     // Hint uses the pre-compile enabled state (Phase 1 behavior): a
     // slot with a syntax error suppresses it too.
@@ -776,7 +1070,7 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     } else if (mode() == graph::Mode::kPolar) {
         editor_key = "R=";
     }
-    const char* const keys[6] = {editor_key, "WIN", "MODE", "TRC", "TBL", ""};
+    const char* const keys[6] = {editor_key, "WIN", "MODE", "TRC", "TBL", "CALC"};
     ui::draw_softkeys(fb, keys);
 }
 

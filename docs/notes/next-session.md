@@ -1,60 +1,70 @@
 # Start here — next session
 
-**Last session:** 2026-07-20 (Session 16). **Sub-phase 4A is
-code-complete (D28)** — matrices + numeric solver, on top of the
-Session 15 Phase 3 close. Suite **953 checks**, lint clean, both
-boards build, **flashed to the Pico 2** (boots clean; psram-bulk OK,
-battery heartbeat sane). What landed (user decisions taken upfront:
-TI `[A]`-`[J]` syntax; eigenvalues error on complex pairs; solver =
-form screen + inline `solve()`):
+**Last session:** 2026-07-20 (Session 17). **Sub-phase 4B is
+code-complete (D29)** — graph analysis / CALC menu, on top of the
+Session 16 Phase 4A close. Suite **1070 checks**, lint clean, both
+boards build clean. **No hardware was connected this session — nothing
+was flashed.** The Pico 2 is still on the **Session 16 (4A) build**;
+Pico 1 is still on Session 7 firmware awaiting the deferred 3D.14 pass.
+What landed:
 
-- **`matops` + `MatrixStore`** (`src/math/matrix.{hpp,cpp}`): free
-  functions over 2-D Arrays (listops-style streaming) — arithmetic,
-  transpose, LU det, Gauss-Jordan inverse, rref/ref/rank, powers,
-  reshape, QR eigenvalues (n<=10, real; complex pair = error).
-  [A]-[J] persist to `/picocalc/matrices.dat` (**PCM1**, late-init
-  retry like lists).
-- **`[A]` expressions** (`src/math/mat_expr.{hpp,cpp}`): recursive-
-  descent evaluator — `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`,
-  `[A](2,3)`, det/rank inline, inverse/rref/augment/identity,
-  `dim`/`eigenvals` (whole-form, list results), `-> [C]`/`lk`/`a`
-  stores, MatAns buffer. Routed first in the home screen.
-- **`matrix` editor** (alias `mat`): TAB cycles [A]-[J]+Ans(RO),
-  F7 DIM, F8 clear, strip-safe cached render.
-- **Numeric solver** (`src/math/numeric_solve.{hpp,cpp}`): bisection +
-  Newton polish, Newton-from-guess fallback; `solve` form screen
-  (root -> variable + Ans) and inline `solve(f,x,lo,hi)` /
-  `solve(f,x,guess)` / `solve(lhs=rhs,...)` substitution. Reused by
-  4B zero/intersect later.
-- **ArrayStore pools grew** (28 slabs, 24 PSRAM regions; catalog cap
-  72): Pico 1 now text ~337 KB, **bss ~188 KB of 264 KB** (~76 KB
-  stack/heap headroom — watch it).
+- **Numeric calculus primitives** added to
+  `src/math/numeric_solve.{hpp,cpp}` (the 4A solver file): Brent's-
+  method extremum, central-difference+Richardson derivative, adaptive
+  Gauss-Kronrod (G7-K15) integral — each a callback core (`EvalFn`)
+  plus an expr-string wrapper (parametric/polar integrands aren't a
+  single expression string).
+- **Graph analysis engine** (`src/graph/analysis.{hpp,cpp}`): mode-
+  aware value/zero/extremum/intersect/derivative/integral across
+  function/parametric/polar (parametric slope = (dy/dt)/(dx/dt); polar
+  slope via the Cartesian forms; polar fnInt = area only, radians
+  internally regardless of angle mode).
+- **Interactive session state machine**
+  (`src/graph/analysis_cursor.{hpp,cpp}`): `AnalysisSession`, modeled
+  on `TraceCursor`, drives the TI-84 step flow (Left/Right Bound,
+  Guess, First/Second curve for intersect).
+- **UI**: new F6 **"CALC"** softkey on the graph screen + typed
+  `calc`/`analyze`; new `src/apps/calc_menu.{hpp,cpp}` menu screen;
+  `graph_screen.{hpp,cpp}` draws the result marker, tangent line
+  (dy/dx), and shaded fnInt region (function mode, new — no Phase-3
+  shaded-region primitive existed despite the spec assuming one).
+- **D29 resolves two open spec questions**: P4-6 (intersect curve
+  picking = cursor-cycle, TI-84 behavior) and P4-8 (polar fnInt = area
+  only, no arc length). Min/max keep the "Guess?" UI step but Brent's
+  method only uses the bracket — a judgment call to revisit on
+  hardware. Full details in `decisions.md` (D29).
+- Pico 1 size **unchanged from the 4A baseline** (text 354036, bss
+  188616 of 264 KB) — the Gauss-Kronrod tables are compile-time
+  constexpr arrays in flash/text, not bss.
 
 ## The next job
 
-1. **On-device evals** (worklog HW-PENDING; the Session 16 build is
-   already flashed): Session 11 (3A lists), Session 12 (3B
-   stats), Session 15 storage health + 3D (inference + stat plots —
-   expect the PCG4 one-time reset on first boot), **and Session 16
-   4A**: matrix editor feel, `[A]`/`]`/bracket typing on the physical
-   keyboard, `[A]*[B]` -> `[C]` round-trip, det/inverse/eigenvals
-   spot-checks, matrices.dat first save + power cycle, solver screen
-   + inline `solve()`, big-matrix (>16x16, PSRAM tier) edit/op timing.
+1. **On-device evals** (worklog HW-PENDING; the flashed build is still
+   Session 16/4A — flash the Session 17/4B build first): Session 11
+   (3A lists), Session 12 (3B stats), Session 15 storage health + 3D
+   (inference + stat plots — expect the PCG4 one-time reset on first
+   boot), Session 16 4A (matrix editor, bracket typing, solver), and
+   **Session 17 4B**: F6 CALC menu on the physical keyboard, cursor
+   feel riding curves in all three graph modes, shaded fnInt region +
+   tangent-line rendering, result-store-to-variable behavior, and
+   specifically judge whether the min/max "Guess?" step should
+   actually influence Brent's bracket or whether cursor-only bounds
+   are fine (D29).
 2. **3D.14 — the combined Pico 1 pass (D18)** closes Phase 3: swap the
    board, reflash `build/pico/…uf2` (BOOTSEL volume `RPI-RP2`), run the
    Phase 2 sweep (headline: split-pane clipping on the strip renderer),
    the Session 8+9 fix list, Phase 3 acceptance, and watch every §8
-   screen for strip-render artifacts. **Re-check the map file** — 4A
-   pushed Pico 1 bss to ~188 KB of 264 KB (D28); if the ~76 KB
+   screen for strip-render artifacts. **Re-check the map file** — Pico 1
+   bss is ~188 KB of 264 KB (D28, unchanged by D29); if the ~76 KB
    stack/heap headroom pinches, shrink `ArrayStore::kSlabCount`.
-3. Then **Phase 4B** (`phase4-spec.md` §4): graph analysis / CALC menu
-   (value, zero, min/max, intersect, dy/dx, fnInt) — reuses 4A's
-   `numeric_solve` for zero/intersect. Open question P4-6 (intersect
-   curve picking) is due at 4B.5.
+3. After the 4B on-device eval: **Phase 4C (complex numbers)** is next
+   per `phase4-spec.md` §5 (weeks 30-31) — `Complex` type + arithmetic
+   + a+bi/polar mode, prerequisite for 4D CAS's complex-aware solve.
 
 Mind the §8 strip-safety rule (idempotent `render()` — Stats/Dist/
 Infer/Solver screens cache result lines; matrix editor caches cells;
-stat plots split recompute/draw).
+stat plots split recompute/draw; the new CALC fnInt shading reads the
+graph's cached plot-y column array rather than recomputing).
 
 ## D14 rail settle — NEXT BENCH SESSION
 
@@ -126,6 +136,12 @@ still comfortable, but re-check the map file then.
 - F3 MODE vs ZOOM (TI's F3 slot) — judge after real use (D20 KIV).
 - D16 trace-sync option b (trace steps by table-step) — after more split
   use.
+- **4B CALC watch-items (Session 17, judge on device)**: min/max "Guess?"
+  step is UI-only, doesn't feed Brent's bracket — decide if that's fine or
+  needs wiring through (D29). (Resolved by D29: P4-6 intersect = cursor-
+  cycle; P4-8 polar fnInt = area only, no arc length — both from
+  `phase4-spec.md` §11, tracked here and in `decisions.md` rather than
+  editing the spec's open-questions table.)
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —
   the last deferred HW item); 340-point curve cache cap; audio HAL; licensing (D17 —
   display/keyboard rewrites remain); dual-core display service (D10

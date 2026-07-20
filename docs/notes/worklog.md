@@ -220,8 +220,86 @@ Still to verify on hardware:
 | Session 15 — storage health (D26) + editor truncation | Y= editor: store a regression model to y1, open Y= — text ends `...` before the checkbox, no overlap. **Hot-plug** (needs the physical card): eject while on → red `SD` appears in the home status bar within ~1 s (serial: `sd: card removed`); `files` shows no card; re-insert → `sd: card inserted`, remount within ~2 s, indicator clears, files/save work again; **in-memory lists/history survive** (no stale reload). **Extended-cold-boot case** (the original observation): power on after a long time off — if SD is slow, red `SD` shows, then clears when the (now unlimited) retries land; serial `late-init:` lines confirm. PSRAM indicator: hard to test without fault injection — verify it's absent when healthy |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
 | Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine |
+| Session 17 — Phase 4B graph analysis / CALC menu (D29; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected |
 
 ---
+
+## 2026-07-20 — Session 17: Phase 4B — graph analysis / CALC menu (D29)
+
+All of 4B in one pass, on top of the Session 16 (4A) close. No hardware was
+connected this session (`/dev/cu.usbmodem*` empty) — **nothing was flashed**;
+the Pico 2 stays on the Session 16 build. Host suite grew **953 -> 1070
+checks**, 0 failures; lint clean; both boards build clean (a format pass fixed
+two `-Wformat-truncation` warnings by growing two `line[64]` -> `line[96]`
+buffers in `graph_screen.cpp`). Pico 1 text 354036, bss 188616 of 264 KB
+(**unchanged from the 4A baseline** — the Gauss-Kronrod tables are
+compile-time constexpr arrays in flash/text, not bss). Pico 2 text 341420,
+bss 382536. Two open spec questions resolved as **D29**.
+
+- **Numeric calculus primitives** (`src/math/numeric_solve.{hpp,cpp}`, the 4A
+  solver file per the spec's file plan): `numeric_extremum`/`_fn` (Brent's
+  method: golden section + parabolic interpolation), `numeric_derivative`/
+  `_fn` (central difference + one Richardson step, O(h^4)),
+  `numeric_integral`/`_fn` (adaptive Gauss-Kronrod G7-K15, depth-capped at
+  12 so pathological integrands can't hang; Kronrod nodes skip panel
+  endpoints so endpoint singularities like `1/sqrt(x)` integrate cleanly).
+  Each has a callback core (`EvalFn`) plus an expr-string wrapper — the
+  callback form exists because parametric/polar integrands (`Y(t)*X'(t)`)
+  aren't a single expression string.
+- **Graph analysis engine** (`src/graph/analysis.{hpp,cpp}`): `AnalysisOp`
+  (Value/Zero/Minimum/Maximum/Intersect/Derivative/Integral) +
+  `AnalysisResult`, and `analyze_value/zero/extremum/intersect/derivative/
+  integral`, mode-aware across function/parametric/polar — parametric slope
+  = (dy/dt)/(dx/dt); polar slope differentiates the Cartesian forms
+  r*cos(theta)/r*sin(theta) (correct in degree mode); parametric fnInt =
+  integral of Y(t)*X'(t) dt; polar fnInt = area only, (1/2) integral of
+  r^2 d(theta), always in radians internally regardless of angle mode
+  (**D29 resolves P4-8**). Intersect solves same-independent-variable
+  crossings only — documented limitation for parametric/polar.
+- **Interactive session state machine** (`src/graph/analysis_cursor.{hpp,cpp}`):
+  `AnalysisSession`, modeled on the existing `TraceCursor`, drives the
+  TI-84 multi-step flow (e.g. zero: "Left Bound?" -> "Right Bound?" ->
+  "Guess?"). **D29 resolves P4-6**: intersect curve picking is cursor-cycle
+  (Up/Down + ENTER through "First curve?"/"Second curve?"), not a list
+  picker; picking the same curve twice is refused. Fully host-testable.
+- **UI integration**: new `src/apps/calc_menu.{hpp,cpp}` (`CalcMenuScreen`,
+  form-list, 7 ops) pushed from a new **F6 "CALC" softkey** on the graph
+  screen or typed `calc`/`analyze` (home screen); picking an op pops back to
+  the graph and starts the session there, riding the existing `trace_`
+  cursor machinery. `graph_screen.{hpp,cpp}` gained the analysis draw path:
+  result marker, tangent line for dy/dx, shaded region under the curve for
+  fnInt (function mode only, column-based fill off the cached plot-y array
+  — new, since no Phase 3 shaded-region primitive existed despite the spec
+  assuming one; §8 strip-safe), and a prompt/readout strip. Results store
+  TI-style: root/location -> the mode's independent variable (x/t/theta),
+  headline value -> Ans. Help screen gained the command + F6 CALC entries.
+- New host suite: `tests/host/test_analysis.cpp` (117 checks) — the three
+  numeric primitives directly, `analyze_*` in all three modes (spec
+  acceptance cases: max of `4-x^2` at 0, intersect of `x`/`x^2` at 0 and 1,
+  dy/dx of `x^2` at 3 = 6, integral of sin 0..pi = 2, parametric slope on
+  the unit circle, polar area of a circle in both radian and degree mode),
+  and the `AnalysisSession` state machine incl. the intersect
+  same-curve-refusal case.
+
+Decisions recorded as **D29** (see `decisions.md`): P4-6 (intersect =
+cursor-cycle) and P4-8 (polar fnInt = area only) resolved; min/max keep the
+TI "Guess?" step in the UI but Brent's method only uses the bracket,
+ignoring the guess value — a judgment call to revisit on hardware.
+
+Known limitations / deferred:
+- Intersect can't find parametric/polar curves that cross at different
+  parameter values (same-independent-variable crossings only).
+- Min/max "Guess?" step is UI-only, not fed to the solver's bracket.
+- No arc-length option for polar fnInt (area only, per D29/P4-8).
+- Phase4-spec.md §4.3/4.5's assumed Phase-3 shaded-region primitive doesn't
+  exist; the fnInt shading in `graph_screen.cpp` is new, function-mode-only.
+
+Still HW-PENDING: the full 4B on-device batch — F6 CALC menu on the physical
+keyboard, cursor feel riding curves in all three modes, shaded fnInt region
+and tangent-line rendering, result-store-to-variable behavior, and the
+min/max Guess-step judgment call — plus the older Session 11/12/15/16
+batches; then **3D.14** (the combined Pico 1 pass, D18); then **Phase 4C**
+(complex numbers, phase4-spec.md §5).
 
 ## 2026-07-20 — Session 16: Phase 4A — matrices + numeric solver (D28)
 

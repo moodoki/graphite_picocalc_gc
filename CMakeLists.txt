@@ -128,10 +128,13 @@ add_executable(picocalc_graphcalc
     src/graph/polar_source.cpp
     src/graph/stat_plot.cpp
     src/graph/trace.cpp
+    src/graph/analysis.cpp
+    src/graph/analysis_cursor.cpp
     src/apps/nav.cpp
     src/apps/home_screen.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
+    src/apps/calc_menu.cpp
     src/apps/matrix_editor.cpp
     src/apps/solver_screen.cpp
     src/apps/stats_screen.cpp

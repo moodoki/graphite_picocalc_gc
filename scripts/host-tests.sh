@@ -107,6 +107,18 @@ echo "== Compiling + linking test_solve =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_solve"
 
+echo "== Compiling + linking test_analysis =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_analysis.cpp \
+    src/graph/analysis.cpp src/graph/analysis_cursor.cpp \
+    src/graph/graph_mode.cpp \
+    src/math/numeric_solve.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_analysis"
+
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -140,6 +152,9 @@ echo "== Running test_matrix =="
 
 echo "== Running test_solve =="
 "$OUT/test_solve"
+
+echo "== Running test_analysis =="
+"$OUT/test_analysis"
 
 echo "== Running test_stats =="
 "$OUT/test_stats"

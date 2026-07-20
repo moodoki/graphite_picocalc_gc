@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "ui/screen.hpp"
+#include "graph/analysis_cursor.hpp"
 #include "graph/graph_state.hpp"
 #include "graph/trace.hpp"
 #include "graph/viewport.hpp"
@@ -44,6 +45,10 @@ public:
     // used by other screens jumping here in trace mode, TI-style).
     void start_trace();
 
+    // Start an interactive CALC-menu analysis (Phase 4B). Called by
+    // CalcMenuScreen after it pops back; no-op when nothing plots.
+    void begin_analysis(graph::AnalysisOp op);
+
     // Trace sync with the table pane (task 2.20, nearest-row).
     bool trace_active() const { return trace_.active; }
     double trace_value() const;          // Current independent value
@@ -78,6 +83,12 @@ private:
     bool dirty_ = true;
     graph::TraceCursor trace_;
 
+    // Interactive CALC session (4B). The cursor rides trace_ (slot +
+    // index) while inputs are collected; results are computed on the
+    // final ENTER and only drawn from cached state (strip-safe).
+    graph::AnalysisSession analysis_;
+    char analysis_line_[96] = {};
+
     // Last replot time in microseconds (task 5.6 profiling hook).
     uint32_t last_recompute_us_ = 0;
 
@@ -98,6 +109,14 @@ private:
     void draw_function(gfx::Framebuffer& fb, int fi) const;
     void draw_param_curve(gfx::Framebuffer& fb, int p) const;
     void draw_trace(gfx::Framebuffer& fb) const;
+
+    // CALC-session helpers (4B).
+    bool handle_analysis_key(const platform::KeyEvent& ev);
+    void finish_analysis();
+    int indep_px(double v) const;  // Pixel column for an indep value (-1 = none)
+    void cursor_point(int* px, int* py) const;
+    void draw_analysis(gfx::Framebuffer& fb) const;
+    void draw_readout_strip(gfx::Framebuffer& fb, const char* line) const;
 };
 
 GraphScreen& graph_screen();

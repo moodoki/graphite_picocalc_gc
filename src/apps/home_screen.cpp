@@ -16,6 +16,7 @@
 #include "math/solve_expr.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
+#include "apps/calc_menu.hpp"
 #include "apps/dist_screen.hpp"
 #include "apps/files_screen.hpp"
 #include "apps/graph_screen.hpp"
@@ -346,6 +347,12 @@ bool HomeScreen::handle_command(const char* cmd) {
     // stays an expression (inline solve, handled in evaluate_input).
     if (std::strcmp(cmd, "solve") == 0 || std::strcmp(cmd, "solver") == 0) {
         ui::screen_manager().push(&solver_screen());
+        return true;
+    }
+    // Graph analysis (4B): jump to the graph with the CALC menu open.
+    if (std::strcmp(cmd, "calc") == 0 || std::strcmp(cmd, "analyze") == 0) {
+        ui::screen_manager().push(&graph_screen());
+        ui::screen_manager().push(&calc_menu());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {
