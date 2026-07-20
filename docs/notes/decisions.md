@@ -18,6 +18,21 @@ Format:
 
 ---
 
+## D28: 4A matrices + numeric solver as-built — TI [A]-[J] syntax, eigen errors on complex, dual solver surface
+
+**Date**: 2026-07-20
+**Status**: Accepted (Session 16, sub-phase 4A; user decisions taken upfront)
+**Context**: Phase 4A needed three user calls (matrix reference syntax, real-only eigenvalue behavior on complex pairs, solver UI shape) plus the usual as-built reconciliation with the Phase 3 `Array` reality (get/set streaming, non-copyable — the spec's reference-returning `Matrix` class sketch doesn't fit).
+**Decision**:
+1. **TI-style `[A]`-`[J]` syntax** (user pick), lowercase `[a]` accepted, uppercase displayed. Matrices can't flow through tinyexpr and their operators aren't element-wise, so `math::matexpr` is a **recursive-descent evaluator** over tagged scalar/matrix values (not a listexpr-style rewrite): `[A]*[B]`, `2*[A]`, `[A]/3`, `[A]^-1`, `[A]^T` (also `^t`), `[A]^n` (n <= 100), `[A](r,c)` element access (1-based), det/rank scalars inline, inverse/transpose/rref/ref/augment/identity matrix-valued, `dim`/`eigenvals` whole-expression list forms, stores `-> [C]` / `-> lk` / `-> a`. Scalar subterms go through `eval_field` (full engine syntax). Routed **first** in `evaluate_input` ([X] tokens are unambiguous; `identity(` is the only no-token trigger). Matrix results land in a persistent **MatAns** buffer; history shows `[[1,2][3,4]]` truncated at ~40 chars.
+2. **Matrix layer = `matops` free functions over 2-D `Array`** (`src/math/matrix.{hpp,cpp}`), the same deviation lists made: streaming row buffers (200 doubles), no references. LU det (direct 1x1-3x3), Gauss-Jordan inverse, rref/ref/rank with relative pivot tolerance (1e-12 * max|a|), reshape (row/col-overlap preserving — editor DIM). **Eigenvalues: Givens Hessenberg + Wilkinson-shifted QR, n <= 10, real only; a complex conjugate pair is an error** ("Complex eigenvalues", user pick — a partial answer would mislead; complex support is 4C/P4-7). Output is a 1-D list (descending) so results flow into l1..l6. `MatrixStore` [A]-[J] (10 slots, 99x99 editor cap; total elements <= 10000 per Array), persisted to `/picocalc/matrices.dat` (magic **PCM1**, lists_persist pattern incl. all-or-nothing PSRAM load + late-init retry).
+3. **Matrix editor** (`matrix` / `mat` typed command): one matrix at a time, TAB cycles [A]-[J] + read-only Ans view, F7 DIM (`rows,cols` prompt, reshape), F8 clear, ENTER/typing edits cells (advance right-then-down), strip-safe cached render.
+4. **Solver = both surfaces** (user pick): `math::numeric_solve` (bisection to a tight bracket + Newton polish; Newton-from-midpoint fallback when no sign change; lo == hi = explicit-guess form; solve variable saved/restored) behind (a) a `solve` form screen (equation with optional top-level `=`, variable cycle, Lower/Upper/optional Guess; root -> variable + Ans, residual + iterations shown) and (b) **inline `solve(f, var, lo, hi)` / `solve(f, var, guess)` / `solve(lhs=rhs, ...)`** substituted to a numeric literal pre-evaluation (composes anywhere; innermost-first like the list reductions).
+5. **ArrayStore pools grown** for the matrix population: SRAM slabs 12 -> **28** (+32 KB bss), PSRAM regions 12 -> **24** (bookkeeping only). Pico 1 is now text ~337 KB / **bss ~188 KB of 264 KB** (~76 KB stack/heap headroom — recheck at the 3D.14/4A Pico 1 pass). `kMaxCatalogEntries` 56 -> 72 (12 help-only rows: matrix functions + solve).
+**Rationale**: TI muscle memory for syntax; honest errors over silent partial eigen-results; the solver's two surfaces share one engine so 4B's zero/intersect reuse is free; matops-over-Array keeps everything host-testable (199 matrix + 27 solver checks).
+**Tradeoffs**: No matrix literals on the home screen (editor is the entry path — watch on device); `dim`/`eigenvals` can't nest inside larger expressions; element *stores* (`5 -> [A](2,3)`) are editor-only; Pico 1 bss headroom narrowed to ~76 KB.
+**Revisit when**: 4C complex lands (eigen complex pairs, P4-7); home-screen matrix literals get missed in practice; Pico 1 headroom pinches (shrink slab count or move small-tier matrices to PSRAM).
+
 ## D27: 3D inference + stat plots as-built — Alt-driven tests, separate intervals (P3-6), Plot1-3 layer (P3-5)
 
 **Date**: 2026-07-20
@@ -170,7 +185,7 @@ architectural rework.
 firmware, e.g. 079a8b2, to bisect phase-2 vs phase-3 fallout in one flash). If Phase 2
 introduced a non-idempotent render pattern, Phase 3 may copy it before hardware
 catches it — mitigated by the strip-safety rule added to `phase3-spec.md` §8: new
-screen `render()`s must be idempotent (may run ~20×/frame in strip mode).
+screen `render()`s must be idempotent (may run ~20x/frame in strip mode).
 **Revisit when**: Phase 3 grows new rendering machinery beyond ordinary screens
 (animations, new split layouts) — then swap boards *before* that work starts; or any
 host-side strip-mode regression harness appears, which would shrink the deferred risk

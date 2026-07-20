@@ -86,6 +86,27 @@ echo "== Compiling + linking test_infer =="
     "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_infer"
 
+echo "== Compiling + linking test_matrix =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_matrix.cpp tests/host/host_psram_backend.cpp \
+    src/math/array.cpp src/math/matrix.cpp src/math/mat_expr.cpp \
+    src/math/lists.cpp src/math/list_ops.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_matrix"
+
+echo "== Compiling + linking test_solve =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_solve.cpp \
+    src/math/numeric_solve.cpp src/math/solve_expr.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_solve"
+
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -113,6 +134,12 @@ echo "== Running test_dist =="
 
 echo "== Running test_infer =="
 "$OUT/test_infer"
+
+echo "== Running test_matrix =="
+"$OUT/test_matrix"
+
+echo "== Running test_solve =="
+"$OUT/test_solve"
 
 echo "== Running test_stats =="
 "$OUT/test_stats"

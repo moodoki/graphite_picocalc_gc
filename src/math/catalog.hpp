@@ -15,7 +15,7 @@ struct FnDescriptor {
 };
 
 // Registration headroom for build_lookup's fixed-size table.
-constexpr int kMaxCatalogEntries = 56;
+constexpr int kMaxCatalogEntries = 72;
 
 // The full catalog, in display order.
 const FnDescriptor* catalog(int* count);

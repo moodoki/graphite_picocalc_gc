@@ -109,10 +109,14 @@ private:
 class ArrayStore {
 public:
     static constexpr size_t kSlabBytes = 2048;  // 256 doubles (D21 threshold)
-    static constexpr int kSlabCount = 12;       // 6 lists + expression temps
+    // 6 lists + list expression temps, plus (4A) 10 matrices + MatAns +
+    // matrix expression/work temps. Slabs are SRAM (kSlabCount * 2 KB
+    // of bss); regions are PSRAM bookkeeping only — a region's 80 KB
+    // is bump-allocated on first use.
+    static constexpr int kSlabCount = 28;
     static constexpr size_t kRegionBytes =
         static_cast<size_t>(Array::kMaxElements) * sizeof(calc_t);
-    static constexpr int kMaxPsramRegions = 12;
+    static constexpr int kMaxPsramRegions = 24;
 
     uint8_t* slab_alloc();
     void slab_free(const uint8_t* p);

@@ -24,6 +24,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/functions.hpp"
 #include "math/lists.hpp"
+#include "math/matrix.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -313,6 +314,8 @@ int main() {
     // false while SD or (for large lists) PSRAM is still down — the
     // late-init loop below retries it.
     bool lists_loaded = math::lists().load(platform::storage());
+    // Matrix variables (Phase 4A) — same all-or-nothing contract.
+    bool matrices_loaded = math::matrices().load(platform::storage());
     // The typed `diag` command pushes the diagnostics overlay (the old
     // global F6 toggle is gone — 2026-07-18 remap).
     apps::home_screen().set_diag_screen(&g_diag_screen);
@@ -409,6 +412,13 @@ int main() {
                     lists_loaded = math::lists().load(platform::storage());
                     if (lists_loaded) {
                         printf("late-init: lists loaded at %lu ms\n",
+                               static_cast<unsigned long>(now));
+                    }
+                }
+                if (!matrices_loaded) {
+                    matrices_loaded = math::matrices().load(platform::storage());
+                    if (matrices_loaded) {
+                        printf("late-init: matrices loaded at %lu ms\n",
                                static_cast<unsigned long>(now));
                     }
                 }

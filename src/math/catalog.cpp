@@ -81,6 +81,22 @@ const FnDescriptor kCatalog[] = {
     {"poisson_cdf", "poisson_cdf(k,lam)", "P(X<=k)", fp2(dist::poisson_cdf), 2},
     {"geometric_pmf", "geometric_pmf(k,p)", "P(1st success=k)", fp2(dist::geometric_pmf), 2},
     {"geometric_cdf", "geometric_cdf(k,p)", "P(X<=k)", fp2(dist::geometric_cdf), 2},
+    // Matrices (Phase 4A): help-only rows — [A]-[J] arguments are
+    // intercepted by math::matexpr before the engine. Also [A]^-1,
+    // [A]^T, [A](r,c), and `-> [C]` store (see help text).
+    {"det", "det([A])", "Determinant", nullptr, 1},
+    {"inverse", "inverse([A])", "Matrix inverse", nullptr, 1},
+    {"transpose", "transpose([A])", "Transpose", nullptr, 1},
+    {"rref", "rref([A])", "Reduced row echelon", nullptr, 1},
+    {"ref", "ref([A])", "Row echelon form", nullptr, 1},
+    {"rank", "rank([A])", "Matrix rank", nullptr, 1},
+    {"identity", "identity(n)", "n x n identity", nullptr, 1},
+    {"augment", "augment([A],[B])", "Concat columns", nullptr, 2},
+    {"dim", "dim([A])", "{rows, cols} list", nullptr, 1},
+    {"eigenvals", "eigenvals([A])", "Real eigenvalues", nullptr, 1},
+    // Numeric solver (Phase 4A): solve_expr intercepts; bare `solve`
+    // opens the solver screen.
+    {"solve", "solve(f,x,lo,hi)", "Root of f (or guess)", nullptr, 4},
 };
 
 constexpr int kCount = sizeof(kCatalog) / sizeof(kCatalog[0]);

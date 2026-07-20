@@ -11,6 +11,9 @@
 #include "math/format.hpp"
 #include "math/list_expr.hpp"
 #include "math/lists.hpp"
+#include "math/mat_expr.hpp"
+#include "math/matrix.hpp"
+#include "math/solve_expr.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/dist_screen.hpp"
@@ -19,9 +22,11 @@
 #include "apps/help_screen.hpp"
 #include "apps/infer_screen.hpp"
 #include "apps/list_editor.hpp"
+#include "apps/matrix_editor.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
 #include "apps/plot_screen.hpp"
+#include "apps/solver_screen.hpp"
 #include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "graph/graph_state.hpp"
@@ -164,9 +169,73 @@ void HomeScreen::evaluate_input() {
         return;
     }
 
-    // List expressions (Phase 3A) get first crack; Kind::kNone means
+    // Inline solve() calls become numeric literals first (Phase 4A),
+    // so they compose inside any downstream path. History shows the
+    // original input; evaluation continues on the substituted text.
+    char expr[160];
+    std::snprintf(expr, sizeof(expr), "%s", input_.text());
+    if (math::solveexpr::contains_solve(expr)) {
+        const char* serr = nullptr;
+        if (!math::solveexpr::substitute(expr, sizeof(expr), &serr)) {
+            push_entry(input_.text(), serr, true);
+            input_.clear();
+            hist_nav_ = -1;
+            pending_[0] = 0;
+            return;
+        }
+    }
+
+    // Matrix expressions (Phase 4A) get next crack — [X] tokens are
+    // unambiguous. Kind::kNone means "not matrix syntax".
+    const auto mres = math::matexpr::evaluate(expr);
+    if (mres.kind != math::matexpr::Kind::kNone) {
+        char result[48];
+        bool error = false;
+        if (mres.kind == math::matexpr::Kind::kError) {
+            std::snprintf(result, sizeof(result), "%s", mres.error);
+            error = true;
+        } else if (mres.kind == math::matexpr::Kind::kScalar) {
+            format_scalar_result(mres.scalar, result, sizeof(result));
+            error = !mres.scalar.ok;
+        } else if (mres.kind == math::matexpr::Kind::kList) {
+            char text[40];
+            math::listexpr::format_list(*mres.list, text, sizeof(text));
+            if (mres.stored_list >= 0) {
+                std::snprintf(result, sizeof(result), "%s>l%c", text,
+                              static_cast<char>('1' + mres.stored_list));
+            } else {
+                std::snprintf(result, sizeof(result), "%s", text);
+            }
+        } else {
+            char text[40];
+            math::matexpr::format_matrix(*mres.matrix, text, sizeof(text));
+            if (mres.stored_matrix >= 0) {
+                std::snprintf(result, sizeof(result), "%s>[%c]", text,
+                              static_cast<char>('A' + mres.stored_matrix));
+            } else {
+                std::snprintf(result, sizeof(result), "%s", text);
+            }
+        }
+        push_entry(input_.text(), result, error);
+        if (!error) {
+            persist_history_line(input_.text(), result);
+            save_variables();
+            if (mres.matrices_modified) {
+                math::matrices().save(platform::storage());
+            }
+            if (mres.lists_modified) {
+                math::lists().save(platform::storage());
+            }
+        }
+        input_.clear();
+        hist_nav_ = -1;
+        pending_[0] = 0;
+        return;
+    }
+
+    // List expressions (Phase 3A) next; Kind::kNone means
     // "not list syntax" and falls through to the scalar engine.
-    const auto lres = math::listexpr::evaluate(input_.text());
+    const auto lres = math::listexpr::evaluate(expr);
     if (lres.kind != math::listexpr::Kind::kNone) {
         char result[48];
         bool error = false;
@@ -200,7 +269,7 @@ void HomeScreen::evaluate_input() {
         return;
     }
 
-    const auto res = math::engine().evaluate(input_.text());
+    const auto res = math::engine().evaluate(expr);
     char result[48];
     format_scalar_result(res, result, sizeof(result));
 
@@ -267,6 +336,16 @@ bool HomeScreen::handle_command(const char* cmd) {
     }
     if (std::strcmp(cmd, "plot") == 0 || std::strcmp(cmd, "plots") == 0) {
         ui::screen_manager().push(&plot_screen());
+        return true;
+    }
+    if (std::strcmp(cmd, "matrix") == 0 || std::strcmp(cmd, "mat") == 0) {
+        ui::screen_manager().push(&matrix_editor());
+        return true;
+    }
+    // Bare `solve` opens the form screen; `solve(...)` with arguments
+    // stays an expression (inline solve, handled in evaluate_input).
+    if (std::strcmp(cmd, "solve") == 0 || std::strcmp(cmd, "solver") == 0) {
+        ui::screen_manager().push(&solver_screen());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {

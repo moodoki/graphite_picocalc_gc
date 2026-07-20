@@ -1,46 +1,60 @@
 # Start here — next session
 
-**Last session:** 2026-07-20 (Session 15). **Phase 3 is code-complete**:
-part 1 implemented the Session 14 observation batch (**D26** — storage
-health: retry-forever heartbeat, SD hot-plug via DET poll, red
-`SD`/`PSRAM` status-bar indicators; Y=-editor `...` truncation); part 2
-shipped **all of sub-phase 3D except the Pico 1 pass (3D.1-3D.13,
-D27** — resolves P3-5 + P3-6). Suite **716 checks**, lint clean, both
-boards build, **flashed to the Pico 2**. What landed in part 2:
+**Last session:** 2026-07-20 (Session 16). **Sub-phase 4A is
+code-complete (D28)** — matrices + numeric solver, on top of the
+Session 15 Phase 3 close. Suite **953 checks**, lint clean, both
+boards build, **flashed to the Pico 2** (boots clean; psram-bulk OK,
+battery heartbeat sane). What landed (user decisions taken upfront:
+TI `[A]`-`[J]` syntax; eigenvalues error on complex pairs; solver =
+form screen + inline `solve()`):
 
-- **`math::stats` inference** (`src/math/infer.{hpp,cpp}`): z/t
-  (pooled + Welch, Data or summary), paired t, 1/2-prop z, chi-square
-  GOF + 2-way (columns = l1..lk), one-way ANOVA (groups = l1..lk),
-  linreg slope t-test, and the six interval families. `Alt` (!=, <, >)
-  on the mean/prop/slope tests; p-values via new one-sided `dist`
-  survival functions.
-- **`test` typed command** (alias `infer`): 15-kind form (10 tests + 5
-  intervals), Data/Stats source toggle, results as cached lines.
-- **StatPlots**: Plot1-3 (`plot` command; persisted — **PCG4, one-time
-  graph-state reset on first boot**): scatter, xy-line, histogram,
-  modified box plot, normal-probability plot. Cache/draw split for
-  strip safety; graph draws plots under curves; **`Z` = ZoomStat**.
+- **`matops` + `MatrixStore`** (`src/math/matrix.{hpp,cpp}`): free
+  functions over 2-D Arrays (listops-style streaming) — arithmetic,
+  transpose, LU det, Gauss-Jordan inverse, rref/ref/rank, powers,
+  reshape, QR eigenvalues (n<=10, real; complex pair = error).
+  [A]-[J] persist to `/picocalc/matrices.dat` (**PCM1**, late-init
+  retry like lists).
+- **`[A]` expressions** (`src/math/mat_expr.{hpp,cpp}`): recursive-
+  descent evaluator — `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`,
+  `[A](2,3)`, det/rank inline, inverse/rref/augment/identity,
+  `dim`/`eigenvals` (whole-form, list results), `-> [C]`/`lk`/`a`
+  stores, MatAns buffer. Routed first in the home screen.
+- **`matrix` editor** (alias `mat`): TAB cycles [A]-[J]+Ans(RO),
+  F7 DIM, F8 clear, strip-safe cached render.
+- **Numeric solver** (`src/math/numeric_solve.{hpp,cpp}`): bisection +
+  Newton polish, Newton-from-guess fallback; `solve` form screen
+  (root -> variable + Ans) and inline `solve(f,x,lo,hi)` /
+  `solve(f,x,guess)` / `solve(lhs=rhs,...)` substitution. Reused by
+  4B zero/intersect later.
+- **ArrayStore pools grew** (28 slabs, 24 PSRAM regions; catalog cap
+  72): Pico 1 now text ~337 KB, **bss ~188 KB of 264 KB** (~76 KB
+  stack/heap headroom — watch it).
 
 ## The next job
 
-1. **On-device eval** of the outstanding batches (worklog HW-PENDING):
-   Session 11 (3A lists), Session 12 (3B stats), Session 15 storage
-   health (hot-plug needs the physical card) **and** Session 15 3D
-   (inference + stat plots — expect the PCG4 one-time reset on first
-   boot).
+1. **On-device evals** (worklog HW-PENDING; the Session 16 build is
+   already flashed): Session 11 (3A lists), Session 12 (3B
+   stats), Session 15 storage health + 3D (inference + stat plots —
+   expect the PCG4 one-time reset on first boot), **and Session 16
+   4A**: matrix editor feel, `[A]`/`]`/bracket typing on the physical
+   keyboard, `[A]*[B]` -> `[C]` round-trip, det/inverse/eigenvals
+   spot-checks, matrices.dat first save + power cycle, solver screen
+   + inline `solve()`, big-matrix (>16x16, PSRAM tier) edit/op timing.
 2. **3D.14 — the combined Pico 1 pass (D18)** closes Phase 3: swap the
    board, reflash `build/pico/…uf2` (BOOTSEL volume `RPI-RP2`), run the
    Phase 2 sweep (headline: split-pane clipping on the strip renderer),
    the Session 8+9 fix list, Phase 3 acceptance, and watch every §8
-   screen for strip-render artifacts (stats/dist/test results, stat
-   plots — scatter/normprob re-stream per strip; judge the feel).
-   Pico 1 budget as of Session 15: text ~305 KB, bss ~147 KB of
-   264 KB — re-check the map file.
-3. Then **Phase 4** (`phase4-spec.md`): 4A matrices, 4B graph analysis
-   (CALC menu), 4C complex numbers.
+   screen for strip-render artifacts. **Re-check the map file** — 4A
+   pushed Pico 1 bss to ~188 KB of 264 KB (D28); if the ~76 KB
+   stack/heap headroom pinches, shrink `ArrayStore::kSlabCount`.
+3. Then **Phase 4B** (`phase4-spec.md` §4): graph analysis / CALC menu
+   (value, zero, min/max, intersect, dy/dx, fnInt) — reuses 4A's
+   `numeric_solve` for zero/intersect. Open question P4-6 (intersect
+   curve picking) is due at 4B.5.
 
 Mind the §8 strip-safety rule (idempotent `render()` — Stats/Dist/
-Infer screens cache result lines; stat plots split recompute/draw).
+Infer/Solver screens cache result lines; matrix editor caches cells;
+stat plots split recompute/draw).
 
 ## D14 rail settle — NEXT BENCH SESSION
 
@@ -51,14 +65,14 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is the Session 15 build** (storage health +
-  full 3D on top of everything prior; flashed 2026-07-20). **First boot
-  does a one-time graph-state reset (PCG4)** — window/mode/axis-labels/
-  plots return to defaults once. The Pico 1 is still on Session 7
-  firmware; its pass is 3D.14 (D18).
-- **`lists.dat` may not exist yet on the SD card** — first save creates
-  it. If a load ever misbehaves, deleting the file resets all lists
-  (magic PCL1; bump to PCL2 on layout change).
+- **Firmware on the unit is the Session 16 build** (4A matrices +
+  solver on top of everything prior; flashed 2026-07-20, warm-boot
+  verified over serial). The PCG4 graph-state reset already happened
+  on the Session 15 build — no reset this time. The Pico 1 is still
+  on Session 7 firmware; its pass is 3D.14 (D18).
+- **`lists.dat` / `matrices.dat` may not exist yet on the SD card** —
+  first save creates them. If a load ever misbehaves, deleting the
+  file resets that store (magics PCL1 / PCM1; bump on layout change).
 - **D14 cold boot (~5-8 s rail settle):** PSRAM/SD may fail early init on
   a cold power-on; self-tests retry inside the 30 s late-init window and
   serial prints `late-init: ...` lines (including `lists loaded`).

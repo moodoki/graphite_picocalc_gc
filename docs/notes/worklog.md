@@ -219,8 +219,80 @@ Still to verify on hardware:
 | Session 15 — 3D inference + stat plots (D27; flashed 2026-07-20) | **First boot: PCG4 one-time graph-state reset** (window/mode/plots back to defaults — re-set once, then persistence resumes). `test` cmd: T-Test on `{12.9,13.5,12.8,15.6,17.2,19.2,12.6,15.3,14.4,11.3}->l1` vs mu0=14 → t≈.634, p≈.542; same data 2-SampT vs l2, Welch df≈17.65; Stats source entry; 1-PropZ x=57 n=100 p0=.5 (>) → z=1.4 p≈.0808; ANOVA over l1..l3; T-Interval C=.95; error paths (n non-integer, conf=1). `plot` cmd: scatter l1 vs l2 + `Z` ZoomStat on graph; histogram (auto + manual bin width); box plot with an outlier (e.g. append 99); NormProb of a normal-ish list ≈ straight line; three plots at once + a Y= function overlay. Help: COMMANDS test/plot rows, KEYS TEST + STAT PLOTS sections, graph Z row. Regression: trace/table/split unaffected; stats/dist screens fine |
 | Session 15 — storage health (D26) + editor truncation | Y= editor: store a regression model to y1, open Y= — text ends `...` before the checkbox, no overlap. **Hot-plug** (needs the physical card): eject while on → red `SD` appears in the home status bar within ~1 s (serial: `sd: card removed`); `files` shows no card; re-insert → `sd: card inserted`, remount within ~2 s, indicator clears, files/save work again; **in-memory lists/history survive** (no stale reload). **Extended-cold-boot case** (the original observation): power on after a long time off — if SD is slow, red `SD` shows, then clears when the (now unlimited) retries land; serial `late-init:` lines confirm. PSRAM indicator: hard to test without fault injection — verify it's absent when healthy |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine |
+| Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine |
 
 ---
+
+## 2026-07-20 — Session 16: Phase 4A — matrices + numeric solver (D28)
+
+All of 4A.1-4A.9 in one pass. Three user calls taken upfront via a question
+form (TI-style `[A]`-`[J]` matrix syntax; eigenvalues error on complex pairs
+rather than a partial answer, since complex support is 4C; solver ships as
+both a form screen and inline `solve()`), recorded as **D28**. Host suite grew
+**716 -> 953 checks**, 0 failures; lint clean (five real clang-tidy findings
+fixed: branch-clone, an analyzer null-path in `augment`, `std::max`, a dead
+store, a missing `const`); format applied; both boards build with no new
+warnings (pre-existing `home_screen` strncpy warnings remain); flashed to the
+Pico 2, warm boot verified over serial.
+
+- **`matops` + `MatrixStore`** (`src/math/matrix.{hpp,cpp}`): free functions
+  over 2-D `Array`s (listops-style streaming — the spec's reference-returning
+  `Matrix` class sketch doesn't fit the get/set PSRAM `Array`): add/sub/mul/
+  scalar, transpose, LU determinant (direct for <=3x3), Gauss-Jordan inverse,
+  rref/ref/rank, powers (`^-1`/`^0`/`^n<=100`), reshape (row/col-overlap
+  preserving, for the editor's DIM), QR eigenvalues (Givens Hessenberg +
+  Wilkinson shift, n<=10, real-only — a complex conjugate pair is the
+  "Complex eigenvalues" error per the user's D28 call), descending 1-D list
+  output. `MatrixStore` holds [A]-[J].
+- **Persistence** (`src/math/matrices_persist.cpp`): `/picocalc/matrices.dat`,
+  magic **PCM1**, the `lists_persist` pattern (all-or-nothing PSRAM load);
+  wired into `main.cpp` boot + late-init retry.
+- **`[A]` expression layer** (`src/math/mat_expr.{hpp,cpp}`): a recursive-
+  descent evaluator (matrix ops aren't element-wise, so this isn't a
+  listexpr-style lift) covering `[A]*[B]`, `2*[A]`, `[A]/3`, `[A]^-1`,
+  `[A]^T`, `[A]^n`, `[A](r,c)` element access, `det`/`rank` inline scalars,
+  `inverse`/`transpose`/`rref`/`ref`/`augment`/`identity`, `dim`/`eigenvals`
+  whole-form list results, `-> [C]`/`-> lk`/`-> a` stores, a persistent
+  MatAns buffer. Routed first in `home_screen`'s `evaluate_input`. Verified
+  `[`/`]` are typeable (`kPrintable` + pass-through).
+- **`matrix`/`mat` editor** (`src/apps/matrix_editor.{hpp,cpp}`): grid
+  editor, TAB cycles [A]-[J] + Ans (read-only), F7 DIM, F8 clear, strip-safe
+  cached render (§8).
+- **Numeric solver** (`src/math/numeric_solve.{hpp,cpp}`): bisection to a
+  tight bracket + Newton polish, Newton-from-midpoint fallback when there's
+  no sign change, `lo == hi` = explicit-guess form, solve variable saved/
+  restored. Reused by 4B's zero/intersect later.
+- **`solve`/`solver` form screen** (`src/apps/solver_screen.{hpp,cpp}`):
+  equation (optional top-level `=`), variable cycle, Lower/Upper/optional
+  Guess; root -> variable + Ans; residual + iterations shown.
+- **Inline solve** (`src/math/solve_expr.{hpp,cpp}`): `solve(f,x,lo,hi)` /
+  `solve(f,x,guess)` / `solve(lhs=rhs,...)` substituted to numeric literals
+  pre-evaluation (innermost-first, like the list reductions) — composes in
+  any expression.
+- **Pools grown** for the matrix population: `ArrayStore::kSlabCount` 12 ->
+  28 (+32 KB bss), `kMaxPsramRegions` 12 -> 24; `kMaxCatalogEntries` 56 -> 72
+  (12 help-only rows: matrix functions + `solve`).
+- New host suite: `tests/host/test_matrix.cpp` (199 checks, incl. the
+  `mat_expr` layer + the PSRAM tier) and `tests/host/test_solve.cpp` (27
+  checks).
+
+Known limitations / deferred:
+- **Pico 1 bss is now ~188 KB of 264 KB** (~76 KB stack/heap headroom) —
+  flagged for the 3D.14 Pico 1 pass; the knob is `ArrayStore::kSlabCount`.
+- No matrix literals on the home screen — the editor is the only entry path
+  for populating [A]-[J] (matches D28's syntax call; watch on device).
+- `dim`/`eigenvals` are whole-form results (list-valued) and can't nest
+  inside a larger expression.
+- Element stores (`5 -> [A](2,3)`) are editor-only, not available inline.
+- A pre-existing unicode `×` in `decisions.md` was fixed in passing (found
+  by the markdown validation pass).
+
+Still HW-PENDING: the full 4A on-device batch (bracket typing feel, matrix
+editor, `[A]*[B]->[C]` round-trip, det/inverse/eigenvals spot-checks,
+`matrices.dat` first-save + power cycle, solver screen + inline `solve()`,
+>16x16 PSRAM-tier timing) — see the HW-PENDING table above — plus the older
+Session 11/12/15 batches; then **3D.14** (the combined Pico 1 pass, D18);
+then Phase 4B.
 
 ## 2026-07-20 — Session 15 (part 2): Phase 3 sub-phase 3D — inference + stat plots (D27)
 

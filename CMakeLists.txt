@@ -110,6 +110,11 @@ add_executable(picocalc_graphcalc
     src/math/stats.cpp
     src/math/dist.cpp
     src/math/infer.cpp
+    src/math/matrix.cpp
+    src/math/matrices_persist.cpp
+    src/math/mat_expr.cpp
+    src/math/numeric_solve.cpp
+    src/math/solve_expr.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -127,6 +132,8 @@ add_executable(picocalc_graphcalc
     src/apps/home_screen.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
+    src/apps/matrix_editor.cpp
+    src/apps/solver_screen.cpp
     src/apps/stats_screen.cpp
     src/apps/dist_screen.cpp
     src/apps/infer_screen.cpp
