@@ -10,6 +10,15 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **3D plotting (surface graphs, $z = f(x,y)$)** (raised 2026-07-21): not
+  on TI-83/84+ at all — this is TI-Nspire CX II CAS territory (rotatable
+  wireframe/surface plots), similar in kind to CAS itself: a capability
+  that separates the 84+ tier from the Nspire tier, not a parity gap.
+  Would need a new graph mode, a projection/rotation math layer, and a
+  different renderer path from the existing 2D column-based plotter
+  (`graph/`, `render/`) — substantial scope, likely its own sub-phase or
+  phase if ever picked up, not a small addition. No design work done;
+  raised as a stretch idea only, no phase home yet.
 - **Antialiased / higher-res font rendering (D31)**: the rasterized fonts
   (JuliaMono, Iosevka) read worse than the bitmap fonts at 8px 1bpp on the
   PicoCalc; antialiasing or a higher-resolution panel would likely help.
