@@ -140,6 +140,88 @@ the launcher, not directly to Home, so a user who came from the launcher
 doesn't lose their place). `HOME` still short-circuits to the home
 screen from anywhere, matching every other screen's existing behavior.
 
+### 3.4 Compiled app launcher entries (`uf2loader`-based, **stretch — not core 6A scope**)
+
+Promoted here from a deferred-future-phase candidate on 2026-07-21 (D34
+follow-up) once it became clear this can plausibly appear as **a third
+`AppEntry` kind, selected from the same launcher as everything else** —
+not a separate reboot-into-a-different-menu experience. Explicitly
+**stretch**: not part of 6A's committed 14 hrs, attempted only if there's
+appetite after the core sub-phase ships, same status as the old
+`program_screen`'s "syntax highlighting is a stretch goal."
+
+**Mechanism**: each compiled app is a complete, independently built
+`.uf2` — same fixed-address pico-sdk toolchain, no relocation, no PIC,
+no shared-ABI table with the running calculator firmware (it never runs
+concurrently with it, see §9.1 for why that matters). A manifest entry
+(§4.5's format, extended with `type=native`) points at the `.uf2` file
+on SD instead of a `.py` entry script. Selecting it in the launcher:
+
+1. Parses the `.uf2` directly off the SD card — UF2 is a simple,
+   well-specified block format (512-byte self-describing blocks: magic
+   numbers, target address, payload, block count), designed from the
+   ground up to be robust against partial reads/writes. This is real
+   work, but it's implementing a well-specified format, not inventing a
+   write-safety protocol from scratch — a materially smaller lift than
+   the "homegrown write-verify-activate protocol for an arbitrary
+   relocatable blob" that in-process loading would need (§9.1).
+2. Writes the parsed payload into a **reserved app-boot flash region**,
+   using the Pico SDK's flash write primitives (code executing this step
+   must run from RAM, not flash, while flash is being written — the same
+   constraint this project already documents for other flash operations).
+3. Triggers a reset. On boot, either `uf2loader` (if installed) or a
+   small in-firmware bootstrap auto-boots whatever's in that region —
+   the freshly written app, with no interactive menu step, because the
+   *selection* already happened in our own launcher.
+4. **Returning to the calculator** is the same operation run in reverse:
+   re-flash the calculator's own `.uf2` into that region and reset. Apps
+   built from this project's own template know how to do this (a `calc`
+   module binding, analogous to 6B's other bindings); a completely
+   foreign `.uf2` would not, and would rely on the hold-a-key-at-boot
+   fallback below instead.
+
+**What this does and doesn't remove, versus §9.1's in-process approach**:
+removes the relocator/PIC problem (#2) and the ABI/symbol-table
+versioning tax (#4) and the concurrent-execution memory-protection
+problem (#3) entirely — nothing runs concurrently, so there's nothing to
+protect or version against. It does **not** remove the need for a real,
+carefully tested flash-write step — that's still genuine risk, just a
+substantially smaller and better-specified version of it (a known block
+format, not an arbitrary blob).
+
+**Safety net, not a nice-to-have**: the reserved app-boot region must be
+strictly separate from wherever `uf2loader` itself (or a minimal
+in-firmware bootstrap, if not depending on the external project) lives.
+If this project's own self-flash routine has a bug, the worst case must
+be "the app slot is corrupted, hold the boot key and reflash from SD via
+the untouched bootloader" — never "the device won't boot at all." This
+constraint should be treated as non-negotiable in any implementation,
+not an optimization.
+
+**Open questions before implementation**:
+
+- Does this depend on `uf2loader` being separately installed (as a
+  recovery fallback and possibly to own the actual flash-write step), or
+  does the calculator firmware become fully self-sufficient for
+  switching, with `uf2loader` relegated to an optional install-time
+  safety net? Needs hardware verification before committing either way —
+  confirm what `uf2loader` actually does at the flash level, and whether
+  its own reboot lands back in its menu/logic or requires a specific
+  reset call this project hasn't confirmed yet (the existing Phase 1
+  "Reboot to bootloader" MODE-screen entry likely calls
+  `reset_usb_boot()`, which forces raw BOOTSEL/PC-flash mode and would
+  bypass `uf2loader` entirely rather than returning to it).
+- Where does the calculator's own `.uf2` come from at "return" time —
+  bundled as a resource apps carry, fetched fresh from a known SD path,
+  or something else? Needs a small design pass, not assumed.
+
+**Rough estimate**: **~25–35 hrs**, gated by a feasibility spike first
+(parse one real `.uf2`, write it to a scratch flash region, reboot into
+it successfully, confirm the untouched-bootloader recovery path actually
+recovers) — flash-write code should prove itself in isolation before the
+rest is built on top of it, the same "spike before committing" principle
+§9.1 recommends for anything touching a homegrown flash/loader path.
+
 ---
 
 ## 4. Sub-phase 6B: MicroPython programming (first base app)
@@ -330,6 +412,40 @@ land before Phase 6 in the intended order and both touch SRAM.
 On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus
 ~200 KB for framebuffer still leaves ~216 KB.
 
+### 4.5 SD-discovered app manifests
+
+Accepted into 6B's scope on 2026-07-21 (was scoped as a §9 "candidate,"
+promoted once the complexity assessment showed it's low-risk — see D34).
+Extends 6B so that scripts under `/picocalc/apps/<name>/` show up as
+their own named tiles in 6A's launcher, instead of every script being
+reached through one generic program-editor "load" flow.
+
+```cpp
+namespace platform {
+
+// A second, dynamically populated tier of AppRegistry entries (§3.1),
+// scanned once at boot from the SD card. Bounded, no heap allocation —
+// same fixed-capacity-table shape as ArrayStore's slabs.
+struct SdAppManifest {
+    char name[24];
+    char icon_glyph[8];   // optional, UTF-8 glyph or empty
+    char entry_path[64];  // e.g. "/picocalc/apps/finance/main.py"
+};
+
+// Scans /picocalc/apps/*/app.txt (flat key=value: name=, icon=, entry=),
+// populates up to kMaxSdApps entries, registers each with AppRegistry.
+// Malformed manifests are skipped and logged, never fatal.
+void scan_sd_apps();
+
+}  // namespace scripting
+```
+
+Each discovered entry's `launch()` calls
+`PythonInterpreter::exec_file(entry_path)` — exactly 6B's existing
+program-runner path (§4.1), just reached from a named launcher tile
+instead of the generic editor's file browser. No new execution model, no
+new failure mode beyond "bad manifest, skip it."
+
 ---
 
 ## 5. Task breakdown
@@ -364,16 +480,20 @@ Solo developer, part-time (~20 hrs/week).
 | 6B.12 | Execution: output capture, error display | 4 | print output + line-numbered errors |
 | 6B.13 | Load/save scripts to SD | 3 | Save, power cycle, reload, run |
 | 6B.14 | Memory management: lazy init, cleanup | 3 | Heap freed on leaving program screen |
-| | **Subtotal** | **~61 hrs** | |
+| 6B.15 | SD app manifest parser + second `AppRegistry` tier (§4.5) | 6 | Malformed manifest skipped + logged, not fatal |
+| 6B.16 | Boot-time SD app scan + launcher integration (§4.5) | 6 | `/picocalc/apps/finance/` shows as a named launcher tile |
+| | **Subtotal** | **~73 hrs** | |
 
 ### Summary
 
 | Sub-phase | Hours | Deliverable |
 |-----------|-------|-------------|
 | 6A: App framework | ~14 | Launcher screen, app registry, screen-handoff convention |
-| 6B: MicroPython | ~61 | Interpreter, `calc` module, editor, SD scripts — first app on 6A |
-| **Total (scoped so far)** | **~75 hrs** | |
-| *6C+ future apps, release engineering* | *unscoped* | *see §9 — no estimate until something is actually picked up* |
+| 6B: MicroPython | ~73 | Interpreter, `calc` module, editor, SD scripts, SD-discovered app manifests — first app on 6A |
+| **Total (committed)** | **~87 hrs** | |
+| *Compiled app launcher entries (§3.4, stretch)* | *~25–35, gated on a feasibility spike* | *`uf2loader`-based reboot into a full app `.uf2`, selected the same way as a Python app* |
+| *Native dynamically-loaded (in-process) apps* | *deferred* | *own future phase, not Phase 6 — see §9.1* |
+| *6C+ other future apps, release engineering* | *unscoped* | *see §9.2 — no estimate until something is actually picked up* |
 
 ---
 
@@ -445,6 +565,8 @@ P4-4/P4-5, renumbered into this document.)*
 | P6-2 | `calc.plot()` from Python: immediate graph switch or buffered? | Immediate vs. buffered | 6B implementation |
 | P6-3 | Launcher entry point: dedicated Home softkey, or typed-command-only like `lists`/`stats`? | Softkey is more discoverable; typed-only matches the Phase 3 precedent and doesn't consume a scarce F-key slot | 6A implementation |
 | P6-4 | Does leaving an app via `HOME` (not `ESC`) skip the launcher entirely, or route through it? | Direct-to-Home matches every other screen's existing `HOME` behavior; routing through the launcher is more consistent but adds a hop | 6A implementation |
+| P6-5 | §3.4 compiled apps: depend on `uf2loader` being installed, or make the calculator self-sufficient for the flash-write/reboot step? | Depending on `uf2loader` is less new code but adds an external GPLv3 install-time dependency; self-sufficient is more code but no dependency | 3.4 feasibility spike |
+| P6-6 | §3.4 "return to calculator": bundle the calculator's own `.uf2` as a resource apps carry, or fetch it fresh from a known SD path at return time? | Bundled is more reliable (works even if SD layout changes) but bloats every app; fetched-fresh is leaner but couples every app to a path convention | 3.4 implementation |
 
 ---
 
@@ -453,14 +575,96 @@ P4-4/P4-5, renumbered into this document.)*
 Deliberately left open rather than pre-scoped — the point of Phase 6's
 structure is that these can be picked up whenever, in whatever order,
 without a spec rewrite each time. Listed here so they're not lost, not
-because any of them is committed:
+because any of them is committed.
+
+### 9.1 Native dynamically-loaded (in-process) apps — its own future phase
+
+**History (2026-07-21, two corrections in the same session)**: this
+section originally covered both SD-discovered Python apps and *all*
+compiled-app approaches as one "SD-card app loading" item. The Python
+half was low-risk and has since been accepted into 6B's scope (§4.5).
+It then turned out the original write-up had missed
+[feasibility.md](../notes/feasibility.md) §4.4, this project's own
+pre-Phase-1 research, which had already named `uf2loader` as a simpler
+alternative to in-process loading — corrected by adding what was then
+"Path B" (reboot into a separate firmware image). That approach turned
+out to be viable as **a launcher menu item indistinguishable in shape
+from a Python app entry** (self-flash the selected `.uf2` into a
+reserved region, then reboot — no interactive bootloader menu needed),
+which is enough of a UX and complexity win that it has since been
+promoted out of this section entirely — **see §3.4** for the accepted
+stretch-goal version. What remains deferred to a genuinely separate
+future phase, covered below, is the harder problem: **loading code that
+runs concurrently with the calculator firmware**, in the same process,
+without a reboot.
+
+**Goal**: run genuinely new machine code inline — no reboot, app and
+calculator coexist in one running process — without a firmware rebuild.
+This is the "OS-style" version: copy a relocatable blob into RAM or a
+reserved flash partition and jump into it while the calculator firmware
+keeps running. It is hard on a microcontroller with no MMU, for six
+compounding reasons:
+
+1. **The SD card isn't executable memory** — a loaded app has to be
+   staged into RAM or a reserved on-chip flash partition first (RAM
+   competes with Pico 1's already-tight ~188.8 KB/264 KB bss; flash
+   staging needs a homegrown write-verify-activate protocol, since a
+   partial write from power loss mid-flash can corrupt that partition).
+2. **Position-independent code, or a real relocator** — either every
+   app is built PIC (a fiddlier Cortex-M toolchain path than this
+   project's existing fixed-address build) or the loader parses
+   relocation records and patches addresses at load time — a minimal
+   dynamic linker written from scratch. The hardest, most bug-prone
+   piece, and bugs here are memory corruption, not a clean error.
+3. **Memory protection is asymmetric across boards.** RP2040 (Pico 1)
+   has no MPU at all — a bad app can corrupt anything it can address.
+   RP2350 (Pico 2) has a real ARMv8-M MPU that could sandbox loaded code
+   with hardware-enforced fault isolation, which does meaningfully
+   improve the risk picture **if scoped Pico-2-only** — turning "silent
+   corruption" into a catchable fault, and removing the "no cheap
+   dual-board answer" objection this section originally raised, since
+   there's no attempt to protect Pico 1 at all. Building the MPU
+   configuration and a fault handler that can unwind back to the
+   launcher is itself new work, though, so this buys risk reduction more
+   than effort reduction.
+4. **A stable, versioned ABI/symbol table** the app links against — and
+   unlike MicroPython (plain text, re-interpreted every run, immune to
+   firmware internals changing), a compiled app blob silently breaks the
+   moment a firmware rebuild changes this table's layout, with no
+   compiler around to catch the mismatch.
+5. **A build/packaging pipeline maintained indefinitely** — a second
+   linker script, a binary header format (magic/ABI-version/CRC), and an
+   SD-card layout convention every future app has to keep working
+   against.
+6. **A new failure mode** — a hung or corrupting app needs
+   watchdog-driven recovery and a boot-loop guard, a class of problem
+   nothing in the compiled-in-firmware model has today.
+
+**Estimate**: **120–200 hrs** if scoped Pico-2-only (dropping the
+dual-board tooling tax roughly offsets the added MPU/fault-handler work),
+or **150–250+ hrs** if attempted for both boards.
+
+**Recommendation**: not a Phase 6 item at all, stretch or otherwise —
+this is the one approach left that's a genuine embedded-systems R&D
+project in its own right (a homegrown relocator is still the hardest,
+most bug-prone piece, and nothing above removes it). §3.4's reboot-based
+approach delivers "run code that wasn't compiled into this firmware" for
+a fraction of the cost and risk; there'd need to be a concrete need that
+specifically requires in-process, no-reboot execution — not just "more
+apps" — before this is worth opening. If that need ever materializes, it
+deserves a standalone feasibility spike (prove the relocator in
+isolation) before committing to the rest, and its own dedicated phase,
+not a line item anywhere in Phase 6.
+
+### 9.2 Other candidates
 
 - **Additional built-in apps**, TI-Apps-style: a finance/TVM solver, a
   periodic table reference, a probability simulator. On this platform
   the general answer to "TI ships this as an app" is usually "write it
-  in MicroPython" (6B) rather than a new C++ app — but a few
-  high-value ones might warrant a native app for speed/polish reasons.
-  Evaluate case by case.
+  in MicroPython" (6B), or as an SD-discovered app (§4.5), rather than a
+  new C++ app; a few high-value ones might still warrant a compiled app
+  via §3.4's reboot mechanism for speed/polish reasons. Evaluate case by
+  case.
 - **Desktop emulator build target**: a third build target (alongside
   Pico 1/Pico 2) that runs the UI on a development machine. Flagged
   independently in the [wishlist](../notes/wishlist.md) (font
@@ -485,3 +689,7 @@ because any of them is committed:
 4. Docs site plan (release-engineering candidate, §9) — [docs-site-plan.md](../notes/docs-site-plan.md)
 5. MicroPython embed port — https://docs.micropython.org/en/latest/develop/embed.html
 6. MicroPython RP2040/RP2350 support — https://micropython.org/download/RPI_PICO/
+7. Project feasibility research, App Framework section (§3.4/§9.1's
+   original source, missed on first pass) — [feasibility.md](../notes/feasibility.md) §4.4
+8. `uf2loader` — SD-card bootloader for RP2040/RP2350 on the PicoCalc,
+   the basis for §3.4's reboot-based compiled apps — https://github.com/pelrun/uf2loader (GPLv3)

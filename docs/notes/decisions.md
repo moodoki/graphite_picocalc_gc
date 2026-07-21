@@ -18,6 +18,103 @@ Format:
 
 ---
 
+## D34: SD-loadable apps — Python apps and `uf2loader`-based compiled apps both accepted into Phase 6; only in-process dynamic loading deferred
+
+**Date**: 2026-07-21
+**Status**: Accepted (same stocktaking session as D32/D33; a follow-on to
+phase6-spec.md §9's original "SD-card app loading" candidate, refined
+twice more within the same session before landing here)
+**Context**: Asked to consider the complexity of letting 6A's app
+framework load apps from the SD card and spec it as a Phase 6+ stretch
+goal. Three passes within one session:
+1. First pass split this into "SD-discovered MicroPython apps"
+   (tractable) and "dynamically loaded native apps" (a real
+   embedded-systems undertaking — relocator, flash-write safety, ABI
+   versioning, fault recovery; ~150–250+ hrs, not recommended).
+2. A follow-up question — would scoping compiled apps to Pico 2 only
+   reduce that — surfaced that RP2350's MPU genuinely improves the risk
+   picture (catchable faults instead of silent corruption) but doesn't
+   remove the relocator/ABI/flash-safety work, which is the bulk of the
+   estimate. In discussing alternatives, the developer raised `uf2loader`
+   and a "reboot into app" model, which turned out to already be scoped
+   in this project's own pre-Phase-1 `feasibility.md` (§4.4) — missed on
+   the first pass.
+3. A further question — can the `uf2loader` reboot path present as a
+   launcher menu item indistinguishable from a Python app, rather than a
+   separate reboot-to-a-different-menu experience — worked out to be
+   yes, via the firmware performing its own UF2-format flash write into
+   a reserved app-boot region (reusing the well-specified UF2 block
+   format's own robustness, not inventing a new one) rather than relying
+   on any programmatic hook into `uf2loader`'s own UI. That's enough of a
+   complexity/UX win to promote it out of "deferred future phase" and
+   into Phase 6 as a stretch item.
+**Decision**:
+1. **SD-discovered Python apps are accepted into Phase 6 core scope**, as
+   new sub-phase 6B section §4.5 (see
+   [phase6-spec.md](../phases/phase6-spec.md) §4.5, tasks 6B.15/6B.16,
+   ~12 hrs added to 6B's estimate, 61→73 hrs). A second, SD-scanned tier
+   of `AppRegistry` entries, each launching a declared MicroPython script
+   — no new execution model beyond what 6B already builds.
+2. **Reboot-based compiled apps (`uf2loader`-based) are accepted into
+   Phase 6 as a stretch item** — new §3.4 (under 6A, since it generalizes
+   the launcher/registry rather than being MicroPython-specific), ~25–35
+   hrs, explicitly gated on a feasibility spike (parse one real `.uf2`,
+   flash it to a scratch region, reboot into it, confirm the
+   untouched-bootloader recovery path actually recovers) before
+   committing to the rest. Mechanism: the calculator firmware itself
+   parses a selected app's `.uf2` off SD and writes it into a reserved
+   app-boot flash region (reusing UF2's own well-specified, robust block
+   format rather than a bespoke protocol), then resets — no dependency
+   on `uf2loader` exposing a "boot straight into app X" API it doesn't
+   document having. `uf2loader` (or a minimal in-firmware bootstrap)
+   remains the always-untouched safety net if the self-flash step ever
+   has a bug.
+3. **True in-process dynamic loading — code running concurrently with
+   the calculator firmware, no reboot — stays deferred to a genuinely
+   separate future phase**, not Phase 6 in any form, stretch or
+   otherwise. This is the one approach where the hardest problem (a
+   homegrown relocator) is unavoidable regardless of any of the above.
+   Estimate unchanged: 120–200 hrs if scoped Pico-2-only (RP2350's MPU
+   turns silent corruption into a catchable fault, and removes the
+   "no cheap dual-board answer" objection since Pico 1 was never going
+   to be protected either way), 150–250+ hrs for both boards.
+**Rationale**: the SD card was never going to be execute-in-place memory
+under any approach — something always has to stage code into RAM or
+on-chip flash before it runs. Once that's accepted, the real choice is
+between inventing a bespoke write-safety-and-relocation stack (the
+in-process approach) versus implementing a well-specified, already
+field-tested transport format (UF2) for a *whole replacement firmware*
+that never needs relocating because it's linked at a fixed address like
+every other build in this project already is. The reboot-based approach
+being expressible as an ordinary launcher menu item — once it became
+clear the firmware could do its own UF2 write rather than needing
+`uf2loader` to expose an API — removed the last reason to treat it as
+"a separate, worse-UX thing" rather than a first-class stretch feature.
+Reboot-based handoff also sidesteps the GPL "combined work" question
+in-process linking would raise, the same way this project's own
+NOTICE.md already reasons about separately-distributed vs. linked GPL
+code.
+**Tradeoffs**: §3.4 still needs a real, carefully tested flash-write
+step — smaller and better-specified than the in-process approach's, but
+not zero risk; the "safety net stays untouched" constraint is
+non-negotiable, not an optimization. No state handoff (Ans/variables/
+graph state) between the calculator and a launched app either way —
+solvable later via the existing SD-persistence pattern
+(`lists.dat`-style) if ever needed, not built now. Two real open
+questions remain and are tracked as P6-5/P6-6 in phase6-spec.md §8
+rather than assumed away: whether §3.4 depends on `uf2loader` being
+installed or becomes self-sufficient, and where the calculator's own
+`.uf2` comes from at "return" time.
+**Revisit when**: 6B is actually implemented (verify §4.5's manifest
+scan against real SD hardware timing); before implementing §3.4, run its
+~4–8 hr feasibility spike first — parse+write+reboot one real `.uf2` and
+confirm the recovery path actually recovers — rather than building on
+top of an unverified assumption; if true in-process dynamic loading is
+ever seriously considered, it still needs its own dedicated phase and a
+standalone relocator feasibility spike before anything else.
+
+---
+
 ## D33: Phase re-scoping — Phase 4 = pre-release GC milestone, Phase 6 = non-calculator functions with MicroPython as its first app
 
 **Date**: 2026-07-21
