@@ -46,8 +46,8 @@ struct Result {
     const char* text = nullptr;
     int stored_matrix = -1;          // ->[X] target index, else -1
     int stored_list = -1;            // ->lk target, else -1
-    bool matrices_modified = false;  // Caller should persist matrices.dat
-    bool lists_modified = false;     // Caller should persist lists.dat
+    bool matrices_modified = false;  // Caller should persist this matrix (stored_matrix)
+    bool lists_modified = false;     // Caller should persist this list (stored_list)
     const char* error = nullptr;     // kError (static string)
 };
 

@@ -144,8 +144,12 @@ void MatrixEditorScreen::on_activate() {
     invalidate_all();
 }
 
-void MatrixEditorScreen::save_matrices() {
-    math::matrices().save(platform::storage());
+void MatrixEditorScreen::save_matrices() const {
+    // Every call site only ever just mutated cur_slot_ (edit/dim/clear;
+    // Ans is read-only so it never reaches here) — one-file-per-matrix
+    // persistence (2026-07-22) means that's the only matrix that needs
+    // writing.
+    math::matrices().save(platform::storage(), cur_slot_);
 }
 
 void MatrixEditorScreen::begin_edit(const platform::KeyEvent* first_key) {

@@ -18,15 +18,26 @@ public:
     Array& list(int index) { return lists_[index]; }
     const Array& list(int index) const { return lists_[index]; }
 
-    // Persistence to /picocalc/lists.dat. load() is all-or-nothing:
-    // when the file needs the PSRAM tier before PSRAM is up (cold
-    // boot, D14) it loads nothing and returns false so the late-init
-    // loop retries.
-    bool save(platform::Storage& storage) const;
+    // Persistence: one file per list, /picocalc/list1.dat..list6.dat
+    // (perf fix, 2026-07-22 — a single concatenated lists.dat made every
+    // save touch all six lists' full contents, even a one-element edit
+    // to just one of them). save(index) persists only that list — every
+    // caller only ever mutates one list per operation (a single ->lk
+    // store target), so this is always the right granularity; there is
+    // no "save everything" entry point because nothing needs one.
+    // load() reads all six and is all-or-nothing per list: when a list
+    // needs the PSRAM tier before PSRAM is up (cold boot, D14) it loads
+    // nothing for that list and returns false so the late-init loop
+    // retries.
+    bool save(platform::Storage& storage, int index) const;
     bool load(platform::Storage& storage);
 
 private:
     Array lists_[kCount];
+    // Per-list load latch so a late-init retry (waiting on PSRAM for one
+    // big list, say) never re-reads a list that already loaded — that
+    // would clobber an in-session edit made while the retry was pending.
+    bool loaded_[kCount] = {};
 };
 
 // Singleton accessor (project convention).

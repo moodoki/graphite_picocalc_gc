@@ -83,14 +83,25 @@ public:
     Array& matrix(int index) { return matrices_[index]; }
     const Array& matrix(int index) const { return matrices_[index]; }
 
-    // Persistence to /picocalc/matrices.dat. load() is all-or-nothing
-    // when the PSRAM tier is needed but not up yet (cold boot, D14) —
-    // returns false so the late-init loop retries.
-    bool save(platform::Storage& storage) const;
+    // Persistence: one file per matrix, /picocalc/matrix1.dat..matrix10.dat
+    // (perf fix, 2026-07-22 — mirrors lists_persist.cpp's fix; a single
+    // concatenated matrices.dat made every save touch all ten matrices'
+    // full contents). save(index) persists only that matrix — every
+    // caller only ever mutates one matrix per operation (a single ->[X]
+    // store target or one editor slot), so this is always the right
+    // granularity; there is no "save everything" entry point because
+    // nothing needs one. load() reads all ten and is all-or-nothing per
+    // matrix: when a matrix needs the PSRAM tier before PSRAM is up
+    // (cold boot, D14) it loads nothing for that matrix and returns
+    // false so the late-init loop retries.
+    bool save(platform::Storage& storage, int index) const;
     bool load(platform::Storage& storage);
 
 private:
     Array matrices_[kCount];
+    // Per-matrix load latch — same reasoning as ListStore::loaded_: a
+    // late-init retry must never re-read a matrix that already loaded.
+    bool loaded_[kCount] = {};
 };
 
 // Singleton accessor (project convention).

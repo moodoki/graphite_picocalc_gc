@@ -1,10 +1,16 @@
-// matrices.dat: fixed header (magic + per-matrix dtype tag and shape),
-// followed by each matrix's raw elements row-major. Mirrors
-// lists_persist.cpp — the dtype tag is in the format from day one
-// (D21) so complex-valued matrices later change the tag, not the
-// layout. Data streams in slab-sized chunks.
+// matrix<N>.dat (N = 1..10, one file per matrix, perf fix 2026-07-22):
+// fixed header (magic + dtype tag + shape) followed by that matrix's
+// raw elements row-major. Mirrors lists_persist.cpp's fix — splitting
+// the old single concatenated matrices.dat into one file per matrix
+// means save() only ever touches the one matrix an edit actually
+// changed, instead of re-writing all ten matrices' full contents on
+// every cell commit. Old matrices.dat images are simply never read
+// under this scheme and are left on the card, same as the project's
+// existing "old files ignored, not deleted" precedent for prior format
+// bumps.
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "platform/storage.hpp"
@@ -14,105 +20,118 @@ namespace math {
 
 namespace {
 
-constexpr const char* kPath = "/picocalc/matrices.dat";
-
-// Bump on layout change ("PCM2", ...): old images then fail to load
-// and the matrices start empty.
-constexpr char kMagic[4] = {'P', 'C', 'M', '1'};
+// Bump on layout change ("PCM3", ...): old images then fail to load
+// and that matrix starts empty.
+constexpr char kMagic[4] = {'P', 'C', 'M', '2'};
 
 struct Header {
     char magic[4];
-    uint8_t dtype[MatrixStore::kCount];
-    uint8_t reserved[2];
-    uint16_t rows[MatrixStore::kCount];
-    uint16_t cols[MatrixStore::kCount];
+    uint8_t dtype;
+    uint8_t reserved;
+    uint16_t rows;
+    uint16_t cols;
 };
 
 constexpr int kChunkElements = 256;
 calc_t g_chunk[kChunkElements];
 
-}  // namespace
+void path_for(int index, char* buf, size_t cap) {
+    std::snprintf(buf, cap, "/picocalc/matrix%d.dat", index + 1);
+}
 
-bool MatrixStore::save(platform::Storage& storage) const {
+bool save_matrix(platform::Storage& storage, const Array& m, int index) {
     if (!storage.mounted()) {
         return false;
     }
+    char path[24];
+    path_for(index, path, sizeof(path));
     Header h = {};
     std::memcpy(h.magic, kMagic, sizeof(kMagic));
-    for (int i = 0; i < kCount; ++i) {
-        h.dtype[i] = static_cast<uint8_t>(matrices_[i].dtype());
-        h.rows[i] = static_cast<uint16_t>(matrices_[i].dim(0));
-        h.cols[i] = static_cast<uint16_t>(matrices_[i].dim(1));
-    }
-    if (!storage.write_file(kPath, reinterpret_cast<const uint8_t*>(&h), sizeof(h))) {
+    h.dtype = static_cast<uint8_t>(m.dtype());
+    h.rows = static_cast<uint16_t>(m.dim(0));
+    h.cols = static_cast<uint16_t>(m.dim(1));
+    if (!storage.write_file(path, reinterpret_cast<const uint8_t*>(&h), sizeof(h))) {
         return false;
     }
-    for (const Array& m : matrices_) {
-        const int n = m.size();
-        for (int at = 0; at < n; at += kChunkElements) {
-            const int cnt = n - at < kChunkElements ? n - at : kChunkElements;
-            m.read_range(at, cnt, g_chunk);
-            if (!storage.append_file(kPath, reinterpret_cast<const uint8_t*>(g_chunk),
-                                     static_cast<size_t>(cnt) * sizeof(calc_t))) {
-                return false;
-            }
+    const int n = m.size();
+    for (int at = 0; at < n; at += kChunkElements) {
+        const int cnt = n - at < kChunkElements ? n - at : kChunkElements;
+        m.read_range(at, cnt, g_chunk);
+        if (!storage.append_file(path, reinterpret_cast<const uint8_t*>(g_chunk),
+                                 static_cast<size_t>(cnt) * sizeof(calc_t))) {
+            return false;
         }
     }
     return true;
 }
 
-bool MatrixStore::load(platform::Storage& storage) {
+// Mirrors lists_persist.cpp's load_list() contract: true if this
+// matrix is done (loaded, or intentionally left empty), false only
+// when it needs the PSRAM tier and PSRAM isn't up yet (D14).
+bool load_matrix(platform::Storage& storage, Array& m, int index) {
     if (!storage.mounted()) {
         return false;
     }
-    if (!storage.file_exists(kPath)) {
-        return true;  // Nothing saved yet — loaded state is "all empty"
+    char path[24];
+    path_for(index, path, sizeof(path));
+    if (!storage.file_exists(path)) {
+        return true;  // Nothing saved yet — loaded state is "empty"
     }
     Header h = {};
-    if (storage.read_file_range(kPath, 0, reinterpret_cast<uint8_t*>(&h), sizeof(h)) !=
+    if (storage.read_file_range(path, 0, reinterpret_cast<uint8_t*>(&h), sizeof(h)) !=
             static_cast<int>(sizeof(h)) ||
         std::memcmp(h.magic, kMagic, sizeof(kMagic)) != 0) {
-        return true;  // Corrupt/old image: ignore it, keep matrices empty
+        return true;  // Corrupt/old image: ignore it, keep this matrix empty
+    }
+    const int n = static_cast<int>(h.rows) * static_cast<int>(h.cols);
+    if (h.dtype != static_cast<uint8_t>(Dtype::kDouble) || n > Array::kMaxElements) {
+        return true;  // Unknown dtype / bad shape: treat as corrupt
     }
     constexpr size_t kSlabElems = ArrayStore::kSlabBytes / sizeof(calc_t);
-    bool needs_psram = false;
-    for (int i = 0; i < kCount; ++i) {
-        const int n = static_cast<int>(h.rows[i]) * static_cast<int>(h.cols[i]);
-        if (h.dtype[i] != static_cast<uint8_t>(Dtype::kDouble) || n > Array::kMaxElements) {
-            return true;  // Unknown dtype / bad shape: treat as corrupt
-        }
-        needs_psram = needs_psram || static_cast<size_t>(n) > kSlabElems;
+    if (static_cast<size_t>(n) > kSlabElems && !psram_backend::available()) {
+        return false;  // Needs PSRAM, not up yet — let late-init retry
     }
-    // All-or-nothing: SD can be up while PSRAM is still settling on a
-    // cold boot (D14). Load nothing and let late-init retry.
-    if (needs_psram && !psram_backend::available()) {
+    if (n == 0) {
+        m.clear();
+        return true;
+    }
+    if (!m.resize(h.rows, h.cols)) {
         return false;
     }
     size_t off = sizeof(h);
-    for (int i = 0; i < kCount; ++i) {
-        const int rows = h.rows[i];
-        const int cols = h.cols[i];
-        const int n = rows * cols;
-        if (n == 0) {
-            matrices_[i].clear();
-            continue;
+    for (int at = 0; at < n; at += kChunkElements) {
+        const int cnt = n - at < kChunkElements ? n - at : kChunkElements;
+        const int bytes = cnt * static_cast<int>(sizeof(calc_t));
+        if (storage.read_file_range(path, off, reinterpret_cast<uint8_t*>(g_chunk),
+                                    static_cast<size_t>(bytes)) != bytes) {
+            m.clear();  // Truncated image: drop this one
+            return true;
         }
-        if (!matrices_[i].resize(rows, cols)) {
-            return false;
-        }
-        for (int at = 0; at < n; at += kChunkElements) {
-            const int cnt = n - at < kChunkElements ? n - at : kChunkElements;
-            const int bytes = cnt * static_cast<int>(sizeof(calc_t));
-            if (storage.read_file_range(kPath, off, reinterpret_cast<uint8_t*>(g_chunk),
-                                        static_cast<size_t>(bytes)) != bytes) {
-                matrices_[i].clear();  // Truncated image: drop this one
-                return true;
-            }
-            matrices_[i].write_range(at, cnt, g_chunk);
-            off += static_cast<size_t>(bytes);
-        }
+        m.write_range(at, cnt, g_chunk);
+        off += static_cast<size_t>(bytes);
     }
     return true;
+}
+
+}  // namespace
+
+bool MatrixStore::save(platform::Storage& storage, int index) const {
+    return save_matrix(storage, matrices_[index], index);
+}
+
+bool MatrixStore::load(platform::Storage& storage) {
+    bool all_done = true;
+    for (int i = 0; i < kCount; ++i) {
+        if (loaded_[i]) {
+            continue;  // Already loaded — don't clobber an in-session edit
+        }
+        if (load_matrix(storage, matrices_[i], i)) {
+            loaded_[i] = true;
+        } else {
+            all_done = false;
+        }
+    }
+    return all_done;
 }
 
 }  // namespace math

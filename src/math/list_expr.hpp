@@ -35,7 +35,7 @@ struct Result {
     // stored/sorted list slot.
     const Array* list = nullptr;
     int stored_list = -1;         // ->lk target, else -1
-    bool lists_modified = false;  // Caller should persist lists.dat
+    bool lists_modified = false;  // Caller should persist this list (stored_list)
     const char* error = nullptr;  // kError (static string)
 };
 

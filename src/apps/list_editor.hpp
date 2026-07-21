@@ -41,12 +41,14 @@ private:
 
     void refresh_cells();
     void invalidate_grid();
+    void invalidate_header();
+    void invalidate_row(int visible_row);
     void invalidate_entry();
     void begin_edit(const platform::KeyEvent* first_key);
     void commit_edit();
     void delete_row();
     void sort_current(bool asc);
-    void save_lists();
+    void save_lists() const;
 };
 
 ListEditorScreen& list_editor();

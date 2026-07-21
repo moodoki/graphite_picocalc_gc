@@ -300,8 +300,9 @@ void GraphScreen::recompute() {
             break;
     }
     // Stat-plot caches (3D): histogram bins, box summaries, normprob
-    // sorted copies — anything render must not compute per strip (§8).
-    graph::recompute_stat_plots();
+    // sorted copies, pixel-space point cache — anything render must not
+    // compute per strip (§8).
+    graph::recompute_stat_plots(vp);
 
     last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
     printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
@@ -956,7 +957,11 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
                 return true;
             }
             if (ev.ch == 'z' || ev.ch == 'Z') {  // ZoomStat (3D, D27)
-                graph::recompute_stat_plots();
+                // Only the data-space bounds below matter here; the pixel
+                // cache this rebuilds is immediately superseded by the
+                // dirty_ = true recompute() a few lines down, once the
+                // window (and vp) actually changes.
+                graph::recompute_stat_plots(viewport());
                 double xlo = 0;
                 double xhi = 0;
                 double ylo = 0;

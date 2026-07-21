@@ -235,10 +235,10 @@ void HomeScreen::evaluate_input() {
             persist_history_line(input_.text(), result);
             save_variables();
             if (mres.matrices_modified) {
-                math::matrices().save(platform::storage());
+                math::matrices().save(platform::storage(), mres.stored_matrix);
             }
             if (mres.lists_modified) {
-                math::lists().save(platform::storage());
+                math::lists().save(platform::storage(), mres.stored_list);
             }
         }
         input_.clear();
@@ -274,7 +274,7 @@ void HomeScreen::evaluate_input() {
             persist_history_line(input_.text(), result);
             save_variables();
             if (lres.lists_modified) {
-                math::lists().save(platform::storage());
+                math::lists().save(platform::storage(), lres.stored_list);
             }
         }
         input_.clear();

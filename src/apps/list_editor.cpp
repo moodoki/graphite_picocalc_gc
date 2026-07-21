@@ -49,6 +49,24 @@ void ListEditorScreen::invalidate_grid() {
     invalidate(kHeaderY - 2, kGridBottom);
 }
 
+// Perf fix (2026-07-22): invalidate_grid() covers all kVisibleRows (13,
+// ~14 strips of 20 on Pico 1) — fine for operations that touch every row
+// (sort, delete-shift, clear), wasteful for plain cursor movement or a
+// single-cell edit, which only ever change the old and new selected row.
+// invalidate_header() and invalidate_row() let call sites narrow the
+// band to just what actually changed.
+void ListEditorScreen::invalidate_header() {
+    invalidate(kHeaderY - 2, kGridY - 1);
+}
+
+void ListEditorScreen::invalidate_row(int visible_row) {
+    if (visible_row < 0 || visible_row >= kVisibleRows) {
+        return;
+    }
+    const int y = kGridY + visible_row * kRowH;
+    invalidate(y - 1, y - 1 + kRowH);
+}
+
 void ListEditorScreen::invalidate_entry() {
     invalidate(kEntryY, kSoftkeyY);
 }
@@ -86,8 +104,11 @@ void ListEditorScreen::on_activate() {
     invalidate_all();
 }
 
-void ListEditorScreen::save_lists() {
-    math::lists().save(platform::storage());
+void ListEditorScreen::save_lists() const {
+    // Every call site only ever just mutated cur_list_ (edit/delete/sort/
+    // clear) — one-file-per-list persistence (2026-07-22) means that's
+    // the only list that needs writing.
+    math::lists().save(platform::storage(), cur_list_);
 }
 
 void ListEditorScreen::begin_edit(const platform::KeyEvent* first_key) {
@@ -128,13 +149,25 @@ void ListEditorScreen::commit_edit() {
     lst.set(cur_row_, v);
     editing_ = false;
     save_lists();
+    const int old_row = cur_row_ - row_off_;
     // Advance down, TI-style.
     ++cur_row_;
+    bool scrolled = false;
     if (cur_row_ - row_off_ >= kVisibleRows) {
         ++row_off_;
+        scrolled = true;
     }
     refresh_cells();
-    invalidate_grid();
+    if (scrolled) {
+        invalidate_grid();
+    } else {
+        // A commit may have appended (changing the header's "l1:N" count)
+        // as well as moving the selection — narrow to just those bands
+        // instead of the whole 13-row grid.
+        invalidate_header();
+        invalidate_row(old_row);
+        invalidate_row(cur_row_ - row_off_);
+    }
     invalidate_entry();
 }
 
@@ -200,21 +233,39 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
     switch (ev.key) {
         case Key::kUp:
             if (cur_row_ > 0) {
+                const int old_row = cur_row_ - row_off_;
                 --cur_row_;
-                row_off_ = std::min(row_off_, cur_row_);
+                const int new_row_off = std::min(row_off_, cur_row_);
+                const bool scrolled = new_row_off != row_off_;
+                row_off_ = new_row_off;
                 refresh_cells();
-                invalidate_grid();
+                if (scrolled) {
+                    invalidate_grid();
+                } else {
+                    // Same visible window — only the old and new
+                    // selected row's highlight actually changed.
+                    invalidate_row(old_row);
+                    invalidate_row(cur_row_ - row_off_);
+                }
                 invalidate_entry();
             }
             return true;
         case Key::kDown:
             if (cur_row_ < count) {  // count == append row
+                const int old_row = cur_row_ - row_off_;
                 ++cur_row_;
+                bool scrolled = false;
                 if (cur_row_ - row_off_ >= kVisibleRows) {
                     ++row_off_;
+                    scrolled = true;
                 }
                 refresh_cells();
-                invalidate_grid();
+                if (scrolled) {
+                    invalidate_grid();
+                } else {
+                    invalidate_row(old_row);
+                    invalidate_row(cur_row_ - row_off_);
+                }
                 invalidate_entry();
             }
             return true;

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 
 #include "math/dist.hpp"
 #include "math/list_ops.hpp"
@@ -14,6 +16,20 @@ namespace {
 
 constexpr int kChunk = 256;
 constexpr int kMaxBins = 64;
+
+// Point-cache cap for scatter/xy-line/normprob (perf fix, 2026-07-22):
+// draw_stat_plots() runs once per render() call, and render() runs once
+// per config::kStripHeight-line strip on Pico 1 (~20x/frame) vs once for
+// the whole screen on Pico 2 (§8). Streaming the full list from its Array
+// (PSRAM-tier above ~256 elements, D21) on every one of those calls was
+// the actual bottleneck, not the point count itself — the screen is only
+// platform::kScreenW px wide, so a few hundred points already exceeds
+// what's visually distinguishable. Cache transforms once per recompute
+// (data/window change, not per strip) into a small capped, decimated
+// pixel-space buffer; render only ever touches that.
+constexpr int kMaxCachedPoints = 800;
+constexpr int kStripBuckets =
+    (platform::kScreenH + config::kStripHeight - 1) / config::kStripHeight;
 
 // Slot colors (distinct from the function palette's first entries).
 const platform::Color kPlotColors[kStatPlotSlots] = {
@@ -48,6 +64,30 @@ struct Cache {
 };
 Cache g_cache[kStatPlotSlots];
 
+// Capped, pixel-space point cache (perf fix above). Scatter/normprob get
+// bucket-sorted by strip band so render only visits the bucket(s)
+// overlapping the current clip range; xy-line keeps insertion order
+// (line segments depend on it) and render just iterates the whole
+// (small, capped) cache every strip — still far cheaper than the
+// original per-strip PSRAM re-stream.
+struct PointCache {
+    int count = 0;
+    bool bucketed = false;
+    int16_t px[kMaxCachedPoints] = {};
+    int16_t py[kMaxCachedPoints] = {};
+    int bucket_start[kStripBuckets + 1] = {};
+};
+PointCache g_points[kStatPlotSlots];
+int16_t g_tmp_px[kMaxCachedPoints];
+int16_t g_tmp_py[kMaxCachedPoints];
+
+int strip_bucket(int py) {
+    int b = py / config::kStripHeight;
+    b = b < 0 ? 0 : b;
+    b = b >= kStripBuckets ? kStripBuckets - 1 : b;
+    return b;
+}
+
 const math::Array& list_of(int idx) {
     return math::lists().list(idx);
 }
@@ -75,10 +115,90 @@ bool stream_min_max(const math::Array& a, double* lo, double* hi) {
     return true;
 }
 
-void recompute_slot(int slot) {
+// Single streamed pass over x (and, if given, paired y): computes data
+// bounds (optional out params, nullptr to skip) and fills `pc` with at
+// most kMaxCachedPoints (px,py) pairs transformed through `vp`, taking
+// every stride-th point when n exceeds the cap so large lists decimate
+// instead of overflowing. Replaces what used to be two separate
+// stream_min_max() passes for the scatter/xy-line case.
+void cache_points(const math::Array& x, const math::Array* y, int n, const Viewport& vp,
+                  PointCache& pc, double* x_lo = nullptr, double* x_hi = nullptr,
+                  double* y_lo = nullptr, double* y_hi = nullptr) {
+    pc.count = 0;
+    pc.bucketed = false;
+    if (n < 1) {
+        return;
+    }
+    const int stride = (n + kMaxCachedPoints - 1) / kMaxCachedPoints;  // >= 1
+    bool first = true;
+    for (int at = 0; at < n; at += kChunk) {
+        const int m = n - at < kChunk ? n - at : kChunk;
+        x.read_range(at, m, g_buf_x);
+        if (y != nullptr) {
+            y->read_range(at, m, g_buf_y);
+        }
+        for (int i = 0; i < m; ++i) {
+            const double vx = g_buf_x[i];
+            const double vy = y != nullptr ? g_buf_y[i] : 0.0;
+            if (x_lo != nullptr) {
+                if (first) {
+                    *x_lo = *x_hi = vx;
+                    if (y != nullptr && y_lo != nullptr) {
+                        *y_lo = *y_hi = vy;
+                    }
+                    first = false;
+                } else {
+                    *x_lo = vx < *x_lo ? vx : *x_lo;
+                    *x_hi = vx > *x_hi ? vx : *x_hi;
+                    if (y != nullptr && y_lo != nullptr) {
+                        *y_lo = vy < *y_lo ? vy : *y_lo;
+                        *y_hi = vy > *y_hi ? vy : *y_hi;
+                    }
+                }
+            }
+            const int idx = at + i;
+            if (idx % stride == 0 && pc.count < kMaxCachedPoints) {
+                pc.px[pc.count] = static_cast<int16_t>(vp.px_x(vx));
+                pc.py[pc.count] = static_cast<int16_t>(y != nullptr ? vp.px_y(vy) : 0);
+                ++pc.count;
+            }
+        }
+    }
+}
+
+// Counting-sort pc's points into ascending strip-bucket order. Only for
+// order-independent draws (scatter, normprob) — never for xy-line, whose
+// segments must stay in original data order.
+void bucket_sort(PointCache& pc) {
+    int counts[kStripBuckets] = {};
+    for (int i = 0; i < pc.count; ++i) {
+        ++counts[strip_bucket(pc.py[i])];
+    }
+    pc.bucket_start[0] = 0;
+    for (int b = 0; b < kStripBuckets; ++b) {
+        pc.bucket_start[b + 1] = pc.bucket_start[b] + counts[b];
+    }
+    int cursor[kStripBuckets];
+    for (int b = 0; b < kStripBuckets; ++b) {
+        cursor[b] = pc.bucket_start[b];
+    }
+    for (int i = 0; i < pc.count; ++i) {
+        const int b = strip_bucket(pc.py[i]);
+        g_tmp_px[cursor[b]] = pc.px[i];
+        g_tmp_py[cursor[b]] = pc.py[i];
+        ++cursor[b];
+    }
+    std::memcpy(pc.px, g_tmp_px, sizeof(int16_t) * static_cast<size_t>(pc.count));
+    std::memcpy(pc.py, g_tmp_py, sizeof(int16_t) * static_cast<size_t>(pc.count));
+    pc.bucketed = true;
+}
+
+void recompute_slot(int slot, const Viewport& vp) {
     const StatPlotConfig& p = state().stat_plots[slot];
     Cache& c = g_cache[slot];
     c.valid = false;
+    g_points[slot].count = 0;
+    g_points[slot].bucketed = false;
     if (!p.enabled) {
         g_np_sorted[slot].clear();
         g_np_quant[slot].clear();
@@ -97,13 +217,13 @@ void recompute_slot(int slot) {
             if (y.size() != n) {
                 return;  // Length mismatch — plot skipped
             }
-            double ylo = 0;
-            double yhi = 0;
-            if (!stream_min_max(x, &c.x_lo, &c.x_hi) || !stream_min_max(y, &ylo, &yhi)) {
+            cache_points(x, &y, n, vp, g_points[slot], &c.x_lo, &c.x_hi, &c.y_lo, &c.y_hi);
+            if (g_points[slot].count < 1) {
                 return;
             }
-            c.y_lo = ylo;
-            c.y_hi = yhi;
+            if (p.type == StatPlotType::kScatter) {
+                bucket_sort(g_points[slot]);  // Dots only — order-independent
+            }
             c.valid = true;
             break;
         }
@@ -212,6 +332,8 @@ void recompute_slot(int slot) {
             c.x_hi = g_np_sorted[slot].get(n - 1);
             c.y_lo = g_np_quant[slot].get(0);
             c.y_hi = g_np_quant[slot].get(n - 1);
+            cache_points(g_np_sorted[slot], &g_np_quant[slot], n, vp, g_points[slot]);
+            bucket_sort(g_points[slot]);  // Dots only — order-independent
             c.valid = true;
             break;
         }
@@ -238,6 +360,20 @@ void draw_mark(gfx::Framebuffer& fb, int px, int py, int mark, platform::Color c
     }
 }
 
+// Draws a bucket-sorted PointCache, visiting only the bucket(s) that
+// overlap the framebuffer's current strip clip range (perf fix above) —
+// on Pico 2 that's a single "bucket range" spanning the whole screen, on
+// Pico 1 it's the 1-2 buckets under the current 16-line strip.
+void draw_bucketed(gfx::Framebuffer& fb, const PointCache& pc, int mark, platform::Color color) {
+    const int b0 = strip_bucket(fb.clip_y0());
+    const int b1 = strip_bucket(fb.clip_y1() - 1);
+    for (int b = b0; b <= b1; ++b) {
+        for (int i = pc.bucket_start[b]; i < pc.bucket_start[b + 1]; ++i) {
+            draw_mark(fb, pc.px[i], pc.py[i], mark, color);
+        }
+    }
+}
+
 void draw_slot(gfx::Framebuffer& fb, const Viewport& vp, int slot) {
     const StatPlotConfig& p = state().stat_plots[slot];
     const Cache& c = g_cache[slot];
@@ -246,26 +382,21 @@ void draw_slot(gfx::Framebuffer& fb, const Viewport& vp, int slot) {
     }
     const platform::Color color = kPlotColors[slot];
     const math::Array& x = list_of(p.x_list);
-    const math::Array& y = list_of(p.y_list);
 
     switch (p.type) {
-        case StatPlotType::kScatter:
+        case StatPlotType::kScatter: {
+            draw_bucketed(fb, g_points[slot], p.mark, color);
+            break;
+        }
         case StatPlotType::kXyLine: {
-            int prev_px = 0;
-            int prev_py = 0;
-            for (int at = 0; at < c.n; at += kChunk) {
-                const int m = c.n - at < kChunk ? c.n - at : kChunk;
-                x.read_range(at, m, g_buf_x);
-                y.read_range(at, m, g_buf_y);
-                for (int i = 0; i < m; ++i) {
-                    const int px = vp.px_x(g_buf_x[i]);
-                    const int py = vp.px_y(g_buf_y[i]);
-                    draw_mark(fb, px, py, p.mark, color);
-                    if (p.type == StatPlotType::kXyLine && (at + i) > 0) {
-                        fb.draw_line(prev_px, prev_py, px, py, color);
-                    }
-                    prev_px = px;
-                    prev_py = py;
+            // Original data order matters here — not bucketed. Still a
+            // small, capped, SRAM-resident cache rather than a per-strip
+            // PSRAM re-stream, so the full iteration every strip is cheap.
+            const PointCache& pc = g_points[slot];
+            for (int i = 0; i < pc.count; ++i) {
+                draw_mark(fb, pc.px[i], pc.py[i], p.mark, color);
+                if (i > 0) {
+                    fb.draw_line(pc.px[i - 1], pc.py[i - 1], pc.px[i], pc.py[i], color);
                 }
             }
             break;
@@ -304,33 +435,27 @@ void draw_slot(gfx::Framebuffer& fb, const Viewport& vp, int slot) {
             fb.draw_hline(pq3, cy, phi - pq3, color);
             fb.draw_vline(plo, cy - 4, 9, color);
             fb.draw_vline(phi, cy - 4, 9, color);
-            // Outliers past the fences, streamed.
-            for (int at = 0; at < c.n; at += kChunk) {
-                const int m = c.n - at < kChunk ? c.n - at : kChunk;
-                x.read_range(at, m, g_buf_x);
-                for (int i = 0; i < m; ++i) {
-                    const double v = g_buf_x[i];
-                    if (v < c.fence_lo || v > c.fence_hi) {
-                        draw_mark(fb, vp.px_x(v), cy, 1, color);
+            // Outliers past the fences, streamed — but this slot's whole
+            // band lives on one fixed row, so if `cy` isn't even in the
+            // current strip, none of these marks would land on it. Skip
+            // the streamed scan entirely on the ~19/20 strips that don't
+            // contain it (perf fix, same principle as draw_bucketed).
+            if (cy >= fb.clip_y0() && cy < fb.clip_y1()) {
+                for (int at = 0; at < c.n; at += kChunk) {
+                    const int m = c.n - at < kChunk ? c.n - at : kChunk;
+                    x.read_range(at, m, g_buf_x);
+                    for (int i = 0; i < m; ++i) {
+                        const double v = g_buf_x[i];
+                        if (v < c.fence_lo || v > c.fence_hi) {
+                            draw_mark(fb, vp.px_x(v), cy, 1, color);
+                        }
                     }
                 }
             }
             break;
         }
         case StatPlotType::kNormalProb: {
-            const math::Array& xs = g_np_sorted[slot];
-            const math::Array& zs = g_np_quant[slot];
-            if (xs.size() != c.n || zs.size() != c.n) {
-                break;
-            }
-            for (int at = 0; at < c.n; at += kChunk) {
-                const int m = c.n - at < kChunk ? c.n - at : kChunk;
-                xs.read_range(at, m, g_buf_x);
-                zs.read_range(at, m, g_buf_y);
-                for (int i = 0; i < m; ++i) {
-                    draw_mark(fb, vp.px_x(g_buf_x[i]), vp.px_y(g_buf_y[i]), p.mark, color);
-                }
-            }
+            draw_bucketed(fb, g_points[slot], p.mark, color);
             break;
         }
         default:
@@ -346,9 +471,9 @@ bool any_stat_plot_enabled() {
                        [](const StatPlotConfig& p) { return p.enabled; });
 }
 
-void recompute_stat_plots() {
+void recompute_stat_plots(const Viewport& vp) {
     for (int i = 0; i < kStatPlotSlots; ++i) {
-        recompute_slot(i);
+        recompute_slot(i, vp);
     }
 }
 

@@ -58,7 +58,7 @@ private:
     void begin_edit(const platform::KeyEvent* first_key);
     void commit_edit();
     void commit_dim();
-    void save_matrices();
+    void save_matrices() const;
 };
 
 MatrixEditorScreen& matrix_editor();

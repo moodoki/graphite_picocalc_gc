@@ -1,6 +1,6 @@
 # Start here — next session
 
-**Last session:** 2026-07-22, two blocks of work. **(1) Task 3D.14**, the
+**Last session:** 2026-07-22, four blocks of work. **(1) Task 3D.14**, the
 deferred Pico 1 combined pass (D18): the Pico 1 (RP2040) was swapped back in
 after three days on Session 7 firmware; rebuilt and reflashed
 `build/pico/picocalc_graphcalc.uf2` from current HEAD (Session 19's
@@ -22,11 +22,22 @@ logic, harder rendering case already passed) — see "Key things to note".
 non-REAL Number mode on any board — not a keyboard quirk. Fix candidate
 identified but **not yet applied** (see "The next job" #1). Logged verbatim
 in `session3D14-pico1-observations-verbatim.md` and
-`phase4abc-pico1-observations-verbatim.md`. No other code changed this
-session (docs/observations/investigation only); host test count (1219
-checks) and both-boards build status are unchanged from Session 19. Full
-detail in `worklog.md` (two 2026-07-22 entries) and `decisions.md` (D18
-resolution).
+`phase4abc-pico1-observations-verbatim.md`. Host test count (1219 checks)
+and both-boards build status were unchanged from Session 19 as of these two
+blocks. **(3) and (4): the two 3D.14 perf findings got fixed and flashed
+(D35)** — bucketed pixel-space point cache for stat plots (scatter/xy-line/
+normprob/box-plot, `src/graph/stat_plot.{cpp,hpp}`), list-editor dirty-band
+narrowing (`src/apps/list_editor.{cpp,hpp}`), and — the real bottleneck
+behind "large lists feel sluggish to enter," found mid-session — one-file-
+per-list and one-file-per-matrix SD persistence (`src/math/lists_persist.cpp`,
+`src/math/matrices_persist.cpp`, magic bumps PCL1→PCL2/PCM1→PCM2). All four
+fixes built clean on both boards, passed the still-1219-check host suite
+(no new host coverage needed — stat_plot/persistence have no host tests per
+existing convention), lint clean, and were each flashed to and
+developer-confirmed on the Pico 1 before moving to the next. Pico 1 bss is
+now **201896 bytes** (was ~193.5 KB), still comfortably inside the ~76 KB
+headroom watched since D28. Full detail in `worklog.md` (four 2026-07-22
+entries) and `decisions.md` (D18 resolution, **D35**).
 
 ## The next job
 
@@ -59,9 +70,15 @@ resolution).
 3. **Low-priority, not blocking**: Pico 2 perf feel for Phase 3/4 features
    (lists, StatPlots, CALC-menu rendering, matrix ops) has never been
    re-measured against current code — only the pre-Phase-3 2.25 baseline
-   exists. Worth a quick spot-check next time the Pico 2 is in hand,
-   especially given the Pico 1 found two sluggish spots (list editor,
-   5000-point scatter) on 2026-07-22 while big-matrix ops felt fine there.
+   exists. The two Pico 1 sluggish spots found 2026-07-22 (list editor,
+   5000-point scatter) are now **fixed (D35)** — stat-plot point cache,
+   list-editor dirty bands, one-file-per-list/matrix persistence — and the
+   fixes are board-generic (same code path, no `#ifdef`s), so the Pico 2
+   should already benefit. That's still **unverified**, though — it wasn't
+   reflashed this session. Worth a quick spot-check next time the Pico 2 is
+   in hand: confirm it still feels fine (it already did pre-fix, per
+   Phase 4A-4C) and ideally confirm the fixes measurably help there too,
+   not just on the Pico 1.
 4. **After 4D ships (its on-device eval), before Phase 5 starts in
    earnest: decide the remaining matrix/complex "first-class" departures**
    — see
@@ -93,19 +110,23 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the Pico 2 is Session 19's font/glyph build**
+- **Firmware on the Pico 2 is still Session 19's font/glyph build**
   (Terminus default, `-DPICOCALC_FONT=terminus`; flashed 2026-07-21,
-  boots healthy, telemetry clean over serial). This build layers on top
+  boots healthy, telemetry clean over serial) — it was **not reflashed
+  this session**, so it does not yet have the D35 perf fixes (stat-plot
+  cache, list-editor dirty bands, per-list/per-matrix persistence) that
+  are now on the Pico 1; it's a build behind. This build layers on top
   of Sessions 11/12/15/16/17/18 (3A lists, 3B stats, 3D inference/plots,
   4A matrices/solver, 4B CALC menu, 4C complex numbers). **All of their
   hands-on on-device evals are now closed as a formality (2026-07-22)** —
   board-independent logic, and the harder rendering case (Pico 1) passed
   the identical checklists the same day (3D.14 for 11/12/15, the Phase
-  4A-4C pass for 16/17/18); see `worklog.md`'s two 2026-07-22 entries.
+  4A-4C pass for 16/17/18); see `worklog.md`'s 2026-07-22 entries.
   What's genuinely still open, Pico-2-specific (not closeable by this
-  reasoning): its own perf re-baseline for Phase 3/4 features (see "The
-  next job" #3) — **deliberately deferred**, not part of this session's
-  scope. Session 15's storage-health row (hot-plug/retry-forever,
+  reasoning): its own perf re-baseline for Phase 3/4 features, now also
+  covering whether the D35 fixes help there too once it's reflashed (see
+  "The next job" #3) — **deliberately deferred**, not part of this
+  session's scope. Session 15's storage-health row (hot-plug/retry-forever,
   Y=-editor truncation) is now fully closed — confirmed on both boards.
   **Session 10 round 2 is now also closed (2026-07-22)**: `L` toggle
   surviving a reboot, `rand()` showing a sensible varying value, ZTrig
@@ -113,22 +134,35 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 is now also on the Session 19 build** (reflashed
-  2026-07-22, task 3D.14 — no code changes since Session 19, so it's
-  the identical binary): boots healthy, telemetry clean over serial.
-  Phase 2 + Phase 3 are HW-verified on this board (3D.14 pass, closes
-  D18/Phase 3), and **Phase 4A-4C are now also HW-verified on this board**
-  (same session, second block of work) — full pass, see the Phase 4A-4C
-  worklog entry. Font/glyph correctness was informally spot-checked
-  during that pass and reported looking correct (not a dedicated sweep).
-  Two non-blocking findings open: the `!` factorial bug (root-caused, fix
-  not yet applied — see "The next job" #1) and list-editor/scatter-plot
-  perf feel (not profiled) — see "Backlog".
+- **The Pico 1 is now four commits ahead of the Session 19 build** that it
+  was first reflashed to this session (task 3D.14, no code changes at that
+  point) — the same physical flash session then picked up Phase 4A-4C
+  (docs/investigation only), and finally the four D35 perf fixes (stat-plot
+  point cache, list-editor dirty bands, one-file-per-list persistence,
+  one-file-per-matrix persistence), each built, flashed, and
+  developer-confirmed in turn. Current state: boots healthy, telemetry
+  clean over serial; bss **201896 bytes** (was ~193.5 KB pre-D35), still
+  comfortably inside the ~76 KB headroom watched since D28. Phase 2 +
+  Phase 3 are HW-verified on this board (3D.14 pass, closes D18/Phase 3),
+  and Phase 4A-4C are HW-verified on this board (full pass, see the
+  Phase 4A-4C worklog entry). Font/glyph correctness was informally
+  spot-checked during the Phase 4A-4C pass and reported looking correct
+  (not a dedicated sweep). Only one non-blocking finding remains open on
+  this board: the `!` factorial bug (root-caused, fix not yet applied —
+  see "The next job" #1). The list-editor/scatter-plot perf feel that was
+  open at the start of the day is **fixed and confirmed (D35)** — see
+  "Open design threads" below and `worklog.md`'s fourth 2026-07-22 entry.
 - **No GraphState layout change this session** — still **PCG5** (last
   bumped Session 18/D30), no new one-time reset on this flash.
-- **`lists.dat` / `matrices.dat` may not exist yet on the SD card** —
-  first save creates them. If a load ever misbehaves, deleting the
-  file resets that store (magics PCL1 / PCM1; bump on layout change).
+- **List/matrix persistence changed shape this session (D35)**: the old
+  single `lists.dat` / `matrices.dat` (magics PCL1 / PCM1) are replaced by
+  one file per store — `/picocalc/list1.dat`..`list6.dat` (magic PCL2) and
+  `/picocalc/matrix1.dat`..`matrix10.dat` (magic PCM2). Old images simply
+  aren't read under the new paths (same "old files ignored" precedent as
+  prior format bumps) — expect a one-time reset to empty lists/matrices on
+  first boot under this firmware, already confirmed as expected. If a load
+  ever misbehaves, deleting the relevant `listN.dat`/`matrixN.dat` resets
+  just that one store.
 - **Non-default font builds** (`build/pico2-jm|io|uni|term`) are stale
   relative to this session's non-font changes (eig alias, list scroll)
   — rebuild before re-comparing fonts. `build/pico2` (Terminus) is the
@@ -161,7 +195,9 @@ Pico 1 was reflashed to current HEAD (Session 19) and put through the full
 Phase 2 sweep — headline **split-pane clipping on the strip renderer**, no
 bleed — plus the Session 8+9 fix list and the Phase 3 acceptance checklist.
 All passed; two non-blocking findings (factorial `!`, list-editor/scatter-plot
-perf) are open in "Backlog" below. Full detail: worklog 2026-07-22 entry,
+perf) were logged at the time. The perf finding was fixed later the same day
+(D35 — see "Open design threads" and the fourth 2026-07-22 worklog entry); the
+factorial bug remains open in "Backlog" below. Full detail: worklog 2026-07-22 entry,
 `phase3-retro.md`, `session3D14-pico1-observations-verbatim.md`. **This
 closes Phase 3.** Guardrail carried forward: Phase 3+ render code must stay
 strip-safe (idempotent, may run ~20x/frame) — rule recorded in
@@ -220,13 +256,16 @@ observed across either pass.
   (factorial) throws a syntax error in non-REAL Number mode — **root-caused
   by code scan** (`complexexpr` lacks `engine`'s postfix-`!` rewrite,
   reproduces on any board, not a keyboard quirk), fix identified but not
-  yet applied (see "The next job" #1). The list editor and a 5000-point
-  scatter plot both feel sluggish on the Pico 1 — not profiled; could be
-  strip-renderer overhead, RP2040 clock speed, or list/plot-specific cost
-  (note: big-matrix ops felt fine on the same board, so it's not a blanket
-  Pico 1 slowdown). Two more from the Phase 4A-4C pass: no home-screen
-  `MatAns` token (editor-only, UX gap vs. scalar `ans`); fnInt shading
-  should follow curve color (feature request). All logged in
+  yet applied (see "The next job" #1) — **still the only unresolved item
+  in this bullet**. The list editor and 5000-point scatter plot sluggishness
+  are **fixed as of the same day (D35)**: bucketed stat-plot point cache,
+  list-editor dirty-band narrowing, and (the real bottleneck behind "large
+  lists feel sluggish to enter") one-file-per-list/matrix SD persistence —
+  all flashed and developer-confirmed on the Pico 1, see `worklog.md`'s
+  fourth 2026-07-22 entry and `decisions.md` D35. Two more from the
+  Phase 4A-4C pass, both still open: no home-screen `MatAns` token
+  (editor-only, UX gap vs. scalar `ans`); fnInt shading should follow curve
+  color (feature request). All logged in
   `session3D14-pico1-observations-verbatim.md`,
   `phase4abc-pico1-observations-verbatim.md`, and `phase3-retro.md`.
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —

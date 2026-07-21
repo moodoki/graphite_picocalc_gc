@@ -287,6 +287,99 @@ Still to verify on hardware:
 
 ---
 
+## 2026-07-22 — Pico 1 perf fixes: stat-plot point cache, list-editor dirty bands, per-list/matrix persistence (D35)
+
+Fourth block of work today, following 3D.14 and the Phase 4A-4C eval above. Where
+those two blocks were docs/investigation-only, this one is code: root-caused and
+fixed both non-blocking perf findings from 3D.14 (5000-point scatter plot slow to
+render, list editor feels sluggish), plus a related bug the developer's own
+retest surfaced mid-session. Full technical detail in **D35**
+(`docs/notes/decisions.md`); this entry summarizes.
+
+1. **Bucketed pixel-space point cache for stat plots** (`src/graph/stat_plot.cpp`,
+   `src/graph/stat_plot.hpp`, call sites in `src/apps/graph_screen.cpp`).
+   Root cause: `draw_stat_plots()` streamed a plot's *entire* list from its Array
+   (PSRAM-tier above ~256 elements, D21) on every `render()` call — and
+   `render()` runs once per `config::kStripHeight`-line strip (~20x/frame) on the
+   Pico 1 vs. once for the whole screen on the Pico 2 (§8), so the same code paid
+   a ~20x hidden multiplier on this board. Fix: `recompute_stat_plots()` now takes
+   the viewport and builds a capped (800 points), decimated `PointCache` once per
+   actual data/window change; scatter and normprob (order-independent) get
+   counting-sorted into strip-height buckets so `render()` only visits the
+   bucket(s) overlapping `fb.clip_y0()/clip_y1()`; xy-line keeps insertion order
+   (segments depend on it) but still benefits from the small SRAM cache instead
+   of re-streaming PSRAM every strip; box-plot outliers get a one-line guard
+   (skip the fence-scan unless the slot's fixed row is in the current strip).
+   Built clean both boards, lint clean, all 1219 host checks pass (stat_plot has
+   no host coverage per the phase3-spec §8 strip-safety note — unchanged).
+   Pico 1 bss +~8.4 KB (**201896 bytes** total, was ~193.5 KB) — comfortably
+   inside the ~76 KB headroom watched since D28. Flashed and developer-confirmed:
+   scatter "much faster," decimated output "looks right," xy-line/box-plot/
+   normprob all still correct.
+2. **List-editor dirty-band narrowing** (`src/apps/list_editor.cpp`,
+   `src/apps/list_editor.hpp`). The screen already used the D13 dirty-band
+   mechanism but only ever invalidated the whole 13-row grid on any change.
+   Added `invalidate_row(int)` and `invalidate_header()`; `kUp`/`kDown`
+   navigation and `commit_edit()` now narrow to just the affected row(s) (plus
+   the header band on commits, since appending changes the "l1:N" count) when
+   the visible window didn't scroll; delete/sort/clear keep the full-grid
+   invalidate (they touch every row). Built clean, tests/lint pass. Flashed and
+   developer-confirmed: "held key is definitely better" — but the developer also
+   clarified the *actual* originally-reported sluggishness was specifically about
+   "entering values when there are already large lists," which pointed at fix 3.
+3. **One-file-per-list persistence** (`src/math/lists.hpp`,
+   `src/math/lists_persist.cpp`, call sites in `src/apps/list_editor.cpp` and
+   `src/apps/home_screen.cpp`). Real bottleneck, found by reading
+   `ListStore::save()` after the developer's retest pointed at data entry, not
+   rendering: it re-serialized **all six lists'** full contents to SD on every
+   single commit — an I/O cost proportional to total stored data, not the edit
+   size, and the dominant cost behind "large lists feel sluggish." Replaced the
+   single concatenated `/picocalc/lists.dat` with one file per list
+   (`/picocalc/list1.dat`..`list6.dat`, magic bumped **PCL1→PCL2** — old file
+   simply isn't read under the new paths, same "old files ignored" precedent as
+   prior format bumps); `save()` now takes the index that changed (every call
+   site already only ever mutates one list per operation, verified by reading
+   each one, not assumed). `load()` keeps the old all-or-nothing-per-item
+   contract for the PSRAM-tier D14 retry case, but now tracks a per-list
+   `loaded_[]` latch so a pending retry never re-reads (and clobbers an
+   in-session edit to) a list that already succeeded. Built clean, tests/lint
+   pass (one nit fixed: `save_lists()` made `const`). Flashed — developer
+   confirmed the expected one-time reset (old lists showed empty, as designed),
+   confirmed entry perf "much faster," and confirmed append/edit/delete/sort/
+   clear and the home-screen list-expression store paths all still persist
+   correctly.
+4. **One-file-per-matrix persistence** (`src/math/matrix.hpp`,
+   `src/math/matrices_persist.cpp`, call sites in `src/apps/matrix_editor.cpp`
+   and `src/apps/home_screen.cpp`). Developer asked mid-interview whether
+   matrices had the identical bug — confirmed yes (`MatrixStore::save()` had the
+   exact same concatenated-file pattern) — and the identical fix shape was
+   applied: `/picocalc/matrix1.dat`..`matrix10.dat` (magic **PCM1→PCM2**),
+   index-aware `save()`, per-matrix `loaded_[]` latch. Built clean, tests/lint
+   pass. Flashed — developer confirmed the expected one-time reset (matrices
+   showed empty), confirmed entry perf on a large matrix "much faster," and
+   confirmed edit/DIM-reshape/clear and the home-screen matrix-expression store
+   paths all still persist correctly.
+
+Host test count is **unchanged at 1219 checks** (198 math + 46 layout + 72 graph
++ 134 lists + 71 dist + 91 infer + 225 matrix + 27 solve + 117 analysis + 122
+stats + 66 complex + 50 complex_expr) — no new host tests were added or needed,
+since stat_plot and the persistence layers have no host coverage per existing
+project convention (strip-safety and SD I/O both need real hardware/framebuffer
+to exercise meaningfully). Both boards build clean; lint clean.
+
+**Known limitations / deferred, explicitly**: `kMaxCachedPoints = 800` means very
+dense scatters (checked with 5000 points) are visually decimated rather than
+literally rendering every point — accepted as a non-issue at 320px screen width,
+confirmed by the developer rather than assumed. The per-file persistence change
+is a real, precedented format break — any lists/matrices saved before this
+session were lost on first boot under the new firmware (expected, not a
+surprise — confirmed with the developer during the interview). Pico 2 was not
+reflashed this session; these fixes are board-generic (same code path, no
+`#ifdef`s) so it should already benefit, but that is **not separately
+verified** — carried to `next-session.md`. The `!` factorial bug root-caused
+earlier today is unrelated to this session's work and remains unfixed (see
+"The next job" in `next-session.md`).
+
 ## 2026-07-22 — Task 3D.14: Pico 1 combined pass — Phase 3 CLOSED (D18)
 
 The Pico 1 (RP2040) board was swapped back into the PicoCalc unit, having sat on
