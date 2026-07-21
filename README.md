@@ -2,13 +2,12 @@
 
 TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](https://www.clockworkpi.com/picocalc), written in C++17 using the Raspberry Pi Pico SDK. Targets both the Pico 1 H (RP2040) and Pico 2 H (RP2350) modules. Personal-use project.
 
-> **Status**: Phases 0–2 complete and hardware-verified on Pico 2 (parametric/
-> polar modes, tables, split-screen, built-in help, unified persistence; the
-> Pico 1 verification pass is deferred to task 3D.14). Phase 3 (statistics:
-> lists, regression, distributions, inference, stat plots) and Phase 4
-> sub-phases 4A–4C (matrices, graph-analysis CALC menu, complex numbers) are
-> code-complete and flashed to Pico 2 — on-device verification of these newer
-> surfaces and the combined Pico 1 pass are still pending. See
+> **Status**: Phases 0–3 complete and hardware-verified on both Pico 1 and
+> Pico 2 (parametric/polar modes, tables, split-screen, built-in help,
+> unified persistence; statistics — lists, regression, distributions,
+> inference, stat plots). Phase 4 sub-phases 4A–4C (matrices, graph-analysis
+> CALC menu, complex numbers) are also hardware-verified on both boards;
+> sub-phase 4D (GC completeness) is specced but not started. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -23,7 +22,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   the SD card. The status bar shows angle/display mode and battery level (cached
   STM32 read, refreshed every 30 s; cyan while charging; shows `--` on units whose
   STM32 keyboard firmware predates the battery register).
-- **Phase 2 (complete, HW-verified on Pico 2)**: Graph modes — **parametric**
+- **Phase 2 (complete, HW-verified on both boards)**: Graph modes — **parametric**
   ($X_{nT}(t), Y_{nT}(t)$ pairs) and **polar** ($r_n(\theta)$, angle-mode aware)
   alongside function mode, selected from the MODE screen; mode-aware
   Y=/parametric/polar editors and window screen (Tmin/Tmax/Tstep, $\theta$
@@ -32,17 +31,17 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   pane focus and trace↔row sync; **built-in help browser** (function catalog
   driven by the same table the parser registers from, key reference, syntax
   notes); all graphing state persists in one SD file with automatic migration
-  from the Phase 1 format. Pico 1 verification pass deferred to task 3D.14.
-- **Phase 3 (code-complete)**: Six data lists ($L_1 \ldots L_6$) backed by a
-  shared `Array` primitive with a spreadsheet-style list editor; 1-var/2-var
-  descriptive statistics and all ten TI-style regression models; probability
-  distributions (PDF/CDF/inverse) for normal, $t$, $\chi^2$, $F$, binomial,
-  Poisson, and geometric; the full inference suite (hypothesis tests,
-  confidence intervals, ANOVA); statistical plots (histogram, box plot,
-  scatter) overlaid on the graphing engine. On-device verification and the
-  Pico 1 pass (3D.14) pending.
-- **Phase 4 — the pre-release milestone (sub-phases 4A–4C code-complete,
-  flashed to Pico 2; 4D specced, not started)**: 10 matrix variables
+  from the Phase 1 format.
+- **Phase 3 (complete, HW-verified on both boards)**: Six data lists
+  ($L_1 \ldots L_6$) backed by a shared `Array` primitive with a
+  spreadsheet-style list editor; 1-var/2-var descriptive statistics and all
+  ten TI-style regression models; probability distributions (PDF/CDF/inverse)
+  for normal, $t$, $\chi^2$, $F$, binomial, Poisson, and geometric; the full
+  inference suite (hypothesis tests, confidence intervals, ANOVA);
+  statistical plots (histogram, box plot, scatter) overlaid on the graphing
+  engine.
+- **Phase 4 — the pre-release milestone (sub-phases 4A–4C complete,
+  HW-verified on both boards; 4D specced, not started)**: 10 matrix variables
   (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
   row-echelon form, eigenvalues, and a numeric equation solver (4A); a
   TI-84-style **CALC menu** on the graph screen — value, zero, min/max,
@@ -58,8 +57,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   persistence) — making Phase 4's completion the point at which the
   calculator is feature-complete as a graphing calculator, independent of
   CAS or programmability. See
-  [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md). On-device
-  verification of 4A–4C pending.
+  [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md).
 - **Phase 5 (planned)**: symbolic math (CAS) — simplify, expand, factor,
   differentiate, solve (complex-aware), a bounded form of symbolic
   integration, and exact-value display (`sqrt(2)` shown as `√2` rather
@@ -251,9 +249,9 @@ Background research:
 |-------|--------|-------|
 | 0: Prep | Complete | Environment, repo, vendored drivers |
 | 1: HAL + calculator + basic graphing | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase1-retro.md) |
-| 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 2 (retro: docs/notes/phase2-retro.md); Pico 1 pass folded into task 3D.14 |
-| 3: Statistics | **Code complete** | Lists, regression, distributions, inference, stat plots; on-device eval + Pico 1 pass (3D.14) pending |
-| 4A–4C: Matrix + graph analysis + complex numbers | **Code complete** | Flashed to Pico 2 (D28/D29/D30); on-device eval pending |
+| 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase2-retro.md; Pico 1 pass via task 3D.14) |
+| 3: Statistics | **Complete** | Lists, regression, distributions, inference, stat plots; HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase3-retro.md; Pico 1 pass via task 3D.14) |
+| 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
 | 4D: GC completeness (pre-release milestone) | Specced, not started | docs/phases/phase4-spec.md §7 (D33) |
 | 5: CAS (symbolic math) | Specced, not started | docs/phases/phase5-spec.md (D32) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
