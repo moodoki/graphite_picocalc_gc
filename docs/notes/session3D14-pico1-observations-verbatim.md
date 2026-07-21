@@ -64,6 +64,7 @@ investigated**.
     without (`{5,7,8,9,10,11,12,13,15}`); normal probability plot with a
     roughly-normal set (`{68,70,71,72,72,73,73,74,74,75,75,76,77,78,80}`) vs.
     a right-skewed set (`{1,2,2,3,3,3,4,4,5,6,8,12,20}`).
+  - **5000-point scatter plot is slow to render.**
 
 ## Open items raised, not covered above
 
