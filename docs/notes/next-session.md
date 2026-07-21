@@ -96,14 +96,23 @@ is actually scheduled.
 - **Firmware on the Pico 2 is Session 19's font/glyph build**
   (Terminus default, `-DPICOCALC_FONT=terminus`; flashed 2026-07-21,
   boots healthy, telemetry clean over serial). This build layers on top
-  of Sessions 16-18 (4A matrices/solver, 4B CALC menu, 4C complex
-  numbers). **Their hands-on on-device evals are now closed as a
-  formality (2026-07-22)** — the logic is board-independent and the
-  harder rendering case (Pico 1) passed the identical checklist the same
-  day; see `worklog.md`'s 2026-07-22 Phase 4A-4C entry. The one thing
-  that's genuinely still open and Pico-2-specific: perf feel hasn't been
-  re-measured against current code (only the pre-Phase-3 2.25 baseline
-  exists) — low priority, see "The next job" #3.
+  of Sessions 11/12/15/16/17/18 (3A lists, 3B stats, 3D inference/plots,
+  4A matrices/solver, 4B CALC menu, 4C complex numbers). **All of their
+  hands-on on-device evals are now closed as a formality (2026-07-22)** —
+  board-independent logic, and the harder rendering case (Pico 1) passed
+  the identical checklists the same day (3D.14 for 11/12/15, the Phase
+  4A-4C pass for 16/17/18); see `worklog.md`'s two 2026-07-22 entries.
+  What's genuinely still open, Pico-2-specific (not closeable by this
+  reasoning): its own perf re-baseline for Phase 3/4 features (see "The
+  next job" #3), and two Session 15 storage-health visual details never
+  distinctly probed on either board (Y=-editor `...` truncation before
+  the checkbox; the red `SD` status-bar indicator's actual look, vs. just
+  "recovers cleanly" functionally — low priority). **Session 10 round 2
+  remains genuinely open too** (not closed by any reasoning above): `L`
+  toggle surviving a reboot, `rand()` display, ZTrig short tick labels,
+  and a quick ZoomFit regression — nothing since has specifically
+  re-confirmed these, worth a quick check next time either board is in
+  hand.
 - **The Pico 1 is now also on the Session 19 build** (reflashed
   2026-07-22, task 3D.14 — no code changes since Session 19, so it's
   the identical binary): boots healthy, telemetry clean over serial.
