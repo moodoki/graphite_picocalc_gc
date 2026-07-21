@@ -41,19 +41,33 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   confidence intervals, ANOVA); statistical plots (histogram, box plot,
   scatter) overlaid on the graphing engine. On-device verification and the
   Pico 1 pass (3D.14) pending.
-- **Phase 4 (sub-phases 4A–4C code-complete, flashed to Pico 2)**: 10 matrix
-  variables (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
+- **Phase 4 — the pre-release milestone (sub-phases 4A–4C code-complete,
+  flashed to Pico 2; 4D specced, not started)**: 10 matrix variables
+  (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
   row-echelon form, eigenvalues, and a numeric equation solver (4A); a
   TI-84-style **CALC menu** on the graph screen — value, zero, min/max,
   intersect, `dy/dx`, numeric integral — across function/parametric/polar
   modes (4B); **complex numbers** with `a+bi`/polar (`r∠θ`) display modes,
   complex-aware arithmetic and elementary functions, and complex matrix
   eigenvalue spectra (4C). A swappable 8x16 font system with real math glyphs
-  (`π θ σ Σ μ λ ≠ √ ∠ ⇒ …`) ships alongside this work. Symbolic math (CAS —
-  differentiation, simplification, factoring, equation solving, basic
-  integration; 4D) and a MicroPython programming environment (4E) are
-  specced but not started. On-device verification of 4A–4C pending.
-- **Phase 5 (planned)**: App framework, polish, release.
+  (`π θ σ Σ μ λ ≠ √ ∠ ⇒ …`) ships alongside this work. Sub-phase **4D (GC
+  completeness)** closes out the remaining TI-83/84+ parity gaps — sequence
+  graphing, fuller zoom/shading, list↔matrix conversion, scientific
+  constants, unit conversions, home-screen matrix literals, complex-valued
+  variable storage, and device polish (auto power-off, brightness
+  persistence) — making Phase 4's completion the point at which the
+  calculator is feature-complete as a graphing calculator, independent of
+  CAS or programmability. See
+  [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md). On-device
+  verification of 4A–4C pending.
+- **Phase 5 (planned)**: symbolic math (CAS) — simplify, expand, factor,
+  differentiate, solve (complex-aware), and a bounded form of symbolic
+  integration. See [docs/phases/phase5-spec.md](docs/phases/phase5-spec.md).
+- **Phase 6 (planned)**: non-calculator functions — an app-launcher
+  framework (6A) and MicroPython as its first base app (6B), plus room
+  for future apps and release engineering (docs site, versioned
+  releases) as unscoped, order-independent sub-phases. See
+  [docs/phases/phase6-spec.md](docs/phases/phase6-spec.md).
 
 The TI-83/84 design language is the reference, but the UI is modernized to take advantage of the PicoCalc's $320\times320$ color display.
 
@@ -183,7 +197,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 │   ├── ui/                # Screen manager, widgets
 │   ├── math/              # Expression engine, function catalog, numeric eval,
 │   │                      #   lists/stats/distributions/inference, matrices,
-│   │                      #   complex numbers (cas/ lands with Phase 4D)
+│   │                      #   complex numbers (cas/ lands with Phase 5)
 │   ├── render/            # Natural math layout-node renderer
 │   ├── graph/             # Graphing subsystem: viewport, plotter, modes,
 │   │                      #   point sources, trace, persisted GraphState
@@ -210,7 +224,9 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/phases/phase1-spec.md](docs/phases/phase1-spec.md)** / **[phase1-plan.md](docs/phases/phase1-plan.md)** — Phase 1 design contract + plan (complete; retro in [docs/notes/phase1-retro.md](docs/notes/phase1-retro.md))
 - **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (complete; retro in [docs/notes/phase2-retro.md](docs/notes/phase2-retro.md))
 - **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics; code-complete)
-- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract (matrix, graph analysis, complex numbers, CAS, MicroPython; current phase — 4A–4C code-complete, 4D/4E not started)
+- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; 4A–4C code-complete, 4D specced not started)
+- **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; specced, not started)
+- **[docs/phases/phase6-spec.md](docs/phases/phase6-spec.md)** — Phase 6 design contract (non-calculator functions: app framework, MicroPython; specced, not started)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
 - **[docs/hardware.md](docs/hardware.md)** — hardware reference
 - **[docs/dev-environment.md](docs/dev-environment.md)** — macOS Apple Silicon dev setup
@@ -218,6 +234,9 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/notes/next-bench-session.md](docs/notes/next-bench-session.md)** — deferred hardware bench work (D14 rail settle)
 - **[docs/notes/wishlist.md](docs/notes/wishlist.md)** — desired-but-unplanned features
 - **[docs/notes/decisions.md](docs/notes/decisions.md)** — architecture & design decision log
+- **[docs/notes/ti-parity-2026-07-21.md](docs/notes/ti-parity-2026-07-21.md)** — feature parity stocktake vs. TI-83/84+ and TI-Nspire CX II CAS
+- **[docs/notes/design-departures-matrix-complex.md](docs/notes/design-departures-matrix-complex.md)** — unbuilt ideas for first-class matrices/vectors/complex numbers
+- **[docs/notes/docs-site-plan.md](docs/notes/docs-site-plan.md)** — plan for a public GitHub Pages docs site with TI-guidebook-style workbooks
 - **[AGENTS.md](AGENTS.md)** — for AI coding agents
 
 Background research:
@@ -233,9 +252,9 @@ Background research:
 | 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 2 (retro: docs/notes/phase2-retro.md); Pico 1 pass folded into task 3D.14 |
 | 3: Statistics | **Code complete** | Lists, regression, distributions, inference, stat plots; on-device eval + Pico 1 pass (3D.14) pending |
 | 4A–4C: Matrix + graph analysis + complex numbers | **Code complete** | Flashed to Pico 2 (D28/D29/D30); on-device eval pending |
-| 4D: CAS (symbolic math) | Specced, not started | docs/phases/phase4-spec.md §6 |
-| 4E: MicroPython | Specced, not started | docs/phases/phase4-spec.md §7 |
-| 5: App framework + polish | Not started | Spec pending |
+| 4D: GC completeness (pre-release milestone) | Specced, not started | docs/phases/phase4-spec.md §7 (D33) |
+| 5: CAS (symbolic math) | Specced, not started | docs/phases/phase5-spec.md (D32) |
+| 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 
 Both boards build clean and the host test suite (1200+ checks) passes. See
 [docs/notes/next-session.md](docs/notes/next-session.md) for exactly what's

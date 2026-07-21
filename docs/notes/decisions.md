@@ -18,6 +18,134 @@ Format:
 
 ---
 
+## D33: Phase re-scoping — Phase 4 = pre-release GC milestone, Phase 6 = non-calculator functions with MicroPython as its first app
+
+**Date**: 2026-07-21
+**Status**: Accepted (same stocktaking session as D32; refines it)
+**Context**: Immediately after D32 split CAS into Phase 5, the developer
+gave a clearer target shape for the remaining phases: Phase 4 should
+"roughly provide full GC functionality" as a pre-release milestone, Phase
+5 is CAS, and Phase 6 should be "non-calculator functions... ideally with
+sub phases that can be completed in any order," with MicroPython as a
+candidate first sub-phase ("first base app"). This directly resolves
+D32's own open item — MicroPython's phase slot — which D32 had explicitly
+left undecided.
+**Decision**:
+1. **Phase 4 gains a new closing sub-phase, 4D: GC completeness**,
+   reusing the `4D` label CAS vacated. Scope is every TI-83/84+ parity
+   gap the [parity stocktake](../notes/ti-parity-2026-07-21.md) found
+   (excluding CAS-tier items) plus the two lowest-risk
+   [design-departures](../notes/design-departures-matrix-complex.md)
+   ideas (home-screen matrix literals, complex-valued storage). Full
+   item list, task table, and rationale in
+   [phase4-spec.md](../phases/phase4-spec.md) §7–§8. **Phase 4's
+   completion is now the project's pre-release milestone** — the point
+   at which the calculator is a complete, TI-83/84+-class graphing
+   calculator independent of CAS or programmability.
+2. **MicroPython moves out of Phase 4 entirely, into Phase 6** as
+   sub-phase 6B, no longer an open question. Phase 6 gains a new
+   sub-phase 6A (app framework: a launcher screen + static app-registry
+   table) that 6B rides on as its first consumer, so a second
+   non-calculator feature later has a landing spot instead of a bespoke
+   integration. New file [phase6-spec.md](../phases/phase6-spec.md)
+   replaces the MicroPython content that used to be phase4-spec.md §7
+   (4E) verbatim, adapted to launch through 6A.
+3. **Phase 6's sub-phases are explicitly designed to be order-independent**
+   once 6A exists (6B, future 6C+ apps, and release engineering/docs-site
+   work all become parallel-safe) — a structural difference from Phases
+   1–5's strict week-by-week sequencing, matching the developer's
+   "ideally... any order" framing.
+4. **Phase ordering is now 4 → 5 → 6** (GC completeness → CAS → apps),
+   confirmed explicitly rather than left implicit.
+**Rationale**: "full GC functionality" as an explicit pre-release
+milestone gives Phase 4 completion real meaning — closing 4A–4C without
+closing the parity doc's remaining gaps would leave "Phase 4 done" quietly
+meaning "mostly done." Splitting MicroPython into its own app-framework
+sub-phase (rather than bolting it directly onto the screen manager, the
+original 4E plan) costs a small amount of upfront scaffolding (6A, ~14
+hrs) in exchange for not re-solving "how does a non-calculator feature
+plug in" from scratch the next time one is wanted.
+**Tradeoffs**: 4D is a "grab-bag" sub-phase with ~20 mostly-independent
+small items rather than one coherent subsystem (flagged as its own risk —
+phase4-spec.md Risk 8, scope creep) — it's a different shape of risk than
+4A–4C's deep-but-narrow subsystems. 6A adds a small amount of
+indirection (an app registry + launcher) that a single-app MicroPython
+plan wouldn't have needed on its own; justified only if a second app
+actually shows up later.
+**Revisit when**: 4D's scope is being implemented and any single item
+(especially APD/brightness persistence, flagged feasibility-unknown) turns
+out infeasible — drop it back to the wishlist rather than forcing it.
+6A's design should be revisited once a real second app (Phase 6 §9
+candidates) is actually picked up, to check the launcher/registry still
+fits rather than needing to grow.
+
+---
+
+## D32: CAS split into its own Phase 5; docs-site + design-departures plans (stocktaking session)
+
+**Date**: 2026-07-21
+**Status**: Accepted (documentation/reflection session — no code touched)
+**Context**: A stock-taking session to assess feature parity against the
+TI-83/84+ (and, for the unbuilt CAS, TI-Nspire CX II CAS), plan a public
+docs site with TI-guidebook-style workbooks, and consider departures from
+TI's design for matrix/vector/complex handling. Along the way, CAS's size
+and risk relative to the rest of what was Phase 4 (originally sub-phase
+4D, ~124 of Phase 4's ~320 estimated hours — already the largest and
+riskiest sub-phase per phase4-spec.md's own §1) made a clean phase split
+worth doing now rather than leaving it bundled.
+**Decision**:
+1. **CAS is now Phase 5**, split out of Phase 4 sub-phase 4D. New file
+   [phase5-spec.md](../phases/phase5-spec.md) carries the content
+   verbatim (former §6.1–6.9 → top-level §2–§10), plus a new intro tying
+   it to the [TI parity stocktake](ti-parity-2026-07-21.md) §8
+   (TI-Nspire CAS comparison) and the [design-departures doc](design-departures-matrix-complex.md).
+   `phase4-spec.md` §6 is now a one-paragraph pointer; its task
+   breakdown, performance benchmarks, risks (1, 2, 5), and open
+   questions (P4-1/2/3) moved to phase5-spec.md's own §11–§14 (task IDs
+   and risk/question numbers kept as originally assigned — `4D.n`,
+   `Risk 5`, `P4-n` → `P5-n` — rather than renumbered, to keep any
+   existing cross-references from other notes still resolvable by search).
+2. **The old "Phase 5" (app framework, polish, release) becomes Phase 6.**
+   Still spec-pending, no content change — just the number.
+3. ~~**MicroPython (sub-phase 4E) stays put, unrenumbered, for now.**~~
+   **Superseded by D33** (same session): MicroPython moves to Phase 6 as
+   sub-phase 6B. What follows here is kept for history: its final phase
+   slot (stay in Phase 4, follow CAS, or get its own phase) was
+   deliberately left open — see `next-session.md`. Renumbering it
+   speculatively before that call was made would just have created more
+   churn to undo later.
+4. **Docs site**: no code/config created this session (by design — see
+   [docs-site-plan.md](docs-site-plan.md)). Recommends MkDocs Material,
+   hosted via GitHub Pages/Actions, TI-guidebook-shaped workbook
+   chapters, public user docs kept separate from the existing
+   developer/spec docs tree. Suggested home: Phase 6.
+5. **Design departures** (complex-valued variables/lists/matrices,
+   home-screen matrix literals, vector ops, list↔matrix bridge, and the
+   larger idea of unifying `matexpr`/`complexexpr`/`listexpr` into one
+   tagged-value evaluator) are recorded as **ideas, not decisions** — see
+   [design-departures-matrix-complex.md](design-departures-matrix-complex.md).
+   Nothing there is committed; each would need its own scoping pass and
+   its own D-numbered decision if picked up.
+**Rationale**: CAS was always going to dominate whichever phase held it
+(§1's own effort table made that visible before this session); giving it
+a dedicated phase makes the phase-completion signal ("Phase 4 done") mean
+something again instead of hiding CAS's much larger remaining scope
+behind an already-shipped 4A–4C. Keeping MicroPython's slot open rather
+than guessing avoids a second renumbering pass later. Plans-not-code for
+the docs site and departures matches the session's own framing (stock-
+taking/reflection, not implementation).
+**Tradeoffs**: two renumbered phases (5→6) mean any old notes/commit
+messages saying "Phase 5" now mean the app-framework phase's predecessor
+concept, not CAS — worth reading dates when in doubt. `phase4-spec.md`'s
+task/risk/question IDs (`4D.n`, `Risk 5`, `P4-1..3`) now point across a
+file boundary into phase5-spec.md rather than staying self-contained.
+**Revisit when**: MicroPython's phase slot gets decided (renumber then,
+not speculatively now); the docs-site plan gets picked up for real
+(Phase 6, or opportunistically earlier); any design-departures idea is
+actually scheduled into a phase (gets its own D-number at that point).
+
+---
+
 ## D31: Real math glyphs + a swappable 8x16 main font — Terminus default (testdrive)
 
 **Date**: 2026-07-21

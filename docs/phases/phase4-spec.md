@@ -1,33 +1,46 @@
-# Phase 4 Spec: Matrix, Graph Analysis, Complex, CAS & Programming
+# Phase 4 Spec: Matrix, Graph Analysis, Complex Numbers & GC Completeness
 
 **Prerequisite phases**: Phase 1 (HAL + calculator + graphing), Phase 2 (table view, parametric/polar, split-screen), Phase 3 (statistics, data lists, the shared `Array` primitive).
 
-**Scope**: Add matrix operations, interactive graph analysis (the TI-84 CALC menu), a complex-number subsystem, a symbolic math engine (CAS), and a MicroPython programming environment. This phase transforms the calculator from a numerical/statistical tool into an algebraic one with interactive analysis and programmability.
+**Scope**: Add matrix operations, interactive graph analysis (the TI-84 CALC menu), a complex-number subsystem, and a closing pass that brings the remaining TI-83/84+ parity gaps up to par. **Phase 4 is the pre-release milestone**: when it's done, the calculator is feature-complete as a graphing calculator — everything past this point (CAS, MicroPython, other non-calculator apps) is additive, not required to call the core product finished.
 
-**End state**: the calculator can manipulate matrices; analyze graphs interactively (roots, extrema, intersections, numeric derivative and integral); compute with complex numbers throughout; differentiate, simplify, factor, and solve expressions symbolically (including complex roots); and run user-written Python programs with access to all calculator functions.
+**End state**: the calculator can manipulate matrices; analyze graphs interactively (roots, extrema, intersections, numeric derivative and integral); compute with complex numbers throughout; and stands on its own as a complete TI-83/84+-class graphing calculator (sequence graphing, full zoom/shading set, scientific constants, unit conversions, list↔matrix interop, device power/settings polish — see sub-phase 4D).
+
+> **2026-07-21 update (phase restructure)**: the CAS engine (originally
+> sub-phase 4D below) has been split out into its own **Phase 5** — see
+> [phase5-spec.md](phase5-spec.md) and [decisions.md](../notes/decisions.md)
+> D32. **MicroPython (originally sub-phase 4E) has moved to the new
+> Phase 6** ("non-calculator functions") as sub-phase 6B — see
+> [phase6-spec.md](phase6-spec.md) and D33. The `4D` label, vacated by
+> CAS, is reused here for a new closing sub-phase — **GC completeness** —
+> that rounds out Phase 4 into the "full graphing calculator" pre-release
+> milestone the project is now organized around: Phase 4 = complete GC,
+> Phase 5 = CAS, Phase 6 = non-calculator apps/extensibility, in that
+> order, with 6's sub-phases (unlike 4/5/6 themselves) designed to be
+> completable in any order once Phase 6 starts.
 
 ---
 
 ## 1. Overview and phasing within Phase 4
 
-Phase 4 is the largest and most varied phase. It splits into five sub-phases, developed in order. Each occupies a different part of the codebase, but there are deliberate dependencies: graph analysis reuses 4A's numeric solver, and CAS's complex-aware solving depends on the 4C complex subsystem.
+Phase 4 splits into sub-phases, developed in order. Each occupies a different part of the codebase, but there are deliberate dependencies: graph analysis reuses 4A's numeric solver, 4C's complex subsystem is a prerequisite for both CAS (Phase 5) and parts of 4D, and 4D itself reuses matrix/complex/graphing machinery from 4A–4C to close out remaining gaps.
 
 | Sub-phase | Weeks | Content |
 |-----------|-------|---------|
 | 4A: Matrix operations | 26–27 | Matrix editor, arithmetic, det, inverse, rref, eigenvalues; numeric solver |
 | 4B: Graph analysis (CALC) | 28–29 | value, zero, min/max, intersect, dy/dx, fnInt — numeric + interactive on the graph screen |
 | 4C: Complex numbers | 30–31 | `Complex` type, complex-aware arithmetic and functions, a+bi mode, rect/polar display |
-| 4D: CAS engine | 32–36 | Symbolic tree, differentiation, simplification, factoring, solving (complex-aware), integration |
-| 4E: MicroPython | 37–39 | Embedded interpreter, `calc` module, on-device editor, SD card scripts |
+| 4D: GC completeness | 32–35 | Sequence graphing, zoom/shading, list↔matrix bridge, sci constants, unit conversions, home-screen matrix literals, complex storage, device polish — closes remaining TI-83/84+ parity gaps |
 
-**Total estimated effort**: ~14 weeks part-time (~320 hours).
+*(4A–4C already shipped under these labels — see D28–D30 — so their numbering is unchanged. `4D` is a new definition, reusing the label CAS vacated when it became Phase 5; the old 4E, MicroPython, is gone from this document entirely — see phase6-spec.md §2.)*
+
+**Total estimated effort (this document)**: ~46 + 51 + 38 + [4D estimate, see §8] hours across 4A–4D.
 
 The ordering matters:
 
 - **4B (graph analysis) after 4A** because zero/intersect reuse 4A's numeric root-finder, and the CALC operations are numeric in this phase.
-- **4C (complex) before 4D (CAS)** because CAS equation solving is complex-aware — `solve(x^2 + 1 = 0)` returns `{i, -i}`, which requires the complex representation to exist first.
-- **4D (CAS) is the dominant effort** and highest risk. It's specced to be built incrementally: a minimal-but-correct core extended feature by feature.
-- **4E (MicroPython) last** so its `calc` bindings can expose everything built in 4A–4D.
+- **4C (complex)** precedes 4D because two of 4D's items (home-screen matrix literals interacting with complex scalars, complex-valued variable/Ans storage) build directly on the `Complex` type and number-mode subsystem. 4C was also completed before CAS (Phase 5) work could start, since CAS equation solving is complex-aware — that dependency is satisfied and Phase 5 can proceed independently of this document from here.
+- **4D (GC completeness) last** because it's explicitly a closing/mop-up pass — it pulls together loose ends across graphing, matrices, complex numbers, and stats/lists that only make sense to scope once 4A–4C exist to extend.
 
 ---
 
@@ -43,29 +56,27 @@ src/
 │   ├── matrix.hpp / .cpp          # NEW: linear-algebra view over Array (2-D)
 │   ├── numeric_solve.hpp / .cpp   # NEW: root-finder, extrema, numeric integ/deriv
 │   ├── complex.hpp / .cpp         # NEW: Complex type + complex-aware functions
-│   ├── expr_tree.hpp / .cpp       # NEW (4D): symbolic expression tree (AST)
-│   ├── cas/
-│   │   ├── simplify.hpp / .cpp    # Algebraic simplification rules
-│   │   ├── derivative.hpp / .cpp  # Symbolic differentiation
-│   │   ├── integrate.hpp / .cpp   # Symbolic integration (table-based)
-│   │   ├── factor.hpp / .cpp      # Polynomial factoring
-│   │   ├── solve.hpp / .cpp       # Symbolic equation solver (complex-aware)
-│   │   ├── expand.hpp / .cpp      # Distribution / expansion
-│   │   └── rules.hpp             # Shared rewriting utilities
+│   ├── seq_expr.hpp / .cpp        # NEW (4D): sequence-mode (u/v/w) evaluator
+│   ├── frac.hpp / .cpp            # NEW (4D): decimal→fraction conversion (▶Frac)
+│   ├── constants.hpp / .cpp       # NEW (4D): scientific constants catalog
+│   ├── units.hpp / .cpp           # NEW (4D): unit-conversion catalog + conversion
 │   └── types.hpp                  # Updated: complex type, matrix view alias
+│   # expr_tree.hpp/.cpp and cas/ (simplify, derivative, integrate, factor,
+│   # solve, expand, rules) moved to Phase 5 — see phase5-spec.md.
 ├── graph/
 │   ├── analysis.hpp / .cpp        # NEW (4B): CALC operations engine
-│   └── analysis_cursor.hpp / .cpp # NEW (4B): interactive bound/guess cursor
+│   ├── analysis_cursor.hpp / .cpp # NEW (4B): interactive bound/guess cursor
+│   └── seq_points.hpp / .cpp      # NEW (4D): sequence-mode point source
 ├── apps/
 │   ├── matrix_editor.hpp / .cpp   # NEW (4A): matrix editor screen
 │   ├── solver_screen.hpp / .cpp   # NEW (4A): numeric & symbolic solver UI
 │   ├── calc_menu.hpp / .cpp       # NEW (4B): graph analysis menu + interaction
-│   ├── cas_screen.hpp / .cpp      # NEW (4D): CAS worksheet / symbolic mode
-│   └── program_screen.hpp / .cpp  # NEW (4E): MicroPython editor + runner
-├── scripting/
-│   ├── micropython_embed.hpp/.cpp # NEW (4E): MicroPython interpreter wrapper
-│   ├── calc_module.hpp / .cpp     # NEW (4E): Python 'calc' module (C++ bindings)
-│   └── script_runner.hpp / .cpp   # NEW (4E): load + execute .py from SD card
+│   ├── seq_editor.hpp / .cpp      # NEW (4D): sequence-mode editor screen
+│   └── constants_screen.hpp / .cpp # NEW (4D): constants/units browse-and-insert menu
+│   # cas_screen.hpp/.cpp (CAS worksheet / symbolic mode) moved to Phase 5;
+│   # program_screen.hpp/.cpp (MicroPython editor) moved to Phase 6 §2.
+├── platform/
+│   └── power.hpp / .cpp           # NEW (4D): auto power-off / standby (APD)
 ```
 
 ---
@@ -393,7 +404,7 @@ No new math engine capability is required beyond the numeric methods in §4.2.
 
 ## 5. Sub-phase 4C: Complex numbers (weeks 30–31)
 
-A complex-number subsystem that flows through the numeric evaluator and, in 4D, into CAS solving. `sqrt(-1)` yields `i`; expressions evaluate over ℂ when a complex value appears; results display in rectangular ($a + bi$) or polar ($r\angle\theta$) form.
+A complex-number subsystem that flows through the numeric evaluator and, in Phase 5, into CAS solving. `sqrt(-1)` yields `i`; expressions evaluate over ℂ when a complex value appears; results display in rectangular ($a + bi$) or polar ($r\angle\theta$) form.
 
 ### 5.1 Complex type (`math/complex.hpp`)
 
@@ -504,579 +515,175 @@ sqrt(-4)         -> 2i
 e^(i*pi)         -> -1          (Euler; within display tolerance)
 ```
 
-### 5.5 Hooks for CAS (4D) and matrices
+### 5.5 Hooks for CAS (Phase 5) and matrices
 
-- **CAS solve** (4D): the symbolic solver's quadratic and polynomial paths use complex arithmetic when the discriminant is negative, emitting roots like `i`, `-i`, `2 + 3i`. The `Complex` type here is the numeric backing; in the symbolic tree, `i` is represented as a reserved symbolic constant (see §6.1) and complex literals become `a + b*i` subtrees. Conversion between numeric `Complex` and symbolic form lives in `cas/solve.cpp`.
-- **Matrix eigenvalues** (4A): 4A computes real eigenvalues only. With the complex type available, a follow-up (deferred, noted in open questions) could return complex-conjugate eigenvalue pairs. Not in Phase 4 scope unless time permits.
+- **CAS solve** (Phase 5): the symbolic solver's quadratic and polynomial paths use complex arithmetic when the discriminant is negative, emitting roots like `i`, `-i`, `2 + 3i`. The `Complex` type here is the numeric backing; in the symbolic tree, `i` is represented as a reserved symbolic constant and complex literals become `a + b*i` subtrees. Conversion between numeric `Complex` and symbolic form lives in `cas/solve.cpp` — see [phase5-spec.md](phase5-spec.md) §4.1 and §8.
+- **Matrix eigenvalues** (4A): as-built, this now returns complex-conjugate eigenvalue pairs too (D30 §7, resolving open question P4-7) — the "real only" note below is historical, kept for context on the original 4A decision.
 
----
-## 6. Sub-phase 4D: CAS engine (weeks 32–36)
-
-This is the core of Phase 4. The CAS operates on a new symbolic expression tree (`ExprTree`) that is distinct from the numerical evaluation path. The numerical evaluator (tinyexpr++) remains for graphing and immediate numeric results. The CAS is invoked explicitly — when the user types an expression and presses a CAS-specific key or selects a CAS operation from a menu.
-
-CAS also provides the *symbolic* counterparts to the numeric `dy/dx` and `fnInt` built in Sub-phase 4B. Where 4B computes a numeric derivative at a point or a definite integral over bounds, CAS `differentiate` (§6.5) and `integrate` (§6.8) return symbolic expressions. On the graph screen, the CALC menu's `dy/dx` and `∫` stay numeric (fast, always-available); a user wanting the symbolic form uses the CAS menu on the function's expression.
-
-### 6.1 Symbolic expression tree
-
-```cpp
-namespace math {
-
-// Node types for the symbolic expression tree.
-enum class ExprType : uint8_t {
-    // Atoms
-    NUM,        // Numeric literal: 3, -2.5, pi
-    VAR,        // Variable: x, y, t, a, b (and reserved 'i' = imaginary unit)
-    
-    // Binary operations
-    ADD,        // a + b (n-ary via linked children: a + b + c)
-    MUL,        // a * b (n-ary)
-    POW,        // a ^ b
-    
-    // Unary operations
-    NEG,        // -a (separate from SUB for tree clarity)
-    
-    // Functions
-    FUNC,       // Named function application: sin(x), ln(x), etc.
-    
-    // Structural
-    EQ,         // Equation: lhs = rhs
-};
-
-struct Expr {
-    ExprType type;
-    
-    union {
-        calc_t num_val;            // For NUM
-        char var_name;             // For VAR: single char 'a'-'z'
-        char func_name[12];        // For FUNC: "sin", "cos", "ln", etc.
-    };
-    
-    // Children: singly-linked list via next, tree via child.
-    // ADD and MUL are n-ary: children linked as a chain.
-    //   ADD(a, b, c) → child=a, a->next=b, b->next=c
-    // POW is binary: child=base, child->next=exponent
-    // FUNC is unary: child=argument
-    Expr* child = nullptr;
-    Expr* next  = nullptr;
-    
-    // ---- Convenience constructors (use pool allocator) ----
-    static Expr* num(calc_t val);
-    static Expr* var(char name);
-    static Expr* add(Expr* a, Expr* b);
-    static Expr* mul(Expr* a, Expr* b);
-    static Expr* pow(Expr* base, Expr* exp);
-    static Expr* neg(Expr* a);
-    static Expr* func(const char* name, Expr* arg);
-    static Expr* eq(Expr* lhs, Expr* rhs);
-    
-    // ---- Predicates ----
-    bool is_num() const { return type == ExprType::NUM; }
-    bool is_var() const { return type == ExprType::VAR; }
-    bool is_zero() const { return is_num() && num_val == 0.0; }
-    bool is_one() const  { return is_num() && num_val == 1.0; }
-    bool is_neg_one() const { return is_num() && num_val == -1.0; }
-    bool is_add() const { return type == ExprType::ADD; }
-    bool is_mul() const { return type == ExprType::MUL; }
-    bool is_pow() const { return type == ExprType::POW; }
-    bool is_func() const { return type == ExprType::FUNC; }
-    
-    // Does this expression contain variable v?
-    bool contains(char v) const;
-    
-    // Deep equality
-    bool equals(const Expr* other) const;
-    
-    // Deep clone (into current pool)
-    Expr* clone() const;
-    
-    // Count of child nodes (for n-ary ADD/MUL)
-    int child_count() const;
-};
-
-} // namespace math
-```
-
-### 6.2 Memory management
-
-Symbolic manipulation creates many short-lived intermediate trees. A **pool allocator** sized for CAS operations avoids heap fragmentation:
-
-```cpp
-namespace math {
-
-class ExprPool {
-public:
-    // On Pico 1: pool lives in PSRAM (64 KB default allocation)
-    // On Pico 2: pool lives in SRAM (32 KB) with PSRAM overflow
-    void init(size_t pool_size = 65536);
-    
-    Expr* alloc();            // Get a fresh Expr node
-    void reset();             // Free everything (between operations)
-    
-    size_t used() const;
-    size_t capacity() const;
-    
-private:
-    uint8_t* pool_ = nullptr;
-    size_t offset_ = 0;
-    size_t capacity_ = 0;
-};
-
-// Global CAS pool — reset before each top-level CAS operation
-extern ExprPool g_cas_pool;
-
-} // namespace math
-```
-
-Each top-level CAS operation (differentiate, simplify, solve) calls `g_cas_pool.reset()` at the start, works entirely within the pool, then copies the final result to a persistent output buffer before the pool is reclaimed. This means intermediate garbage is never individually freed — the entire pool is bulk-reclaimed.
-
-**Sizing**: a single `Expr` node is ~32 bytes. A 64 KB pool holds ~2000 nodes. This is sufficient for expressions of practical complexity — even a 50-term polynomial after expansion produces ~150 nodes. Deeply recursive operations (repeated integration) may need the pool to spill into PSRAM on Pico 1, which is why the pool lives there by default.
-
-### 6.3 Expression parser (string → `Expr` tree)
-
-The CAS needs its own parser because tinyexpr++ produces an opaque evaluation tree, not a manipulable AST. The CAS parser handles the same infix syntax but produces `Expr` nodes:
-
-```cpp
-namespace math {
-
-// Parse an infix expression string into an Expr tree.
-// Returns nullptr on parse error; sets *error to a message.
-Expr* parse_expr(const char* input, const char** error = nullptr);
-
-// Serialize an Expr tree back to a human-readable string.
-// Writes into buf, returns number of chars written.
-int expr_to_string(const Expr* expr, char* buf, size_t buf_len);
-
-// Serialize an Expr tree into a layout tree for pretty-print rendering.
-// Reuses the render::LayoutNode system from Phase 1.
-render::LayoutNode* expr_to_layout(const Expr* expr);
-
-} // namespace math
-```
-
-The parser is a standard recursive-descent parser for mathematical expressions. Operator precedence: `=` < `+`/`-` < `*`/`/` < unary `-` < `^` < function application. Implicit multiplication (e.g., `2x` → `2*x`, `xy` → `x*y`) is supported for CAS mode since it's natural for algebraic entry.
-
-**Imaginary unit in the symbolic tree**: `i` is a reserved `VAR` whose algebraic rule is $i^2 = -1$. The simplifier (§6.4) knows this rule, so `i*i` simplifies to `-1`, `i^3` to `-i`, and `i^4` to `1`. Complex literals appear as ordinary subtrees, e.g., `3 + 2*i`. When a symbolic result containing `i` is evaluated numerically or stored, it converts to a `math::Complex` (Sub-phase 4C). This shared representation is what lets CAS `solve` return complex roots.
-
-### 6.4 Simplification (`cas/simplify.hpp`)
-
-The simplifier applies a set of rewriting rules repeatedly until no rule fires (fixed-point iteration). Rules are applied bottom-up — children are simplified before parents.
-
-```cpp
-namespace math::cas {
-
-// Simplify an expression. Returns a new tree (in the current pool).
-// The original is not modified.
-Expr* simplify(const Expr* expr);
-
-} // namespace math::cas
-```
-
-**Rule categories and representative rules**:
-
-**Identity and annihilation rules** (trivial, apply first):
-
-| Rule | Example |
-|------|---------|
-| $x + 0 \to x$ | `ADD(x, 0)` → `x` |
-| $x \cdot 0 \to 0$ | `MUL(x, 0)` → `0` |
-| $x \cdot 1 \to x$ | `MUL(x, 1)` → `x` |
-| $x^0 \to 1$ | `POW(x, 0)` → `1` |
-| $x^1 \to x$ | `POW(x, 1)` → `x` |
-| $0^x \to 0$ (for $x > 0$) | `POW(0, x)` → `0` |
-| $1^x \to 1$ | `POW(1, x)` → `1` |
-| $-(-x) \to x$ | `NEG(NEG(x))` → `x` |
-
-**Constant folding** — evaluate numeric sub-expressions:
-
-| Rule | Example |
-|------|---------|
-| $a + b \to c$ where $a$, $b$ are numbers | `ADD(2, 3)` → `5` |
-| $a \cdot b \to c$ | `MUL(4, 5)` → `20` |
-| $a^b \to c$ where result is exact integer | `POW(2, 10)` → `1024` |
-| $\sin(0) \to 0$, $\cos(0) \to 1$, etc. | Exact values at known points |
-
-**Like-term collection**:
-
-| Rule | Example |
-|------|---------|
-| $ax + bx \to (a+b)x$ | `3x + 5x` → `8x` |
-| $x + x \to 2x$ | Special case of above |
-| $x^a \cdot x^b \to x^{a+b}$ | `x^2 * x^3` → `x^5` |
-| $\frac{x^a}{x^b} \to x^{a-b}$ | Handled via `x^a * x^{-b}` |
-
-**Canonical ordering** — sort commutative operands for consistent matching:
-
-- In ADD nodes: numeric terms last, variables alphabetically
-- In MUL nodes: numeric coefficients first, then variables alphabetically, then functions
-
-**Fraction simplification**:
-
-| Rule | Example |
-|------|---------|
-| $\frac{a}{1} \to a$ | |
-| $\frac{0}{a} \to 0$ | |
-| $\frac{a}{a} \to 1$ | When $a$ is structurally identical |
-| $\frac{na}{nb} \to \frac{a}{b}$ | GCD reduction of integer coefficients |
-
-**Implementation approach**: each rule is a function `Expr* try_rule(const Expr* e)` that returns a new tree if the rule applies, or `nullptr` if it doesn't. The simplifier loops through the rule set applying every applicable rule, then recurs into children, repeating until a full pass produces no changes. A hard iteration cap (e.g., 50 passes) prevents infinite loops from malformed rule interactions.
-
-### 6.5 Symbolic differentiation (`cas/derivative.hpp`)
-
-```cpp
-namespace math::cas {
-
-// Differentiate expr with respect to variable var.
-// Returns a simplified result.
-Expr* differentiate(const Expr* expr, char var);
-
-} // namespace math::cas
-```
-
-Differentiation is the most straightforward CAS operation — it's a direct structural recursion over the tree with well-defined rules:
-
-| Rule | Derivative |
-|------|-----------|
-| $\frac{d}{dx} c = 0$ | Constant (number or variable $\neq x$) |
-| $\frac{d}{dx} x = 1$ | Identity |
-| $\frac{d}{dx} (u + v) = u' + v'$ | Sum rule |
-| $\frac{d}{dx} (u \cdot v) = u'v + uv'$ | Product rule |
-| $\frac{d}{dx} \frac{u}{v} = \frac{u'v - uv'}{v^2}$ | Quotient rule (derived from product + power) |
-| $\frac{d}{dx} u^n = n \cdot u^{n-1} \cdot u'$ | Power rule (constant exponent) |
-| $\frac{d}{dx} u^v = u^v(v' \ln u + v \frac{u'}{u})$ | General power rule |
-| $\frac{d}{dx} \sin(u) = \cos(u) \cdot u'$ | Chain rule for sin |
-| $\frac{d}{dx} \cos(u) = -\sin(u) \cdot u'$ | Chain rule for cos |
-| $\frac{d}{dx} \tan(u) = \sec^2(u) \cdot u'$ | Or: $(1 + \tan^2(u)) \cdot u'$ |
-| $\frac{d}{dx} e^u = e^u \cdot u'$ | Chain rule for exp |
-| $\frac{d}{dx} \ln(u) = \frac{u'}{u}$ | Chain rule for ln |
-| $\frac{d}{dx} \sqrt{u} = \frac{u'}{2\sqrt{u}}$ | Via power rule: $u^{1/2}$ |
-| $\frac{d}{dx} \arcsin(u) = \frac{u'}{\sqrt{1 - u^2}}$ | Inverse trig |
-| $\frac{d}{dx} \arccos(u) = \frac{-u'}{\sqrt{1 - u^2}}$ | Inverse trig |
-| $\frac{d}{dx} \arctan(u) = \frac{u'}{1 + u^2}$ | Inverse trig |
-
-The raw derivative output is typically bloated (e.g., $\frac{d}{dx}[x^2 \cdot \sin(x)]$ produces `2*x*sin(x) + x^2*cos(x)` which is already simplified, but $\frac{d}{dx}[\frac{x}{x+1}]$ produces `(1*(x+1) - x*1) / (x+1)^2`). Every differentiation call ends with `simplify()` to clean up the result.
-
-**Higher-order derivatives**: `differentiate(differentiate(expr, 'x'), 'x')` — just recurse. A `differentiate_n(expr, var, n)` convenience wrapper applies $n$ times.
-
-### 6.6 Expansion and factoring (`cas/expand.hpp`, `cas/factor.hpp`)
-
-**Expand** distributes multiplication over addition:
-
-```cpp
-namespace math::cas {
-
-// Expand products and powers of sums.
-// E.g., (x+1)*(x-1) → x^2 - 1
-//       (x+1)^3 → x^3 + 3x^2 + 3x + 1
-Expr* expand(const Expr* expr);
-
-} // namespace math::cas
-```
-
-Implementation: recursively expand `MUL(ADD(...), ADD(...))` using the FOIL-like distribution algorithm. For `POW(ADD(...), n)` where $n$ is a positive integer, expand via binomial theorem or repeated multiplication. Cap exponent at a reasonable limit (e.g., $n \leq 20$) to prevent combinatorial explosion.
-
-**Factor** performs polynomial factoring:
-
-```cpp
-namespace math::cas {
-
-// Factor a polynomial expression in variable var.
-// Handles: common factor extraction, difference of squares,
-// quadratic formula, and rational root theorem for degree <= 4.
-// Returns the factored form, or the original if no factoring found.
-Expr* factor(const Expr* expr, char var = 'x');
-
-} // namespace math::cas
-```
-
-Factoring strategy (in order of attempt):
-
-1. **Common factor extraction**: pull out the GCD of all term coefficients and the lowest power of each variable. E.g., $6x^3 + 4x^2 \to 2x^2(3x + 2)$.
-2. **Difference of squares**: $a^2 - b^2 \to (a+b)(a-b)$.
-3. **Quadratic**: for degree-2 polynomials, use the discriminant. If $\Delta = b^2 - 4ac$ is a perfect square, produce $(x - r_1)(x - r_2)$. Otherwise, return as-is or use the quadratic formula symbolically.
-4. **Rational root theorem**: for degree 3–4, test rational roots $\pm \frac{p}{q}$ where $p$ divides the constant term and $q$ divides the leading coefficient. If a root is found, divide out the factor and recurse.
-5. **Grouping**: for four-term expressions, try grouping pairs and factoring common sub-expressions.
-
-This handles the vast majority of factoring problems encountered in a high-school / early-college calculus context. It will not factor quintics or higher-degree polynomials with irrational roots — that requires Galois theory and is well beyond what even the HP-50G or TI-Nspire CAS attempt.
-
-### 6.7 Symbolic equation solving (`cas/solve.hpp`)
-
-```cpp
-namespace math::cas {
-
-// Solve an equation for variable var.
-// Returns a list of solutions (as Expr* array).
-// max_solutions caps the output.
-struct SolveResult {
-    Expr* solutions[8];
-    int count;
-    bool exact;    // true if all solutions are symbolic/exact
-    bool complex;  // true if any solution has a nonzero imaginary part
-};
-
-SolveResult solve(const Expr* equation, char var);
-
-} // namespace math::cas
-```
-
-Solving strategy (in order of attempt):
-
-1. **Linear isolation**: if the equation is linear in `var`, algebraically isolate it. E.g., $3x + 5 = 17 \to x = 4$.
-2. **Quadratic formula**: if the equation is quadratic in `var`, apply $x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}$ symbolically. When the discriminant $b^2 - 4ac < 0$, the roots are complex; the solver emits them using the symbolic imaginary unit `i` (see §6.1). For example, `solve(x^2 + 1 = 0)` returns `{i, -i}` and `solve(x^2 - 2x + 5 = 0)` returns `{1 + 2*i, 1 - 2*i}`. This requires the complex subsystem from Sub-phase 4C.
-3. **Polynomial root-finding**: for degree 3–4, try the rational root theorem + synthetic division to reduce to a quadratic.
-4. **Inverse function isolation**: for equations like $\sin(x) = 0.5$, apply $\arcsin$ to both sides. Handles the standard trig, exp, and log inversions.
-5. **Numeric fallback**: if symbolic methods fail, fall back to `numeric_solve()` and present the result as an approximate decimal.
-
-**Complex roots**: the quadratic path (and, where reducible, the cubic/quartic paths) produce complex roots when real roots don't exist. Complex solutions are honored only when the number mode (Sub-phase 4C) is RECTANGULAR or POLAR; in REAL mode the solver reports "no real solution" instead. The symbolic `i` in a solution tree converts to a numeric `math::Complex` when the result is evaluated or stored.
-
-### 6.8 Symbolic integration (`cas/integrate.hpp`)
-
-This is the hardest CAS operation and the one with the most limited scope. A general-purpose symbolic integrator (like Risch algorithm) is infeasible on this hardware. Instead, implement a **table-based integrator** with a few heuristic methods.
-
-```cpp
-namespace math::cas {
-
-// Attempt symbolic integration of expr with respect to var.
-// Returns the antiderivative (without +C), or nullptr if unable.
-Expr* integrate(const Expr* expr, char var);
-
-// Definite integral: evaluate antiderivative at bounds.
-// Returns a numeric result if bounds are numeric.
-struct DefIntResult {
-    bool has_symbolic;   // Was symbolic antiderivative found?
-    Expr* antideriv;     // Symbolic antiderivative (nullable)
-    bool has_numeric;    // Was numeric result computed?
-    calc_t numeric_val;  // Numeric result of definite integral
-};
-
-DefIntResult definite_integrate(const Expr* expr, char var,
-                                 const Expr* lower, const Expr* upper);
-
-} // namespace math::cas
-```
-
-**Integration table** (direct matches):
-
-| Pattern | Result |
-|---------|--------|
-| $\int x^n \, dx$ ($n \neq -1$) | $\frac{x^{n+1}}{n+1}$ |
-| $\int x^{-1} \, dx$ | $\ln\lvert x\rvert$ |
-| $\int e^x \, dx$ | $e^x$ |
-| $\int a^x \, dx$ | $\frac{a^x}{\ln a}$ |
-| $\int \sin(x) \, dx$ | $-\cos(x)$ |
-| $\int \cos(x) \, dx$ | $\sin(x)$ |
-| $\int \sec^2(x) \, dx$ | $\tan(x)$ |
-| $\int \frac{1}{1+x^2} \, dx$ | $\arctan(x)$ |
-| $\int \frac{1}{\sqrt{1-x^2}} \, dx$ | $\arcsin(x)$ |
-
-**Heuristic methods** (applied when table lookup fails):
-
-1. **Linearity**: $\int (af + bg) \, dx = a\int f \, dx + b\int g \, dx$. Always applied first — split sums and pull out constants.
-2. **Linear substitution**: if the integrand matches a table entry with $x$ replaced by $(ax + b)$, apply the substitution rule: $\int f(ax+b) \, dx = \frac{1}{a} F(ax+b)$. E.g., $\int \sin(3x+1) \, dx = -\frac{1}{3}\cos(3x+1)$.
-3. **Power rule generalization**: $\int u^n \cdot u' \, dx = \frac{u^{n+1}}{n+1}$ where $u$ is a sub-expression of $x$. Check if the integrand has the form $f(u) \cdot u'$ for common $f$.
-4. **Integration by parts** (one level only): if the integrand is a product $u \cdot v$, try $\int u \, dv = uv - \int v \, du$ with heuristic choice of $u$ and $dv$ (LIATE rule: Logarithmic, Inverse trig, Algebraic, Trig, Exponential). Attempt this once — don't recurse IBP, as that risks infinite loops and memory exhaustion.
-
-If all methods fail, `integrate()` returns `nullptr` and the UI reports that symbolic integration was unsuccessful, offering to compute a numeric definite integral via Simpson's rule or Gauss-Legendre quadrature instead.
-
-### 6.9 CAS user interface
-
-CAS operations are accessible from the home screen via a menu. The interaction model:
-
-1. Type an expression on the home screen (e.g., `x^3 - 3*x + 2`)
-2. Press a CAS key (mapped to a function key or key combo — e.g., `2nd` + `ENTER` for CAS menu)
-3. A menu appears:
-
-```
-  CAS Operations
-  ─────────────────
-  1: Simplify
-  2: Expand
-  3: Factor
-  4: Differentiate → d/dx
-  5: Integrate → ∫dx
-  6: Solve for x
-```
-
-4. Result appears pretty-printed in the history, tagged as "symbolic" with a different accent color (e.g., dark blue vs. black for numeric results)
-
-Alternatively, CAS functions are callable directly as expression syntax:
-
-```
-diff(x^3, x)          → 3x²
-integ(sin(x), x)      → -cos(x)
-solve(x^2 - 4 = 0, x) → {-2, 2}
-factor(x^2 - 4)       → (x-2)(x+2)
-expand((x+1)^3)       → x³ + 3x² + 3x + 1
-simplify(2x/4x^2)     → 1/(2x)
-```
-
-These CAS functions are registered in the expression parser alongside the numeric functions, but routed to the symbolic engine instead of tinyexpr++. Detection is simple: if the expression contains a CAS keyword (`diff`, `integ`, `solve`, `factor`, `expand`, `simplify`), the entire expression is parsed by the CAS parser and processed symbolically.
+~~4A computes real eigenvalues only. With the complex type available, a follow-up (deferred, noted in open questions) could return complex-conjugate eigenvalue pairs. Not in Phase 4 scope unless time permits.~~ *(superseded by D30 — see decisions.md)*
 
 ---
 
-## 7. Sub-phase 4E: MicroPython programming (weeks 37–39)
+## 6. CAS engine — moved to Phase 5
 
-### 7.1 Embedding strategy
+The CAS engine (symbolic expression tree, simplification, differentiation,
+expansion/factoring, symbolic equation solving, symbolic integration, and
+the CAS user interface) was originally specced here as sub-phase 4D. It
+has been split out into its own phase given its size (~124 of this
+phase's original ~320 estimated hours) and risk profile relative to the
+rest of what was Phase 4.
 
-MicroPython provides an `embed` port specifically designed for hosting MicroPython inside a larger C/C++ application. The firmware includes the MicroPython interpreter as a library, not a standalone runtime.
+**See [phase5-spec.md](phase5-spec.md) for the full spec.** The content
+that used to live in this section (§6.1–6.9) now lives there as
+top-level sections §2–§10, unchanged in substance — only the phase
+boundary moved. Background: [decisions.md](../notes/decisions.md) D32,
+[ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md) §8.
 
-```cpp
-namespace scripting {
+---
 
-class PythonInterpreter {
-public:
-    // Initialize the MicroPython runtime.
-    // heap_size: bytes allocated for the Python heap.
-    //   Pico 1: 48 KB from SRAM (leaves ~80KB for app + stack)
-    //   Pico 2: 96 KB from SRAM
-    // PSRAM is NOT directly usable as Python heap (too slow for
-    // GC scanning), but individual large allocations can be proxied.
-    bool init(size_t heap_size);
-    
-    void shutdown();
-    
-    // Execute a Python string (single statement or block).
-    // Returns true if execution succeeded.
-    // Output is captured and passed to output_callback.
-    bool exec(const char* code);
-    
-    // Execute a .py file from the SD card.
-    bool exec_file(const char* path);
-    
-    // Register a C function as a Python built-in.
-    // Used to expose calculator APIs to scripts.
-    void register_function(const char* module, const char* name,
-                           void* c_func);
-    
-    // Check if interpreter is initialized.
-    bool is_running() const;
-    
-    // Set callback for print() output.
-    using OutputCallback = void (*)(const char* text);
-    void set_output_callback(OutputCallback cb);
-    
-    // Set callback for input() requests.
-    using InputCallback = const char* (*)(const char* prompt);
-    void set_input_callback(InputCallback cb);
-    
-private:
-    bool initialized_ = false;
-};
+## 7. Sub-phase 4D: GC completeness pass (weeks 32–35)
 
-} // namespace scripting
-```
+This sub-phase has a different shape from 4A–4C: instead of one coherent
+subsystem, it's a grab-bag closing pass that pulls together every gap the
+[TI parity stocktake](../notes/ti-parity-2026-07-21.md) found against
+TI-83/84+ (excluding CAS-tier items, which are Phase 5) plus the two
+lowest-risk ideas from the
+[design-departures doc](../notes/design-departures-matrix-complex.md)
+(home-screen matrix literals, complex-valued storage). The organizing
+question for every item here is the same: **would a TI-83/84+ user
+notice this missing?** If yes, it belongs in 4D. If it's Nspire-CAS-tier
+(symbolic display, exact-value arithmetic) it stays out — either deferred
+to Phase 5 or left as a standalone wishlist item.
 
-### 7.2 Calculator API bindings (`calc` Python module)
+### 7.1 Display & number formatting
 
-User scripts import a `calc` module that exposes calculator functionality:
+- **ENG display format**: a third exponent-grouping mode alongside
+  FLOAT/FIX/SCI, exponents forced to multiples of 3 (matches TI's
+  MODE row). Small, contained change to `math::format`.
+- **`▶Frac` / `▶Dec` toggle**: convert a decimal result to a fraction via
+  a bounded continued-fraction search (denominator cap, e.g. $\leq 10000$) and
+  back. This is arithmetic, not CAS — no symbolic tree needed, just a
+  `frac.hpp` helper (`bool decimal_to_fraction(calc_t, int* num, int* den,
+  int max_den)`) and a result-formatting hook. Closes the "fraction
+  display" parity gap without pulling in Phase 5.
+- **Pi-multiple axis tick labels**: when a tick value is a rational
+  multiple of $\pi$ within tolerance, label it symbolically (`$\pi/2$`,
+  `$3\pi$`) instead of a decimal. Purely a graph-axis rendering rule —
+  doesn't need the CAS `Expr` tree, just a rational-multiple-of-$\pi$
+  detector reused from the same logic `▶Frac` needs.
+- **True subscripts** (`Sₓ`, `σₓ`) in stats/inference output, closing the
+  last piece of the wishlist's "Greek/typographic stats display" item
+  (D31 shipped the Greek letters; subscripts were explicitly left open).
+  Needs a subscript primitive in `render::LayoutNode`, not just a baked
+  glyph.
+- **Vertical centering for fraction expressions**: the wishlist item —
+  stacked numerator/denominator currently top-aligns to the text line
+  instead of centering on the fraction bar. Layout-builder fix.
 
-```python
-import calc
+### 7.2 Graphing completeness
 
-# Expression evaluation
-result = calc.eval("2 + 3 * sin(pi/4)")
+- **Sequence graphing mode** (`u`, `v`, `w`): the largest single item in
+  this sub-phase. TI's third graph mode alongside function/parametric —
+  recursively defined sequences (`u(n) = u(n-1) + 1`, optionally
+  referencing a second sequence `v(n-1)`), plotted either as
+  time-series (`n` vs. `u(n)`) or web/cobweb plots. Follows the same
+  shape as Phase 2's parametric/polar addition: a new `GraphMode::kSeq`,
+  a `seq_expr` evaluator (`math/seq_expr.{hpp,cpp}`) that handles
+  recursive self-reference with memoization (bounded — a sequence table
+  can't recompute from `n=0` every redraw), a `seq_points` point source
+  (`graph/seq_points.{hpp,cpp}`), and a dedicated editor
+  (`apps/seq_editor.{hpp,cpp}`) for `nMin`, `u(n)`, `u(nMin)` seed
+  values. Reuses the existing table/trace/window machinery per-mode, the
+  same way Phase 2 did.
+- **Zoom preset expansion**: `ZBox` (drag-select a rectangular region —
+  needs a two-corner cursor interaction, new but small, similar shape to
+  the 4B analysis cursor), `ZDecimal` (window bounds land on exact
+  0.1 multiples so trace values are clean), `ZSquare` (adjusts one axis
+  so 1 unit is the same pixel distance on both axes, accounting for the
+  $320\times320$ panel's aspect ratio — trivial here since it's square,
+  unlike TI's non-square LCDs).
+- **Shading**: generalize the existing fnInt-only column shading (4B) to
+  a standalone `Shade(lower, upper)` graph-screen operation and basic
+  inequality shading (`y > f(x)`-style, shade above/below a curve). Reuses
+  the column-fill approach 4B already built (D29 §6), extended to a
+  user-invoked mode rather than only CALC-menu-triggered.
 
-# Variables
-calc.store("A", 42)
-val = calc.recall("A")
+### 7.3 Data, matrices & complex numbers
 
-# Graphing
-calc.plot("sin(x)", color="blue")
-calc.plot("cos(x)", color="red")
-calc.window(-10, 10, -2, 2)
-calc.show_graph()
+- **List↔matrix bridge**: `List►matr(l1, l2, ..., [A])` packs lists into
+  matrix columns; `Matr►list([A], l1, l2, ...)` unpacks columns back to
+  lists. Straightforward glue between the existing `Array`-backed list
+  and matrix storage — no new storage model, just a conversion function
+  in `matexpr`.
+- **Named/more lists**: raise the fixed 6-list (`l1`..`l6`) cap — either
+  more fixed slots or (bigger lift) named user lists. Scope the actual
+  cap increase against `ArrayStore` slab headroom (Pico 1 bss is already
+  tight — see D28's recurring watch item) before committing to "how
+  many"; this item is explicitly capped by that constraint, not by
+  design intent.
+- **Home-screen matrix literals** (design-departures idea A):
+  `[[1,2][3,4]]` typed directly on the home screen, not just built in the
+  matrix editor. Closes the D28 tradeoff. Parser-only change in
+  `matexpr` — materializes into `MatAns`, no storage-model change.
+- **Complex-valued variable and `Ans` storage** (design-departures idea
+  B): widen `Variables::vars` and the `Ans` cache to hold either a real
+  `calc_t` or a `Complex`, closing the D30 gap (`2i->a` currently
+  errors). See the design-departures doc's own scoping notes — this is
+  moderate risk (a real storage-type widening, touches every
+  `Variables::vars` read site) but explicitly doesn't touch the graphing
+  hot path, same dual-path precedent 4C established.
+  **Complex-valued lists and matrices (departures ideas C/D) are
+  explicitly out of scope for 4D** — the design-departures doc flags
+  those as needing a real Pico 1 memory feasibility study first, which
+  is bigger than a "closing pass" item. Revisit as a standalone item
+  post-4D if wanted.
+- **Additional stat plot types**: `xyLine` (scatter with points connected
+  in list order) and normal probability plot, rounding out the
+  histogram/box/scatter set from Phase 3D to match TI's full stat-plot
+  menu.
 
-# CAS operations
-d = calc.diff("x^3 - 2*x", "x")    # Returns "3*x^2 - 2"
-i = calc.integ("sin(x)", "x")       # Returns "-cos(x)"
-s = calc.solve("x^2 - 4 = 0", "x") # Returns ["-2", "2"]
-s2 = calc.solve("x^2 + 1 = 0", "x")# Returns ["i", "-i"] (complex-aware)
-f = calc.factor("x^2 - 4")          # Returns "(x-2)*(x+2)"
+### 7.4 Scientific extras
 
-# Complex numbers
-z = calc.complex(3, 2)              # 3 + 2i
-mag = calc.c_abs(z)                 # 3.606...
-ang = calc.c_arg(z)                 # 0.588...
-cj = calc.c_conj(z)                 # 3 - 2i
+- **Scientific constants menu**: a curated catalog (speed of light,
+  Planck's constant, Avogadro's number, elementary charge, gas constant,
+  etc. — TI-84 CE's constants list is the reference set) insertable from
+  a menu or typed by name, backed by `math/constants.{hpp,cpp}` — a
+  flat, read-only table, no new evaluator needed.
+- **Unit conversions**: length/mass/temperature/volume/etc. conversion
+  pairs, either a `convert(value, "from", "to")` function or a dedicated
+  conversion screen. Backed by `math/units.{hpp,cpp}` — a conversion
+  table keyed by unit-family, plus one multiply/offset per pair. No
+  research risk here, just breadth of catalog to decide (scope the unit
+  list to TI-84 CE's set rather than trying to be exhaustive).
 
-# Graph analysis (numeric)
-root = calc.graph_zero("Y1", -5, 5)      # numeric root in bracket
-mx   = calc.graph_max("Y1", 0, 10)       # local maximum
-area = calc.graph_integral("Y1", 0, 3.14)# numeric definite integral
-slope= calc.graph_deriv("Y1", 2.0)       # numeric dy/dx at x=2
+### 7.5 Device & system polish
 
-# Matrix operations
-m = calc.matrix([[1, 2], [3, 4]])
-det = calc.det(m)
-inv = calc.inverse(m)
+- **Auto power-off / standby (APD)**: an inactivity timer that drops to
+  a low-power sleep state after N minutes idle, waking on any key press.
+  Needs `platform/power.{hpp,cpp}`, an idle timer reset on every input
+  event, and confirmation that the display/keyboard HAL actually
+  supports a low-power sleep path (feasibility check first — the
+  wishlist item flags this as unscoped for exactly this reason).
+- **Remember screen brightness / keypad backlight**: persist the current
+  brightness/backlight level across power cycles instead of resetting.
+  Same feasibility caveat as APD — depends on whether the PicoCalc's
+  brightness/backlight controls are readable back or write-only; check
+  before committing to a design.
+- **Build-identifier diag label**: replace the stale hardcoded
+  `"[milestone 1]"` string (`src/main.cpp:213`, unchanged since the
+  Phase 1 bootstrap) with the current phase and a build identifier — git
+  short hash if the tree is clean, `dev` otherwise. Needs CMake to
+  capture `git rev-parse --short HEAD` plus a `git status --porcelain`
+  clean/dirty check and pass it through as a compile definition. Small,
+  but exactly the kind of loose end a "pre-release milestone" phase
+  should close rather than carry forward again.
 
-# Lists (from Phase 3)
-calc.set_list(1, [1, 2, 3, 4, 5])
-mean = calc.stat_mean(1)
-
-# Display
-calc.clear_screen()
-calc.draw_text(10, 10, "Hello from Python!")
-calc.draw_line(0, 0, 319, 319, "white")
-calc.draw_rect(50, 50, 100, 80, "blue", fill=True)
-
-# Input
-key = calc.wait_key()
-text = calc.input("Enter value: ")
-
-# File I/O (SD card)
-calc.write_file("/picocalc/data.txt", "hello")
-content = calc.read_file("/picocalc/data.txt")
-```
-
-Each `calc.*` function is a thin C++ wrapper that calls into the existing `math::Engine`, `math::cas::*`, `math::Matrix`, `platform::Display`, `platform::Keyboard`, and `platform::Storage` classes.
-
-### 7.3 Program editor screen
-
-A simple on-device text editor for writing and editing Python scripts:
-
-```
-┌──────────────────────────────────┐
-│  Edit: program.py                 │
-├──────────────────────────────────┤
-│  1│ import calc                    │
-│  2│                                │
-│  3│ for i in range(10):            │
-│  4│   y = calc.eval(f"sin({i})")   │
-│  5│   calc.draw_text(10, i*20, str │
-│  6│ |                              │
-│  7│                                │
-│                                    │
-├──────────────────────────────────┤
-│ F1:RUN F2:SAVE F3:LOAD F4:NEW    │
-└──────────────────────────────────┘
-```
-
-**Features**:
-
-- Line-numbered display with cursor (row + column)
-- Arrow key navigation, `ENTER` inserts newline
-- `BACKSPACE` / `DEL` work as expected
-- Auto-indent on `ENTER` after `:` (match Python expectations)
-- `F1` (RUN): save current buffer, execute via `PythonInterpreter::exec_file()`
-- `F2` (SAVE): write to `/picocalc/programs/<name>.py`
-- `F3` (LOAD): file browser for `/picocalc/programs/`, select a `.py` file
-- `F4` (NEW): clear buffer, prompt for filename
-- Syntax highlighting is a stretch goal — basic keyword coloring (`import`, `def`, `for`, `if`, `while`, `return`) if time permits
-
-**Output capture**: when a script runs, `print()` output goes to a scrollable output pane that replaces the editor temporarily. Press `ESCAPE` to return to the editor. Errors display with the line number and exception message.
-
-### 7.4 Memory budget for MicroPython
-
-| Component | Pico 1 (SRAM) | Pico 2 (SRAM) |
-|-----------|---------------|---------------|
-| MicroPython interpreter + stdlib | ~60 KB flash | ~60 KB flash |
-| Python heap (GC-managed) | 48 KB | 96 KB |
-| C stack for Python calls | 8 KB | 8 KB |
-| **Total SRAM impact** | **~56 KB** | **~104 KB** |
-
-On Pico 1, this leaves ~80 KB SRAM for the rest of the application (HAL, UI, math engine, line buffers). This is tight but workable because the CAS pool lives in PSRAM and the framebuffer uses line-buffer rendering. The MicroPython interpreter is only initialized when the user enters the programming screen — it doesn't consume memory when doing normal calculator work.
-
-On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus ~200 KB for framebuffer still leaves ~216 KB.
+**Explicitly out of scope for 4D** (per the parity doc's own boundary):
+CAS-tier items (symbolic simplify, surd/exact-value display, arbitrary
+symbolic differentiation/integration) — Phase 5. MicroPython and any
+other non-calculator app — Phase 6. Complex-valued lists/matrices
+(departures ideas C/D) and the unified tagged-value evaluator (idea F) —
+explicitly deferred past 4D, see §7.3 above.
 
 ---
 
@@ -1132,53 +739,34 @@ Solo developer, part-time (~20 hrs/week).
 | 4C.9 | Number-mode screen + persistence | 2 | Mode survives power cycle |
 | | **Subtotal** | **~38 hrs** | |
 
-### Sub-phase 4D: CAS engine (weeks 32–36)
+*(Sub-phase 4D, CAS engine, ~124 hrs — moved to [phase5-spec.md](phase5-spec.md) §11, task IDs kept as `4D.n` there for continuity.)*
+
+### Sub-phase 4D: GC completeness pass (weeks 32–35)
 
 | # | Task | Est. hrs | Acceptance |
 |---|------|---|---|
-| 4D.1 | `Expr` tree + pool allocator | 6 | Construct, clone, compare trees |
-| 4D.2 | CAS expression parser (string → `Expr`) | 10 | `2*x^2 + 3*x - 1` → correct tree |
-| 4D.3 | `expr_to_string` | 4 | Round-trip parse→serialize |
-| 4D.4 | `expr_to_layout` (natural-math render) | 4 | CAS results pretty-printed |
-| 4D.5 | Simplify: identity/annihilation/constant fold | 6 | `x + 0` → `x`; `2 + 3` → `5` |
-| 4D.6 | Simplify: like-terms, canonical order, `i^2=-1` | 8 | `3x + 5x` → `8x`; `i*i` → `-1` |
-| 4D.7 | Simplify: fraction reduction | 4 | `2x/(4x^2)` → `1/(2x)` |
-| 4D.8 | Symbolic differentiation (all rules) | 8 | `diff(x^3*sin(x))` correct |
-| 4D.9 | Higher-order differentiation | 2 | `diff(diff(x^4))` → `12x^2` |
-| 4D.10 | Expand (distribute, binomial) | 6 | `(x+1)^3` expanded |
-| 4D.11 | Factor (common, diff-of-squares, quadratic) | 8 | `x^2 - 4` → `(x-2)(x+2)` |
-| 4D.12 | Factor (rational root, degree 3–4) | 6 | `x^3-6x^2+11x-6` → 3 factors |
-| 4D.13 | Solve: linear + quadratic (real) | 6 | `x^2-5x+6=0` → `{2,3}` |
-| 4D.14 | Solve: complex roots (needs 4C) | 4 | `x^2+1=0` → `{i,-i}` |
-| 4D.15 | Solve: inverse-function isolation | 4 | `sin(x)=1/2` → `pi/6` |
-| 4D.16 | Integrate: table + linearity | 8 | `integ(x^3)` → `x^4/4` |
-| 4D.17 | Integrate: linear substitution, power rule | 6 | `integ(sin(3x+1))` correct |
-| 4D.18 | Integrate: one-level integration by parts | 6 | `integ(x*e^x)` correct |
-| 4D.19 | Definite integration (symbolic + numeric fallback) | 4 | $\int_0^\pi \sin x\,dx$ = 2 |
-| 4D.20 | CAS menu UI + expression routing | 4 | CAS ops from home-screen menu |
-| 4D.21 | CAS function syntax (`diff()`, `integ()`, etc.) | 4 | Callable inline from input |
-| 4D.22 | Stress testing + edge cases | 6 | Nested exprs, complex roots, guards |
-| | **Subtotal** | **~124 hrs** | |
-
-### Sub-phase 4E: MicroPython programming (weeks 37–39)
-
-| # | Task | Est. hrs | Acceptance |
-|---|------|---|---|
-| 4E.1 | Build MicroPython embed lib (both boards) | 8 | `print(1+1)` → "2" on serial |
-| 4E.2 | `PythonInterpreter` wrapper | 4 | Init/exec/shutdown clean |
-| 4E.3 | `calc` module: eval, variables, store/recall | 6 | `calc.eval("sin(pi/4)")` correct |
-| 4E.4 | `calc` module: CAS bindings (incl. complex solve) | 4 | `calc.solve("x^2+1=0","x")` → `["i","-i"]` |
-| 4E.5 | `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = 5 |
-| 4E.6 | `calc` module: graph-analysis bindings | 4 | `calc.graph_zero`, `graph_integral` work |
-| 4E.7 | `calc` module: matrix bindings | 3 | Create/multiply/invert from Python |
-| 4E.8 | `calc` module: display primitives | 4 | Script draws graphics |
-| 4E.9 | `calc` module: keyboard input | 3 | Read keys, text input |
-| 4E.10 | `calc` module: file I/O | 2 | Read/write SD files |
-| 4E.11 | Program editor screen | 10 | Write a 20-line script on-device |
-| 4E.12 | Execution: output capture, error display | 4 | print output + line-numbered errors |
-| 4E.13 | Load/save scripts to SD | 3 | Save, power cycle, reload, run |
-| 4E.14 | Memory management: lazy init, cleanup | 3 | Heap freed on leaving program screen |
-| | **Subtotal** | **~61 hrs** | |
+| 4D.1 | ENG display format | 3 | `1234` in ENG shows `1.234E3` |
+| 4D.2 | `▶Frac`/`▶Dec` toggle (bounded continued-fraction) | 6 | `0.75 ▶Frac` → `3/4` |
+| 4D.3 | Pi-multiple axis tick labels | 4 | Tick at $\pi/2$ shows `$\pi/2$` not `1.5708` |
+| 4D.4 | True subscripts in stats/inference render | 5 | `Sₓ`, `σₓ` render with a real subscript |
+| 4D.5 | Fraction vertical centering | 2 | Stacked fraction centers on the bar |
+| 4D.6 | Sequence graphing: `seq_expr` evaluator + memoized recursion | 10 | `u(n)=u(n-1)+1, u(0)=1` tables correctly |
+| 4D.7 | Sequence graphing: point source + time-series/web plot | 8 | Sequence plots on graph screen |
+| 4D.8 | Sequence editor screen + window/table integration | 8 | Enter `nMin`, `u(n)`, seed; graph/table work |
+| 4D.9 | `ZBox` (drag-select zoom) | 5 | Select region, window updates |
+| 4D.10 | `ZDecimal` / `ZSquare` | 3 | Bounds land on clean multiples / equal-aspect |
+| 4D.11 | `Shade()` + inequality shading | 5 | `y > x^2` shades correctly |
+| 4D.12 | `List►matr` / `Matr►list` | 3 | Round-trips `l1,l2 ↔ [A]` correctly |
+| 4D.13 | List cap increase (scope against Pico 1 headroom first) | 4 | New cap set, existing tests pass |
+| 4D.14 | Home-screen matrix literals | 4 | `[[1,2][3,4]]` evaluates from home screen |
+| 4D.15 | Complex-valued `Variables`/`Ans` storage | 10 | `2i->a` stores; `a` reads back as `2i` |
+| 4D.16 | `xyLine` + normal probability stat plots | 5 | Both plot types render correctly |
+| 4D.17 | Scientific constants catalog + menu | 4 | Insert `c` (speed of light) from menu |
+| 4D.18 | Unit conversions catalog + `convert()` | 6 | `convert(1, "mi", "km")` ≈ 1.609 |
+| 4D.19 | Auto power-off (APD) — feasibility check first | 8 | Idles to sleep, wakes on key press |
+| 4D.20 | Brightness/backlight persistence — feasibility check first | 4 | Setting survives power cycle |
+| 4D.21 | Build-identifier diag label | 2 | Diag screen shows hash or `dev` |
+| | **Subtotal** | **~109 hrs** | |
 
 ### Summary
 
@@ -1187,9 +775,10 @@ Solo developer, part-time (~20 hrs/week).
 | 4A: Matrix operations | 26–27 | ~46 | Matrix editor, arithmetic, rref/det/inverse/eigen, numeric solver |
 | 4B: Graph analysis (CALC) | 28–29 | ~51 | value/zero/min/max/intersect/dy-dx/fnInt, interactive on graph |
 | 4C: Complex numbers | 30–31 | ~38 | Complex type, functions, a+bi/polar mode |
-| 4D: CAS engine | 32–36 | ~124 | Symbolic diff/simplify/factor/solve (complex)/integrate |
-| 4E: MicroPython | 37–39 | ~61 | Interpreter, `calc` module, editor, SD scripts |
-| **Total Phase 4** | **~14 weeks** | **~320 hrs** | |
+| 4D: GC completeness | 32–35 | ~109 | Sequence mode, zoom/shading, list↔matrix, sci constants/units, home-screen matrix literals, complex storage, device polish |
+| **Total Phase 4** | **26–35 (~10 weeks)** | **~244 hrs** | Pre-release milestone: full TI-83/84+-class GC functionality |
+| *CAS engine — moved to Phase 5* | *32–36* | *~124* | *see [phase5-spec.md](phase5-spec.md) §11* |
+| *MicroPython — moved to Phase 6* | | *~61* | *see [phase6-spec.md](phase6-spec.md) §5* |
 
 ---
 
@@ -1211,20 +800,7 @@ All interactive-grade. fnInt on a hard integrand (many subdivisions) is the wors
 
 Complex arithmetic is 2–$6\times$ the cost of real (a complex multiply is 4 real multiplies + 2 adds). Since complex evaluation is confined to the home-screen path (never graphing), this is imperceptible for single expressions. Complex elementary functions (`c_exp`, `c_ln`) cost ~2–$3\times$ their real counterparts.
 
-### CAS operation benchmarks (estimated)
-
-| Operation | Typical size | Pico 1 | Pico 2 |
-|-----------|--------------|--------|--------|
-| Simplify (basic polynomial) | ~30 nodes | 1–5 ms | <1 ms |
-| Differentiate | ~30 → ~80 nodes | 2–10 ms | <2 ms |
-| Factor (degree 3) | ~15 nodes | 5–20 ms | 1–5 ms |
-| Expand $(x+1)^{10}$ | ~5 → ~55 nodes | 10–50 ms | 2–10 ms |
-| Solve (quadratic, incl. complex) | ~15 nodes | 2–10 ms | <2 ms |
-| Integrate (table match) | ~20 nodes | 1–5 ms | <1 ms |
-| Integrate (IBP, one level) | ~30 nodes | 10–50 ms | 2–10 ms |
-| Simplify (200+ nodes, multi-pass) | ~200 nodes | 50–500 ms | 10–100 ms |
-
-Worst-case complex simplification approaches ~0.5 s on Pico 1 — perceptible but acceptable (the TI-89 often took longer at 10–12 MHz).
+*(CAS operation benchmarks moved to [phase5-spec.md](phase5-spec.md) §12.)*
 
 ### Matrix benchmarks (estimated)
 
@@ -1238,17 +814,27 @@ Worst-case complex simplification approaches ~0.5 s on Pico 1 — perceptible bu
 
 Large matrices ($>$ $20\times20$) are slow on Pico 1 — acceptable, as these are uncommon in handheld use.
 
+### GC completeness (4D)
+
+Nearly all of 4D is either a lookup (constants/units catalogs, O(1)) or a
+UI/parser change with no meaningful runtime cost. The two items worth a
+performance note:
+
+| Operation | Method | Pico 1 | Pico 2 |
+|-----------|--------|--------|--------|
+| Sequence table recompute | memoized recursion, capped depth | 1–10 ms typical | <1 ms |
+| `▶Frac` conversion | bounded continued-fraction search | <1 ms | <1 ms |
+
+Sequence mode's memoization needs a cap — an unbounded `u(n-1)` chain
+from a large `n` without a memo table is $O(n)$ recursive calls per
+redraw, which is the one place in 4D that could actually stutter if
+implemented naively.
+
 ---
 
 ## 10. Risks and mitigations
 
-### Risk 1: CAS simplification infinite loops
-
-Poorly ordered rewriting rules can cycle. **Mitigation**: hard cap on simplification passes (50 iterations); canonical ordering of commutative operands for deterministic matching; test suite of tricky expressions ($\frac{x}{x}$, $0^0$, $(x+y)^{20}$, `i^4`).
-
-### Risk 2: CAS pool memory exhaustion
-
-Expanding $(x+y+z)^{15}$ produces thousands of nodes. **Mitigation**: check pool capacity before expansion; abort with an error above 80% capacity; pool can grow into PSRAM (up to 512 KB) for specific operations.
+*(Risks 1, 2, and 5 were CAS-specific — moved to [phase5-spec.md](phase5-spec.md) §13. Numbering below is left as originally assigned, matching cross-references elsewhere in this document and in decisions.md.)*
 
 ### Risk 3: Complex evaluation slowing the hot path
 
@@ -1258,58 +844,71 @@ If the numeric evaluator became complex-by-default, graphing would slow 2–$6\t
 
 Adaptive Gauss-Kronrod can over-subdivide on oscillatory or singular integrands, becoming slow. **Mitigation**: cap subdivision depth; report the error estimate alongside the result; fall back to a coarser fixed rule if the depth cap is hit rather than hanging.
 
-### Risk 5: CAS ↔ complex representation seams
+*(Risks 6 and 7 were MicroPython-specific — moved to
+[phase6-spec.md](phase6-spec.md) §7. Numbering left as originally
+assigned.)*
 
-The symbolic `i` (a reserved VAR) and the numeric `Complex` type are two representations of the same concept; conversion bugs are likely. **Mitigation**: centralize conversion in one place (`cas/solve.cpp` helper functions `complex_to_expr` / `expr_to_complex`); unit-test the round trip; keep the rule $i^2 = -1$ in exactly one simplification rule.
+### Risk 8: 4D's breadth invites scope creep
 
-### Risk 6: MicroPython heap too small on Pico 1
+Unlike 4A–4C, 4D has no single hard technical core — it's ~20 mostly
+independent small features. The risk isn't any one item failing, it's
+the sub-phase quietly growing as each item picks up "just one more"
+extension (e.g., sequence mode acquiring web/cobweb-plot styling
+options TI itself treats as a stretch feature). **Mitigation**: hold the
+line at the parity-doc-derived scope in §7 above; anything beyond it
+goes back to the wishlist rather than expanding 4D's task list
+mid-implementation.
 
-48 KB Python heap limits script complexity. **Mitigation**: document the limit; store large data in `calc`-module lists/matrices (PSRAM, outside the Python heap); Pico 2 doubles the heap.
+### Risk 9: APD / brightness persistence feasibility is unverified
 
-### Risk 7: Building MicroPython for both RP2040 and RP2350
-
-**Mitigation**: MicroPython officially supports both. Build the embed lib as a separate CMake external project per board target. Test the embed build early (4E.1) before writing bindings.
+Both device-polish items (§7.5) assume the display/keyboard HAL supports
+a low-power sleep path and that brightness/backlight state is readable
+back, neither confirmed yet. **Mitigation**: both task rows (4D.19,
+4D.20) are explicitly flagged "feasibility check first" in §8 — spend an
+hour confirming the HAL surface before scoping the real implementation;
+if either turns out to be write-only/unsupported, drop that item back to
+the wishlist rather than forcing it.
 
 ---
 
 ## 11. Open questions for Phase 4
 
+*(P4-1, P4-2, P4-3 were CAS-specific — moved to [phase5-spec.md](phase5-spec.md) §14 as P5-1/P5-2/P5-3. P4-4/P4-5 were MicroPython-specific — moved to [phase6-spec.md](phase6-spec.md) §8 as P6-1/P6-2. Numbering below is left as originally assigned.)*
+
 | # | Question | Options | When |
 |---|----------|---------|------|
-| P4-1 | Store CAS results in the same history as numeric results? | Unified vs. separate CAS history | Week 32 |
-| P4-2 | Represent symbolic results in variables (e.g., `A = x^2+1`)? | Allow expression-valued variables vs. numeric-only | Week 32 |
-| P4-3 | Implicit multiplication globally, or CAS-mode only? | CAS-only (safer) vs. global (natural) | Week 32 |
-| P4-4 | Python heap: static at boot or lazy on first use? | Lazy saves ~56 KB when unused | Week 37 |
-| P4-5 | `calc.plot()` from Python: immediate graph switch or buffered? | Immediate vs. buffered | Week 38 |
 | P4-6 | CALC intersect with >2 curves: pick two via cursor, or list? | Cursor-cycle vs. explicit picker | Week 28, task 4B.5 |
 | P4-7 | Complex eigenvalues for matrices (4A produces real only)? | Add conjugate-pair support in 4C, or defer | Week 30, task 4C — likely defer |
 | P4-8 | Polar `fnInt`: area ($\frac{1}{2}\int r^2 d\theta$) only, or also arc length? | Area matches TI; arc length is a nice extra | Week 29, task 4B.8 |
 | P4-9 | Number-mode default on first boot: REAL or RECTANGULAR? | REAL matches TI default; RECT is friendlier | Week 31, task 4C.9 |
+| P4-10 | List cap increase (4D.13): how many lists, fixed slots or named? | Bounded by Pico 1 `ArrayStore` headroom — scope at implementation time | Week 32-35, task 4D.13 |
+| P4-11 | Complex storage (4D.15): do real-only readers (matexpr scalar subterms, listexpr) error or silently truncate on a complex-valued variable? | Error (matches REAL-mode precedent) vs. silent real-part truncation | Week 32-35, task 4D.15 |
+| P4-12 | Sequence mode: support two-sequence cross-reference (`u(n)` referencing `v(n-1)`) in v1, or single-sequence only? | TI supports cross-reference; single-sequence is simpler first cut | Week 32-35, task 4D.6 |
 
 ---
 
 ## 12. Reconciliation notes
 
 - **Matrix on `Array`** (§3): Phase 4's `Matrix` is now a linear-algebra view over Phase 3's 2-D `Array`, not a standalone storage class. This resolves the reconciliation flagged in Phase 3 §10. Storage, allocation, and element access come from `Array`; `Matrix` adds only linear-algebra methods.
-- **Numeric vs. symbolic calculus**: 4B's `dy/dx` and `fnInt` are numeric and live on the graph screen; 4D's `differentiate` and `integrate` are symbolic and live in the CAS menu. They are complementary, not duplicative — documented in §6's intro.
-- **Complex before CAS**: 4C precedes 4D so CAS `solve` can return complex roots. The symbolic `i` and numeric `Complex` share a conversion layer (§5.5, Risk 5).
-- **Dual evaluation path**: the complex subsystem must not slow graphing. `evaluate_real()` stays the hot path; `evaluate_complex()` is home-screen only (§5.2, Risk 3).
+- **Numeric vs. symbolic calculus**: 4B's `dy/dx` and `fnInt` are numeric and live on the graph screen; Phase 5's `differentiate` and `integrate` are symbolic and live in the CAS menu. They are complementary, not duplicative — documented in phase5-spec.md §1.
+- **Complex before CAS**: 4C shipped before Phase 5 so CAS `solve` can return complex roots. The symbolic `i` and numeric `Complex` share a conversion layer (§5.5; phase5-spec.md §13 Risk 5).
+- **Dual evaluation path**: the complex subsystem must not slow graphing. `evaluate_real()` stays the hot path; `evaluate_complex()` is home-screen only (§5.2, Risk 3). This rule now also binds Phase 5's CAS parsing/evaluation, not just this document's own complex subsystem.
+- **Sequence mode reuses Phase 2's per-mode pattern**: 4D.6–4D.8 (§7.2) follow the exact shape Phase 2 established for parametric/polar — a mode enum value, a dedicated expression evaluator, a point source, and a mode-aware editor/table/window, all riding the existing trace/split-screen machinery. No new architectural pattern, just a third instance of an existing one.
+- **4D depends on 4A–4C, not vice versa**: home-screen matrix literals (4D.14) and complex storage (4D.15) extend `matexpr` (4A, D28) and `Variables`/`NumberMode` (4C, D30) respectively. Nothing in 4A–4C was written anticipating 4D — this is why 4D is scoped last.
 
 ---
 
 ## 13. References
 
 1. Phase 1 spec — [phase1-spec.md](phase1-spec.md)
-2. Phase 2 spec — [phase2-spec.md](phase2-spec.md)
+2. Phase 2 spec (parametric/polar mode pattern §7.2 reuses) — [phase2-spec.md](phase2-spec.md)
 3. Phase 3 spec (Array primitive, stat-plot layer) — [phase3-spec.md](phase3-spec.md)
-4. DB48X source (CAS reference) — https://github.com/c3d/db48x
-5. DB48X symbolic operations — https://github.com/c3d/db48x/releases/tag/v0.8.1
-6. KhiCAS / Giac (full CAS on calculators) — https://github.com/nwagyu/khicas
-7. MicroPython embed port — https://docs.micropython.org/en/latest/develop/embed.html
-8. MicroPython RP2040/RP2350 support — https://micropython.org/download/RPI_PICO/
-9. tinyexpr++ (numeric evaluation) — https://github.com/Blake-Madden/tinyexpr-plus-plus
-10. Brent's method (extrema) — Brent, "Algorithms for Minimization without Derivatives"
-11. Gauss-Kronrod quadrature — Piessens et al., QUADPACK
-12. NIST DLMF (integration tables, special functions) — https://dlmf.nist.gov/
-13. TI-84 Plus CALC menu guidebook — https://education.ti.com/en/guidebook/details/en/6152F7C2E0B9491482D4CF5C3EEB6EB1/84plce
-14. QR algorithm for eigenvalues — Golub & Van Loan, "Matrix Computations"
+4. Phase 5 spec (CAS — DB48X/KhiCAS references live there now) — [phase5-spec.md](phase5-spec.md)
+5. Phase 6 spec (MicroPython, moved from this document) — [phase6-spec.md](phase6-spec.md)
+6. TI parity stocktake (source of 4D's scope) — [ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md)
+7. Design departures (source of 4D.14/4D.15) — [design-departures-matrix-complex.md](../notes/design-departures-matrix-complex.md)
+8. tinyexpr++ (numeric evaluation) — https://github.com/Blake-Madden/tinyexpr-plus-plus
+9. Brent's method (extrema) — Brent, "Algorithms for Minimization without Derivatives"
+10. Gauss-Kronrod quadrature — Piessens et al., QUADPACK
+11. TI-84 Plus CALC menu guidebook — https://education.ti.com/en/guidebook/details/en/6152F7C2E0B9491482D4CF5C3EEB6EB1/84plce
+12. QR algorithm for eigenvalues — Golub & Van Loan, "Matrix Computations"

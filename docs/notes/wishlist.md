@@ -10,44 +10,49 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
-- **Symbolic display (KIV, raised Session 10 eval)**: pi-multiple axis ticks,
-  surd displays, fraction/pi-fraction answers. Phase 3/4 polish family; the
-  4-sig-digit tick cap is the current stopgap.
-- **Greek/typographic stats display (Session 13, D24.9)** — *mostly shipped
-  D31*: greek `σ`/`μ`/Σ and the ² superscript now render in the stats/inference/
-  distribution results. **Still open: true subscripts** (`Sₓ`, `σₓ`) — needs a
-  subscript story in the text renderer, not just baked glyphs.
-- **Antialiased / higher-res / desktop-emulator font rendering (D31)**: the
-  rasterized fonts (JuliaMono, Iosevka) read worse than the bitmap fonts at
-  8px 1bpp on the PicoCalc; they'd likely look good with antialiasing, a
-  higher-resolution panel, or a desktop emulator build (which would also help
-  the D-prelude-2 "third target" note). All unplanned — revisit together.
-- **Scientific constants (Session 13, D24.9)**: c, h, N_A, ... Easy to fold
-  into any session once the exposure surface is decided (catalog entries vs. a
-  `const` command vs. a 2nd-key layer) — decide at the start of that session.
-- **Unit conversions (Session 13, D24.9)**: as an app later, or
-  scientific-calculator-style conversion pairs. Design effort needed; deferred.
-- **Beyond 6 lists + SD list-data files (Session 13, D24.9)**: named lists
-  and loading list data from files on the SD card; useful groundwork for a
-  future CBL/CBR-style data-logger expansion.
-- **Vertical centering for fraction expressions**: fraction display currently
-  top-aligns to the surrounding text line instead of centering on the
-  fraction bar. Readable as-is, but a stacked numerator/denominator reads
-  better vertically centered against neighboring glyphs. Text-renderer layout
-  change, not yet scoped.
-- **Auto power-off / standby after idle**: no inactivity timeout today: the
-  calculator stays fully on and drawing power until manually switched off.
-  Battery-life feature; needs an idle timer, a low-power/sleep path, and a
-  wake trigger (key press). Not yet scoped.
-- **Remember screen brightness / keypad backlight setting**: brightness and
-  backlight level reset instead of persisting across power cycles. Needs a
-  feasibility check first — depends on what settings-persistence path already
-  exists (if any) and whether the PicoCalc's brightness/backlight controls
-  are even readable back or only write-only. Not yet scoped.
+- **Antialiased / higher-res font rendering (D31)**: the rasterized fonts
+  (JuliaMono, Iosevka) read worse than the bitmap fonts at 8px 1bpp on the
+  PicoCalc; antialiasing or a higher-resolution panel would likely help.
+  Hardware-dependent, still fully unplanned. *(The "desktop emulator" half
+  of this item graduated to Phase 6 §9 as a named candidate; see below.)*
 
 ## Graduated — now planned
 
-(empty — everything graduated so far has shipped; see Completed / Closed)
+- **Pi-multiple axis ticks + `▶Frac`/`▶Dec` fraction answers** (split off
+  the old "Symbolic display" item) → Phase 4, sub-phase **4D** (see
+  [phase4-spec.md](../phases/phase4-spec.md) §7.1, tasks 4D.2/4D.3).
+- **Surd / exact-value display** (the other split-off piece of the old
+  "Symbolic display" item, raised Session 10 eval): keeping $\sqrt{2}$ as
+  $\sqrt{2}$ instead of a decimal → folded into **Phase 5** core scope on
+  2026-07-21 (see [phase5-spec.md](../phases/phase5-spec.md) §10.1, tasks
+  4D.23/4D.24) — it needs the `Expr` tree and `simplify()` Phase 5
+  builds anyway, so there was no reason to leave it homeless once Phase 5
+  existed. Unit/dimensional arithmetic (`3 m/s` staying symbolic) is a
+  materially bigger feature and remains explicitly out of scope (Phase 5
+  non-goals, §13).
+- **True subscripts** (`Sₓ`, `σₓ`) in stats/inference display (Session 13,
+  D24.9; the piece D31's Greek-letter pass left open) → Phase 4 **4D**
+  (§7.1, task 4D.4).
+- **Vertical centering for fraction expressions** → Phase 4 **4D** (§7.1,
+  task 4D.5).
+- **Scientific constants** (Session 13, D24.9) → Phase 4 **4D** (§7.4,
+  task 4D.17).
+- **Unit conversions** (Session 13, D24.9) → Phase 4 **4D** (§7.4, task
+  4D.18) as a native catalog, not a later app — closes the gap while it's
+  cheap; TI-84 CE ships these natively too, not as a sideloaded app.
+- **Beyond 6 lists** (Session 13, D24.9; the "named lists" half of the old
+  combined item) → Phase 4 **4D** (§7.3, task 4D.13), capped by whatever
+  `ArrayStore` headroom actually allows — see phase4-spec.md open question
+  P4-10. *(The "SD list-data files / CBL-CBR data-logger" half of the old
+  item did **not** graduate — still unscoped, no phase home yet.)*
+- **Auto power-off / standby after idle** → Phase 4 **4D** (§7.5, task
+  4D.19), feasibility-check-first per the task table.
+- **Remember screen brightness / keypad backlight setting** → Phase 4
+  **4D** (§7.5, task 4D.20), feasibility-check-first per the task table.
+- **Desktop emulator build** (the tooling half of the old antialiasing
+  item) → named as a candidate in Phase 6 §9 (see
+  [phase6-spec.md](../phases/phase6-spec.md)), still unscoped/not
+  committed — listed there rather than shipped.
 
 ## Completed / Closed
 
@@ -61,8 +66,12 @@ only of features that don't yet have a home.
   matrices hold complex values too," but D30 deferred that — `Variables::vars`
   and list storage (l1..l6) stay `calc_t`/real-only, so `2i->a` and storing a
   complex eigenvalue spectrum both error "Complex results can't be stored."
-  Revisit if that storage gap is ever actually requested (tracked as an open
-  watch-item in next-session.md).
+  **Partially graduated**: complex-valued *variable/Ans* storage → Phase 4
+  **4D** (task 4D.15, see [phase4-spec.md](../phases/phase4-spec.md) §7.3).
+  Complex-valued *lists and matrices* did **not** graduate — flagged in
+  [design-departures-matrix-complex.md](design-departures-matrix-complex.md)
+  as needing a Pico 1 memory feasibility study first, bigger than a 4D
+  closing-pass item. Still unscoped.
 - **TI-84 CALC-menu graph analysis** (value, zero, min/max, intersect, dy/dx,
   numeric fnInt) → Phase 4 sub-phase **4B**, shipped as **D29** (2026-07-20,
   see [decisions.md](./decisions.md) D29 and

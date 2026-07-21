@@ -61,11 +61,40 @@ stand-in. What landed:
    bss is ~188.8 KB of 264 KB (D28/D29/D30/D31, essentially flat across
    all four); if the ~76 KB stack/heap headroom pinches, shrink
    `ArrayStore::kSlabCount`.
-4. After the 4C on-device eval: **Phase 4D (CAS engine)** is next per
-   `phase4-spec.md` §6 (weeks 32-36) — symbolic simplify/expand/solve,
-   using the Session 18 `Complex` type as the numeric backing for
-   complex roots (§5.5 hook; quadratic/polynomial solves with negative
-   discriminant emit `i`-valued symbolic roots).
+4. After the 4C on-device eval: **Phase 4D (GC completeness)** is next
+   per `phase4-spec.md` §7 (weeks 32-35) — the closing pass that rounds
+   Phase 4 out into the project's pre-release milestone (sequence
+   graphing, fuller zoom/shading, list↔matrix bridge, scientific
+   constants, unit conversions, home-screen matrix literals,
+   complex-valued variable/Ans storage, device polish). **Phase 5 (CAS
+   engine)** follows 4D per `phase5-spec.md` — symbolic simplify/expand/
+   solve, using the Session 18 `Complex` type as the numeric backing for
+   complex roots (§4.1 hook; quadratic/polynomial solves with negative
+   discriminant emit `i`-valued symbolic roots). **Phase 6
+   (non-calculator functions)** follows Phase 5 — an app-launcher
+   framework (6A) with MicroPython as its first app (6B), replacing the
+   old 4E plan. This ordering (4 → 5 → 6) and the phase split itself were
+   decided 2026-07-21 (D32, D33) — see `phase4-spec.md`, `phase5-spec.md`,
+   `phase6-spec.md`, and `decisions.md` D32/D33. MicroPython's phase slot
+   (an open question as of D32) is now resolved: Phase 6 sub-phase 6B.
+5. **After 4D ships (its on-device eval), before Phase 5 starts in
+   earnest: decide the remaining matrix/complex "first-class" departures**
+   — see
+   [design-departures-matrix-complex.md](design-departures-matrix-complex.md).
+   Ideas A (home-screen matrix literals) and B (complex variable/Ans
+   storage) are already scheduled as 4D.14/4D.15 — nothing to decide
+   there. What's still open: **C/D** (complex-valued lists/matrices —
+   gated on a Pico 1 memory feasibility check the doc itself calls for;
+   4D.15's actual measured bss cost for widening `Variables` storage is
+   exactly the data point that check needs, so this can't be scoped well
+   before 4D ships), the **vector-ops half of E** (`dot`/`cross`/`norm` —
+   never made it into 4D's task list, only the list↔matrix bridge half
+   did, 4D.12), and **F** (unifying `matexpr`/`complexexpr`/`listexpr`
+   into one tagged-value evaluator — explicitly a "wait for duplication
+   pain" trigger, not a calendar one; check whether it's fired once
+   4D.15 and whichever of C/D/E get picked up have shipped). Do this as
+   a short scoping pass, not mid-4D — it needs 4D's real numbers, not
+   guesses.
 
 Mind the §8 strip-safety rule (idempotent `render()`) for any new
 screens touched during the on-device passes.
@@ -182,10 +211,14 @@ essentially flat) — re-check the map file then; the knob is
 ## Feature wishlist
 
 Desired-but-unplanned features live in **[wishlist.md](wishlist.md)**. Complex
-numbers and TI-84 CALC-menu graph analysis have graduated into Phase 4
-(sub-phases 4C and 4B — both now code-complete — see
-[phase4-spec.md](../phases/phase4-spec.md)); still-open item there is symbolic
-display (KIV).
+numbers and TI-84 CALC-menu graph analysis graduated into Phase 4 (sub-phases
+4C and 4B — both code-complete). The 2026-07-21 stocktaking session (D32/D33)
+graduated most of the rest: eight items into Phase 4D, one into Phase 6 §9,
+and the old "symbolic display" item split in two — pi-ticks/`▶Frac` into 4D,
+surd/exact-value display into Phase 5 §10.1. What's left unscheduled:
+antialiased font rendering (revisit once the Phase 6 desktop-emulator
+candidate exists) and the SD list-data-file/CBL-CBR half of the old
+"beyond 6 lists" item. See [wishlist.md](wishlist.md) for current detail.
 
 ## Hardware debugging kit (reminder)
 
