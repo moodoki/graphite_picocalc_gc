@@ -61,8 +61,10 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md). On-device
   verification of 4A–4C pending.
 - **Phase 5 (planned)**: symbolic math (CAS) — simplify, expand, factor,
-  differentiate, solve (complex-aware), and a bounded form of symbolic
-  integration. See [docs/phases/phase5-spec.md](docs/phases/phase5-spec.md).
+  differentiate, solve (complex-aware), a bounded form of symbolic
+  integration, and exact-value display (`sqrt(2)` shown as `√2` rather
+  than a decimal, for closed forms `simplify()` recognizes). See
+  [docs/phases/phase5-spec.md](docs/phases/phase5-spec.md).
 - **Phase 6 (planned)**: non-calculator functions — an app-launcher
   framework (6A) and MicroPython as its first base app (6B), plus room
   for future apps and release engineering (docs site, versioned
