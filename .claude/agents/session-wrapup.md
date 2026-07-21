@@ -1,6 +1,6 @@
 ---
 name: session-wrapup
-description: Closes out a PicoCalc GraphCalc work session — appends a worklog.md entry, updates next-session.md (and other handoff docs like next-bench-session.md/wishlist.md if touched), writes the commit message, and stages/commits/pushes. Use it at the end of a session once code changes are done and verified (built, linted, tested). Do NOT use it mid-task or to write code/fix bugs — it only documents and commits work already done.
+description: Closes out a PicoCalc GraphCalc work session — appends a worklog.md entry, updates next-session.md (and other handoff docs like next-bench-session.md/wishlist.md if touched), updates README.md's status table/blurb when a phase or major sub-phase's status changed, updates docs/notes/ti-parity.md when a phase just closed, writes the commit message, and stages/commits/pushes. Use it at the end of a session once code changes are done and verified (built, linted, tested). Do NOT use it mid-task or to write code/fix bugs — it only documents and commits work already done.
 tools: Bash, Read, Edit, Write, Grep, Glob, TaskOutput
 model: sonnet
 ---
@@ -31,6 +31,48 @@ This file is the canonical "start here" handoff — keep it short and current, n
 - Update "Key things to note" (firmware-on-device state, flash path, known gotchas) if this session changed what's flashed or discovered new hardware quirks.
 - Preserve sections that are still accurate (open design threads, wishlist pointer, hardware debugging kit) — edit only what changed, don't regenerate the whole file from scratch.
 - If a note belongs in a linked doc instead (`next-bench-session.md`, `wishlist.md`), edit that file and leave only a pointer here, matching the project's existing pattern of keeping this file short.
+
+## Updating README.md (only if a phase or major sub-phase's status changed)
+
+The README carries three things that drift out of sync with worklog.md if
+nobody deliberately updates them: the **Status** callout near the top (lines
+~5-13), the per-phase bullets under **Features**, and the **Project status**
+table near the bottom. Check whether this session changed any phase or major
+sub-phase's status (e.g. code-complete → HW-verified, HW-verified → complete/
+closed, specced → started, a sub-phase like 4A/4B/4C/4D flipping state) — not
+every session needs this, only ones that actually moved a status. If one did:
+
+- Update the **Status** blurb (top of README) to reflect the new state in
+  plain prose — this is the "read this and you know where the project is"
+  line, keep it tight.
+- Update the **Project status** table row(s) for the phase(s)/sub-phase(s)
+  that changed — status column and notes column, matching the table's
+  existing terse style (see the table for the phrasing convention: "Complete",
+  "Code complete", "Specced, not started", etc.).
+- Update the matching bullet under **Features** if the phase's one-line
+  description needs a status-word change (e.g. "code-complete" →
+  "HW-verified") — don't rewrite the whole bullet's feature list unless the
+  feature set itself changed, just the status framing.
+- If in doubt whether a change counts as a "status change" worth a README
+  edit, ask the caller rather than skipping it silently or over-editing.
+
+## Updating docs/notes/ti-parity.md (only at the end of a phase)
+
+`docs/notes/ti-parity.md` is a **living** feature-parity tracker vs. TI-83/84+
+(and TI-Nspire for CAS) — not a dated snapshot; it gets edited in place, never
+copied to a new dated filename. When this session **closes out a whole phase**
+(not just a sub-phase — e.g. "Phase 3 declared done", "Phase 4 complete"), do
+a pass over it:
+
+- Walk the sections relevant to what the closing phase shipped and flip any
+  `❌`/`🟡` rows that are now `✅` (or vice versa, if something regressed or
+  was descoped) to match what's actually true post-phase.
+- Update the "Last updated" line at the top of the file to today's date.
+- Keep edits scoped to what this phase actually changed — don't re-audit
+  the whole document from scratch unless the caller asks for that (that's a
+  bigger stocktaking pass, not a routine wrap-up step).
+- This step is **not** needed for a plain sub-phase or session wrap-up — only
+  when a phase itself just closed.
 
 ## Commit messages
 

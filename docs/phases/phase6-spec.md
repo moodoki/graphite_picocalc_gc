@@ -62,7 +62,7 @@ into `apps/nav.{hpp,cpp}`.
 
 6A is deliberately scoped small. This is **not** TI's Apps ecosystem —
 sideloadable binaries, a computer-link install flow, an app store (see
-the [parity doc](../notes/ti-parity-2026-07-21.md)'s "deliberately not
+the [parity doc](../notes/ti-parity.md)'s "deliberately not
 chasing TI" list, which already rules this out). It's an in-firmware
 launcher screen plus a lightweight registration table: closer to "a
 second menu of screens, entered from Home" than a real OS with
@@ -685,7 +685,7 @@ not a line item anywhere in Phase 6.
 
 1. Phase 4 spec (prerequisite — GC completeness milestone) — [phase4-spec.md](phase4-spec.md)
 2. Phase 5 spec (CAS — soft dependency for 6B's `calc` module) — [phase5-spec.md](phase5-spec.md)
-3. TI parity stocktake ("deliberately not chasing TI" — why 6A stays small) — [ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md)
+3. TI parity stocktake ("deliberately not chasing TI" — why 6A stays small) — [ti-parity.md](../notes/ti-parity.md)
 4. Docs site plan (release-engineering candidate, §9) — [docs-site-plan.md](../notes/docs-site-plan.md)
 5. MicroPython embed port — https://docs.micropython.org/en/latest/develop/embed.html
 6. MicroPython RP2040/RP2350 support — https://micropython.org/download/RPI_PICO/

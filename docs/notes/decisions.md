@@ -130,7 +130,7 @@ left undecided.
 **Decision**:
 1. **Phase 4 gains a new closing sub-phase, 4D: GC completeness**,
    reusing the `4D` label CAS vacated. Scope is every TI-83/84+ parity
-   gap the [parity stocktake](../notes/ti-parity-2026-07-21.md) found
+   gap the [parity stocktake](../notes/ti-parity.md) found
    (excluding CAS-tier items) plus the two lowest-risk
    [design-departures](../notes/design-departures-matrix-complex.md)
    ideas (home-screen matrix literals, complex-valued storage). Full
@@ -194,7 +194,7 @@ worth doing now rather than leaving it bundled.
 1. **CAS is now Phase 5**, split out of Phase 4 sub-phase 4D. New file
    [phase5-spec.md](../phases/phase5-spec.md) carries the content
    verbatim (former §6.1–6.9 → top-level §2–§10), plus a new intro tying
-   it to the [TI parity stocktake](ti-parity-2026-07-21.md) §8
+   it to the [TI parity stocktake](ti-parity.md) §8
    (TI-Nspire CAS comparison) and the [design-departures doc](design-departures-matrix-complex.md).
    `phase4-spec.md` §6 is now a one-paragraph pointer; its task
    breakdown, performance benchmarks, risks (1, 2, 5), and open

@@ -1,14 +1,20 @@
 # Feature parity stocktake — TI-83/84+ (and TI-Nspire CAS for CAS)
 
-**Date**: 2026-07-21
-**Purpose**: a session-scoped assessment of how PicoCalc GraphCalc compares to
-its two reference machines — the TI-83/84+ family for the general calculator,
-and the TI-Nspire CX II CAS for the not-yet-built CAS phase. Written to
-inform the Phase 5 (CAS) spec draft and the Phase 6 (app framework/polish)
-scoping, and to give an honest "how far along are we" read. Not a spec, not
-a decision log — see [design-departures-matrix-complex.md](design-departures-matrix-complex.md)
-for where we intend to diverge on purpose, and
-[decisions.md](decisions.md) for anything actually decided.
+**Last updated**: 2026-07-21 (originally written this date; kept current going
+forward — see "Maintenance" below)
+**Purpose**: a living assessment of how PicoCalc GraphCalc compares to its two
+reference machines — the TI-83/84+ family for the general calculator, and the
+TI-Nspire CX II CAS for the not-yet-built CAS phase. Used to inform phase
+scoping (originally the Phase 5 CAS spec draft and Phase 6 app-framework/polish
+scoping) and to give an honest "how far along are we" read at any point in the
+project. Not a spec, not a decision log — see
+[design-departures-matrix-complex.md](design-departures-matrix-complex.md) for
+where we intend to diverge on purpose, and [decisions.md](decisions.md) for
+anything actually decided.
+
+**Maintenance**: updated in place (no dated filename/copies) at the end of
+each phase, when a phase's feature set changes what's shipped vs. planned.
+Bump "Last updated" when edited.
 
 Legend: ✅ shipped/on par · 🟡 partial or different shape · ❌ not present ·
 🚫 out of scope (deliberately not pursuing)

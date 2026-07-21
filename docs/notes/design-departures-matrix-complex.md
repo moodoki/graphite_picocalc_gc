@@ -4,7 +4,7 @@
 **Status**: Ideas for consideration, **not decisions**. Nothing here is
 committed; each idea needs its own scoping pass (and its own D-numbered
 decision) whenever a phase actually picks it up. Written alongside the
-[TI parity stocktake](ti-parity-2026-07-21.md) and feeding the
+[TI parity stocktake](ti-parity.md) and feeding the
 [Phase 5 CAS spec draft](../phases/phase5-spec.md).
 
 ## Why depart from TI at all

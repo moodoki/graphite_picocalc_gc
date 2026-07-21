@@ -20,7 +20,7 @@ own, the single largest and highest-risk sub-phase — see §13 below).
 **MicroPython** (the former sub-phase 4E) is *not* part of this phase —
 it moved to [phase6-spec.md](phase6-spec.md) sub-phase 6B (D33).
 
-**Reference reading**: [ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md)
+**Reference reading**: [ti-parity.md](../notes/ti-parity.md)
 §8 positions this phase against TI-Nspire CX II CAS feature-for-feature —
 read that first for what's explicitly *not* being attempted here (systems
 of equations, limits/series, unit/dimensional arithmetic — see §13
@@ -753,7 +753,7 @@ on 2026-07-21 (graduated from the wishlist's "symbolic display" item, see
 here because it's easy to assume it's excluded along with the
 unit-arithmetic item above — it isn't.
 
-See [ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md) §8 for
+See [ti-parity.md](../notes/ti-parity.md) §8 for
 the full comparison this boundary is drawn against.
 
 ---
@@ -778,7 +778,7 @@ the full comparison this boundary is drawn against.
 3. Phase 4 spec (matrix, graph analysis, complex numbers — prerequisite
    sub-phases 4A–4C) — [phase4-spec.md](phase4-spec.md)
 4. TI parity stocktake (§8: this phase vs. TI-Nspire CX II CAS) —
-   [ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md)
+   [ti-parity.md](../notes/ti-parity.md)
 5. Design departures (complex/matrix first-class ideas) —
    [design-departures-matrix-complex.md](../notes/design-departures-matrix-complex.md)
 6. DB48X source (CAS reference) — https://github.com/c3d/db48x

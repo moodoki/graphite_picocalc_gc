@@ -537,7 +537,7 @@ rest of what was Phase 4.
 that used to live in this section (§6.1–6.9) now lives there as
 top-level sections §2–§10, unchanged in substance — only the phase
 boundary moved. Background: [decisions.md](../notes/decisions.md) D32,
-[ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md) §8.
+[ti-parity.md](../notes/ti-parity.md) §8.
 
 ---
 
@@ -545,7 +545,7 @@ boundary moved. Background: [decisions.md](../notes/decisions.md) D32,
 
 This sub-phase has a different shape from 4A–4C: instead of one coherent
 subsystem, it's a grab-bag closing pass that pulls together every gap the
-[TI parity stocktake](../notes/ti-parity-2026-07-21.md) found against
+[TI parity stocktake](../notes/ti-parity.md) found against
 TI-83/84+ (excluding CAS-tier items, which are Phase 5) plus the two
 lowest-risk ideas from the
 [design-departures doc](../notes/design-departures-matrix-complex.md)
@@ -905,7 +905,7 @@ the wishlist rather than forcing it.
 3. Phase 3 spec (Array primitive, stat-plot layer) — [phase3-spec.md](phase3-spec.md)
 4. Phase 5 spec (CAS — DB48X/KhiCAS references live there now) — [phase5-spec.md](phase5-spec.md)
 5. Phase 6 spec (MicroPython, moved from this document) — [phase6-spec.md](phase6-spec.md)
-6. TI parity stocktake (source of 4D's scope) — [ti-parity-2026-07-21.md](../notes/ti-parity-2026-07-21.md)
+6. TI parity stocktake (source of 4D's scope) — [ti-parity.md](../notes/ti-parity.md)
 7. Design departures (source of 4D.14/4D.15) — [design-departures-matrix-complex.md](../notes/design-departures-matrix-complex.md)
 8. tinyexpr++ (numeric evaluation) — https://github.com/Blake-Madden/tinyexpr-plus-plus
 9. Brent's method (extrema) — Brent, "Algorithms for Minimization without Derivatives"

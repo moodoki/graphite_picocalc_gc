@@ -236,7 +236,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/notes/next-bench-session.md](docs/notes/next-bench-session.md)** — deferred hardware bench work (D14 rail settle)
 - **[docs/notes/wishlist.md](docs/notes/wishlist.md)** — desired-but-unplanned features
 - **[docs/notes/decisions.md](docs/notes/decisions.md)** — architecture & design decision log
-- **[docs/notes/ti-parity-2026-07-21.md](docs/notes/ti-parity-2026-07-21.md)** — feature parity stocktake vs. TI-83/84+ and TI-Nspire CX II CAS
+- **[docs/notes/ti-parity.md](docs/notes/ti-parity.md)** — feature parity stocktake vs. TI-83/84+ and TI-Nspire CX II CAS
 - **[docs/notes/design-departures-matrix-complex.md](docs/notes/design-departures-matrix-complex.md)** — unbuilt ideas for first-class matrices/vectors/complex numbers
 - **[docs/notes/docs-site-plan.md](docs/notes/docs-site-plan.md)** — plan for a public GitHub Pages docs site with TI-guidebook-style workbooks
 - **[AGENTS.md](AGENTS.md)** — for AI coding agents
