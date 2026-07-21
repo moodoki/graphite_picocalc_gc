@@ -104,15 +104,13 @@ is actually scheduled.
   4A-4C pass for 16/17/18); see `worklog.md`'s two 2026-07-22 entries.
   What's genuinely still open, Pico-2-specific (not closeable by this
   reasoning): its own perf re-baseline for Phase 3/4 features (see "The
-  next job" #3), and two Session 15 storage-health visual details never
-  distinctly probed on either board (Y=-editor `...` truncation before
-  the checkbox; the red `SD` status-bar indicator's actual look, vs. just
-  "recovers cleanly" functionally — low priority). **Session 10 round 2
-  remains genuinely open too** (not closed by any reasoning above): `L`
-  toggle surviving a reboot, `rand()` display, ZTrig short tick labels,
-  and a quick ZoomFit regression — nothing since has specifically
-  re-confirmed these, worth a quick check next time either board is in
-  hand.
+  next job" #3). Session 15's storage-health row (hot-plug/retry-forever,
+  Y=-editor truncation) is now fully closed — confirmed on both boards.
+  **Session 10 round 2 remains genuinely open** (not closed by any
+  reasoning above): `L` toggle surviving a reboot, `rand()` display,
+  ZTrig short tick labels, and a quick ZoomFit regression — nothing since
+  has specifically re-confirmed these, worth a quick check next time
+  either board is in hand.
 - **The Pico 1 is now also on the Session 19 build** (reflashed
   2026-07-22, task 3D.14 — no code changes since Session 19, so it's
   the identical binary): boots healthy, telemetry clean over serial.
