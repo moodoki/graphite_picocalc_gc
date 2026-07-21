@@ -1,4 +1,4 @@
-# PicoCalc Graphing Calculator
+# Graphite - PicoCalc Graphing Calculator
 
 TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](https://www.clockworkpi.com/picocalc), written in C++17 using the Raspberry Pi Pico SDK. Targets both the Pico 1 H (RP2040) and Pico 2 H (RP2350) modules. Personal-use project.
 

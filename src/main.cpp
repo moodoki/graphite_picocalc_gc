@@ -210,7 +210,7 @@ public:
 
         fb.clear(kBlack);
         int y = 8;
-        font.draw_string(fb, 8, y, "PicoCalc GraphCalc  [milestone 1]", kGreen, kBlack);
+        font.draw_string(fb, 8, y, "Graphite GC", kGreen, kBlack);
         y += lh * 2;
 
 #if PICOCALC_PICO2
