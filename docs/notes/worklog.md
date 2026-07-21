@@ -227,12 +227,48 @@ ZStandard, typed commands, F-key remap, case-sensitivity, DEL/SPACE, polar-gap
 fix, split-trace activation), and the Phase 3 acceptance checklist (list
 editor 3A, stats 3B, distributions 3C, inference 3D, StatPlot layer incl.
 box-plot-outlier and normal-vs-skewed contrast tests) passed. Two
-non-blocking findings, not yet investigated: `!` (factorial) throws a syntax
-error on this board (pre-Phase-3 feature, not a regression — possibly a
-physical-keyboard mapping quirk specific to this unit); the list editor and a
-5000-point scatter plot both feel sluggish (not profiled). Full verbatim
-record: `session3D14-pico1-observations-verbatim.md`. **This closes Phase 3**
-(retro: `phase3-retro.md`) and resolves **D18**.
+non-blocking findings: `!` (factorial) throws a syntax error on this board
+(pre-Phase-3 feature, not a regression — **root-caused 2026-07-22 by code
+scan, not a hardware/keyboard quirk**, see the Phase 4A-4C paragraph below);
+the list editor and a 5000-point scatter plot both feel sluggish (not
+profiled). Full verbatim record: `session3D14-pico1-observations-verbatim.md`.
+**This closes Phase 3** (retro: `phase3-retro.md`) and resolves **D18**.
+
+**Verified on Pico 1 hardware 2026-07-22 (Phase 4A-4C pass, same session as
+3D.14, same build):** first-ever on-device eval of Phase 4A (matrices +
+solver), 4B (CALC menu / graph analysis), and 4C (complex numbers) on any
+board with a human actually working through the checklists (Pico 2 was
+flashed at the time but never hands-on walked for these three — see the
+table rows below). Matrix editor, arithmetic, stores, persistence, solver
+(form + inline), and big-matrix PSRAM-tier perf all passed (big-matrix ops
+feel fine, unlike the list/scatter sluggishness above); CALC menu passed in
+full across function/parametric/polar and both angle modes including the
+strip-render-risky tangent-line and shaded-fnInt draws; complex numbers
+passed in full (mode cycling, arithmetic, store rules, polar glyph,
+eigenvalue text display). Two reports cross-checked against `decisions.md`
+as intentional, not bugs (matrix+scalar addition dim mismatch — only
+scalar-*multiply* is defined, D28; case-insensitive matrix names — deliberate
+D28 exception to D19). One real UX gap: no typeable `MatAns` home-screen
+token (the last matrix result is editor-only, unlike scalar `ans`). One
+feature request: fnInt shading should follow the curve's own color
+(alpha-blend or hatching). Full verbatim record:
+`phase4abc-pico1-observations-verbatim.md`.
+
+**`!` (factorial) syntax-error root cause, found by code scan (no hardware
+needed) 2026-07-22:** `math::complexexpr::evaluate` (`src/math/complex_expr.cpp`)
+has no equivalent of `math::engine`'s `preprocess()` postfix-`!`-to-`fac()`
+rewrite. In `kReal` number mode (default), `HomeScreen::evaluate_input`
+(`src/apps/home_screen.cpp`) only uses `complexexpr` as a discardable probe
+and falls through to `math::engine()` (which has the rewrite) on failure —
+`5!` works. In `kRectangular`/`kPolar` mode, `complexexpr`'s result is
+authoritative and its "Syntax error" (no `!` handling) is shown directly —
+`math::engine()` is never called. **Reproduces on any board**, in any
+non-REAL Number mode (MODE screen F3 "Number" row) — not a per-unit
+keyboard/hardware quirk as originally speculated in the 3D.14 paragraph
+above. Fix candidate: add the same `!`-postfix rewrite to `complexexpr`'s
+input (or share `engine::preprocess`), or route bare-`!` expressions through
+`math::engine()` when they don't otherwise need complex support. Not yet
+fixed — logged as a backlog item (see next-session.md).
 
 Still to verify on hardware:
 
@@ -244,9 +280,9 @@ Still to verify on hardware:
 | Session 15 — 3D inference + stat plots (D27; flashed 2026-07-20) | **First boot: PCG4 one-time graph-state reset** (window/mode/plots back to defaults — re-set once, then persistence resumes). `test` cmd: T-Test on `{12.9,13.5,12.8,15.6,17.2,19.2,12.6,15.3,14.4,11.3}->l1` vs mu0=14 → t≈.634, p≈.542; same data 2-SampT vs l2, Welch df≈17.65; Stats source entry; 1-PropZ x=57 n=100 p0=.5 (>) → z=1.4 p≈.0808; ANOVA over l1..l3; T-Interval C=.95; error paths (n non-integer, conf=1). `plot` cmd: scatter l1 vs l2 + `Z` ZoomStat on graph; histogram (auto + manual bin width); box plot with an outlier (e.g. append 99); NormProb of a normal-ish list ≈ straight line; three plots at once + a Y= function overlay. Help: COMMANDS test/plot rows, KEYS TEST + STAT PLOTS sections, graph Z row. Regression: trace/table/split unaffected; stats/dist screens fine. Pico 1 leg: covered by the 3D.14 pass (2026-07-22, incl. box-plot-outlier and normal-vs-skewed contrast) — see the Pico 1 hardware paragraph above |
 | Session 15 — storage health (D26) + editor truncation | Y= editor: store a regression model to y1, open Y= — text ends `...` before the checkbox, no overlap. **Hot-plug** (needs the physical card): eject while on → red `SD` appears in the home status bar within ~1 s (serial: `sd: card removed`); `files` shows no card; re-insert → `sd: card inserted`, remount within ~2 s, indicator clears, files/save work again; **in-memory lists/history survive** (no stale reload). **Extended-cold-boot case** (the original observation): power on after a long time off — if SD is slow, red `SD` shows, then clears when the (now unlimited) retries land; serial `late-init:` lines confirm. PSRAM indicator: hard to test without fault injection — verify it's absent when healthy |
 | Session 12 — Phase 3B stats (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | `stats` command opens the form; row set follows the analysis (Freq row for 1-Var, Y list + Store for regressions). 1-Var on a small list (`{2,4,4,4,5,5,7,9}->l1` → mean 5, sigx 2, med 4.5, Q1 4, Q3 6), then with a freq list; 2-Var; LinReg on l1,l2 (check r, r², model line); QuadReg exact parabola; SinReg on `seq(2*sin(1.5*x+0.5)+3, x, 0, 12.5, 0.5)->l2` (converged, b≈1.5); Med-Med. **Store to y1** → F5 graph shows the fit; SinReg store in DEGREE mode plots correctly (D23/§10). Error paths on-screen: empty list, length mismatch, LnReg on negative x, non-integer freq. ~~PSRAM-tier timing feel~~ **verified 2026-07-19 (Session 13 eval): large-array regressions feel OK, "Computing..." indicator shows** (D23 revisit closed). Results scroll (2-Var = 17 lines). Help: KEYS commands list + STATS sections. Regression: `lists` editor unaffected, home eval fine. Pico 1 leg: the stats-screen ground was covered by the 3D.14 pass (2026-07-22) — see the Pico 1 hardware paragraph above |
-| Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine |
-| Session 17 — Phase 4B graph analysis / CALC menu (D29; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected |
-| Session 18 — Phase 4C complex numbers (D30; **NOT flashed — no hardware connected this session**, still on the Session 16 (4A) build) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface |
+| Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine. **Pico 2 leg closed as a formality (2026-07-22):** logic is board-independent (no `#ifdef` branches), and the harder strip-render case (Pico 1) passed this checklist in full the same day — see the Phase 4A-4C paragraph above. Only genuinely board-specific gap: perf feel hasn't been re-measured on the Pico 2 against current code (only the pre-Phase-3 2.25 baseline exists) |
+| Session 17 — Phase 4B graph analysis / CALC menu (D29; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 17 itself) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale as the Session 16 row above; the full CALC-menu checklist, including the strip-render-risky tangent-line/shaded-fnInt draws, passed on the Pico 1 the same day |
+| Session 18 — Phase 4C complex numbers (D30; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 18 itself) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale; full complex-number checklist passed on the Pico 1 the same day (note: this checklist's own r∠θ description is stale — superseded by the real ∠ glyph, D31; and its "spot check the real catalog" item is now known to have one gap, the `!` postfix-factorial bug root-caused the same day, see the paragraph above) |
 | Session 19 — font system + real math glyphs, `eig` alias, list UX (D31; flashed 2026-07-21, **Terminus** default build, boots healthy, PSRAM/storage/battery telemetry clean) | This session's own on-device font comparison across all five builds is already done (D31: Terminus picked as the shipped default; Unifont good with the 2px lift; Spleen best if a thicker font is wanted; JuliaMono worst, Iosevka a bit unbalanced) — remaining is a **glyph-correctness sweep on the Terminus build in situ**: home-screen complex results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row (`a+bi`/`r∠θ`), pretty-printed expressions (`π`, `θ`, inline `√(x)`, `3+2i` via the plain-text fallback), stats `σx`/`σy`/`Σx`/`Σx²`/`Σy`/`Σy²`/`Σxy`/`r²`, inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace + table polar label `θ`, and `…` truncation in list/matrix/complex history + slot editor. Also: `eig` as a drop-in alias for `eigenvals([A])` (whole-expression only, same as `eigenvals`/`dim`); list history LEFT/RIGHT horizontal scroll on the newest result when the input line is empty, using the new compact (4-sig-fig) number format so more list elements fit per screen. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis, table all unaffected |
 
 ---
@@ -274,9 +310,10 @@ inference 3D, StatPlot layer — box-plot-outlier and normal-vs-skewed contrast
 tests). Everything passed except two non-blocking findings, logged verbatim to
 `session3D14-pico1-observations-verbatim.md`:
 
-- `!` (factorial) throws a syntax error on this board — not investigated; could
-  be a parser bug or a physical-keyboard `!`-key mapping quirk specific to this
-  unit. Factorial predates Phase 3, so this is not a Phase 3 regression.
+- `!` (factorial) throws a syntax error on this board — not investigated at the
+  time; **root-caused later the same day by code scan, see the next entry
+  below** (a genuine, board-independent bug, not a keyboard quirk). Factorial
+  predates Phase 3, so this is not a Phase 3 regression.
 - The list editor and a 5000-point scatter plot both feel sluggish on the
   Pico 1 — not profiled; could be strip-renderer overhead, RP2040 clock speed,
   or list/plot-specific cost.
@@ -288,6 +325,58 @@ done, **Phase 3 is declared closed** — retro written to `phase3-retro.md`
 forward as non-blocking backlog items, not blockers. No code changed this
 session (docs/observations only); host test count and both-boards build status
 are unchanged from Session 19.
+
+## 2026-07-22 — Phase 4A-4C Pico 1 eval + `!` factorial root-cause (code scan)
+
+Same session as 3D.14 above, same board/build (no reflash needed — Phase
+4A-4C and Session 19 fonts were already on the binary flashed for 3D.14).
+Ran the Phase 4A (matrices + solver), 4B (CALC menu / graph analysis), and 4C
+(complex numbers) checklists against the Pico 1 — the first hands-on
+functional walkthrough of any of these three sub-phases on **either** board
+(Pico 2 was flashed at Session 19 but never walked through for 4A/4B/4C
+specifically). Full verbatim record:
+`phase4abc-pico1-observations-verbatim.md`.
+
+All acceptance checks passed: matrix editor/ops/stores/persistence, solver
+(form + inline), big-matrix PSRAM-tier perf (fine — unlike the list/scatter
+sluggishness from 3D.14); CALC menu across function/parametric/polar and
+both angle modes, including the tangent-line and shaded-fnInt strip-render
+risks; complex-number mode cycling, arithmetic, store rules, polar glyph,
+eigenvalue text display. Two reports turned out to be intentional per
+`decisions.md` (matrix+scalar addition dim mismatch — D28, only
+scalar-multiply is defined; case-insensitive matrix names — D28's deliberate
+exception to D19), not bugs. One real UX gap (`MatAns` has no home-screen
+token — editor-only, unlike scalar `ans`) and one feature request (fnInt
+shading should follow curve color) logged for later.
+
+**Closed the Session 16/17/18 Pico 2 HW-PENDING rows as a formality**: the
+matrix/CALC-menu/complex-number logic is 100% board-independent (no
+board-conditional code in any of these paths), and the harder rendering case
+(Pico 1's strip renderer) just passed the identical checklist — so a
+dedicated Pico 2 hands-on pass would be repeating the same checklist against
+the same code, not exercising anything Pico 2-specific. Also fixed two
+stale "NOT flashed" notes on the Session 17/18 rows — Session 19's flash
+(2026-07-21) put current HEAD (including 4B/4C) on the Pico 2, that just
+never got a hands-on walkthrough. **Genuinely still open, not covered by
+today's pass**: Pico 2 perf feel for any Phase 3/4 feature has never been
+re-measured against current code (only the pre-Phase-3 2.25 baseline
+exists) — perf doesn't transfer between boards the way correctness does.
+
+**`!` (factorial) syntax error — root-caused by code scan, no hardware
+needed:** `math::complexexpr::evaluate` (`src/math/complex_expr.cpp`) has no
+equivalent of `math::engine`'s `preprocess()` postfix-`!`→`fac()` rewrite. In
+`kReal` Number mode (default), `HomeScreen::evaluate_input` only uses
+`complexexpr` as a discardable probe and falls through to `math::engine()`
+(which has the rewrite) on failure, so `5!` works. In `kRectangular`/`kPolar`
+mode, `complexexpr`'s own "Syntax error" becomes the final, displayed result
+— `math::engine()` is never reached. Reproduces in any non-REAL Number mode
+(MODE screen, F3, "Number" row), on any board — **not** a per-unit
+keyboard/hardware quirk as originally speculated. Fix candidate: give
+`complexexpr` the same `!`-postfix rewrite (or share `engine::preprocess`).
+Not yet fixed — added to the backlog (see `next-session.md`).
+
+No code changed this session (docs/investigation only); host test count and
+both-boards build status unchanged from Session 19.
 
 ## 2026-07-21 — Docs/tooling: wishlist restructure, validator fix, GitHub math-rendering pass
 
