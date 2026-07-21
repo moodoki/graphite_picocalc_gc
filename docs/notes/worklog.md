@@ -274,7 +274,7 @@ Still to verify on hardware:
 
 | Item | What to check on hardware |
 |------|---------------------------|
-| Session 10 round 2 (flashed 2026-07-18; round 1 eval passed — screens good, labels kept) | `L` toggle survives a reboot (PCG3 — expect a **one-time state reset** on first boot: re-set window/mode); `rand()` shows correctly in history; ZTrig tick labels short (`1.571`-style); quick regression: F ZoomFit still fine |
+| Session 10 round 2 — **CLOSED 2026-07-22** | `L` toggle survives a reboot: confirmed. `rand()` shows a sensible, varying value each call: confirmed. ZTrig tick labels short (`1.571`-style): confirmed. `F` ZoomFit auto-fits the y-range correctly: confirmed. (The original PCG3 one-time-reset transition itself isn't re-testable at this point — both boards are long past it, now on PCG5 — but steady-state persistence is what actually matters going forward, and that's confirmed.) |
 | Session 10 round 3 (bulk PSRAM) — **CLOSED, both legs done** | Pico 2 verified 2026-07-18 (`psram-bulk: OK`, 150/156 us); Pico 1 leg verified 2026-07-22 (3D.14): `psram-bulk:` heartbeat and diag `PSRAM: word OK, bulk OK` both clean there too. Nothing further to check |
 | Session 11 — Phase 3A lists (flashed 2026-07-19, boot + psram-bulk heartbeat verified over serial) | Home: `{1,2,3}->l1`, `l1+l2`, `l1*2`, `sum(l1)`, `sort_asc(l1)`, `seq(x^2,x,1,10,1)->l2`, error cases (`l1+l6` length mismatch, `5->l1`); results render in history (short lists + `,...` truncation). Editor (`lists` cmd): navigation, type-to-edit, append advance, DEL row shift, F6/F7 sort, F8 clear, horizontal scroll to l4-l6. Persistence: lists survive a reboot; big-list path: `seq(x,x,1,1000,1)->l1` (PSRAM tier) then sort + reboot. Cold power-on: lists appear after late-init (D14 wait, `late-init: lists loaded` if late). Regression: normal scalar eval, history recall, help tabs (new LISTS sections, wider FUNC summary column). Pico 1 leg: the list-editor and list-acceptance ground was covered by the 3D.14 pass (2026-07-22) — see the Pico 1 hardware paragraph above (note: perf feel flagged sluggish there, not yet profiled). **Pico 2 leg closed as a formality (2026-07-22):** same rationale as the Session 16-18 rows — board-independent logic, and the harder rendering case (Pico 1) passed this exact checklist the same day |
 | Session 15 — 3D inference + stat plots (D27; flashed 2026-07-20) | **First boot: PCG4 one-time graph-state reset** (window/mode/plots back to defaults — re-set once, then persistence resumes). `test` cmd: T-Test on `{12.9,13.5,12.8,15.6,17.2,19.2,12.6,15.3,14.4,11.3}->l1` vs mu0=14 → t≈.634, p≈.542; same data 2-SampT vs l2, Welch df≈17.65; Stats source entry; 1-PropZ x=57 n=100 p0=.5 (>) → z=1.4 p≈.0808; ANOVA over l1..l3; T-Interval C=.95; error paths (n non-integer, conf=1). `plot` cmd: scatter l1 vs l2 + `Z` ZoomStat on graph; histogram (auto + manual bin width); box plot with an outlier (e.g. append 99); NormProb of a normal-ish list ≈ straight line; three plots at once + a Y= function overlay. Help: COMMANDS test/plot rows, KEYS TEST + STAT PLOTS sections, graph Z row. Regression: trace/table/split unaffected; stats/dist screens fine. Pico 1 leg: covered by the 3D.14 pass (2026-07-22, incl. box-plot-outlier and normal-vs-skewed contrast) — see the Pico 1 hardware paragraph above. **Pico 2 leg closed as a formality (2026-07-22):** same rationale as the Session 16-18 rows |
@@ -377,6 +377,31 @@ Not yet fixed — added to the backlog (see `next-session.md`).
 
 No code changed this session (docs/investigation only); host test count and
 both-boards build status unchanged from Session 19.
+
+**Same day, third block: closed the remaining HW-PENDING formalities.**
+Applied the same board-independent-logic reasoning to the still-open Session
+11 (lists), 12 (stats), and 15 3D (inference/plots) rows — closed their Pico
+2 legs as a formality, same as Session 16-18. Session 10 round 3 (bulk
+PSRAM) was already fully resolved on both boards and got marked closed
+outright. Session 15's storage-health row was corrected to **fully
+closed** per developer confirmation: hot-plug/retry-forever was checked on
+both boards (not just inferred from Pico 1), and the Y=-editor truncation
+detail was directly observed incidentally during other on-device testing.
+
+Then ran a short interview for the one item that had no supporting evidence
+either way — **Session 10 round 2**, closed 2026-07-22: `L` axis-label
+toggle survives a reboot (confirmed — note the original PCG3 one-time-reset
+transition itself is long past, both boards are now on PCG5, so this
+confirms steady-state persistence, not the historical migration); `rand()`
+shows a sensible, varying value each call (confirmed); ZTrig gives short
+tick labels (`1.571`-style, confirmed); `F` ZoomFit auto-fits the y-range
+correctly (confirmed). The HW-PENDING table is now clear except the
+deliberately-deferred Pico 2 perf re-baseline and the still-informal
+Session 19 font/glyph sweep.
+
+`.claude/skills/testdrive-observations/` (the interview skill used across
+today's sessions to gather and log all of this) is now tracked in git —
+it had been sitting untracked all session.
 
 ## 2026-07-21 — Docs/tooling: wishlist restructure, validator fix, GitHub math-rendering pass
 
