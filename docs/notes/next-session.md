@@ -1,35 +1,36 @@
 # Start here — next session
 
-**Last session:** 2026-07-20→21 (Session 19). A large UI-polish/font
-session, **code-complete (D31)**: a build-time swappable 8x16 main font
-(`-DPICOCALC_FONT=spleen|juliamono|iosevka|unifont|terminus`, default
-**terminus**) with a shared math-glyph slot map, real-glyph
-substitutions across the whole UI (`∠/θ/σ/Σ/μ/i/⇒/λ/≠/…/²/√` replacing
-old ASCII stand-ins), an `eig` alias for `eigenvals`, and a list-history
-LEFT/RIGHT horizontal-scroll fix. Suite **1219 checks**, lint clean,
-both boards build clean. **Flashed to the Pico 2 (Terminus default
-build) — boots healthy, telemetry clean over serial.** No GraphState
-layout change this session (**still PCG5, no one-time reset**). Pico 1
-is still on Session 7 firmware awaiting the deferred 3D.14 pass. Full
-detail in `worklog.md` (Session 19) and `decisions.md` (D31) — this
-session's font/glyph work supersedes the Session 18 ASCII `<` polar
-stand-in. What landed:
+**Last session:** 2026-07-22 — task 3D.14, the deferred Pico 1 combined
+pass (D18). The Pico 1 (RP2040) was swapped back in after three days on
+Session 7 firmware; rebuilt and reflashed `build/pico/picocalc_graphcalc.uf2`
+from current HEAD (Session 19's font/glyph build — no code changed), then
+ran the full Phase 2 sweep, the Session 8+9 fix list, and the Phase 3
+acceptance checklist against it. Serial confirmed a healthy boot (PSRAM OK,
+battery telemetry sane, graph recompute running, no crashes/hangs across
+three capture windows). Everything passed except two non-blocking,
+not-yet-investigated findings: `!` (factorial) throws a syntax error on this
+board, and the list editor / a 5000-point scatter plot both feel sluggish.
+Logged verbatim to `session3D14-pico1-observations-verbatim.md`. **This
+closes task 3D.14, resolves D18, and closes Phase 3** — retro written to
+`phase3-retro.md` (what shipped, what went well/was hard, carried into
+Phase 4). No code changed this session (docs/observations only); host test
+count (1219 checks) and both-boards build status are unchanged from
+Session 19. Full detail in `worklog.md` (2026-07-22 entry) and
+`decisions.md` (D18 resolution). What landed:
 
-- Font-as-build-flag + shared 32..140 glyph slot map across all five
-  fonts (`CMakeLists.txt`, `gfx/font.{hpp,cpp}`, `src/gfx/fonts/*.h`,
-  `scripts/gen-*.sh`, `scripts/{ttf,hex,bdf}_to_utft.py`,
-  `drivers/{juliamono,iosevka,unifont,terminus}/`).
-- Real-glyph substitutions: `format_complex`, MODE Number row,
-  pretty-print `preprocess_glyphs`, home-screen store/truncation,
-  graph-trace/table polar label, stats/inference/distribution screens.
-- `eig` alias for `eigenvals([A])` (`math/mat_expr.cpp`).
-- List UX: `format_number_compact` (4 sig figs) + home-screen
-  LEFT/RIGHT scroll of the newest result when the input line is empty.
-- On-device font comparison across all five builds already done this
-  session (D31): **Terminus** picked as the shipped default.
-- Pico 1 grew modestly (text +2064 B, bss +136 B — ~188.8 KB of 264 KB,
-  same watch item as D28/D29/D30, not worse). Pico 2 text +2096 B, bss
-  +136 B.
+- Task 3D.14 checklist, all passing: the Pico-1-specific strip-renderer
+  risks (split-pane clipping, graph status-bar clip, render idempotency),
+  the full Session 8+9 fix list, the Phase 2 acceptance checklist, and the
+  Phase 3 acceptance checklist (list editor 3A, stats 3B, distributions 3C,
+  inference 3D, StatPlot layer incl. box-plot-outlier and
+  normal-vs-skewed contrast).
+- Two backlog findings, not yet investigated (see "Backlog" below):
+  factorial `!` syntax error on the Pico 1, and list-editor/scatter-plot
+  perf feel sluggish on the Pico 1.
+- `phase3-retro.md` written; `decisions.md` D18 marked Resolved.
+- The Pico 2 is unaffected — this session's scope was Pico 1 only (Phase 2
+  + Phase 3 ground); Phase 4A-4C and the Session 19 font/glyph sweep are
+  **not yet evaluated on the Pico 1** (see "The next job").
 
 ## The next job
 
@@ -41,8 +42,8 @@ stand-in. What landed:
    `σ`/Σ/r², inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace/table
    polar `θ` label, and `…` truncation. Also spot-check the new `eig` alias and
    the list-history LEFT/RIGHT scroll feel.
-2. **On-device evals** (worklog HW-PENDING; the flashed build is now
-   Session 19's font/glyph build, layered on top of Session 16-18 —
+2. **On-device evals, Pico 2** (worklog HW-PENDING; the flashed build is
+   now Session 19's font/glyph build, layered on top of Session 16-18 —
    **no new one-time reset this session, still PCG5**): Session 11 (3A
    lists), Session 12 (3B stats), Session 15 storage health + 3D
    (inference + stat plots), Session 16 4A (matrix editor, bracket
@@ -52,16 +53,12 @@ stand-in. What landed:
    a real ∠ glyph per D31, superseding the old ASCII `<` stand-in),
    `eigenvals()`/`eig()` complex text. Sessions 16-18 are the largest
    diffs yet — worth a broader regression sweep, not just each new
-   surface.
-3. **3D.14 — the combined Pico 1 pass (D18)** closes Phase 3: swap the
-   board, reflash `build/pico/…uf2` (BOOTSEL volume `RPI-RP2`), run the
-   Phase 2 sweep (headline: split-pane clipping on the strip renderer),
-   the Session 8+9 fix list, Phase 3 acceptance, and watch every §8
-   screen for strip-render artifacts. **Re-check the map file** — Pico 1
-   bss is ~188.8 KB of 264 KB (D28/D29/D30/D31, essentially flat across
-   all four); if the ~76 KB stack/heap headroom pinches, shrink
-   `ArrayStore::kSlabCount`.
-4. After the 4C on-device eval: **Phase 4D (GC completeness)** is next
+   surface. (Note: 3D.14 (2026-07-22) already covered the *Pico 1* leg of
+   the Session 11/12/15 ground — lists, stats, storage health, inference,
+   StatPlots — so this item is now Pico-2-scoped only for those three;
+   Sessions 16-18 have no Pico 1 pass yet at all — see "Key things to
+   note".)
+3. After the 4C on-device eval: **Phase 4D (GC completeness)** is next
    per `phase4-spec.md` §7 (weeks 32-35) — the closing pass that rounds
    Phase 4 out into the project's pre-release milestone (sequence
    graphing, fuller zoom/shading, list↔matrix bridge, scientific
@@ -77,7 +74,7 @@ stand-in. What landed:
    decided 2026-07-21 (D32, D33) — see `phase4-spec.md`, `phase5-spec.md`,
    `phase6-spec.md`, and `decisions.md` D32/D33. MicroPython's phase slot
    (an open question as of D32) is now resolved: Phase 6 sub-phase 6B.
-5. **After 4D ships (its on-device eval), before Phase 5 starts in
+4. **After 4D ships (its on-device eval), before Phase 5 starts in
    earnest: decide the remaining matrix/complex "first-class" departures**
    — see
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md).
@@ -108,13 +105,21 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the unit is now Session 19's font/glyph build**
+- **Firmware on the Pico 2 is Session 19's font/glyph build**
   (Terminus default, `-DPICOCALC_FONT=terminus`; flashed 2026-07-21,
   boots healthy, telemetry clean over serial). This build layers on top
   of Sessions 16-18 (4A matrices/solver, 4B CALC menu, 4C complex
   numbers) — **their on-device evals are still outstanding** (see "The
-  next job" above), this session was UI/font polish, not those. The
-  Pico 1 is still on Session 7 firmware; its pass is 3D.14 (D18).
+  next job" above), that session was UI/font polish, not those.
+- **The Pico 1 is now also on the Session 19 build** (reflashed
+  2026-07-22, task 3D.14 — no code changes since Session 19, so it's
+  the identical binary): boots healthy, telemetry clean over serial.
+  Phase 2 + Phase 3 are HW-verified on this board (3D.14 pass, closes
+  D18/Phase 3) — two non-blocking findings open (factorial `!` syntax
+  error, list-editor/scatter-plot perf feel — see "Backlog"). **Phase
+  4A-4C and the Session 19 font/glyph sweep have not yet been evaluated
+  on the Pico 1** — that eval was deliberately out of scope for 3D.14
+  (kept to Phase 2 + Phase 3 ground only) and remains open.
 - **No GraphState layout change this session** — still **PCG5** (last
   bumped Session 18/D30), no new one-time reset on this flash.
 - **`lists.dat` / `matrices.dat` may not exist yet on the SD card** —
@@ -145,20 +150,22 @@ is actually scheduled.
 - **STM32 caution unchanged (both boards):** never poll STM32 registers
   back-to-back; a wedge needs a physical power cycle. Fw is v1.6.
 
-## Pico 1 pass: DEFERRED to post-Phase 3 (D18)
+## Pico 1 pass: DONE (3D.14, D18 resolved 2026-07-22)
 
-Decided 2026-07-18: the board swap is tedious, the board-conditional surface is
-tiny (clip logic is shared and Pico-2-exercised; RP2040 RAM headroom is ~195 KB),
-and the residual risks (strip-render idempotency, perf feel) are localized, not
-architectural. One combined pass after Phase 3 (task 3D.14) covers the Phase 2
-sweep — headline: **split-pane clipping on the strip renderer** — plus the
-Session 8+9 fix list and Phase 3 acceptance. Until then the Pico 1 stays on
-Session 7 firmware; reflash before that pass (`build/pico/…uf2`, BOOTSEL volume
-`RPI-RP2`). Guardrail: Phase 3 render code must be strip-safe (idempotent, may
-run ~20x/frame) — rule recorded in `phase3-spec.md` §8. Note for that pass:
-Pico 1 bss is ~188.8 KB of 264 KB as of Session 19 (D28/D29/D30/D31 combined,
-essentially flat) — re-check the map file then; the knob is
-`ArrayStore::kSlabCount`.
+The combined pass decided 2026-07-18 (D18) ran 2026-07-22 as task 3D.14: the
+Pico 1 was reflashed to current HEAD (Session 19) and put through the full
+Phase 2 sweep — headline **split-pane clipping on the strip renderer**, no
+bleed — plus the Session 8+9 fix list and the Phase 3 acceptance checklist.
+All passed; two non-blocking findings (factorial `!`, list-editor/scatter-plot
+perf) are open in "Backlog" below. Full detail: worklog 2026-07-22 entry,
+`phase3-retro.md`, `session3D14-pico1-observations-verbatim.md`. **This
+closes Phase 3.** Guardrail carried forward: Phase 3+ render code must stay
+strip-safe (idempotent, may run ~20x/frame) — rule recorded in
+`phase3-spec.md` §8; it held up cleanly this pass. Pico 1 bss was ~188.8 KB of
+264 KB as of Session 19 (D28/D29/D30/D31 combined, essentially flat) — no
+headroom pinch observed during 3D.14; still worth re-checking the map file
+whenever Phase 4A-4C get their own Pico 1 eval (the knob is
+`ArrayStore::kSlabCount`).
 
 ## Open design threads
 
@@ -194,6 +201,14 @@ essentially flat) — re-check the map file then; the knob is
   whether the shared Unifont-derived `i`/⇒ glyphs look consistent
   against Terminus's own glyph shapes; big-radical display and true
   subscripts (`Sₓ`, `σₓ`) remain KIV/wishlist items (D31).
+- **Pico 1 watch-items (task 3D.14, 2026-07-22, not yet investigated)**:
+  `!` (factorial) throws a syntax error on this board — pre-Phase-3
+  feature, not a Phase 3 regression; could be a parser bug or a
+  physical-keyboard `!`-key mapping quirk specific to this unit. The
+  list editor and a 5000-point scatter plot both feel sluggish on the
+  Pico 1 — not profiled; could be strip-renderer overhead, RP2040 clock
+  speed, or list/plot-specific cost. Both logged in
+  `session3D14-pico1-observations-verbatim.md` and `phase3-retro.md`.
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —
   the last deferred HW item); 340-point curve cache cap; audio HAL; licensing (D17 —
   display/keyboard rewrites remain); dual-core display service (D10

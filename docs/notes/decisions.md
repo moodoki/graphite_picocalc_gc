@@ -441,7 +441,7 @@ actually scheduled into a phase (gets its own D-number at that point).
 ## D18: Defer the Pico 1 Phase 2 verification pass to post-Phase 3
 
 **Date**: 2026-07-18
-**Status**: Accepted
+**Status**: Resolved 2026-07-22 (task 3D.14)
 **Context**: The Phase 2 test drive (2.24) passed on the Pico 2; the Pico 1 pass was
 deferred from Session 8. Both Picos share one PicoCalc mainboard, so a Pico 1 pass
 costs a tedious physical module swap. Question: run it before Phase 3, or fold it
@@ -466,6 +466,14 @@ screen `render()`s must be idempotent (may run ~20x/frame in strip mode).
 (animations, new split layouts) — then swap boards *before* that work starts; or any
 host-side strip-mode regression harness appears, which would shrink the deferred risk
 further.
+**Resolution (2026-07-22)**: Task 3D.14 ran — the Pico 1 was reflashed to current
+HEAD (Session 19 font/glyph build) and put through the full Phase 2 sweep, the
+Session 8+9 fix list, and Phase 3 acceptance. All passed. Two non-blocking findings
+carried to backlog, not yet investigated: `!` (factorial) throws a syntax error on
+this board (pre-Phase-3 feature, not a regression — possibly a physical-keyboard
+mapping quirk specific to this unit), and the list editor / a 5000-point scatter
+plot both feel sluggish (not profiled). See `phase3-retro.md` and
+`session3D14-pico1-observations-verbatim.md`.
 
 ## D17: Licensing — MIT own code, GPL-2.0 combined firmware
 
