@@ -30,7 +30,7 @@ Phase 4 splits into sub-phases, developed in order. Each occupies a different pa
 | 4A: Matrix operations | 26–27 | Matrix editor, arithmetic, det, inverse, rref, eigenvalues; numeric solver |
 | 4B: Graph analysis (CALC) | 28–29 | value, zero, min/max, intersect, dy/dx, fnInt — numeric + interactive on the graph screen |
 | 4C: Complex numbers | 30–31 | `Complex` type, complex-aware arithmetic and functions, a+bi mode, rect/polar display |
-| 4D: GC completeness | 32–35 | Sequence graphing, zoom/shading, list↔matrix bridge, sci constants, unit conversions, home-screen matrix literals, complex storage, device polish — closes remaining TI-83/84+ parity gaps |
+| 4D: GC completeness | 32–35 | Sequence graphing, zoom/shading, list↔matrix bridge, vector ops, eigenvectors, complex-valued lists/matrices, sci constants, unit conversions, home-screen matrix literals, complex storage, device polish — closes remaining TI-83/84+ parity gaps, including all of the matrix/complex design departures (D37) |
 
 *(4A–4C already shipped under these labels — see D28–D30 — so their numbering is unchanged. `4D` is a new definition, reusing the label CAS vacated when it became Phase 5; the old 4E, MicroPython, is gone from this document entirely — see phase6-spec.md §2.)*
 
@@ -632,11 +632,57 @@ to Phase 5 or left as a standalone wishlist item.
   moderate risk (a real storage-type widening, touches every
   `Variables::vars` read site) but explicitly doesn't touch the graphing
   hot path, same dual-path precedent 4C established.
-  **Complex-valued lists and matrices (departures ideas C/D) are
-  explicitly out of scope for 4D** — the design-departures doc flags
-  those as needing a real Pico 1 memory feasibility study first, which
-  is bigger than a "closing pass" item. Revisit as a standalone item
-  post-4D if wanted.
+  **Real-only readers error on a complex value** (resolves P4-11):
+  matexpr scalar subterms, listexpr reductions, and the graphing/table
+  hot path all error rather than silently drop the imaginary part when
+  they encounter a complex-valued variable, list element, or matrix
+  element — same "Non-real result"-style precedent D30 set for REAL-mode
+  expressions, now generalized to every real-only consumer, not just
+  the home-screen evaluator.
+- **Complex-valued lists** (design-departures idea C — pulled forward
+  into 4D 2026-07-24, see decisions.md D37): `l1`..`l6` can hold `Complex`
+  elements. **Storage never grows Pico 1's fixed 28-slab SRAM pool**
+  (`ArrayStore::kSlabCount * kSlabBytes` = 56 KB of bss, already
+  committed to the real-only small-array tier, ~67 KB headroom left as
+  of D35) — a complex-valued list routes exclusively through the PSRAM
+  region tier regardless of element count, so even a 3-element complex
+  list pays the PSRAM-access cost rather than getting the small-array
+  SRAM fast path. **v1 scope**: storage, display, elementwise ops
+  (add/sub/scalar-mul), and `sum`/`mean` (well-defined componentwise).
+  `stdev`/regression/`sort` and anything else that depends on an
+  ordering or a variance definition **error on complex input** in v1 —
+  not silently promoted, per the real-only-reads rule above (these
+  aren't "real-only readers" exactly, but the same "don't silently drop
+  information" principle applies).
+- **Complex-valued matrices** (design-departures idea D — pulled forward
+  into 4D 2026-07-24, see decisions.md D37): `[A]`–`[J]` can hold
+  `Complex` elements, reusing complex-list's PSRAM-only storage/tier
+  answer (idea C and D share a storage model, as the design-departures
+  doc anticipated). **Full complex linear algebra in v1**: determinant
+  (complex LU), inverse (complex Gauss-Jordan with magnitude-based
+  pivoting), rref/ref/rank, augment/reshape/identity/power/transpose,
+  and the numeric solver's linear path (`solve_linear`) all generalize
+  to `Complex` arithmetic. **Explicitly out of scope**: eigenvalues/
+  eigenvectors *of* a complex-valued matrix — a materially different,
+  much larger algorithmic lift (a complex Hessenberg+QR core) than
+  generalizing arithmetic to `Complex`, and distinct from 4C's existing
+  feature (complex eigenvalues returned *from a real* matrix, D30, which
+  is untouched). `eigen_core` keeps its real-input assumption; 4D.23's
+  new eigenvectors task (idea G) is real-input-only for the same reason.
+- **Vector operations** (design-departures idea E, vector-ops half —
+  pulled forward into 4D 2026-07-24, see decisions.md D36): `dot(v1,
+  v2)`, `cross(v1, v2)` (3-space) and `norm(v)` for a $1\times n$/$n\times
+  1$ `Array`, plus `norm([A])` as the matrix Frobenius norm (a direct
+  extension — same sum-of-squares computation, no new algorithm). New
+  `matexpr` functions only; no storage-model change. The list↔matrix
+  bridge half of the same departure idea already shipped as 4D.12 above.
+- **Matrix eigenvectors** (new, raised in 2026-07-24 soak feedback —
+  not part of the original design-departures doc): 4A/4C ship
+  eigen*values* only (`eigenvalues()`, `eigenvalues_complex()`); there is
+  currently no way to get the corresponding eigenvectors. Real
+  eigenvalues only for v1, mirroring D28's eigenvalues precedent
+  (complex eigenvectors deferred, same as complex eigenvalues were in
+  4A) — see P4-13 for the open algorithm question.
 - **Additional stat plot types**: `xyLine` (scatter with points connected
   in list order) and normal probability plot, rounding out the
   histogram/box/scatter set from Phase 3D to match TI's full stat-plot
@@ -681,9 +727,13 @@ to Phase 5 or left as a standalone wishlist item.
 **Explicitly out of scope for 4D** (per the parity doc's own boundary):
 CAS-tier items (symbolic simplify, surd/exact-value display, arbitrary
 symbolic differentiation/integration) — Phase 5. MicroPython and any
-other non-calculator app — Phase 6. Complex-valued lists/matrices
-(departures ideas C/D) and the unified tagged-value evaluator (idea F) —
-explicitly deferred past 4D, see §7.3 above.
+other non-calculator app — Phase 6. The unified tagged-value evaluator
+(idea F) — all of A-E and G are now in 4D's scope (2026-07-24, D37), but
+F is committed as a real follow-on *after* 4D ships rather than pulled
+in now: its own trigger ("2+ of B-E ship and duplication becomes
+visible in the code") is expected to fire once 4D closes, and unifying
+`matexpr`/`complexexpr`/`listexpr` needs 4D's actual shipped code to
+refactor against, not a speculative rewrite done alongside it.
 
 ---
 
@@ -766,7 +816,11 @@ Solo developer, part-time (~20 hrs/week).
 | 4D.19 | Auto power-off (APD) — feasibility check first | 8 | Idles to sleep, wakes on key press |
 | 4D.20 | Brightness/backlight persistence — feasibility check first | 4 | Setting survives power cycle |
 | 4D.21 | Build-identifier diag label | 2 | Diag screen shows hash or `dev` |
-| | **Subtotal** | **~109 hrs** | |
+| 4D.22 | Vector ops (`dot`/`cross`/`norm`) + matrix Frobenius `norm` | 5 | `dot({1,2,3},{4,5,6})`=32; `norm([A])` correct |
+| 4D.23 | Matrix eigenvectors (real only, v1) | 10 | Eigenvector for each real eigenvalue of a diagonalizable matrix, correct direction/normalized |
+| 4D.24 | Complex-valued lists: PSRAM-only tagged storage, elementwise ops, `sum`/`mean`; error on `stdev`/regression/`sort` | 14 | `l1` holds `{1+i, 2-i}`; `sum(l1)`=`3`; `stdev(l1)` errors |
+| 4D.25 | Complex-valued matrices: full complex linear algebra (det/inverse/rref/ref/rank/solve), reuses 4D.24's storage tier | 22 | `inverse([A])` correct for a complex `[A]`; `det`/`rref` correct |
+| | **Subtotal** | **~160 hrs** | |
 
 ### Summary
 
@@ -775,8 +829,8 @@ Solo developer, part-time (~20 hrs/week).
 | 4A: Matrix operations | 26–27 | ~46 | Matrix editor, arithmetic, rref/det/inverse/eigen, numeric solver |
 | 4B: Graph analysis (CALC) | 28–29 | ~51 | value/zero/min/max/intersect/dy-dx/fnInt, interactive on graph |
 | 4C: Complex numbers | 30–31 | ~38 | Complex type, functions, a+bi/polar mode |
-| 4D: GC completeness | 32–35 | ~109 | Sequence mode, zoom/shading, list↔matrix, sci constants/units, home-screen matrix literals, complex storage, device polish |
-| **Total Phase 4** | **26–35 (~10 weeks)** | **~244 hrs** | Pre-release milestone: full TI-83/84+-class GC functionality |
+| 4D: GC completeness | 32–35 | ~160 | Sequence mode, zoom/shading, list↔matrix, vector ops, eigenvectors, complex lists/matrices, sci constants/units, home-screen matrix literals, complex storage, device polish |
+| **Total Phase 4** | **26–35 (~10-13 weeks)** | **~295 hrs** | Pre-release milestone: full TI-83/84+-class GC functionality, complex/matrix design departures fully closed (D37) |
 | *CAS engine — moved to Phase 5* | *32–36* | *~124* | *see [phase5-spec.md](phase5-spec.md) §11* |
 | *MicroPython — moved to Phase 6* | | *~61* | *see [phase6-spec.md](phase6-spec.md) §5* |
 
@@ -882,8 +936,9 @@ the wishlist rather than forcing it.
 | P4-8 | Polar `fnInt`: area ($\frac{1}{2}\int r^2 d\theta$) only, or also arc length? | Area matches TI; arc length is a nice extra | Week 29, task 4B.8 |
 | P4-9 | Number-mode default on first boot: REAL or RECTANGULAR? | REAL matches TI default; RECT is friendlier | Week 31, task 4C.9 |
 | P4-10 | List cap increase (4D.13): how many lists, fixed slots or named? | Bounded by Pico 1 `ArrayStore` headroom — scope at implementation time | Week 32-35, task 4D.13 |
-| P4-11 | Complex storage (4D.15): do real-only readers (matexpr scalar subterms, listexpr) error or silently truncate on a complex-valued variable? | Error (matches REAL-mode precedent) vs. silent real-part truncation | Week 32-35, task 4D.15 |
+| P4-11 | Complex storage (4D.15): do real-only readers (matexpr scalar subterms, listexpr) error or silently truncate on a complex-valued variable? | **Resolved 2026-07-24 (D37): error**, matching the REAL-mode precedent — generalizes to every real-only consumer of a complex value (variables, list elements, matrix elements), not just 4D.15 | Week 32-35, task 4D.15 |
 | P4-12 | Sequence mode: support two-sequence cross-reference (`u(n)` referencing `v(n-1)`) in v1, or single-sequence only? | TI supports cross-reference; single-sequence is simpler first cut | Week 32-35, task 4D.6 |
+| P4-13 | Eigenvectors (4D.23): algorithm — inverse iteration per eigenvalue vs. nullspace of `(A - λI)` via existing `rref`? How to handle repeated eigenvalues (defective matrices, geometric < algebraic multiplicity)? | `rref`-based nullspace reuses existing matrix code (D28) and is simpler to reason about at Pico-1 scale ($n \leq 10$) than iterative inverse iteration; repeated eigenvalues likely return "did not converge to a unique eigenvector" rather than silently guessing a basis | Week 32-35, task 4D.23 |
 
 ---
 

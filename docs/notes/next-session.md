@@ -1,43 +1,43 @@
 # Start here — next session
 
-**Last session:** 2026-07-22, four blocks of work. **(1) Task 3D.14**, the
-deferred Pico 1 combined pass (D18): the Pico 1 (RP2040) was swapped back in
-after three days on Session 7 firmware; rebuilt and reflashed
-`build/pico/picocalc_graphcalc.uf2` from current HEAD (Session 19's
-font/glyph build — no code changed), then ran the full Phase 2 sweep, the
-Session 8+9 fix list, and the Phase 3 acceptance checklist against it.
-Everything passed except two non-blocking findings (factorial `!` syntax
-error, list-editor/5000-point-scatter perf feel — see below). **This closes
-task 3D.14, resolves D18, and closes Phase 3** — retro in `phase3-retro.md`.
-**(2) Phase 4A-4C on-device eval, same board/build**: ran the Phase 4A
-(matrices+solver), 4B (CALC menu), 4C (complex numbers) checklists on the
-Pico 1 — the first hands-on functional pass of any of these three on
-*either* board. All passed (two reports turned out to be intentional design
-per D28, not bugs; one real UX gap — no home-screen `MatAns` token; one
-feature request — fnInt shading should follow curve color). **Closed the
-Session 16/17/18 Pico 2 HW-PENDING rows as a formality** (board-independent
-logic, harder rendering case already passed) — see "Key things to note".
-**Root-caused the factorial `!` bug by code scan, no hardware needed**:
-`complexexpr` lacks `engine`'s postfix-`!`→`fac()` rewrite, so `5!` fails in
-non-REAL Number mode on any board — not a keyboard quirk. Fix candidate
-identified but **not yet applied** (see "The next job" #1). Logged verbatim
-in `session3D14-pico1-observations-verbatim.md` and
-`phase4abc-pico1-observations-verbatim.md`. Host test count (1219 checks)
-and both-boards build status were unchanged from Session 19 as of these two
-blocks. **(3) and (4): the two 3D.14 perf findings got fixed and flashed
-(D35)** — bucketed pixel-space point cache for stat plots (scatter/xy-line/
-normprob/box-plot, `src/graph/stat_plot.{cpp,hpp}`), list-editor dirty-band
-narrowing (`src/apps/list_editor.{cpp,hpp}`), and — the real bottleneck
-behind "large lists feel sluggish to enter," found mid-session — one-file-
-per-list and one-file-per-matrix SD persistence (`src/math/lists_persist.cpp`,
-`src/math/matrices_persist.cpp`, magic bumps PCL1→PCL2/PCM1→PCM2). All four
-fixes built clean on both boards, passed the still-1219-check host suite
-(no new host coverage needed — stat_plot/persistence have no host tests per
-existing convention), lint clean, and were each flashed to and
-developer-confirmed on the Pico 1 before moving to the next. Pico 1 bss is
-now **201896 bytes** (was ~193.5 KB), still comfortably inside the ~76 KB
-headroom watched since D28. Full detail in `worklog.md` (four 2026-07-22
-entries) and `decisions.md` (D18 resolution, **D35**).
+**Last session:** 2026-07-24, a docs/planning-only session — no
+application source touched, no board reflashed (both boards are still in
+their 2026-07-22 (D35) flash state — see "Key things to note"). Four
+blocks, in order: **(1)** Discussed reviving D10's original dual-core
+display pipeline (core-0 compute + core-1 DMA push) — the multicore-FIFO
+stall that killed it was never root-caused, workaround shipped instead —
+and surveyed the rest of the codebase for other parallelization
+candidates. Concluded D10's pipeline is the highest-value target (SPI
+push time dominates over compute); `GraphScreen::recompute_function`'s
+shared `math::engine()` instance is a secondary, harder candidate; matrix
+ops and iterative regression fits were ruled out as inherently
+sequential. Queued into the next bug-fixing session alongside the `!` fix
+— see "The next job" #1b. **(2)** A soak/feedback session (both boards)
+using the testdrive-observations skill — already logged and committed
+separately, `testdrive-2026-07-24-observations.md` (commit 0c2cdae) — no
+need to redo it; MatAns/fnInt-shading feedback was already 4D-scoped
+(see "The next job" #2), and its vector-ops/eigenvector feedback fed
+directly into (3) below. **(3)** Pulled design-departures ideas E
+(vector ops: `dot`/`cross`/`norm`) and G (new: matrix eigenvectors,
+real-only v1) into Phase 4D as **4D.22**/**4D.23** — **D36**. **(4)**
+Immediately after, worked through the remaining departures (C: complex
+lists, D: complex matrices, F: unify `matexpr`/`complexexpr`/`listexpr`)
+and closed all of them as real decisions rather than deferring to a
+post-4D pass — **D37**: P4-11 resolved (real-only readers error on a
+complex value, don't silently truncate — generalized to list/matrix
+elements too); **C and D both go**, as **4D.24**/**4D.25**, routed
+exclusively through the PSRAM tier so Pico 1's fixed 28-slab SRAM pool
+doesn't grow (D's v1 is full complex linear algebra, excluding
+eigendecomposition of a complex matrix); **F** committed as a real
+follow-on once 4D ships, not indefinite parking. A same-session follow-up
+question — how much work to make variables fully polymorphic
+(MATLAB-style, collapsing the `A`-`Z`/`[A]`-`[J]`/`l1`-`l6` namespaces
+themselves, not just the evaluators) — was scoped as new idea **H** but
+**explicitly left undecided**, revisit after 4D ships (same checkpoint as
+F). 4D's subtotal grew ~109 → ~160 hrs this session (Phase 4 total
+~244 → ~295 hrs). Full detail: `worklog.md`'s 2026-07-24 entries,
+`decisions.md` D36/D37, `design-departures-matrix-complex.md` (status:
+A-G closed, H open).
 
 ## The next job
 
@@ -48,6 +48,27 @@ entries) and `decisions.md` (D18 resolution, **D35**).
    `math::engine()` even in non-REAL Number mode. Small, well-understood fix
    — good to knock out before or alongside Phase 4D. See the worklog
    2026-07-22 entry for the full trace.
+1b. **Revisit the D10 dual-core display stall (2026-07-24 scoping)**: queued
+   into the next bug-fixing session alongside the `!` fix, not a Phase 4D
+   item. D10 (2026-07-10) found that routing the strip push through a
+   core-1 service over the multicore FIFO stalled on the very first frame;
+   the workaround (synchronous core-0 rendering) shipped and the FIFO stall
+   itself was never root-caused — `display_service_main`/`push_rect_dma`
+   are still in the tree, unused, per D10's "revisit when." Since D11/D35,
+   profiling has consistently shown SPI push time dominating over compute
+   (recompute ~15-17 ms vs. ~200 ms full-frame push pre-D13), so the
+   highest-value target is pipelining: core 0 computes the next dirty strip
+   while core 1 DMAs the current one out — not data-splitting a single hot
+   function. First step is diagnosing the actual FIFO stall (timing/
+   handshake bug vs. a real hardware constraint) before rebuilding on top of
+   it. Secondary, lower-priority candidate surfaced in the same scoping
+   pass: `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`)
+   sweeps up to 10 independent `Y=` slots but shares one `math::engine()`
+   instance (mutates a shared `X` var) — parallelizing it needs a second
+   engine/vars context, not just a spawned task. Matrix ops (`inverse`,
+   `eigen_core`, etc.) and iterative regression fits (`lm_fit`, `poly_fit`)
+   were reviewed and ruled out — row-reduction/iteration is inherently
+   sequential, not a 2-core split candidate.
 2. **Phase 4D (GC completeness)** is the next major work, per
    `phase4-spec.md` §7 (weeks 32-35) — the closing pass that rounds Phase 4
    out into the project's pre-release milestone (sequence graphing, fuller
@@ -79,24 +100,35 @@ entries) and `decisions.md` (D18 resolution, **D35**).
    in hand: confirm it still feels fine (it already did pre-fix, per
    Phase 4A-4C) and ideally confirm the fixes measurably help there too,
    not just on the Pico 1.
-4. **After 4D ships (its on-device eval), before Phase 5 starts in
-   earnest: decide the remaining matrix/complex "first-class" departures**
-   — see
-   [design-departures-matrix-complex.md](design-departures-matrix-complex.md).
-   Ideas A (home-screen matrix literals) and B (complex variable/Ans
-   storage) are already scheduled as 4D.14/4D.15 — nothing to decide
-   there. What's still open: **C/D** (complex-valued lists/matrices —
-   gated on a Pico 1 memory feasibility check the doc itself calls for;
-   4D.15's actual measured bss cost for widening `Variables` storage is
-   exactly the data point that check needs, so this can't be scoped well
-   before 4D ships), the **vector-ops half of E** (`dot`/`cross`/`norm` —
-   never made it into 4D's task list, only the list↔matrix bridge half
-   did, 4D.12), and **F** (unifying `matexpr`/`complexexpr`/`listexpr`
-   into one tagged-value evaluator — explicitly a "wait for duplication
-   pain" trigger, not a calendar one; check whether it's fired once
-   4D.15 and whichever of C/D/E get picked up have shipped). Do this as
-   a short scoping pass, not mid-4D — it needs 4D's real numbers, not
-   guesses.
+4. **CLOSED 2026-07-24 (D37): all matrix/complex "first-class" departures
+   are now decided**, no post-4D scoping pass left to do — see
+   [design-departures-matrix-complex.md](design-departures-matrix-complex.md)
+   (status: closed) and `decisions.md` D32/D33 (A/B), D36 (E, G), D37
+   (C, D, F). Every idea A-G now either has a 4D task ID or, for F, a
+   committed (not open-ended) follow-on timing:
+   - A (home-screen matrix literals) → 4D.14
+   - B (complex variable/`Ans` storage) → 4D.15; its open question P4-11
+     (error vs. silent truncation on real-only reads) is **resolved:
+     error**, generalized to cover complex list/matrix elements too
+   - E (vector ops) → 4D.22; the list↔matrix bridge half already shipped
+     as 4D.12
+   - G (matrix eigenvectors, real-only v1) → 4D.23
+   - C (complex-valued lists, PSRAM-only tier so bss doesn't grow; v1 =
+     storage/elementwise/`sum`/`mean`, error on `stdev`/regression/`sort`)
+     → 4D.24
+   - D (complex-valued matrices, full complex linear algebra in v1,
+     excluding eigendecomposition of a complex matrix) → 4D.25
+   - F (unify `matexpr`/`complexexpr`/`listexpr`) → committed as the
+     real follow-on once 4D ships, not a phase/week slot yet
+   4D's subtotal is now ~160 hrs (Phase 4 total ~295 hrs) — see
+   `phase4-spec.md` §8 for the updated task table.
+   **New idea H, raised same session, explicitly NOT decided**:
+   polymorphic variables (any `A`-`Z` holds real/complex/list/matrix,
+   MATLAB-style) — bigger than F (collapses the three *namespaces*, not
+   just the three evaluators). Scoped in
+   [design-departures-matrix-complex.md](design-departures-matrix-complex.md)
+   §H with a rough 100+ hr ballpark, no phase slot. **Revisit after 4D
+   ships**, same checkpoint as F.
 
 Mind the §8 strip-safety rule (idempotent `render()`) for any new
 screens touched during the on-device passes.
@@ -271,7 +303,8 @@ observed across either pass.
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —
   the last deferred HW item); 340-point curve cache cap; audio HAL; licensing (D17 —
   display/keyboard rewrites remain); dual-core display service (D10
-  addendum); **stale diag-screen label** (`src/main.cpp:213`) — still
+  addendum — **now scoped for the next bug-fixing session, see "The next
+  job" #1b**); **stale diag-screen label** (`src/main.cpp:213`) — still
   hardcoded `"[milestone 1]"` from the Phase 1 bootstrap, never updated
   through milestones 2-5 or phases 2-4. Replace with the current phase
   (e.g. "Phase 4") and a build identifier: git short hash if the tree is

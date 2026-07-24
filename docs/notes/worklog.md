@@ -287,6 +287,126 @@ Still to verify on hardware:
 
 ---
 
+## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
+
+Docs/planning-only session — no application source touched, only
+`docs/notes/*.md` and `docs/phases/phase4-spec.md`. No board reflashed;
+both boards remain in their 2026-07-22 (D35) flash state. Four blocks:
+
+1. **D10 dual-core display stall — scoped for the next bug-fixing
+   session, not this one.** Revisited why core 1 was never adopted for
+   the display service: D10 (2026-07-10) found that routing the strip
+   push through a core-1 service over the multicore FIFO stalled on the
+   very first frame; the synchronous-core-0 workaround shipped and the
+   FIFO stall itself was never root-caused (`display_service_main`/
+   `push_rect_dma` are still in the tree, unused). Surveyed the rest of
+   the codebase for other parallelization candidates — matrix ops
+   (`inverse`, `eigen_core`), iterative regression fits (`lm_fit`,
+   `poly_fit`), and `GraphScreen::recompute_function`'s per-`Y=`-slot
+   sweep. Conclusion: reviving D10's original compute/core-0 +
+   DMA-push/core-1 pipeline is the highest-value target, since profiling
+   since D11/D35 has consistently shown SPI push time dominating over
+   compute (recompute ~15-17 ms vs. ~200 ms full-frame push pre-D13) —
+   this is a pipelining problem, not a data-splitting one.
+   `recompute_function` is a secondary, harder candidate (its shared
+   `math::engine()` instance mutates a shared `X` var, so a naive split
+   needs a second engine/vars context); matrix/regression ops were ruled
+   out as inherently sequential (row-reduction/iteration). Added as item
+   **1b** in `next-session.md`'s "The next job", queued into the next
+   bug-fixing session alongside the already-known `!` factorial fix (item
+   1) — not a Phase 4D item.
+2. **Soak/feedback session** (testdrive-observations skill, both boards:
+   Pico 1 current HEAD, Pico 2 Session 19 build) — its own artifact,
+   `docs/notes/testdrive-2026-07-24-observations.md`, was already written
+   and committed separately (`0c2cdae`) mid-session; not re-logged here.
+   Key outcomes: MatAns and fnInt-shading feature requests folded into
+   4D scope (already tracked in `next-session.md`'s "The next job" #2,
+   from the 2026-07-22 Phase 4A-4C pass); "Non-real result" phrasing,
+   font/glyphs, and D16 trace-sync judged fine as-is, no action; F3
+   MODE/ZOOM and the Session 13 caps not tested this session, still open
+   watch-items; new feedback logged but **not yet scoped into any
+   phase** — fnInt/trace numeric limit entry (typed values, not just
+   cursor-drag); and vector-ops/matrix feedback that fed directly into
+   block 3 below.
+3. **D36: pulled vector ops (E) and eigenvectors (G, new idea) into
+   Phase 4D.** The soak session's vector-ops/matrix feedback overlapped
+   directly with `design-departures-matrix-complex.md` idea E — the
+   list↔matrix bridge half already shipped as 4D.12, but the vector-ops
+   half (`dot`/`cross`/`norm`) never made it into 4D's task list — and
+   raised a new idea, G (eigenvectors): 4A/4C ship eigen*values* only,
+   no way to recover the corresponding eigenvectors. Rather than wait for
+   the post-4D scoping pass `next-session.md` had planned, pulled both
+   forward now: **4D.22** (`dot`/`cross`/`norm` on vectors, plus matrix
+   Frobenius `norm`) and **4D.23** (matrix eigenvectors, real-only for
+   v1, mirroring D28's real-only-eigenvalues precedent before D30 added
+   the complex spectrum). Added open question **P4-13**
+   (`phase4-spec.md` §11) for 4D.23's algorithm choice (nullspace of
+   `A - λI` via existing `rref` vs. inverse iteration) and
+   repeated/defective-eigenvalue handling. C/D (complex lists/matrices)
+   and F (unified evaluator) were left deferred at this point, per their
+   own gating reasons. 4D's subtotal grew ~109 → ~124 hrs (Phase 4 total
+   ~244 → ~259 hrs).
+4. **D37: closed out the remaining matrix/complex design departures (C,
+   D, F) instead of leaving them for a post-4D pass.** Immediately after
+   D36, worked through the rest of `design-departures-matrix-complex.md`
+   via a user interview:
+   - **P4-11 resolved: error, not silent truncation.** Real-only
+     consumers of a complex value — matexpr scalar subterms, listexpr
+     reductions, the graphing/table hot path — error rather than
+     silently drop the imaginary part. Generalizes the rule from
+     "complex variables" (the original P4-11 scope) to complex
+     list/matrix elements too.
+   - **C (complex lists): go, as 4D.24.** Complex-valued lists route
+     **exclusively through the PSRAM region tier**, never the fixed
+     28-slab/56 KB SRAM pool (`ArrayStore::kSlabCount * kSlabBytes`,
+     ~67 KB headroom left as of D35) — zero bss growth, even for a
+     3-element complex list, trading away the SRAM fast path small real
+     lists get. v1 scope: storage, display, elementwise ops
+     (add/sub/scalar-mul), `sum`/`mean`. `stdev`, regression, `sort`
+     error on complex input in v1.
+   - **D (complex matrices): go, as 4D.25**, reusing 4D.24's PSRAM-only
+     storage answer. **Full complex linear algebra in v1** (the more
+     ambitious of two scoping options offered, chosen by the user over
+     "storage + elementwise only"): det (complex LU), inverse (complex
+     Gauss-Jordan, magnitude-based pivoting), rref/ref/rank,
+     augment/reshape/identity/power/transpose, and the solver's
+     `solve_linear` path all generalize to `Complex`. Explicitly
+     excludes eigenvalues/eigenvectors *of* a complex-valued matrix (a
+     complex Hessenberg+QR core — materially bigger than generalizing
+     arithmetic to `Complex`, and distinct from 4C's existing
+     complex-eigenvalues-*from-a-real-matrix* feature, D30) — a future
+     gap, not covered by 4D.23 or 4D.25.
+   - **F (unified evaluator): committed as a real follow-on once 4D
+     ships**, not indefinite parking — its own trigger ("2+ of B-E ship
+     and duplication becomes visible") is expected to fire once 4D
+     closes.
+   4D's subtotal grew ~124 → ~160 hrs (Phase 4 total ~259 → ~295 hrs).
+   `docs/phases/phase4-spec.md` (§1, §7.3 prose, §8 task table with new
+   rows 4D.24/4D.25, §11 P4-11 resolution),
+   `docs/notes/design-departures-matrix-complex.md` (A-G marked closed,
+   header status updated), and `docs/notes/next-session.md` (item 4
+   rewritten as "CLOSED 2026-07-24 (D37)") all updated to match.
+5. **Idea H raised, explicitly NOT decided.** Follow-up question: how
+   much work to make variables fully polymorphic — any `A`-`Z` holds
+   real/complex/list/matrix, MATLAB-style, collapsing the three separate
+   namespaces (`A`-`Z`/`[A]`-`[J]`/`l1`-`l6`) themselves, not just
+   unifying the evaluators the way idea F does. Scoped as new idea **H**
+   in `design-departures-matrix-complex.md`, grounded in real code:
+   `Variables::vars` is a flat `calc_t[28]` with no Array-ownership
+   capability; `ArrayStore`'s 28-slab/56 KB SRAM pool; `evaluate_input()`'s
+   token-shape-gated dispatch cascade (`src/apps/home_screen.cpp`). Rough
+   size 100+ hrs, deliberately not pinned tighter — flagged as needing
+   its own design pass (tagged-`Value` representation, array-backed-
+   variable capacity policy, the `[A]`/`A` namespace-collapse product
+   question, persistence format). **Not given a D-number, not scoped
+   into any phase task table** — the final call was to revisit after 4D
+   ships, same checkpoint as F.
+
+No code changes; host test count and both-boards build status unchanged
+from the 2026-07-22 D35 flash. See `decisions.md` D36/D37 for full
+rationale/tradeoffs/revisit-triggers, and `next-session.md`'s "The next
+job" for the current handoff state.
+
 ## 2026-07-22 — Pico 1 perf fixes: stat-plot point cache, list-editor dirty bands, per-list/matrix persistence (D35)
 
 Fourth block of work today, following 3D.14 and the Phase 4A-4C eval above. Where

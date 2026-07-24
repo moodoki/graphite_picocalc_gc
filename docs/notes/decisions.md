@@ -18,6 +18,116 @@ Format:
 
 ---
 
+## D37: Close out the matrix/complex design departures (C, D, F) — all folded into 4D
+
+**Date**: 2026-07-24
+**Status**: Accepted (scoping decision; not yet implemented)
+**Context**: Immediately after D36 pulled E (vector ops) and G (eigenvectors)
+forward into 4D, asked to work through the rest of
+`design-departures-matrix-complex.md` (C: complex lists, D: complex
+matrices, F: unified evaluator) and close those decisions entirely rather
+than leave them gated on a post-4D scoping pass. Concrete numbers were
+pulled from `src/math/array.hpp` first: `ArrayStore`'s SRAM slab pool is a
+fixed `kSlabCount(28) * kSlabBytes(2048)` = 56 KB of bss already committed
+to the real-only small-array tier; Pico 1 bss is ~197 KB of 264 KB as of
+D35 (~67 KB headroom, shrinking as 4D lands). PSRAM regions, by contrast,
+are bump-allocated on first use — zero bss cost.
+**Decision**:
+1. **P4-11 resolved: error, not silent truncation.** Any real-only
+   consumer of a complex value — matexpr scalar subterms, listexpr
+   reductions, the graphing/table hot path — errors rather than silently
+   drops the imaginary part. Generalizes the rule from "complex
+   variables" (the original P4-11 scope) to complex list/matrix elements
+   too, now that C/D are in scope.
+2. **C (complex lists): go**, as **4D.24**. Complex-valued lists route
+   **exclusively through the PSRAM region tier**, never the 28-slab SRAM
+   pool — zero bss growth, even for a 3-element complex list, at the
+   cost of losing the SRAM fast path small real lists get. **v1 scope**:
+   storage, display, elementwise ops (add/sub/scalar-mul), `sum`/`mean`
+   (well-defined componentwise). `stdev`, regression, `sort` — anything
+   depending on an ordering or a variance definition — error on complex
+   input in v1, not silently promoted.
+3. **D (complex matrices): go**, as **4D.25**, reusing 4D.24's
+   PSRAM-only storage answer (C and D share a storage model, as the
+   design-departures doc anticipated). **Full complex linear algebra in
+   v1** (the more ambitious of two scoping options offered — chosen over
+   "storage + elementwise only"): det (complex LU), inverse (complex
+   Gauss-Jordan, magnitude-based pivoting), rref/ref/rank,
+   augment/reshape/identity/power/transpose, and the solver's
+   `solve_linear` path all generalize to `Complex`. **Explicitly out of
+   scope**: eigenvalues/eigenvectors *of* a complex-valued matrix — a
+   complex Hessenberg+QR core is a materially bigger algorithmic lift
+   than generalizing arithmetic to `Complex`, and distinct from 4C's
+   existing feature (complex eigenvalues *from a real* matrix, D30,
+   untouched here). `eigen_core` keeps its real-input assumption;
+   4D.23's eigenvectors (idea G) stay real-input-only for the same
+   reason.
+4. **F (unified evaluator): committed as a real follow-on after 4D
+   ships**, not indefinite parking. With B/C/D/E/G all landing in 4D,
+   F's own trigger ("2+ of B-E ship and duplication becomes visible")
+   is expected to fire once 4D closes — treated as the de facto next
+   architecture pass, though not yet given its own phase/week slot.
+**Rationale**: PSRAM-only routing sidesteps the SRAM feasibility risk the
+design-departures doc flagged entirely, rather than requiring a
+speculative bss study before committing — the numbers make the tradeoff
+(always pay PSRAM access for complex arrays) knowable up front. Splitting
+C/D's v1 scope down to "well-defined operations only" (elementwise,
+sum/mean; full linear algebra for matrices but not complex-matrix
+eigendecomposition) keeps each task honestly estimated instead of
+open-ended. F stays sequenced after 4D because unifying three evaluators
+needs real shipped code with real duplication to refactor against, not a
+parallel speculative rewrite.
+**Tradeoffs**: 4D's subtotal grows ~124 → ~160 hrs (4D.24 ~14 hrs, 4D.25
+~22 hrs); Phase 4 total ~259 → ~295 hrs. Complex lists/matrices always
+pay the PSRAM tier cost, never the SRAM fast path. Complex-matrix
+eigendecomposition remains an open gap after 4D ships — a future item if
+ever wanted, not covered by 4D.23 (real-only) or 4D.25 (explicitly
+excludes it).
+**Revisit when**: 4D.24/4D.25 are implemented and the actual PSRAM-tier
+access cost is measured on hardware (informs whether "always PSRAM, even
+for 3 elements" needs a small-size exception later); complex-matrix
+eigendecomposition gets requested (separate scoping, bigger than 4D.25);
+F's trigger condition is checked once 4D actually closes.
+
+## D36: Pull vector ops + eigenvectors into 4D from soak-feedback session
+
+**Date**: 2026-07-24
+**Status**: Accepted (scoping decision; not yet implemented)
+**Context**: A soak/discussion session after hands-on use of the current
+build (both boards) surfaced feedback that lists and matrices feel "walled
+off" from each other, wanting vector ops (`dot`/`cross`/norms) usable on
+lists/narrow matrices, and asked whether an eigenvector function exists (it
+doesn't — 4A/4C only ever shipped eigen*values*). This overlaps directly
+with `design-departures-matrix-complex.md` idea E (vector ops — the
+list↔matrix bridge half of E already shipped as 4D.12; the vector-ops half
+never made it into 4D's task list) and raises a new idea, G (eigenvectors),
+not in the original A-F list at all. `next-session.md`'s existing plan was
+to scope E's leftover half (and C/D) in a dedicated pass *after* 4D ships.
+**Decision**: Pull E's vector-ops half and the new eigenvectors idea (G)
+forward into 4D now, rather than waiting for the post-4D scoping pass — as
+**4D.22** (`dot`/`cross`/`norm` on vectors, plus matrix Frobenius `norm`)
+and **4D.23** (matrix eigenvectors, real-only for v1, mirroring D28's
+real-only eigenvalues precedent before D30 added the complex spectrum).
+Added open question **P4-13** (`phase4-spec.md` §11) for 4D.23's algorithm
+choice (nullspace of `A - λI` via existing `rref` vs. inverse iteration)
+and repeated/defective-eigenvalue handling. C/D (complex lists/matrices)
+and F (unified evaluator) are unaffected — still deferred to the post-4D
+pass per their own gating reasons (Pico 1 memory feasibility; "wait for
+duplication pain").
+**Rationale**: E was already assessed cheap and storage-model-free in the
+design-departures doc ("could land whenever, including opportunistically
+inside another matrix-touching session") — no reason to hold it for a
+separate pass. G is bigger (a real numeric-methods addition, not a thin
+wrapper) but is scoped now, with its algorithmic uncertainty captured as
+P4-13 rather than guessed at, so 4D's estimate stays honest.
+**Tradeoffs**: 4D's subtotal grows ~109 → ~124 hrs (Phase 4 total ~244 →
+~259 hrs). 4D.23 is real-only in v1 — complex eigenvectors (matching
+`eigenvalues_complex()`'s existing complex spectrum) are not covered and
+would need their own follow-up.
+**Revisit when**: 4D.23 is implemented and P4-13 gets resolved against
+real code, not guessed; or if complex eigenvectors get requested (separate
+scoping, likely bigger than 4D.23 itself).
+
 ## D35: Pico 1 perf fixes — bucketed stat-plot point cache, list-editor dirty-band narrowing, one-file-per-list/matrix persistence
 
 **Date**: 2026-07-22
