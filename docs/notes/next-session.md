@@ -33,22 +33,20 @@ reflashed, and developer-confirmed** the same day. Full detail:
 
 ## The next job
 
-1. **Batch 9 per the D38 plan: device polish (4D.19-20)**, ~12 h est —
-   **needs the board in hand for interactive testing** (the only 4D
-   batch left). New `platform/power.{hpp,cpp}`: inactivity timer in the
-   main-loop key drain; on timeout → backlight 0 (± DISPOFF via an
-   exported `spi_write_command` wrapper in `src/platform/display.cpp` —
-   drivers stay read-only); any key wakes. **All STM32 traffic paced +
-   gated on `Keyboard::bus_idle()`** (never poll back-to-back).
-   Brightness + kbd-backlight (vendored `set_kbd_backlight`, unused)
-   settings rows; persist APD timeout + levels in new
-   `/picocalc/settings.dat` (own magic **PCS1**; restore hooks the
-   late-init path for D14 cold-boot SD settle). No deep sleep in v1
-   (core-1 display service + tinyusb risk). **Batches 2-8 shipped
-   2026-07-26 — SEVEN HW-PENDING eval rows open** (worklog table);
-   working those evals down is likely the better next session than
-   Batch 9. **Phase 4D closing** afterwards triggers the F-evaluator
-   follow-on check (D37) and the idea-H revisit. Task table:
+1. **Phase 4D is CODE-COMPLETE (all 9 batches shipped 2026-07-26,
+   single session).** The next job is the **hands-on eval backlog:
+   EIGHT HW-PENDING rows** (Batches 2-9, worklog table) — complex
+   matrices, sequence graphing (incl. the PCG6 first-boot reset,
+   already absorbed), zoom/shading, data/catalog glue, named lists,
+   display/formatting, eigenvectors, and the device-polish batch
+   (APD sleep/wake + brightness — the one that genuinely needs
+   hands-on care: first new STM32 write path since battery; watch for
+   I2C weirdness/wedges). Work them top-down or per-feature; findings
+   → fix same-session per this session's precedent. **After the evals
+   pass, Phase 4D closes**: run the F-evaluator follow-on check (D37),
+   revisit idea H (polymorphic variables), update `ti-parity.md` and
+   the README status table, then **Phase 5 (CAS)** per D32/D33.
+   Task table:
    `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the idea A-G →
    task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
@@ -109,21 +107,21 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 now carries 4D Batch 8** (eigenvectors, 2026-07-26, same
-  day as Batches 1-7) on top of Batches 1-7 (complex variables/lists,
-  complex matrices, sequence graphing PCG6, zoom/shading, data/catalog
-  glue, named lists, display/formatting), the 2026-07-25 work and the
-  D35 state. Flashed and boot-verified over serial (temp + psram-bulk
-  heartbeats healthy); bss **222,484 bytes** (flat since Batch 6),
-  ~48 KB headroom — keep watching per the D28 watch item. The PCG6
-  one-time graph-state reset happened at the Batch 3 flash; no later
-  batch adds a reset (Batch 6 added new files
-  `listdir.dat`/`nlist<idx>.dat`). Phases 2-3 and 4A-4C are HW-verified
-  on this board, and the 4D Batch 1 hands-on eval passed 2026-07-26.
-  **Seven open HW-PENDING rows: the 4D Batch 2-8 checklists** (worklog
+- **The Pico 1 now carries ALL of Phase 4D (Batches 1-9, 2026-07-26)**
+  on top of the 2026-07-25 work and the D35 state. Flashed and
+  boot-verified over serial after every batch (temp + psram-bulk
+  heartbeats healthy throughout); final bss **222,520 bytes**, ~48 KB
+  headroom — keep watching per the D28 watch item. One-time resets
+  already absorbed on this board: PCG6 (Batch 3 flash). New SD files
+  since: `listdir.dat`/`nlist<idx>.dat` (named lists, Batch 6) and
+  `settings.dat` PCS1 (Batch 9 — created on first `settings` change).
+  **Batch 9's APD defaults to 5 min**: an idle unit now dims its screen;
+  any key wakes it (the wake key is swallowed). Phases 2-3 and 4A-4C
+  are HW-verified on this board; 4D Batch 1's eval passed 2026-07-26.
+  **Eight open HW-PENDING rows: the 4D Batch 2-9 checklists** (worklog
   table). All five font headers were regenerated with glyph slot 141 in
   Batch 7 — the non-default font builds (`build/pico2-jm|io|uni|term`)
-  remain stale as before.
+  remain stale as before. The Pico 2 is now NINE builds behind.
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware

@@ -17,6 +17,7 @@
 
 #include "config.hpp"
 #include "platform/platform.hpp"
+#include "platform/power.hpp"
 #include "platform/sd_card.hpp"
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
@@ -335,6 +336,9 @@ int main() {
     bool named_loaded = math::named_lists().load(platform::storage());
     // Matrix variables (Phase 4A) — same all-or-nothing contract.
     bool matrices_loaded = math::matrices().load(platform::storage());
+    // Device power settings (4D.19-20): brightness/APD; a missing file
+    // keeps the STM32's own boot defaults.
+    bool settings_loaded = platform::power::load(platform::storage());
     // The typed `diag` command pushes the diagnostics overlay (the old
     // global F6 toggle is gone — 2026-07-18 remap).
     apps::home_screen().set_diag_screen(&g_diag_screen);
@@ -438,6 +442,13 @@ int main() {
                     named_loaded = math::named_lists().load(platform::storage());
                     if (named_loaded) {
                         printf("late-init: named lists loaded at %lu ms\n",
+                               static_cast<unsigned long>(now));
+                    }
+                }
+                if (!settings_loaded) {
+                    settings_loaded = platform::power::load(platform::storage());
+                    if (settings_loaded) {
+                        printf("late-init: settings loaded at %lu ms\n",
                                static_cast<unsigned long>(now));
                     }
                 }
@@ -550,6 +561,10 @@ int main() {
         // costs one ~10 ms poll cycle, still far cheaper than a frame.
         // Cap + time budget guard against a wedged FIFO streaming
         // events forever.
+        // Soft-sleep APD (4D.19): inactivity timer + the paced STM32
+        // backlight write queue live in power::tick().
+        platform::power::tick();
+
         constexpr int kMaxEventsPerFrame = 16;
         constexpr uint64_t kDrainBudgetUs = 250'000;
         const uint64_t drain_deadline_us = platform::uptime_us() + kDrainBudgetUs;
@@ -563,6 +578,10 @@ int main() {
                 continue;  // Read in flight (or hold-repeat suppressed)
             }
             ++n;
+            if (platform::power::note_key(ev.pressed)) {
+                dirty = true;  // Waking repaints under the restored light
+                continue;      // The wake key must not also type
+            }
             if (!ev.pressed) {
                 continue;
             }

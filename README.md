@@ -7,9 +7,11 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > unified persistence; statistics — lists, regression, distributions,
 > inference, stat plots). Phase 4 sub-phases 4A–4C (matrices, graph-analysis
 > CALC menu, complex numbers) are also hardware-verified on both boards;
-> sub-phase 4D (GC completeness) is **in progress** — its batch plan is set
-> (D38) and Batch 1 (complex-valued variables/`Ans` and complex lists) is
-> code-complete and flashed. See
+> sub-phase 4D (GC completeness) is **code-complete** — all nine D38
+> batches (complex variables/lists/matrices, sequence graphing, zoom and
+> shading, list↔matrix/constants/units glue, named lists, ENG/`>frac`/π-tick
+> display polish, eigenvectors, auto-power-down + brightness) shipped and
+> flashed; hands-on device evals are in progress. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -43,7 +45,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   statistical plots (histogram, box plot, scatter) overlaid on the graphing
   engine.
 - **Phase 4 — the pre-release milestone (sub-phases 4A–4C complete,
-  HW-verified on both boards; 4D in progress)**: 10 matrix variables
+  HW-verified on both boards; 4D code-complete, evals pending)**: 10 matrix variables
   (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
   row-echelon form, eigenvalues, and a numeric equation solver (4A); a
   TI-84-style **CALC menu** on the graph screen — value, zero, min/max,
@@ -226,7 +228,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/phases/phase1-spec.md](docs/phases/phase1-spec.md)** / **[phase1-plan.md](docs/phases/phase1-plan.md)** — Phase 1 design contract + plan (complete; retro in [docs/notes/phase1-retro.md](docs/notes/phase1-retro.md))
 - **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (complete; retro in [docs/notes/phase2-retro.md](docs/notes/phase2-retro.md))
 - **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics; code-complete)
-- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; 4A–4C code-complete, 4D specced not started)
+- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; 4A–4C HW-verified, 4D code-complete)
 - **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; specced, not started)
 - **[docs/phases/phase6-spec.md](docs/phases/phase6-spec.md)** — Phase 6 design contract (non-calculator functions: app framework, MicroPython; specced, not started)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
@@ -254,7 +256,7 @@ Background research:
 | 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase2-retro.md; Pico 1 pass via task 3D.14) |
 | 3: Statistics | **Complete** | Lists, regression, distributions, inference, stat plots; HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase3-retro.md; Pico 1 pass via task 3D.14) |
 | 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
-| 4D: GC completeness (pre-release milestone) | **In progress** | Batch plan set (D38); Batch 1 (complex variables/Ans + complex lists) code complete; docs/phases/phase4-spec.md §7 |
+| 4D: GC completeness (pre-release milestone) | **Code-complete** | All 9 D38 batches shipped 2026-07-26; on-device evals pending (worklog HW-PENDING table); docs/phases/phase4-spec.md §7 |
 | 5: CAS (symbolic math) | Specced, not started | docs/phases/phase5-spec.md (D32) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 

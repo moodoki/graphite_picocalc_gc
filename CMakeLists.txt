@@ -92,6 +92,7 @@ add_executable(picocalc_graphcalc
     src/platform/sd_diskio.cpp
     src/platform/storage.cpp
     src/platform/system.cpp
+    src/platform/power.cpp
     src/gfx/font.cpp
     src/gfx/framebuffer.cpp
     src/ui/screen_manager.cpp
@@ -141,6 +142,7 @@ add_executable(picocalc_graphcalc
     src/apps/nav.cpp
     src/apps/home_screen.cpp
     src/apps/const_screen.cpp
+    src/apps/settings_screen.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/calc_menu.cpp

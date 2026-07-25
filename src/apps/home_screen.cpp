@@ -32,6 +32,7 @@
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
 #include "apps/plot_screen.hpp"
+#include "apps/settings_screen.hpp"
 #include "apps/solver_screen.hpp"
 #include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
@@ -545,6 +546,11 @@ bool HomeScreen::handle_command(const char* cmd) {
     // Scientific-constants picker (4D.17).
     if (std::strcmp(cmd, "const") == 0 || std::strcmp(cmd, "constants") == 0) {
         ui::screen_manager().push(&const_screen());
+        return true;
+    }
+    // Device settings: brightness/backlight/auto-power-down (4D.19-20).
+    if (std::strcmp(cmd, "settings") == 0 || std::strcmp(cmd, "setup") == 0) {
+        ui::screen_manager().push(&settings_screen());
         return true;
     }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {
