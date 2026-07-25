@@ -10,6 +10,7 @@
 #include "math/format.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
+#include "math/named_lists.hpp"
 #include "math/stats.hpp"
 
 namespace math::listexpr {
@@ -68,6 +69,49 @@ bool contains_list_token(const char* s) {
         }
     }
     return false;
+}
+
+// Named-list token at p (4D.13): a boundary-delimited identifier found
+// in the registry, not followed by '(' (that's a function call).
+// Returns the registry slot; *tok_len gets the identifier length.
+int named_token_at(const char* s, const char* p, size_t* tok_len) {
+    if (std::isalpha(static_cast<unsigned char>(*p)) == 0) {
+        return -1;
+    }
+    if (p > s && (ident_char(p[-1]) || p[-1] == '.')) {
+        return -1;
+    }
+    size_t n = 0;
+    while (ident_char(p[n])) {
+        ++n;
+    }
+    if (n < 2 || n > NamedLists::kMaxName || p[n] == '(') {
+        return -1;
+    }
+    char name[NamedLists::kMaxName + 1];
+    std::memcpy(name, p, n);
+    name[n] = 0;
+    const int idx = named_lists().find(name);
+    if (idx >= 0 && tok_len != nullptr) {
+        *tok_len = n;
+    }
+    return idx;
+}
+
+bool contains_named_token(const char* s) {
+    for (const char* p = s; *p != 0; ++p) {
+        if (named_token_at(s, p, nullptr) >= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Whole-string named-list token ("prices"), else -1.
+int bare_named(const char* s) {
+    size_t n = 0;
+    const int idx = named_token_at(s, s, &n);
+    return (idx >= 0 && s[n] == 0) ? idx : -1;
 }
 
 // Trim into buf; returns false when the input overflows it.
@@ -551,6 +595,14 @@ bool extract_operands(const char* s, char* out, size_t cap, Ctx& ctx) {
                 }
                 break;
             }
+            // Named-list token (4D.13): extract it as an operand span
+            // so the lift machinery below sees it like a brace literal.
+            if (span_end == nullptr) {
+                size_t nl = 0;
+                if (named_token_at(s, p, &nl) >= 0) {
+                    span_end = p + nl;
+                }
+            }
         }
 
         if (span_end == nullptr) {
@@ -976,6 +1028,14 @@ bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
         }
         return true;
     }
+    const int bare_name = bare_named(s);
+    if (bare_name >= 0) {
+        if (!listops::copy(named_lists().list(bare_name), out)) {
+            ctx.err = "Out of list memory";
+            return false;
+        }
+        return true;
+    }
 
     const char* inner = nullptr;
     size_t inner_len = 0;
@@ -1067,13 +1127,20 @@ int in_place_sort_form(const char* s, bool* asc) {
         std::memcpy(arg, inner, inner_len);
         arg[inner_len] = 0;
         char targ[16];
-        if (!trim_into(arg, targ, sizeof(targ)) || std::strlen(targ) != 2) {
+        if (!trim_into(arg, targ, sizeof(targ))) {
             return -1;
         }
-        const int slot = token_at(targ, targ);
-        if (slot >= 0) {
+        if (std::strlen(targ) == 2) {
+            const int slot = token_at(targ, targ);
+            if (slot >= 0) {
+                *asc = which == 0;
+                return slot;
+            }
+        }
+        const int named = bare_named(targ);  // 4D.13: in-place named sort
+        if (named >= 0) {
             *asc = which == 0;
-            return slot;
+            return kNamedRefBase + named;
         }
     }
     return -1;
@@ -1091,19 +1158,34 @@ Result evaluate(const char* input) {
         return res;
     }
 
-    // Store suffix "-> lk" (list targets only; "->a" stays in the body
-    // for the engine's scalar store).
-    int store = -1;
+    // Store suffix "-> lk" or "-> name" (4D.13; "->a" stays in the
+    // body for the engine's scalar store). A valid-but-unknown name is
+    // recorded for creation at commit time, so a failing expression
+    // never leaves a stray empty named list behind.
+    int store = -1;  // List ref (0-5 fixed, 6+ named)
+    char store_name[NamedLists::kMaxName + 1] = {};
     char* arrow = nullptr;
     for (char* p = body; (p = std::strstr(p, "->")) != nullptr; p += 2) {
         arrow = p;
     }
     if (arrow != nullptr) {
         char rhs[16];
-        if (trim_into(arrow + 2, rhs, sizeof(rhs)) && std::strlen(rhs) == 2) {
-            const int slot = token_at(rhs, rhs);
-            if (slot >= 0) {
-                store = slot;
+        if (trim_into(arrow + 2, rhs, sizeof(rhs))) {
+            bool take = false;
+            if (std::strlen(rhs) == 2 && token_at(rhs, rhs) >= 0) {
+                store = token_at(rhs, rhs);
+                take = true;
+            } else {
+                const int ni = named_lists().find(rhs);
+                if (ni >= 0) {
+                    store = kNamedRefBase + ni;
+                    take = true;
+                } else if (NamedLists::valid_name(rhs)) {
+                    std::snprintf(store_name, sizeof(store_name), "%s", rhs);
+                    take = true;
+                }
+            }
+            if (take) {
                 *arrow = 0;
                 char tb[kMaxLen];
                 trim_into(body, tb, sizeof(tb));
@@ -1111,22 +1193,35 @@ Result evaluate(const char* input) {
             }
         }
     }
+    const bool has_store = store >= 0 || store_name[0] != 0;
+    // Commit-time target resolution (creates a pending named list).
+    auto store_ref = [&]() -> int {
+        if (store >= 0 || store_name[0] == 0) {
+            return store;
+        }
+        const int ni = named_lists().create(store_name);
+        if (ni >= 0) {
+            res.names_modified = true;
+            store = kNamedRefBase + ni;
+        }
+        return store;  // -1 = registry full
+    };
 
-    const bool listy = contains_list_token(body) || std::strchr(body, '{') != nullptr ||
-                       contains_wrapper_call(body);
+    const bool listy = contains_list_token(body) || contains_named_token(body) ||
+                       std::strchr(body, '{') != nullptr || contains_wrapper_call(body);
     if (!listy) {
-        if (store >= 0) {
+        if (has_store) {
             res.kind = Kind::kError;
-            res.error = "Store to l1-l6 needs a list";
+            res.error = "Store target needs a list";
         }
         return res;
     }
 
-    // In-place sort of a list slot.
+    // In-place sort of a list slot (fixed or named ref).
     bool asc = false;
-    const int sort_slot = in_place_sort_form(body, &asc);
-    if (sort_slot >= 0) {
-        Array& lst = lists().list(sort_slot);
+    const int sort_ref = in_place_sort_form(body, &asc);
+    if (sort_ref >= 0) {
+        Array& lst = list_by_ref(sort_ref);
         if (lst.dtype() == Dtype::kComplex) {
             res.kind = Kind::kError;
             res.error = "Non-real list";  // No ordering on complex (D37)
@@ -1138,18 +1233,27 @@ Result evaluate(const char* input) {
             res.error = "Out of list memory";
             return res;
         }
+        // The sorted list itself always persists (this was silently
+        // skipped for plain sorts before 4D.13 — the D35 split passed
+        // stored_list = -1 to the save).
         res.lists_modified = true;
+        res.lists_mask |= 1U << sort_ref;
         res.list = &lst;
-        if (store >= 0 && store != sort_slot) {
-            if (!listops::copy(lst, lists().list(store))) {
+        if (has_store) {
+            const int target = store_ref();
+            if (target < 0) {
+                res.kind = Kind::kError;
+                res.error = "Too many named lists";
+                return res;
+            }
+            if (target != sort_ref && !listops::copy(lst, list_by_ref(target))) {
                 res.kind = Kind::kError;
                 res.error = "Out of list memory";
                 return res;
             }
-            res.stored_list = store;
-            res.list = &lists().list(store);
-        } else if (store == sort_slot) {
-            res.stored_list = store;
+            res.stored_list = target;
+            res.lists_mask |= 1U << target;
+            res.list = &list_by_ref(target);
         }
         res.kind = Kind::kList;
         return res;
@@ -1241,24 +1345,30 @@ Result evaluate(const char* input) {
                 g_result.set(1, a[2] * b[0] - a[0] * b[2]);
                 g_result.set(2, a[0] * b[1] - a[1] * b[0]);
                 res.list = &g_result;
-                if (store >= 0) {
-                    if (!listops::copy(g_result, lists().list(store))) {
+                if (has_store) {
+                    const int target = store_ref();
+                    if (target < 0) {
+                        res.error = "Too many named lists";
+                        return res;
+                    }
+                    if (!listops::copy(g_result, list_by_ref(target))) {
                         res.error = "Out of list memory";
                         return res;
                     }
-                    res.stored_list = store;
+                    res.stored_list = target;
                     res.lists_modified = true;
-                    res.list = &lists().list(store);
+                    res.lists_mask |= 1U << target;
+                    res.list = &list_by_ref(target);
                 }
                 res.kind = Kind::kList;
                 res.error = nullptr;
                 return res;
             }
             // dot / norm: scalar results.
-            if (store >= 0) {
+            if (has_store) {
                 s_va.clear();
                 s_vb.clear();
-                res.error = "Store to l1-l6 needs a list";
+                res.error = "Store target needs a list";
                 return res;
             }
             double v = 0;
@@ -1303,9 +1413,9 @@ Result evaluate(const char* input) {
     if (csum_return) {
         // Standalone sum/mean of a complex list (4D.24): a complex
         // scalar. The dispatch layer commits Ans and formats it.
-        if (store >= 0) {
+        if (has_store) {
             res.kind = Kind::kError;
-            res.error = "Store to l1-l6 needs a list";
+            res.error = "Store target needs a list";
             return res;
         }
         // csum_return implies the argument list is complex — in REAL
@@ -1322,11 +1432,11 @@ Result evaluate(const char* input) {
         res.cvalue = csum_val;
         return res;
     }
-    if (!contains_list_token(body) && std::strchr(body, '{') == nullptr &&
-        !contains_wrapper_call(body)) {
-        if (store >= 0) {
+    if (!contains_list_token(body) && !contains_named_token(body) &&
+        std::strchr(body, '{') == nullptr && !contains_wrapper_call(body)) {
+        if (has_store) {
             res.kind = Kind::kError;
-            res.error = "Store to l1-l6 needs a list";
+            res.error = "Store target needs a list";
             return res;
         }
         res.kind = Kind::kScalar;
@@ -1348,15 +1458,22 @@ Result evaluate(const char* input) {
         return res;
     }
     res.list = &g_result;
-    if (store >= 0) {
-        if (!listops::copy(g_result, lists().list(store))) {
+    if (has_store) {
+        const int target = store_ref();
+        if (target < 0) {
+            res.kind = Kind::kError;
+            res.error = "Too many named lists";
+            return res;
+        }
+        if (!listops::copy(g_result, list_by_ref(target))) {
             res.kind = Kind::kError;
             res.error = "Out of list memory";
             return res;
         }
-        res.stored_list = store;
+        res.stored_list = target;
         res.lists_modified = true;
-        res.list = &lists().list(store);
+        res.lists_mask |= 1U << target;
+        res.list = &list_by_ref(target);
     }
     res.kind = Kind::kList;
     return res;

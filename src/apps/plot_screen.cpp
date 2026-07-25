@@ -9,6 +9,7 @@
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/lists.hpp"
+#include "math/named_lists.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/graph_screen.hpp"
 #include "apps/mode_screen.hpp"
@@ -70,6 +71,36 @@ void PlotScreen::on_activate() {
     invalidate_all();
 }
 
+namespace {
+
+// Stat-plot list refs persist in GraphState as uint8_t: 0-5 = l1-l6,
+// 6+k = named registry slot k (4D.13). Cycle position-wise across
+// l1-l6 then the *currently used* named slots.
+uint8_t cycle_list_ref(uint8_t ref, int dir) {
+    auto& nl = math::named_lists();
+    const int fixed = math::ListStore::kCount;
+    const int total = fixed + nl.count();
+    int pos = ref;
+    if (ref >= math::kNamedRefBase) {
+        pos = fixed;  // Default to the first named position
+        for (int n = 0; n < nl.count(); ++n) {
+            if (nl.nth(n) == ref - math::kNamedRefBase) {
+                pos = fixed + n;
+                break;
+            }
+        }
+    } else if (pos >= fixed) {
+        pos = 0;
+    }
+    pos = (pos + dir + total) % total;
+    if (pos < fixed) {
+        return static_cast<uint8_t>(pos);
+    }
+    return static_cast<uint8_t>(math::kNamedRefBase + nl.nth(pos - fixed));
+}
+
+}  // namespace
+
 void PlotScreen::adjust(int row, int dir) {
     auto& p = cfg(slot_);
     switch (row) {
@@ -86,15 +117,13 @@ void PlotScreen::adjust(int row, int dir) {
             break;
         }
         case kRowXList:
-            p.x_list = static_cast<uint8_t>((p.x_list + dir + math::ListStore::kCount) %
-                                            math::ListStore::kCount);
+            p.x_list = cycle_list_ref(p.x_list, dir);
             break;
         default: {
             // Extra rows in display order: Y list, mark, bin width.
             const int extra = row - kRowXList;  // 1-based extra index
             if (type_has_ylist(p.type) && extra == 1) {
-                p.y_list = static_cast<uint8_t>((p.y_list + dir + math::ListStore::kCount) %
-                                                math::ListStore::kCount);
+                p.y_list = cycle_list_ref(p.y_list, dir);
             } else if (type_has_mark(p.type)) {
                 p.mark = static_cast<uint8_t>((p.mark + dir + 3) % 3);
             }
@@ -228,10 +257,10 @@ void PlotScreen::render(gfx::Framebuffer& fb) {
             std::snprintf(value, sizeof(value), "%s", kTypeNames[static_cast<int>(p.type)]);
         } else if (i == kRowXList) {
             label = "X list";
-            std::snprintf(value, sizeof(value), "l%d", p.x_list + 1);
+            math::list_ref_name(p.x_list, value, sizeof(value));
         } else if (type_has_ylist(p.type) && i == kRowXList + 1) {
             label = "Y list";
-            std::snprintf(value, sizeof(value), "l%d", p.y_list + 1);
+            math::list_ref_name(p.y_list, value, sizeof(value));
         } else if (bin_row) {
             label = "Bin width";
             if (p.bin_width > 0) {

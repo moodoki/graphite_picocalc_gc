@@ -9,6 +9,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/format.hpp"
 #include "math/lists.hpp"
+#include "math/named_lists.hpp"
 #include "math/stats.hpp"
 #include "math/types.hpp"
 #include "apps/graph_model.hpp"
@@ -27,6 +28,23 @@ constexpr int kRowH = 28;
 constexpr int kResTopY = 24;
 constexpr int kResRowH = 16;
 constexpr int kSoftkeyY = 300;
+
+// List selection cycles l1-l6 then the named lists (4D.13). Positions
+// are session-local; refs resolve through the registry.
+int list_pos_count() {
+    return math::ListStore::kCount + math::named_lists().count();
+}
+int pos_ref(int pos) {
+    return pos < math::ListStore::kCount
+               ? pos
+               : math::kNamedRefBase + math::named_lists().nth(pos - math::ListStore::kCount);
+}
+const math::Array& pos_list(int pos) {
+    return math::list_by_ref(pos_ref(pos));
+}
+void pos_label(int pos, char* buf, int cap) {
+    math::list_ref_name(pos_ref(pos), buf, cap);
+}
 
 // Result-line labels in real math notation (testdrive 2026-07-21):
 // lowercase sigma for population stddev, uppercase Sigma for the sums.
@@ -76,6 +94,10 @@ int StatsScreen::build_rows(RowKind* rows) const {
 }
 
 void StatsScreen::on_activate() {
+    // A named list may have been deleted since the last visit (4D.13).
+    x_list_ = x_list_ < list_pos_count() ? x_list_ : 0;
+    y_list_ = y_list_ < list_pos_count() ? y_list_ : 1;
+    freq_list_ = freq_list_ < list_pos_count() ? freq_list_ : -1;
     showing_results_ = false;
     msg_ = nullptr;
     invalidate_all();
@@ -87,14 +109,16 @@ void StatsScreen::adjust(RowKind kind, int dir) {
             analysis_ = (analysis_ + dir + kAnalysisCount) % kAnalysisCount;
             break;
         case kRowXList:
-            x_list_ = (x_list_ + dir + math::ListStore::kCount) % math::ListStore::kCount;
+            x_list_ = (x_list_ + dir + list_pos_count()) % list_pos_count();
             break;
         case kRowYList:
-            y_list_ = (y_list_ + dir + math::ListStore::kCount) % math::ListStore::kCount;
+            y_list_ = (y_list_ + dir + list_pos_count()) % list_pos_count();
             break;
-        case kRowFreq:  // OFF, l1..l6 (7 states, OFF = -1)
-            freq_list_ = (freq_list_ + 1 + dir + 7) % 7 - 1;
+        case kRowFreq: {  // OFF, l1..l6, named (OFF = -1)
+            const int states = list_pos_count() + 1;
+            freq_list_ = (freq_list_ + 1 + dir + states) % states - 1;
             break;
+        }
         case kRowStore:  // OFF, y1..y7 (8 states, OFF = -1)
             store_slot_ = (store_slot_ + 1 + dir + 8) % 8 - 1;
             break;
@@ -121,22 +145,26 @@ void StatsScreen::add_kv(const char* key, double v) {
 void StatsScreen::calculate() {
     line_count_ = 0;
     msg_ = nullptr;
-    auto& ls = math::lists();
     char buf[kLineChars];
+    char xn[8];
+    char yn[8];
+    pos_label(x_list_, xn, sizeof(xn));
+    pos_label(y_list_, yn, sizeof(yn));
 
     if (analysis_ == 0) {
         const auto s = freq_list_ >= 0
-                           ? math::stats::one_var_weighted(ls.list(x_list_), ls.list(freq_list_))
-                           : math::stats::one_var(ls.list(x_list_));
+                           ? math::stats::one_var_weighted(pos_list(x_list_), pos_list(freq_list_))
+                           : math::stats::one_var(pos_list(x_list_));
         if (!s.ok) {
             msg_ = s.error;
             return;
         }
         if (freq_list_ >= 0) {
-            std::snprintf(buf, sizeof(buf), "1-Var Stats l%c (freq l%c)",
-                          static_cast<char>('1' + x_list_), static_cast<char>('1' + freq_list_));
+            char fn[8];
+            pos_label(freq_list_, fn, sizeof(fn));
+            std::snprintf(buf, sizeof(buf), "1-Var Stats %s (freq %s)", xn, fn);
         } else {
-            std::snprintf(buf, sizeof(buf), "1-Var Stats l%c", static_cast<char>('1' + x_list_));
+            std::snprintf(buf, sizeof(buf), "1-Var Stats %s", xn);
         }
         add_line(buf);
         add_kv("n", s.n);
@@ -151,13 +179,12 @@ void StatsScreen::calculate() {
         add_kv("Q3", s.q3);
         add_kv("max", s.max_val);
     } else if (analysis_ == 1) {
-        const auto s = math::stats::two_var(ls.list(x_list_), ls.list(y_list_));
+        const auto s = math::stats::two_var(pos_list(x_list_), pos_list(y_list_));
         if (!s.ok) {
             msg_ = s.error;
             return;
         }
-        std::snprintf(buf, sizeof(buf), "2-Var Stats l%c,l%c", static_cast<char>('1' + x_list_),
-                      static_cast<char>('1' + y_list_));
+        std::snprintf(buf, sizeof(buf), "2-Var Stats %s,%s", xn, yn);
         add_line(buf);
         add_kv("n", s.n);
         add_kv("mean_x", s.mean_x);
@@ -177,7 +204,7 @@ void StatsScreen::calculate() {
         add_kv(kSumXY, s.sum_xy);
     } else {
         const auto type = reg_type(analysis_);
-        const auto r = math::stats::regress(ls.list(x_list_), ls.list(y_list_), type);
+        const auto r = math::stats::regress(pos_list(x_list_), pos_list(y_list_), type);
         if (!r.ok) {
             msg_ = r.error;
             return;
@@ -359,16 +386,16 @@ void StatsScreen::render(gfx::Framebuffer& fb) {
                 break;
             case kRowXList:
                 label = analysis_ == 0 ? "List" : "X list";
-                std::snprintf(value, sizeof(value), "l%d", x_list_ + 1);
+                pos_label(x_list_, value, sizeof(value));
                 break;
             case kRowYList:
                 label = "Y list";
-                std::snprintf(value, sizeof(value), "l%d", y_list_ + 1);
+                pos_label(y_list_, value, sizeof(value));
                 break;
             case kRowFreq:
                 label = "Freq";
                 if (freq_list_ >= 0) {
-                    std::snprintf(value, sizeof(value), "l%d", freq_list_ + 1);
+                    pos_label(freq_list_, value, sizeof(value));
                 } else {
                     std::snprintf(value, sizeof(value), "OFF");
                 }

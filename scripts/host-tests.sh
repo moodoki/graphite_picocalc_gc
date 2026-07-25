@@ -68,6 +68,7 @@ echo "== Compiling + linking test_lists =="
     -Isrc -Idrivers/tinyexpr \
     tests/host/test_lists.cpp tests/host/host_psram_backend.cpp \
     src/math/array.cpp src/math/lists.cpp src/math/list_ops.cpp \
+    src/math/named_lists.cpp \
     src/math/list_expr.cpp src/math/stats.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
     src/math/complex.cpp src/math/complex_expr.cpp \

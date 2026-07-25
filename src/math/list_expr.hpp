@@ -39,8 +39,16 @@ struct Result {
     // kList: the value to display — an internal result array, or the
     // stored/sorted list slot.
     const Array* list = nullptr;
-    int stored_list = -1;         // ->lk target, else -1
-    bool lists_modified = false;  // Caller should persist this list (stored_list)
+    // Store target as a list ref (4D.13): 0-5 = l1-l6, 6+k = named
+    // registry slot k. -1 = none.
+    int stored_list = -1;
+    bool lists_modified = false;  // Caller should persist stored_list
+    // Every ref this evaluation wrote (bit r): in-place sorts touch a
+    // list without a store suffix; sort + store touches two (the D35
+    // sort-persistence gap closed with 4D.13).
+    uint32_t lists_mask = 0;
+    // A named list was created/renamed: persist the name directory.
+    bool names_modified = false;
     const char* error = nullptr;  // kError (static string)
 };
 

@@ -102,15 +102,39 @@ void ListEditorScreen::invalidate_entry() {
     invalidate(kEntryY, kSoftkeyY);
 }
 
+int ListEditorScreen::total_cols() const {
+    return math::ListStore::kCount + math::named_lists().count();
+}
+
+int ListEditorScreen::ref_of(int col) const {
+    if (col < math::ListStore::kCount) {
+        return col;
+    }
+    return math::kNamedRefBase + math::named_lists().nth(col - math::ListStore::kCount);
+}
+
+math::Array& ListEditorScreen::col_list(int col) const {
+    return math::list_by_ref(ref_of(col));
+}
+
 void ListEditorScreen::refresh_cells() {
     for (int c = 0; c < kVisibleCols; ++c) {
-        const int li = col_off_ + c;
-        const int count = math::lists().list(li).size();
-        std::snprintf(headers_[c], sizeof(headers_[c]), "l%d:%d", li + 1, count);
+        const int col = col_off_ + c;
+        if (col >= total_cols()) {
+            headers_[c][0] = 0;
+            for (auto& row : cells_) {
+                row[c][0] = 0;
+            }
+            continue;
+        }
+        const int count = col_list(col).size();
+        char lname[8];
+        math::list_ref_name(ref_of(col), lname, sizeof(lname));
+        std::snprintf(headers_[c], sizeof(headers_[c]), "%s:%d", lname, count);
         for (int r = 0; r < kVisibleRows; ++r) {
             const int row = row_off_ + r;
             if (row < count) {
-                cell_text(math::lists().list(li), row, cells_[r][c], sizeof(cells_[r][c]));
+                cell_text(col_list(col), row, cells_[r][c], sizeof(cells_[r][c]));
             } else if (row == count) {
                 std::snprintf(cells_[r][c], sizeof(cells_[r][c]), "_");
             } else {
@@ -118,10 +142,17 @@ void ListEditorScreen::refresh_cells() {
             }
         }
     }
-    const int count = math::lists().list(cur_list_).size();
-    std::snprintf(prompt_, sizeof(prompt_), "l%d(%d)=", cur_list_ + 1, cur_row_ + 1);
+    if (name_prompt_ != 0) {
+        std::snprintf(prompt_, sizeof(prompt_), "name=");
+        cur_val_[0] = 0;
+        return;
+    }
+    const int count = col_list(cur_list_).size();
+    char lname[8];
+    math::list_ref_name(ref_of(cur_list_), lname, sizeof(lname));
+    std::snprintf(prompt_, sizeof(prompt_), "%s(%d)=", lname, cur_row_ + 1);
     if (cur_row_ < count) {
-        const math::Array& cur = math::lists().list(cur_list_);
+        const math::Array& cur = col_list(cur_list_);
         if (cur.dtype() == math::Dtype::kComplex) {
             math::format_complex(cur.cget(cur_row_), math::number_mode(), cur_val_,
                                  sizeof(cur_val_));
@@ -135,7 +166,12 @@ void ListEditorScreen::refresh_cells() {
 
 void ListEditorScreen::on_activate() {
     editing_ = false;
+    name_prompt_ = 0;
     msg_ = nullptr;
+    if (cur_list_ >= total_cols()) {  // A named list may have been removed
+        cur_list_ = total_cols() - 1;
+        col_off_ = std::min(col_off_, cur_list_);
+    }
     refresh_cells();
     invalidate_all();
 }
@@ -144,7 +180,12 @@ void ListEditorScreen::save_lists() const {
     // Every call site only ever just mutated cur_list_ (edit/delete/sort/
     // clear) — one-file-per-list persistence (2026-07-22) means that's
     // the only list that needs writing.
-    math::lists().save(platform::storage(), cur_list_);
+    const int ref = ref_of(cur_list_);
+    if (ref >= math::kNamedRefBase) {
+        math::named_lists().save(platform::storage(), ref - math::kNamedRefBase);
+    } else {
+        math::lists().save(platform::storage(), ref);
+    }
 }
 
 void ListEditorScreen::begin_edit(const platform::KeyEvent* first_key) {
@@ -157,8 +198,51 @@ void ListEditorScreen::begin_edit(const platform::KeyEvent* first_key) {
     invalidate_entry();
 }
 
+void ListEditorScreen::commit_name() {
+    char name[16];
+    std::snprintf(name, sizeof(name), "%s", input_.text());
+    if (!math::NamedLists::valid_name(name)) {
+        msg_ = "Bad name (2-5 chars a-z)";
+        invalidate_entry();
+        return;
+    }
+    if (math::named_lists().find(name) >= 0) {
+        msg_ = "Name in use";
+        invalidate_entry();
+        return;
+    }
+    auto& nl = math::named_lists();
+    if (name_prompt_ == 1) {  // New list
+        const int idx = nl.create(name);
+        if (idx < 0) {
+            msg_ = "Too many lists (20)";
+            invalidate_entry();
+            return;
+        }
+        // Jump to the new column.
+        for (int c = math::ListStore::kCount; c < total_cols(); ++c) {
+            if (ref_of(c) == math::kNamedRefBase + idx) {
+                cur_list_ = c;
+                break;
+            }
+        }
+        cur_row_ = 0;
+        row_off_ = 0;
+        if (cur_list_ - col_off_ >= kVisibleCols) {
+            col_off_ = cur_list_ - kVisibleCols + 1;
+        }
+    } else {  // Rename the selected named list
+        nl.rename(ref_of(cur_list_) - math::kNamedRefBase, name);
+    }
+    nl.save_index(platform::storage());
+    name_prompt_ = 0;
+    refresh_cells();
+    invalidate_grid();
+    invalidate_entry();
+}
+
 void ListEditorScreen::commit_edit() {
-    math::Array& lst = math::lists().list(cur_list_);
+    math::Array& lst = col_list(cur_list_);
     double v = 0;
     bool complex_val = false;
     math::Complex cv;
@@ -239,7 +323,7 @@ void ListEditorScreen::commit_edit() {
 }
 
 void ListEditorScreen::delete_row() {
-    math::Array& lst = math::lists().list(cur_list_);
+    math::Array& lst = col_list(cur_list_);
     const int count = lst.size();
     if (cur_row_ >= count) {
         return;
@@ -264,7 +348,7 @@ void ListEditorScreen::delete_row() {
 }
 
 void ListEditorScreen::sort_current(bool asc) {
-    math::Array& lst = math::lists().list(cur_list_);
+    math::Array& lst = col_list(cur_list_);
     if (lst.dtype() == math::Dtype::kComplex) {
         msg_ = "Non-real list";  // No ordering on complex (D37)
         invalidate_entry();
@@ -288,14 +372,20 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
         return false;
     }
 
-    if (editing_) {
+    if (editing_ || name_prompt_ != 0) {
         if (ev.key == Key::kEnter) {
-            commit_edit();
+            if (name_prompt_ != 0) {
+                commit_name();
+            } else {
+                commit_edit();
+            }
             return true;
         }
         if (ev.key == Key::kEscape) {
             editing_ = false;
+            name_prompt_ = 0;
             msg_ = nullptr;
+            refresh_cells();
             invalidate_entry();
             return true;
         }
@@ -307,7 +397,7 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
     }
 
     msg_ = nullptr;
-    const int count = math::lists().list(cur_list_).size();
+    const int count = col_list(cur_list_).size();
     switch (ev.key) {
         case Key::kUp:
             if (cur_row_ > 0) {
@@ -351,7 +441,7 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kRight: {
             const int dir = ev.key == Key::kRight ? 1 : -1;
             const int next = cur_list_ + dir;
-            if (next < 0 || next >= math::ListStore::kCount) {
+            if (next < 0 || next >= total_cols()) {
                 return true;
             }
             cur_list_ = next;
@@ -360,7 +450,7 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
             } else if (cur_list_ - col_off_ >= kVisibleCols) {
                 col_off_ = cur_list_ - kVisibleCols + 1;
             }
-            cur_row_ = std::min(cur_row_, math::lists().list(cur_list_).size());
+            cur_row_ = std::min(cur_row_, col_list(cur_list_).size());
             row_off_ = std::min(row_off_, cur_row_);
             refresh_cells();
             invalidate_grid();
@@ -381,9 +471,9 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
             return true;
         case Key::kF8:
             // Clearing also reverts a complex list to the real tier.
-            math::lists().list(cur_list_).clear();
-            math::lists().list(cur_list_).set_dtype(math::Dtype::kDouble);
-            math::lists().list(cur_list_).resize(0);
+            col_list(cur_list_).clear();
+            col_list(cur_list_).set_dtype(math::Dtype::kDouble);
+            col_list(cur_list_).resize(0);
             cur_row_ = 0;
             row_off_ = 0;
             save_lists();
@@ -411,6 +501,52 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
             ui::screen_manager().pop();
             return true;
         default:
+            // Named-list management (4D.13): Alt+N new, Alt+R rename,
+            // Alt+X delete (plain letters start a cell edit below).
+            if (ev.alt_held && (ev.ch == 'n' || ev.ch == 'N')) {
+                if (math::named_lists().count() >= math::NamedLists::kMax) {
+                    msg_ = "Too many lists (20)";
+                    invalidate_entry();
+                    return true;
+                }
+                name_prompt_ = 1;
+                input_.clear();
+                refresh_cells();
+                invalidate_entry();
+                return true;
+            }
+            if (ev.alt_held && (ev.ch == 'r' || ev.ch == 'R')) {
+                if (ref_of(cur_list_) < math::kNamedRefBase) {
+                    msg_ = "l1-l6 are fixed";
+                    invalidate_entry();
+                    return true;
+                }
+                name_prompt_ = 2;
+                input_.clear();
+                refresh_cells();
+                invalidate_entry();
+                return true;
+            }
+            if (ev.alt_held && (ev.ch == 'x' || ev.ch == 'X')) {
+                const int ref = ref_of(cur_list_);
+                if (ref < math::kNamedRefBase) {
+                    msg_ = "l1-l6 are fixed";
+                    invalidate_entry();
+                    return true;
+                }
+                const int idx = ref - math::kNamedRefBase;
+                math::named_lists().remove(idx);
+                math::named_lists().remove_file(platform::storage(), idx);
+                math::named_lists().save_index(platform::storage());
+                cur_list_ = std::min(cur_list_, total_cols() - 1);
+                col_off_ = std::min(col_off_, cur_list_);
+                cur_row_ = 0;
+                row_off_ = 0;
+                refresh_cells();
+                invalidate_grid();
+                invalidate_entry();
+                return true;
+            }
             // Typing starts an edit of the current cell directly.
             if (ev.ch != 0) {
                 begin_edit(&ev);
@@ -464,7 +600,7 @@ void ListEditorScreen::render(gfx::Framebuffer& fb) {
     const int ty = kEntryY + 8;
     font.draw_string(fb, 2, ty, prompt_, kGreen);
     const int px = 2 + font.text_width(prompt_) + 2;
-    if (editing_) {
+    if (editing_ || name_prompt_ != 0) {
         input_.render(fb, px, ty, platform::kScreenW - px - 4, font, true);
     } else {
         font.draw_string(fb, px, ty, cur_val_, kWhite);
@@ -474,7 +610,7 @@ void ListEditorScreen::render(gfx::Framebuffer& fb) {
     }
 
     fb.fill_rect(0, kSoftkeyY, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, kSoftkeyY + 4, "ENTER:EDIT DEL:ROW F6/F7:SORT F8:CLR", kGrayLine);
+    font.draw_string(fb, 2, kSoftkeyY + 4, "ENTER:EDIT DEL:ROW F6/F7:SORT Alt+N:NEW", kGrayLine);
 }
 
 ListEditorScreen& list_editor() {

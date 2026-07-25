@@ -105,6 +105,8 @@ add_executable(picocalc_graphcalc
     src/math/array_backend_pico.cpp
     src/math/lists.cpp
     src/math/lists_persist.cpp
+    src/math/named_lists.cpp
+    src/math/named_lists_persist.cpp
     src/math/list_ops.cpp
     src/math/list_expr.cpp
     src/math/stats.cpp

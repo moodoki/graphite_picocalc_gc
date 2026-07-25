@@ -12,6 +12,7 @@
 #include "math/list_expr.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
+#include "math/named_lists.hpp"
 
 namespace {
 
@@ -332,8 +333,8 @@ void test_list_expr() {
     check(res.stored_list == 4 && math::lists().list(4).size() == 5, "seq stores");
 
     // Errors.
-    check_list_error("5->l1", "Store to l1-l6 needs a list");
-    check_list_error("sum(l1)->l1", "Store to l1-l6 needs a list");
+    check_list_error("5->l1", "Store target needs a list");
+    check_list_error("sum(l1)->l1", "Store target needs a list");
     eval_list("{1,2}->l6");
     check_list_error("l1+l6", "List length mismatch");
     check_list_error("seq(x,x,1,5)", "seq needs (expr, var, lo, hi, step)");
@@ -672,6 +673,75 @@ void test_vector_ops() {
     math::lists().list(2).resize(0);
 }
 
+// Named lists (4D.13): registry rules + full expression integration.
+void test_named_lists() {
+    using math::listexpr::Kind;
+    auto& nl = math::named_lists();
+
+    // Name validation.
+    check(math::NamedLists::valid_name("costs"), "valid name");
+    check(math::NamedLists::valid_name("ab2"), "digits after first");
+    check(!math::NamedLists::valid_name("a"), "single letter invalid");
+    check(!math::NamedLists::valid_name("l7"), "l+digit invalid");
+    check(!math::NamedLists::valid_name("toolong"), "6 chars invalid");
+    check(!math::NamedLists::valid_name("sum"), "catalog collision");
+    check(!math::NamedLists::valid_name("clight"), "constant collision");
+    check(!math::NamedLists::valid_name("ans"), "reserved collision");
+    check(!math::NamedLists::valid_name("2ab"), "digit first invalid");
+
+    // Create-on-store, recall, arithmetic, reductions.
+    auto res = eval_list("{1,2,3}->costs");
+    check(res.kind == Kind::kList && res.stored_list == math::kNamedRefBase &&
+              res.names_modified,
+          "store creates named list");
+    check(nl.find("costs") == 0 && nl.list(0).size() == 3, "registry holds it");
+    const double lit[3] = {1, 2, 3};
+    check_list_result("costs", lit, 3);
+    const double dbl[3] = {2, 4, 6};
+    check_list_result("costs*2", dbl, 3);
+    res = eval_list("{10,20,30}->l1");
+    check(res.kind == Kind::kList, "seed l1");
+    const double mix[3] = {11, 22, 33};
+    check_list_result("l1+costs", mix, 3);
+    res = eval_list("sum(costs)");
+    check(res.kind == Kind::kScalar && res.scalar.value == 6.0, "sum(named)");
+    res = eval_list("costs->l2");
+    check(res.kind == Kind::kList && res.stored_list == 1, "named -> fixed copy");
+
+    // In-place sort + the persistence mask (also covers the D35 gap:
+    // a plain sort now reports what it modified).
+    res = eval_list("{3,1,2}->costs");
+    check(res.kind == Kind::kList, "reseed costs");
+    res = eval_list("sort_asc(costs)");
+    check(res.kind == Kind::kList &&
+              (res.lists_mask & (1U << math::kNamedRefBase)) != 0,
+          "named in-place sort masks");
+    check(nl.list(0).get(0) == 1 && nl.list(0).get(2) == 3, "named sorted");
+    res = eval_list("sort_asc(l1)");
+    check(res.kind == Kind::kList && (res.lists_mask & 1U) != 0, "fixed sort masks (D35 fix)");
+
+    // Second named list + errors.
+    res = eval_list("{5,6,7}->qty");
+    check(res.kind == Kind::kList && nl.count() == 2, "second named list");
+    res = eval_list("dot(costs,qty)");
+    check(res.kind == Kind::kScalar && res.scalar.value == 5 + 12 + 21, "dot over named");
+    check_list_error("{1}->ans", "Syntax error");  // ans is not a valid list name
+    res = eval_list("nope*2");
+    check(res.kind == Kind::kNone, "unknown name is not list syntax");
+
+    // Removal frees the name for reuse.
+    check(nl.remove(nl.find("qty")), "remove qty");
+    check(nl.find("qty") < 0 && nl.count() == 1, "qty gone");
+    res = eval_list("{9}->qty");
+    check(res.kind == Kind::kList && nl.find("qty") >= 0, "name reusable");
+
+    // Cleanup.
+    nl.remove(nl.find("qty"));
+    nl.remove(nl.find("costs"));
+    math::lists().list(0).resize(0);
+    math::lists().list(1).resize(0);
+}
+
 int main() {
     test_array_basics();
     test_array_tiers();
@@ -681,6 +751,7 @@ int main() {
     test_complex_array();
     test_complex_list_expr();
     test_vector_ops();
+    test_named_lists();
 
     std::printf("test_lists: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -25,6 +25,7 @@
 #include "math/functions.hpp"
 #include "math/lists.hpp"
 #include "math/matrix.hpp"
+#include "math/named_lists.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -330,6 +331,8 @@ int main() {
     // false while SD or (for large lists) PSRAM is still down — the
     // late-init loop below retries it.
     bool lists_loaded = math::lists().load(platform::storage());
+    // Named user lists (4D.13) — same contract.
+    bool named_loaded = math::named_lists().load(platform::storage());
     // Matrix variables (Phase 4A) — same all-or-nothing contract.
     bool matrices_loaded = math::matrices().load(platform::storage());
     // The typed `diag` command pushes the diagnostics overlay (the old
@@ -428,6 +431,13 @@ int main() {
                     lists_loaded = math::lists().load(platform::storage());
                     if (lists_loaded) {
                         printf("late-init: lists loaded at %lu ms\n",
+                               static_cast<unsigned long>(now));
+                    }
+                }
+                if (!named_loaded) {
+                    named_loaded = math::named_lists().load(platform::storage());
+                    if (named_loaded) {
+                        printf("late-init: named lists loaded at %lu ms\n",
                                static_cast<unsigned long>(now));
                     }
                 }

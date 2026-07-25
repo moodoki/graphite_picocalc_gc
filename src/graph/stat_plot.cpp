@@ -8,6 +8,7 @@
 #include "math/dist.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
+#include "math/named_lists.hpp"
 #include "math/stats.hpp"
 
 namespace graph {
@@ -89,7 +90,13 @@ int strip_bucket(int py) {
 }
 
 const math::Array& list_of(int idx) {
-    return math::lists().list(idx);
+    // Refs since 4D.13: 0-5 = l1-l6, 6+k = named registry slot k. A
+    // deleted named list resolves to its (cleared) slot and renders
+    // empty; out-of-range persisted values clamp to l1.
+    if (idx < 0 || idx >= math::kNamedRefBase + math::NamedLists::kMax) {
+        idx = 0;
+    }
+    return math::list_by_ref(idx);
 }
 
 bool stream_min_max(const math::Array& a, double* lo, double* hi) {

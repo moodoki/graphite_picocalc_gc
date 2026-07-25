@@ -14,6 +14,7 @@
 #include "math/lists.hpp"
 #include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
+#include "math/named_lists.hpp"
 #include "math/solve_expr.hpp"
 #include "math/units.hpp"
 #include "render/layout_builder.hpp"
@@ -327,8 +328,9 @@ void HomeScreen::evaluate_input() {
             char text[120];
             math::listexpr::format_list(*lres.list, text, sizeof(text));
             if (lres.stored_list >= 0) {
-                std::snprintf(result, sizeof(result), "%s%cl%c", text, gfx::kGlyphStore,
-                              static_cast<char>('1' + lres.stored_list));
+                char lname[8];
+                math::list_ref_name(lres.stored_list, lname, sizeof(lname));
+                std::snprintf(result, sizeof(result), "%s%c%s", text, gfx::kGlyphStore, lname);
             } else {
                 std::snprintf(result, sizeof(result), "%s", text);
             }
@@ -337,8 +339,20 @@ void HomeScreen::evaluate_input() {
         if (!error) {
             persist_history_line(input_.text(), result);
             save_variables();
-            if (lres.lists_modified) {
-                math::lists().save(platform::storage(), lres.stored_list);
+            if (lres.names_modified) {  // A named list was created (4D.13)
+                math::named_lists().save_index(platform::storage());
+            }
+            // Persist every ref this evaluation wrote (stores AND
+            // in-place sorts — the latter silently skipped pre-4D.13).
+            for (int r = 0; r < math::kNamedRefBase + math::NamedLists::kMax; ++r) {
+                if ((lres.lists_mask & (1U << r)) == 0) {
+                    continue;
+                }
+                if (r < math::kNamedRefBase) {
+                    math::lists().save(platform::storage(), r);
+                } else {
+                    math::named_lists().save(platform::storage(), r - math::kNamedRefBase);
+                }
             }
         }
         input_.clear();
