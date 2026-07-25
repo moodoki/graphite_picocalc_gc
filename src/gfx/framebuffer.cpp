@@ -60,8 +60,10 @@ void drain_acks() {
 // D10 decision addendum + the 2026-07-25 worklog.
 void display_service_main() {
     while (true) {
-        auto* job = reinterpret_cast<PushJob*>(
-            static_cast<uintptr_t>(multicore_fifo_pop_blocking()));
+        // The inter-core FIFO is a 32-bit mailbox; passing the job
+        // pointer through it is the design (see D10 addendum).
+        const auto raw = static_cast<uintptr_t>(multicore_fifo_pop_blocking());
+        auto* job = reinterpret_cast<PushJob*>(raw);  // NOLINT(performance-no-int-to-ptr)
         platform::display().push_rect_dma(job->x, job->y, job->w, job->h, job->px);
         multicore_fifo_push_blocking(1);  // ack
     }

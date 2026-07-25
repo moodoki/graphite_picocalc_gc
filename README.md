@@ -7,7 +7,9 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > unified persistence; statistics — lists, regression, distributions,
 > inference, stat plots). Phase 4 sub-phases 4A–4C (matrices, graph-analysis
 > CALC menu, complex numbers) are also hardware-verified on both boards;
-> sub-phase 4D (GC completeness) is specced but not started. See
+> sub-phase 4D (GC completeness) is **in progress** — its batch plan is set
+> (D38) and Batch 1 (complex-valued variables/`Ans` and complex lists) is
+> code-complete and flashed. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -41,7 +43,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   statistical plots (histogram, box plot, scatter) overlaid on the graphing
   engine.
 - **Phase 4 — the pre-release milestone (sub-phases 4A–4C complete,
-  HW-verified on both boards; 4D specced, not started)**: 10 matrix variables
+  HW-verified on both boards; 4D in progress)**: 10 matrix variables
   (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
   row-echelon form, eigenvalues, and a numeric equation solver (4A); a
   TI-84-style **CALC menu** on the graph screen — value, zero, min/max,
@@ -252,11 +254,11 @@ Background research:
 | 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase2-retro.md; Pico 1 pass via task 3D.14) |
 | 3: Statistics | **Complete** | Lists, regression, distributions, inference, stat plots; HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase3-retro.md; Pico 1 pass via task 3D.14) |
 | 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
-| 4D: GC completeness (pre-release milestone) | Specced, not started | docs/phases/phase4-spec.md §7 (D33) |
+| 4D: GC completeness (pre-release milestone) | **In progress** | Batch plan set (D38); Batch 1 (complex variables/Ans + complex lists) code complete; docs/phases/phase4-spec.md §7 |
 | 5: CAS (symbolic math) | Specced, not started | docs/phases/phase5-spec.md (D32) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 
-Both boards build clean and the host test suite (1200+ checks) passes. See
+Both boards build clean and the host test suite (1300+ checks) passes. See
 [docs/notes/next-session.md](docs/notes/next-session.md) for exactly what's
 HW-PENDING right now.
 

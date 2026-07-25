@@ -283,9 +283,124 @@ Still to verify on hardware:
 | Session 16 — Phase 4A matrices + numeric solver (D28; flashed 2026-07-20, boot + psram-bulk heartbeat verified over serial) | `matrix`/`mat` editor: TAB cycles [A]-[J]+Ans(RO), F7 DIM reshape, F8 clear, cell edit/advance feel; bracket typing (`[`/`]`) on the physical keyboard. Home: `[A]*[B]`, `2*[A]`, `[A]^-1`, `[A]^T`, `[A](2,3)` element read, `det([A])`/`rank([A])` inline scalars, `inverse`/`rref`/`ref`/`augment`/`identity`, `dim([A])`/`eigenvals([A])` (list results into l1-l6), `-> [C]`/`-> lk`/`-> a` stores, MatAns re-use. `matrices.dat` first save + a power cycle (magic PCM1). `solve` form screen (Lower/Upper/optional Guess, residual + iterations) and inline `solve(f,x,lo,hi)` / `solve(f,x,guess)` / `solve(lhs=rhs,...)`. Big-matrix (>16x16, PSRAM tier) edit/op timing feel. Help: COMMANDS matrix/solve rows, catalog entries. Regression: lists/stats/dist/infer/graph unaffected, home eval fine. **Pico 2 leg closed as a formality (2026-07-22):** logic is board-independent (no `#ifdef` branches), and the harder strip-render case (Pico 1) passed this checklist in full the same day — see the Phase 4A-4C paragraph above. Only genuinely board-specific gap: perf feel hasn't been re-measured on the Pico 2 against current code (only the pre-Phase-3 2.25 baseline exists) |
 | Session 17 — Phase 4B graph analysis / CALC menu (D29; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 17 itself) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale as the Session 16 row above; the full CALC-menu checklist, including the strip-render-risky tangent-line/shaded-fnInt draws, passed on the Pico 1 the same day |
 | Session 18 — Phase 4C complex numbers (D30; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 18 itself) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale; full complex-number checklist passed on the Pico 1 the same day (note: this checklist's own r∠θ description is stale — superseded by the real ∠ glyph, D31; and its "spot check the real catalog" item is now known to have one gap, the `!` postfix-factorial bug root-caused the same day, see the paragraph above) |
+| 4D Batch 1 — complex variables/Ans (4D.15) + complex lists (4D.24) (D38; flashed to the Pico 1 2026-07-26, boot + psram-bulk/battery/temp heartbeats verified over serial) | **First boot: PCV1 one-time variables reset** (variables only — re-set once, then persistence resumes; lists/matrices/graphstate untouched). RECT mode: `2i->a` stores; `a` recalls as `2i`; `a+1`, `a*a`, `conj(a)` work; `fac(a)` errors "Non-real variable"; REAL mode: `a` gives "Non-real result". Lists: `{1+i,2-i}->l1`; recall `l1`; `l1+l1`, `2i*l1`, `l1/2`, `l1+l2` (real l2); `sum(l1)`=`3`; `stdev(l1)`/`sort_asc(l1)` error; REAL mode recall errors. List editor: complex cells render; entering `3+2i` into a real list migrates it; delete/clear behave; complex l1 survives a power cycle; variables reset once then persist (incl. a complex `a` surviving reboot). Graph sanity: with a complex value stored in x, `Y1=sin(x)` still graphs (the sweep-slot exclusion) |
 | Session 19 — font system + real math glyphs, `eig` alias, list UX (D31; flashed 2026-07-21, **Terminus** default build, boots healthy, PSRAM/storage/battery telemetry clean) | This session's own on-device font comparison across all five builds is already done (D31: Terminus picked as the shipped default; Unifont good with the 2px lift; Spleen best if a thicker font is wanted; JuliaMono worst, Iosevka a bit unbalanced) — remaining is a **glyph-correctness sweep on the Terminus build in situ**: home-screen complex results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row (`a+bi`/`r∠θ`), pretty-printed expressions (`π`, `θ`, inline `√(x)`, `3+2i` via the plain-text fallback), stats `σx`/`σy`/`Σx`/`Σx²`/`Σy`/`Σy²`/`Σxy`/`r²`, inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace + table polar label `θ`, and `…` truncation in list/matrix/complex history + slot editor. Also: `eig` as a drop-in alias for `eigenvals([A])` (whole-expression only, same as `eigenvals`/`dim`); list history LEFT/RIGHT horizontal scroll on the newest result when the input line is empty, using the new compact (4-sig-fig) number format so more list elements fit per screen. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis, table all unaffected. **Informally spot-checked 2026-07-22** during the Phase 4A-4C Pico 1 pass — complex/MODE-row/pretty-print/stats glyphs incidentally seen and reported looking correct — but not a dedicated sweep against this row's own full list (still worth doing properly if time allows) |
 
 ---
+
+## 2026-07-26 — Phase 4D STARTED: D38 batch plan; Batch 1 shipped — complex variables/Ans (4D.15) + complex lists (4D.24)
+
+Phase 4D implementation begins. Both boards build; lint + format clean
+(including two pre-existing lint failures fixed, block 4 below); host suite
+green across all 12 binaries — **1305 checks** (test_lists 134→196,
+test_complex_expr 44→74). Pico 1 flashed and boot-verified over serial
+(`psram-bulk: OK`, battery + temp heartbeats, no crashes). Flash-path note:
+the BOOTSEL-volume `cp` failed with "Permission denied" this time (a new
+failure mode vs. the old xattr complaint), so `picotool load -f` remains the
+reliable path; also, `picotool info` **segfaults** in picotool v2.3.0 —
+`load`/`reboot` work fine, just don't lean on `info`.
+
+**1. Phase 4D planning pass (D38).** A full plan for 4D was drawn up
+(code exploration of engine/storage, the graph subsystem, and the
+render/platform HAL) and the developer resolved every remaining open
+question — recorded as **`decisions.md` D38** (full detail there).
+Highlights: **4D.16 (xyLine/normprob plots) discovered ALREADY SHIPPED**
+in Phase 3D (Session 15, D27) and closed with zero work; 4D.21 (build-id
+diag label) closed — shipped 2026-07-25 (`f444db9`); **P4-12** = full
+u/v/w + cross-reference in v1; **P4-10** = named user lists, full
+integration (4D.13 re-estimated 4 → ~15 h); **P4-13** = rref-nullspace of
+`(A−λI)`; units = typed `convert()` only; APD = soft-sleep v1 +
+`/picocalc/settings.dat` (magic PCS1); two scope adds accepted
+(home-screen `MatAns` token → 4D.14, fnInt shading in the curve's color →
+4D.11); **sequencing = risk-first batches** (complex storage → complex
+matrices → sequence graphing → zoom/shading → catalog glue → named lists
+→ display/formatting → eigenvectors → device polish).
+`phase4-spec.md` §7.3/§8/§11 and the summary table updated accordingly
+(4D subtotal ~165 h, Phase 4 total ~300 h).
+
+**2. Batch 1, first half: 4D.15 complex Variables/Ans.**
+- `Variables` widened with a parallel `imag[28]` array (`engine.hpp`);
+  `vars[]` stays the flat real view because tinyexpr binds raw slot
+  addresses. New helpers `is_complex`/`set_real`/`set_complex`.
+- New `math::refs_complex_var(expr, skip_slot)` (`engine.cpp`) detects
+  references to complex-valued slots (`a`-`z`/`ans`/`theta` tokens).
+- **Real-only consumers now ERROR, never truncate** (P4-11/D37):
+  `Engine::eval_internal` ("Non-real variable"), `eval_field` (checks
+  before rebinding x), and `compile`/`compile_with` — which grew a
+  **`sweep_slot` param** excluding the caller's sweep variable, so a stale
+  complex `x` can't block graphing `Y1=sin(x)`; `Engine::kNoComplexCheck`
+  serves the slot editors' syntax-validity-only compiles. All
+  graph/table/solver/seq compile sites pass their sweep slot.
+- `complexexpr` resolves complex-valued variables itself
+  (`parse_scalar_span` intercepts bare var tokens; opaque spans like
+  `fac(a)` give a pointed "Non-real variable" error). The 4C "Complex
+  results can't be stored" restriction is **removed** — `2i->a` now
+  stores.
+- `home_screen`: dispatch forces the complex path on `refs_complex_var`;
+  complex Ans/store commit via `set_complex`; complex store display
+  `3+2i→a`; REAL mode gives "Non-real result".
+- Real writes clear the imag part everywhere (engine evaluate, `mat_expr`
+  scalar store, `solver_screen`, graph trace/analysis stores);
+  `evaluate_at` saves/restores both parts.
+- **`variables.dat` format bump: new magic PCV1** (header + vars + imag,
+  `home_screen.cpp`). The old raw 224-byte file is ignored → **one-time
+  variables reset on first boot** under this firmware (expected,
+  precedented — same "old files ignored" pattern as PCL2/PCM2).
+
+**3. Batch 1, second half: 4D.24 complex lists.**
+- `Dtype::kComplex` (interleaved re/im, 16 B/elem); complex arrays are
+  **PSRAM-only regardless of size** (D37) and cap at **5000 elements**
+  (`kMaxComplexElements`) so one 80 KB region holds a full array. `Array`
+  gained `cget`/`cset`/`read_range_c`/`write_range_c`/`set_dtype`
+  (empty-only retype); real accessors return NaN / no-op on complex
+  arrays (loud failure per D37); byte-based zero-fill.
+- `listexpr`: complex brace literals (`{1+i, 2-i}`); a narrow **complex
+  vector lift** (v1 scope exactly per D37: `+`/`−` of terms, scalar `*`
+  and `/`, one list per term; everything else gives pointed errors like
+  "Complex lists support only +, -, scalar * and /"); `sum`/`mean` of a
+  complex list supported **standalone only** (new
+  `Result::scalar_complex`/`cvalue`; home_screen commits complex Ans);
+  `stdev`/`median`/`prod`/`sort`/`cumsum`/`delta` error "Non-real list";
+  complex list results error "Non-real result" in REAL Number mode
+  **before** any store; `format_list` formats complex elements via
+  `format_complex`.
+- `listops`: dtype-aware copy; `csum`; `copy_complex`; `make_complex`
+  (in-place real→complex migration); dtype guards on
+  sum/prod/sort/cumsum/delta; `seq` retypes its output real.
+- List editor: complex cells display (`format_complex` with a short
+  fallback); entering a complex value into a real list migrates it via
+  `make_complex` (REAL mode rejects); delete-row handles complex; sort
+  gives "Non-real list"; F8 clear reverts the list to the real tier.
+- Stats `one_var`/`two_var`/regressions error "Non-real list" on complex
+  input; stat plots skip complex lists (the slot renders empty).
+- **Lists persistence: PCL2 header unchanged** — the dtype byte was
+  already there; complex payloads (16 B/elem) now save/load. Old firmware
+  treats a complex list file as corrupt (graceful skip).
+- `scripts/host-tests.sh`: test_lists now links `complex_expr.cpp`.
+
+**4. Two PRE-EXISTING lint failures fixed** (HEAD from 2026-07-25 didn't
+pass `./scripts/lint.sh`): the `framebuffer.cpp` int-to-ptr cast in
+`display_service_main` (NOLINT with rationale — the inter-core FIFO is a
+32-bit mailbox by design) and a dead store in `main.cpp` diag rendering.
+
+**5. Pico 1 state.** Flashed with this build: bss **213,332** bytes
+(+1,148 over 212,184 — the imag array + PCV1 image + editor scratch;
+~57 KB headroom), boots healthy (psram-bulk OK, battery + temp
+heartbeats, idle die temp 28-31 C). **Expected one-time variables reset
+(PCV1)** on first boot; lists/matrices/graphstate formats unchanged
+(PCL2/PCM2/PCG5). Batch 1's hands-on eval is queued in the HW-PENDING
+table above and `next-session.md`.
+
+Known limitations / deferred (all per the D37/D38 v1 scope, not
+oversights): the complex vector lift covers only `+`/`−`/scalar `*`,`/`;
+`sum`/`mean` on complex lists are standalone-only; stat plots skip complex
+lists rather than plotting real parts; `eigen_core` stays real-input;
+complex arrays always pay the PSRAM tier and cap at 5000 elements.
+**Next per the D38 batch plan: Batch 2 — complex matrices (4D.25)**,
+~22 h est: generalize `matops` (det/inverse/rref/ref/rank/augment/
+reshape/identity/power/transpose/solve_linear) to `Complex` via the
+static-row-buffer kernels; magnitude-based pivoting; matrix editor
+complex entry/display reusing 4D.24's storage tier.
 
 ## 2026-07-25 — Bugfix session: `!` factorial on the complex path fixed; D10 stall isolated to the multicore FIFO (DMA cleared)
 

@@ -147,8 +147,8 @@ void SolverScreen::solve() {
                   static_cast<double>(sr.residual));
     std::snprintf(result_[2], sizeof(result_[2]), "%d iterations", sr.iterations);
     // The found root lands in the variable and Ans, TI-solver style.
-    math::engine().vars().vars[slot] = sr.root;
-    math::engine().vars().ans() = sr.root;
+    math::engine().vars().set_real(slot, sr.root);
+    math::engine().vars().set_real(math::Variables::kAns, sr.root);
 }
 
 bool SolverScreen::on_key(const platform::KeyEvent& ev) {

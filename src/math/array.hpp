@@ -3,17 +3,19 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "math/complex.hpp"
 #include "math/types.hpp"
 
 namespace math {
 
-// Element type tag (D21): double-only today, but persisted and routed
-// through every accessor so complex-valued lists/matrices (committed
-// future scope) land as a non-breaking addition.
-enum class Dtype : uint8_t { kDouble = 0 };
+// Element type tag (D21): kDouble is the default; kComplex (4D.24,
+// D37/D38) stores interleaved re/im pairs. Complex arrays route
+// exclusively through the PSRAM region tier — never the SRAM slab pool
+// — so the committed bss budget stays real-only (D37).
+enum class Dtype : uint8_t { kDouble = 0, kComplex = 1 };
 
 constexpr size_t dtype_size(Dtype t) {
-    return t == Dtype::kDouble ? sizeof(calc_t) : 0;
+    return t == Dtype::kDouble ? sizeof(calc_t) : t == Dtype::kComplex ? 2 * sizeof(calc_t) : 0;
 }
 
 // Low-level PSRAM hooks for the large-array tier. The firmware
@@ -47,6 +49,9 @@ class Array {
 public:
     static constexpr int kMaxDims = 2;
     static constexpr int kMaxElements = 10000;  // D21 cap
+    // Complex arrays cap at half the elements so one 80 KB PSRAM
+    // region still holds a full array (16 bytes/element, 4D.24).
+    static constexpr int kMaxComplexElements = kMaxElements / 2;
 
     Array() = default;
     ~Array() { clear(); }
@@ -62,7 +67,10 @@ public:
     bool in_psram() const { return psram_addr_ != kNoPsram; }
 
     // Element access, routed through the dtype tag (D21). Out-of-range
-    // get returns NaN; out-of-range set is a no-op.
+    // get returns NaN; out-of-range set is a no-op. The calc_t
+    // accessors are kDouble-only: on a kComplex array get() returns NaN
+    // and set()/the ranges are no-ops — real-only consumers must check
+    // dtype and error, never silently read a real part (D37).
     calc_t get(int i) const;
     calc_t get(int r, int c) const { return get(flat(r, c)); }
     void set(int i, calc_t v);
@@ -71,6 +79,20 @@ public:
     // Bulk element ranges (row-major flat indices, clamped to bounds).
     void read_range(int first, int count, calc_t* out) const;
     void write_range(int first, int count, const calc_t* src);
+
+    // Complex element access (4D.24). cget works on both dtypes
+    // (kDouble promotes to {v, 0}); cset and the ranges are
+    // kComplex-only no-ops otherwise.
+    Complex cget(int i) const;
+    Complex cget(int r, int c) const { return cget(flat(r, c)); }
+    void cset(int i, const Complex& v);
+    void cset(int r, int c, const Complex& v) { cset(flat(r, c), v); }
+    void read_range_c(int first, int count, Complex* out) const;
+    void write_range_c(int first, int count, const Complex* src);
+
+    // Change the element type. Only valid on an empty array (clear()
+    // or resize(0) first); the caller then resizes and fills.
+    bool set_dtype(Dtype t);
 
     void fill(calc_t v);
 

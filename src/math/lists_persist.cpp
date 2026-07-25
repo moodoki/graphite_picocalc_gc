@@ -33,6 +33,9 @@ struct Header {
 
 constexpr int kChunkElements = 256;
 calc_t g_chunk[kChunkElements];
+// Complex chunk (4D.24) aliases the same buffer budget: 128 complex
+// elements per pass through the 2 KB chunk.
+constexpr int kChunkComplex = kChunkElements / 2;
 
 void path_for(int index, char* buf, size_t cap) {
     std::snprintf(buf, cap, "/picocalc/list%d.dat", index + 1);
@@ -52,6 +55,18 @@ bool save_list(platform::Storage& storage, const Array& lst, int index) {
         return false;
     }
     const int n = lst.size();
+    if (lst.dtype() == Dtype::kComplex) {
+        auto* cbuf = reinterpret_cast<Complex*>(g_chunk);
+        for (int at = 0; at < n; at += kChunkComplex) {
+            const int m = n - at < kChunkComplex ? n - at : kChunkComplex;
+            lst.read_range_c(at, m, cbuf);
+            if (!storage.append_file(path, reinterpret_cast<const uint8_t*>(cbuf),
+                                     static_cast<size_t>(m) * sizeof(Complex))) {
+                return false;
+            }
+        }
+        return true;
+    }
     for (int at = 0; at < n; at += kChunkElements) {
         const int m = n - at < kChunkElements ? n - at : kChunkElements;
         lst.read_range(at, m, g_chunk);
@@ -82,19 +97,37 @@ bool load_list(platform::Storage& storage, Array& lst, int index) {
         std::memcmp(h.magic, kMagic, sizeof(kMagic)) != 0) {
         return true;  // Corrupt/old image: ignore it, keep this list empty
     }
-    if (h.dtype != static_cast<uint8_t>(Dtype::kDouble) ||
-        h.count > static_cast<uint32_t>(Array::kMaxElements)) {
+    const bool complex = h.dtype == static_cast<uint8_t>(Dtype::kComplex);
+    if ((h.dtype != static_cast<uint8_t>(Dtype::kDouble) && !complex) ||
+        h.count >
+            static_cast<uint32_t>(complex ? Array::kMaxComplexElements : Array::kMaxElements)) {
         return true;  // Unknown dtype / bad count: treat as corrupt
     }
     constexpr size_t kSlabElems = ArrayStore::kSlabBytes / sizeof(calc_t);
-    if (h.count > kSlabElems && !psram_backend::available()) {
+    if ((complex || h.count > kSlabElems) && !psram_backend::available()) {
         return false;  // Needs PSRAM, not up yet — let late-init retry
     }
     const int n = static_cast<int>(h.count);
-    if (!lst.resize(n)) {
+    lst.clear();
+    if (!lst.set_dtype(complex ? Dtype::kComplex : Dtype::kDouble) || !lst.resize(n)) {
         return false;
     }
     size_t off = sizeof(h);
+    if (complex) {
+        auto* cbuf = reinterpret_cast<Complex*>(g_chunk);
+        for (int at = 0; at < n; at += kChunkComplex) {
+            const int m = n - at < kChunkComplex ? n - at : kChunkComplex;
+            const int bytes = m * static_cast<int>(sizeof(Complex));
+            if (storage.read_file_range(path, off, reinterpret_cast<uint8_t*>(cbuf),
+                                        static_cast<size_t>(bytes)) != bytes) {
+                lst.resize(at);  // Keep what arrived; truncate the rest
+                return true;
+            }
+            lst.write_range_c(at, m, cbuf);
+            off += static_cast<size_t>(bytes);
+        }
+        return true;
+    }
     for (int at = 0; at < n; at += kChunkElements) {
         const int m = n - at < kChunkElements ? n - at : kChunkElements;
         const int bytes = m * static_cast<int>(sizeof(calc_t));

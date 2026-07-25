@@ -65,7 +65,7 @@ SolveResult numeric_solve(const char* expr, int var_slot, calc_t lo, calc_t hi, 
         res.error = "Bad variable";
         return res;
     }
-    void* h = engine().compile(expr);
+    void* h = engine().compile(expr, var_slot);
     if (h == nullptr) {
         res.error = "Syntax error";
         return res;
@@ -175,7 +175,7 @@ Result with_compiled(const char* expr, int var_slot, Body body) {
         res.error = "Bad variable";
         return res;
     }
-    void* h = engine().compile(expr);
+    void* h = engine().compile(expr, var_slot);
     if (h == nullptr) {
         res.error = "Syntax error";
         return res;

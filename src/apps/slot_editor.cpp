@@ -23,7 +23,9 @@ bool field_compiles(const char* text) {
     if (text == nullptr || text[0] == 0) {
         return true;
     }
-    void* h = math::engine().compile(text);
+    // Syntax validity only — a stale complex value in the sweep
+    // variable must not flag a valid expression red (4D.15).
+    void* h = math::engine().compile(text, math::Engine::kNoComplexCheck);
     if (h == nullptr) {
         return false;
     }

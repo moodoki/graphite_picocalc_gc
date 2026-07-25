@@ -104,6 +104,34 @@ bool preprocess_factorial(const char* in, char* out, size_t out_len) {
     return preprocess(in, out, out_len);
 }
 
+bool refs_complex_var(const char* expr, int skip_slot) {
+    const Variables& v = engine().vars();
+    const char* p = expr;
+    while (*p != 0) {
+        if (std::isalpha(static_cast<unsigned char>(*p)) != 0 || *p == '_') {
+            const char* start = p;
+            while (std::isalnum(static_cast<unsigned char>(*p)) != 0 || *p == '_') {
+                ++p;
+            }
+            const auto len = static_cast<size_t>(p - start);
+            int slot = -1;
+            if (len == 1 && start[0] >= 'a' && start[0] <= 'z') {
+                slot = start[0] - 'a';
+            } else if (len == 3 && std::strncmp(start, "ans", 3) == 0) {
+                slot = Variables::kAns;
+            } else if (len == 5 && std::strncmp(start, "theta", 5) == 0) {
+                slot = Variables::kTheta;
+            }
+            if (slot >= 0 && slot != skip_slot && v.imag[slot] != 0) {
+                return true;
+            }
+        } else {
+            ++p;
+        }
+    }
+    return false;
+}
+
 calc_t& Variables::operator[](char name) {
     // Lowercase only (case-sensitive since 2026-07-18).
     if (name >= 'a' && name <= 'z') {
@@ -172,6 +200,15 @@ EvalResult Engine::eval_internal(const char* expr) {
         return res;
     }
 
+    // Real-only path: a referenced variable holding a complex value is
+    // an error, never a silent real-part read (4D.15, P4-11/D37). The
+    // complex-capable evaluator (math::complexexpr) resolves such
+    // variables itself before spans ever reach this engine.
+    if (refs_complex_var(processed)) {
+        res.error = "Non-real variable";
+        return res;
+    }
+
     te_variable lookup[kLookupCount];
     const int li = build_lookup(vars_, lookup);
 
@@ -187,10 +224,13 @@ EvalResult Engine::eval_internal(const char* expr) {
     return res;
 }
 
-void* Engine::compile(const char* expr) {
+void* Engine::compile(const char* expr, int sweep_slot) {
     char processed[kMaxExpr];
     if (!preprocess(expr, processed, sizeof(processed))) {
         return nullptr;
+    }
+    if (sweep_slot != kNoComplexCheck && refs_complex_var(processed, sweep_slot)) {
+        return nullptr;  // Non-real variable (4D.15) — same surface as a parse error
     }
     te_variable lookup[kLookupCount];
     const int li = build_lookup(vars_, lookup);
@@ -198,13 +238,17 @@ void* Engine::compile(const char* expr) {
     return te_compile(processed, lookup, li, &err);
 }
 
-void* Engine::compile_with(const char* expr, const ExtraVar* extras, int extra_count) {
+void* Engine::compile_with(const char* expr, const ExtraVar* extras, int extra_count,
+                           int sweep_slot) {
     if (extra_count < 0 || extra_count > kMaxExtraVars) {
         return nullptr;
     }
     char processed[kMaxExpr];
     if (!preprocess(expr, processed, sizeof(processed))) {
         return nullptr;
+    }
+    if (sweep_slot != kNoComplexCheck && refs_complex_var(processed, sweep_slot)) {
+        return nullptr;  // Non-real variable (4D.15)
     }
     te_variable lookup[kLookupCount + kMaxExtraVars];
     int li = build_lookup(vars_, lookup);
@@ -298,9 +342,10 @@ EvalResult Engine::evaluate(const char* expr) {
 
     EvalResult res = eval_internal(body);
     if (res.ok) {
-        vars_.ans() = res.value;
+        // Real writes clear any complex value the slot held (4D.15).
+        vars_.set_real(Variables::kAns, res.value);
         if (store_index >= 0) {
-            vars_.vars[store_index] = res.value;
+            vars_.set_real(store_index, res.value);
             res.stored_var = store_index;
         }
     }
@@ -308,10 +353,15 @@ EvalResult Engine::evaluate(const char* expr) {
 }
 
 EvalResult Engine::evaluate_at(const char* expr, calc_t x_val) {
+    // Save/restore both parts: the temporary binding is real, but a
+    // complex value the user stored in x must survive unrelated field
+    // evaluations (4D.15).
     const calc_t saved = vars_.vars['x' - 'a'];
-    vars_.vars['x' - 'a'] = x_val;
+    const calc_t saved_im = vars_.imag['x' - 'a'];
+    vars_.set_real('x' - 'a', x_val);
     EvalResult res = eval_internal(expr);
     vars_.vars['x' - 'a'] = saved;
+    vars_.imag['x' - 'a'] = saved_im;
     return res;
 }
 
@@ -322,6 +372,13 @@ Engine& engine() {
 
 bool eval_field(const char* text, calc_t* out) {
     Engine& eng = engine();
+    // The real-only seam (matexpr/listexpr/complexexpr scalar spans,
+    // UI numeric fields): a complex-valued variable reference is an
+    // error here, checked before evaluate_at rebinds x — otherwise a
+    // complex x would silently evaluate as its real part (4D.15, D37).
+    if (refs_complex_var(text)) {
+        return false;
+    }
     // evaluate_at leaves Ans/store untouched; binding X to its own
     // current value makes the call side-effect free.
     const EvalResult res = eng.evaluate_at(text, eng.vars()['x']);

@@ -98,13 +98,76 @@ void test_store() {
     const auto r = math::complexexpr::evaluate("5->a");
     check(r.ok && r.stored_var == 0 && r.value.is_real() && r.value.re == 5, "store real to a");
 
-    check_err("2i->a", "Complex results can't be stored", "store complex errors");
+    // Complex stores are allowed since 4D.15 (the dispatch layer
+    // commits them into the widened Variables).
+    const auto c = math::complexexpr::evaluate("2i->a");
+    check(c.ok && c.stored_var == 0 && c.value.re == 0 && c.value.im == 2, "store complex to a");
     check_err("5->E", "Variables are lowercase a-z", "store uppercase errors");
     check_err("5->e", "e is reserved (Euler's e)", "store e errors");
     check_err("5->i", "i is reserved (imaginary unit)", "store i errors");
 
     const auto t = math::complexexpr::evaluate("7->theta");
     check(t.ok && t.stored_var == math::Variables::kTheta, "store theta");
+}
+
+// 4D.15: complex-valued Variables — the widened storage, the
+// complex evaluator resolving such variables, and every real-only
+// consumer erroring instead of silently reading the real part (D37).
+void test_complex_vars() {
+    auto& vars = math::engine().vars();
+
+    vars.set_complex('a' - 'a', 3, 2);  // a = 3+2i
+    check(vars.is_complex(0), "is_complex after set_complex");
+
+    check_ok("a", 3, 2, "read complex var");
+    check_ok("a+1", 4, 2, "complex var in expression");
+    check_ok("a*a", 5, 12, "complex var squared");
+    check_ok("conj(a)", 3, -2, "conj of complex var");
+
+    // Real-only consumers error (never truncate).
+    const auto er = math::engine().evaluate("a+1");
+    check(!er.ok && er.error != nullptr && std::strcmp(er.error, "Non-real variable") == 0,
+          "real engine errors on complex var");
+    math::calc_t out = 0;
+    check(!math::eval_field("a+1", &out), "eval_field errors on complex var");
+    check(math::engine().compile("a+1") == nullptr, "compile errors on complex var");
+    check_err("fac(a)", "Non-real variable", "opaque span with complex var errors");
+
+    check(math::refs_complex_var("a+1"), "refs_complex_var hit");
+    check(!math::refs_complex_var("b+1"), "refs_complex_var miss");
+    check(!math::refs_complex_var("abs(1)"), "refs_complex_var ignores fn names");
+
+    // Ans and theta slots participate too.
+    vars.set_complex(math::Variables::kAns, 0, 1);  // Ans = i
+    check_ok("ans*ans", -1, 0, "complex ans");
+    check(math::refs_complex_var("ans+1"), "refs_complex_var ans");
+    vars.set_real(math::Variables::kAns, 0);
+
+    // Sweep-slot exclusion: a stale complex x must not block compiling
+    // an expression about to sweep x — and the sweep evaluates on the
+    // real parts it writes.
+    vars.set_complex('x' - 'a', 0, 5);
+    check(math::engine().compile("sin(x)") == nullptr, "complex x blocks plain compile");
+    void* h = math::engine().compile("x*x", 'x' - 'a');
+    check(h != nullptr, "sweep compile skips the sweep slot");
+    if (h != nullptr) {
+        const math::calc_t v = math::engine().eval_compiled(h, 'x' - 'a', 3.0);
+        check(std::fabs(v - 9.0) < 1e-12, "sweep eval uses swept real value");
+        math::engine().free_compiled(h);
+    }
+    vars.set_real('x' - 'a', 0);
+
+    // A real store clears the complex tag.
+    const auto rs = math::engine().evaluate("7->a");
+    check(rs.ok && !vars.is_complex(0) && vars.vars[0] == 7, "real store clears imag");
+
+    // evaluate_at preserves a complex x across unrelated evaluations.
+    vars.set_complex('x' - 'a', 1, 4);
+    const auto ea = math::engine().evaluate_at("2+2", 5.0);
+    check(ea.ok && ea.value == 4, "evaluate_at ok with complex x");
+    check(vars.is_complex('x' - 'a') && vars.imag['x' - 'a'] == 4,
+          "evaluate_at restores complex x");
+    vars.set_real('x' - 'a', 0);
 }
 
 void test_errors() {
@@ -177,6 +240,7 @@ int main() {
     test_functions();
     test_scalar_span_fallback();
     test_store();
+    test_complex_vars();
     test_errors();
     test_format_complex();
     test_number_mode_default();

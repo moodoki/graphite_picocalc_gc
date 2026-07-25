@@ -18,6 +18,69 @@ Format:
 
 ---
 
+## D38: 4D implementation decisions — open questions resolved, batching fixed, two tasks closed as already-shipped
+
+**Date**: 2026-07-26
+**Status**: Accepted (planning decision; implementation starting)
+**Context**: Session start for Phase 4D implementation. A planning pass over
+`phase4-spec.md` §7/§8 plus a code exploration sweep (engine/storage, graph
+subsystem, render/platform HAL) surfaced that two task rows were already
+shipped, and the remaining open questions (P4-10, P4-12, P4-13, units UX,
+APD depth, two scope adds from the 2026-07-22 device pass) needed answers
+before work began. All were put to the developer with implications;
+decisions below.
+**Decision**:
+1. **4D.16 and 4D.21 closed with zero work.** 4D.16 (xyLine + normal
+   probability plots) already shipped in Phase 3D (Session 15, D27) — all
+   five `StatPlotType`s exist with renderers (`graph/graph_state.hpp`,
+   `graph/stat_plot.cpp`); the spec row was written against an outdated
+   assumption. 4D.21 (build-id diag label) shipped 2026-07-25 (`f444db9`).
+2. **P4-12 resolved: full u/v/w + cross-reference in v1.** The seq
+   evaluator iterates forward from `nMin` with memoization (recursion
+   can't ride tinyexpr anyway), so all three sequences advance in lockstep
+   and `v(n-1)`/`u(n-2)` cross-references are nearly free.
+3. **P4-10 resolved: named user lists, full integration** (the bigger
+   option). l1–l6 stay as fixed slots; named lists (letter-first, `≤5`
+   chars, cap ~20) work everywhere a list token works — listexpr, stats/
+   regressions, stat-plot configs, list editor — persisted one file per
+   list plus a name directory. 4D.13 re-estimated 4 → ~15 hrs.
+4. **P4-13 resolved: rref-nullspace of `(A−λI)`** per real eigenvalue,
+   reusing shipped `matops::rref`; repeated/defective eigenvalues return
+   an explicit "no unique eigenvector" error rather than guessing a basis.
+5. **Units UX: typed `convert(value,"from","to")` only** — a pre-engine
+   interceptor (tinyexpr has no string args), matching the project's
+   typed-command precedent. A picker screen stays deferred.
+6. **APD (4D.19) = soft-sleep v1**: inactivity timer in the main loop →
+   backlight 0 (`±` DISPOFF), keep polling the STM32 for wake on any key. No
+   deep sleep (core-1 display service + tinyusb + XIP-residency risk, per
+   D10). Brightness/kbd-backlight + APD timeout persist in a new
+   `/picocalc/settings.dat` with its own magic (`PCS1`) — device settings
+   deliberately decoupled from GraphState format bumps.
+7. **Two scope adds accepted** (both nest inside existing 4D tasks, so
+   Risk 8's scope line holds): home-screen `MatAns` token (into 4D.14) and
+   fnInt shading in the curve's palette color, darkened or hatched — no
+   true alpha on RGB565 (into 4D.11).
+8. **Sequencing: risk-first batches**, one per session: complex
+   Variables/Ans + complex lists (4D.15+24) → complex matrices (4D.25) →
+   sequence graphing (4D.6-8, carries the single PCG5→PCG6 bump including
+   Batch-4's shade-config fields) → zoom/shading (4D.9-11) → data/catalog
+   glue (4D.12/14/17/18/22) → named lists (4D.13) → display/formatting
+   (4D.1-5) → eigenvectors (4D.23) → device polish (4D.19-20, needs board).
+**Rationale**: Risk-first puts the cross-cutting storage work (complex
+variables/lists/matrices, ~46 hrs) at the start of the phase where
+re-planning room exists; small contained items (ENG, ▶Frac, glyphs) make
+good session-filler later. Full u/v/w and full named-list integration were
+chosen over thinner v1s because both thin variants ship visibly
+half-integrated features (coupled sequences are the textbook use;
+compute-but-not-edit named lists feels broken on device).
+**Tradeoffs**: 4D subtotal ≈ 165 hrs (4D.13 grew ~11 hrs; 4D.16/21 removed
+~7; two scope adds ~3). Complex lists/matrices still always pay the PSRAM
+tier (D37, unchanged). Deep sleep and a units picker screen stay unshipped.
+**Revisit when**: any batch's implementation contradicts a resolution
+(e.g. rref tolerance proves inadequate for clustered eigenvalues —
+fall back to inverse iteration per P4-13's alternative); APD soft-sleep
+power draw disappoints and deep sleep gets its own scoping.
+
 ## D37: Close out the matrix/complex design departures (C, D, F) — all folded into 4D
 
 **Date**: 2026-07-24

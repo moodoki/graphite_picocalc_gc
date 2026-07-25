@@ -93,8 +93,8 @@ bool fill_point(const GraphState& st, int slot, double indep, AnalysisResult* re
     res->indep = indep;
     switch (st.mode) {
         case Mode::kParametric: {
-            void* xh = eng.compile(st.param.x_expr[slot]);
-            void* yh = eng.compile(st.param.y_expr[slot]);
+            void* xh = eng.compile(st.param.x_expr[slot], kTSlot);
+            void* yh = eng.compile(st.param.y_expr[slot], kTSlot);
             if (xh == nullptr || yh == nullptr) {
                 eng.free_compiled(xh);
                 eng.free_compiled(yh);
@@ -110,7 +110,7 @@ bool fill_point(const GraphState& st, int slot, double indep, AnalysisResult* re
             break;
         }
         case Mode::kPolar: {
-            void* rh = eng.compile(st.polar.expr[slot]);
+            void* rh = eng.compile(st.polar.expr[slot], math::Variables::kTheta);
             if (rh == nullptr) {
                 res->error = "Syntax error";
                 return false;
@@ -124,7 +124,7 @@ bool fill_point(const GraphState& st, int slot, double indep, AnalysisResult* re
             break;
         }
         default: {
-            void* h = eng.compile(st.y.expr[slot]);
+            void* h = eng.compile(st.y.expr[slot], kXSlot);
             if (h == nullptr) {
                 res->error = "Syntax error";
                 return false;
@@ -264,7 +264,7 @@ AnalysisResult analyze_derivative(const GraphState& st, int slot, double at) {
             // Differentiate x(theta) = r cos, y(theta) = r sin — the
             // ratio equals the polar slope formula and the degree-mode
             // unit factors cancel.
-            void* rh = eng.compile(st.polar.expr[slot]);
+            void* rh = eng.compile(st.polar.expr[slot], math::Variables::kTheta);
             if (rh == nullptr) {
                 res.error = "Syntax error";
                 res.ok = false;
@@ -348,8 +348,8 @@ AnalysisResult analyze_integral(const GraphState& st, int slot, double a, double
     math::IntegralResult ir;
     switch (st.mode) {
         case Mode::kParametric: {
-            void* xh = eng.compile(st.param.x_expr[slot]);
-            void* yh = eng.compile(st.param.y_expr[slot]);
+            void* xh = eng.compile(st.param.x_expr[slot], kTSlot);
+            void* yh = eng.compile(st.param.y_expr[slot], kTSlot);
             if (xh == nullptr || yh == nullptr) {
                 eng.free_compiled(xh);
                 eng.free_compiled(yh);
@@ -366,7 +366,7 @@ AnalysisResult analyze_integral(const GraphState& st, int slot, double a, double
             break;
         }
         case Mode::kPolar: {
-            void* rh = eng.compile(st.polar.expr[slot]);
+            void* rh = eng.compile(st.polar.expr[slot], math::Variables::kTheta);
             if (rh == nullptr) {
                 res.error = "Syntax error";
                 return res;

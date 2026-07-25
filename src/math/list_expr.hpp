@@ -30,7 +30,12 @@ enum class Kind : uint8_t { kNone, kScalar, kList, kError };
 struct Result {
     Kind kind = Kind::kNone;
     // kScalar: the full engine result (Ans/scalar store applied).
+    // Exception: scalar_complex (4D.24, standalone sum/mean of a
+    // complex list) — cvalue holds the value and the dispatch layer
+    // commits Ans, mirroring the complexexpr contract.
     EvalResult scalar;
+    bool scalar_complex = false;
+    Complex cvalue;
     // kList: the value to display — an internal result array, or the
     // stored/sorted list slot.
     const Array* list = nullptr;

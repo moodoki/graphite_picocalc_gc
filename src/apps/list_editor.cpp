@@ -8,6 +8,7 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/list_ops.hpp"
@@ -40,6 +41,27 @@ void format_cell(double v, char* buf, size_t cap) {
         std::snprintf(buf, cap, "%s", full);
     } else {
         std::snprintf(buf, cap, "%.4g", v);
+    }
+}
+
+// Complex cell (4D.24): format_complex, falling back to a short
+// %.3g+%.3gi form when the full form overflows the cell.
+void format_cell_c(const math::Complex& z, char* buf, size_t cap) {
+    char full[48];
+    math::format_complex(z, math::number_mode(), full, sizeof(full));
+    if (std::strlen(full) <= 11) {
+        std::snprintf(buf, cap, "%s", full);
+    } else {
+        std::snprintf(buf, cap, "%.3g%+.3g%c", z.re, z.im, math::kImagUnitGlyph);
+    }
+}
+
+// The list's cell text, complex-aware.
+void cell_text(const math::Array& lst, int row, char* buf, size_t cap) {
+    if (lst.dtype() == math::Dtype::kComplex) {
+        format_cell_c(lst.cget(row), buf, cap);
+    } else {
+        format_cell(lst.get(row), buf, cap);
     }
 }
 
@@ -79,7 +101,7 @@ void ListEditorScreen::refresh_cells() {
         for (int r = 0; r < kVisibleRows; ++r) {
             const int row = row_off_ + r;
             if (row < count) {
-                format_cell(math::lists().list(li).get(row), cells_[r][c], sizeof(cells_[r][c]));
+                cell_text(math::lists().list(li), row, cells_[r][c], sizeof(cells_[r][c]));
             } else if (row == count) {
                 std::snprintf(cells_[r][c], sizeof(cells_[r][c]), "_");
             } else {
@@ -90,8 +112,13 @@ void ListEditorScreen::refresh_cells() {
     const int count = math::lists().list(cur_list_).size();
     std::snprintf(prompt_, sizeof(prompt_), "l%d(%d)=", cur_list_ + 1, cur_row_ + 1);
     if (cur_row_ < count) {
-        math::format_number(math::lists().list(cur_list_).get(cur_row_), cur_val_,
-                            sizeof(cur_val_));
+        const math::Array& cur = math::lists().list(cur_list_);
+        if (cur.dtype() == math::Dtype::kComplex) {
+            math::format_complex(cur.cget(cur_row_), math::number_mode(), cur_val_,
+                                 sizeof(cur_val_));
+        } else {
+            math::format_number(cur.get(cur_row_), cur_val_, sizeof(cur_val_));
+        }
     } else {
         cur_val_[0] = 0;
     }
@@ -122,17 +149,44 @@ void ListEditorScreen::begin_edit(const platform::KeyEvent* first_key) {
 }
 
 void ListEditorScreen::commit_edit() {
+    math::Array& lst = math::lists().list(cur_list_);
     double v = 0;
+    bool complex_val = false;
+    math::Complex cv;
     if (!math::eval_field(input_.text(), &v)) {
-        msg_ = "Bad value";
+        // Complex entry (4D.24): `i`-bearing values and complex-valued
+        // variables don't ride the real field evaluator.
+        const auto cr = math::complexexpr::evaluate(input_.text());
+        if (!cr.ok) {
+            msg_ = "Bad value";
+            invalidate_entry();
+            return;
+        }
+        if (cr.value.is_real()) {
+            v = cr.value.re;
+        } else if (math::number_mode() == math::NumberMode::kReal) {
+            msg_ = "Non-real result";  // D30 precedent
+            invalidate_entry();
+            return;
+        } else {
+            complex_val = true;
+            cv = cr.value;
+        }
+    }
+    // A complex element migrates the whole list to the complex tier
+    // (PSRAM-only, D37) before the write.
+    if (complex_val && !math::listops::make_complex(lst)) {
+        msg_ = "List memory unavailable";
+        editing_ = false;
         invalidate_entry();
         return;
     }
-    math::Array& lst = math::lists().list(cur_list_);
     const int count = lst.size();
+    const int cap = lst.dtype() == math::Dtype::kComplex ? math::Array::kMaxComplexElements
+                                                         : math::Array::kMaxElements;
     if (cur_row_ >= count) {
-        if (count >= math::Array::kMaxElements) {
-            msg_ = "List full (10000)";
+        if (count >= cap) {
+            msg_ = lst.dtype() == math::Dtype::kComplex ? "List full (5000)" : "List full (10000)";
             editing_ = false;
             invalidate_entry();
             return;
@@ -146,7 +200,11 @@ void ListEditorScreen::commit_edit() {
             return;
         }
     }
-    lst.set(cur_row_, v);
+    if (lst.dtype() == math::Dtype::kComplex) {
+        lst.cset(cur_row_, complex_val ? cv : math::Complex(v));
+    } else {
+        lst.set(cur_row_, v);
+    }
     editing_ = false;
     save_lists();
     const int old_row = cur_row_ - row_off_;
@@ -177,11 +235,17 @@ void ListEditorScreen::delete_row() {
     if (cur_row_ >= count) {
         return;
     }
-    static double buf[256];
-    for (int at = cur_row_ + 1; at < count; at += 256) {
-        const int m = count - at < 256 ? count - at : 256;
-        lst.read_range(at, m, buf);
-        lst.write_range(at - 1, m, buf);
+    if (lst.dtype() == math::Dtype::kComplex) {
+        for (int at = cur_row_ + 1; at < count; ++at) {
+            lst.cset(at - 1, lst.cget(at));
+        }
+    } else {
+        static double buf[256];
+        for (int at = cur_row_ + 1; at < count; at += 256) {
+            const int m = count - at < 256 ? count - at : 256;
+            lst.read_range(at, m, buf);
+            lst.write_range(at - 1, m, buf);
+        }
     }
     lst.resize(count - 1);
     save_lists();
@@ -192,6 +256,11 @@ void ListEditorScreen::delete_row() {
 
 void ListEditorScreen::sort_current(bool asc) {
     math::Array& lst = math::lists().list(cur_list_);
+    if (lst.dtype() == math::Dtype::kComplex) {
+        msg_ = "Non-real list";  // No ordering on complex (D37)
+        invalidate_entry();
+        return;
+    }
     const bool ok = asc ? math::listops::sort_asc(lst) : math::listops::sort_desc(lst);
     if (!ok) {
         msg_ = "Sort needs PSRAM";
@@ -302,6 +371,9 @@ bool ListEditorScreen::on_key(const platform::KeyEvent& ev) {
             sort_current(false);
             return true;
         case Key::kF8:
+            // Clearing also reverts a complex list to the real tier.
+            math::lists().list(cur_list_).clear();
+            math::lists().list(cur_list_).set_dtype(math::Dtype::kDouble);
             math::lists().list(cur_list_).resize(0);
             cur_row_ = 0;
             row_off_ = 0;

@@ -68,7 +68,7 @@ int polar_slot_for(const graph::GraphState& st, int col) {
 // Compile-eval-free one expression at `value` written into `var_slot`.
 double eval_expr_at(const char* expr, int var_slot, double value) {
     auto& eng = math::engine();
-    void* h = eng.compile(expr);
+    void* h = eng.compile(expr, var_slot);
     if (h == nullptr) {
         return kNaN;
     }

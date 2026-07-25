@@ -24,10 +24,12 @@ int Array::size() const {
 }
 
 calc_t Array::get(int i) const {
-    if (i < 0 || i >= size()) {
+    // kDouble-only (D37): a complex element never truncates to its
+    // real part here — consumers check dtype and error; NaN surfaces
+    // any path that forgot to.
+    if (i < 0 || i >= size() || dtype_ != Dtype::kDouble) {
         return std::numeric_limits<calc_t>::quiet_NaN();
     }
-    // dtype-aware access (D21): kDouble is the only tag today.
     calc_t v = 0;
     const size_t off = static_cast<size_t>(i) * dtype_size(dtype_);
     if (in_psram()) {
@@ -39,7 +41,7 @@ calc_t Array::get(int i) const {
 }
 
 void Array::set(int i, calc_t v) {
-    if (i < 0 || i >= size()) {
+    if (i < 0 || i >= size() || dtype_ != Dtype::kDouble) {
         return;
     }
     const size_t off = static_cast<size_t>(i) * dtype_size(dtype_);
@@ -51,7 +53,7 @@ void Array::set(int i, calc_t v) {
 }
 
 void Array::read_range(int first, int count, calc_t* out) const {
-    if (first < 0 || count <= 0 || first + count > size()) {
+    if (first < 0 || count <= 0 || first + count > size() || dtype_ != Dtype::kDouble) {
         return;
     }
     const size_t off = static_cast<size_t>(first) * dtype_size(dtype_);
@@ -64,7 +66,7 @@ void Array::read_range(int first, int count, calc_t* out) const {
 }
 
 void Array::write_range(int first, int count, const calc_t* src) {
-    if (first < 0 || count <= 0 || first + count > size()) {
+    if (first < 0 || count <= 0 || first + count > size() || dtype_ != Dtype::kDouble) {
         return;
     }
     const size_t off = static_cast<size_t>(first) * dtype_size(dtype_);
@@ -74,6 +76,72 @@ void Array::write_range(int first, int count, const calc_t* src) {
     } else {
         std::memcpy(sram_ + off, src, bytes);
     }
+}
+
+Complex Array::cget(int i) const {
+    if (i < 0 || i >= size()) {
+        return {std::numeric_limits<calc_t>::quiet_NaN(), std::numeric_limits<calc_t>::quiet_NaN()};
+    }
+    if (dtype_ == Dtype::kDouble) {
+        return {get(i), 0.0};
+    }
+    Complex v;
+    const size_t off = static_cast<size_t>(i) * dtype_size(dtype_);
+    if (in_psram()) {
+        psram_backend::read(psram_addr_ + off, &v, sizeof(v));
+    } else {
+        std::memcpy(&v, sram_ + off, sizeof(v));
+    }
+    return v;
+}
+
+void Array::cset(int i, const Complex& v) {
+    if (i < 0 || i >= size() || dtype_ != Dtype::kComplex) {
+        return;
+    }
+    const size_t off = static_cast<size_t>(i) * dtype_size(dtype_);
+    if (in_psram()) {
+        psram_backend::write(psram_addr_ + off, &v, sizeof(v));
+    } else {
+        std::memcpy(sram_ + off, &v, sizeof(v));
+    }
+}
+
+void Array::read_range_c(int first, int count, Complex* out) const {
+    if (first < 0 || count <= 0 || first + count > size() || dtype_ != Dtype::kComplex) {
+        return;
+    }
+    const size_t off = static_cast<size_t>(first) * dtype_size(dtype_);
+    const size_t bytes = static_cast<size_t>(count) * dtype_size(dtype_);
+    if (in_psram()) {
+        psram_backend::read(psram_addr_ + off, out, bytes);
+    } else {
+        std::memcpy(out, sram_ + off, bytes);
+    }
+}
+
+void Array::write_range_c(int first, int count, const Complex* src) {
+    if (first < 0 || count <= 0 || first + count > size() || dtype_ != Dtype::kComplex) {
+        return;
+    }
+    const size_t off = static_cast<size_t>(first) * dtype_size(dtype_);
+    const size_t bytes = static_cast<size_t>(count) * dtype_size(dtype_);
+    if (in_psram()) {
+        psram_backend::write(psram_addr_ + off, src, bytes);
+    } else {
+        std::memcpy(sram_ + off, src, bytes);
+    }
+}
+
+bool Array::set_dtype(Dtype t) {
+    if (t == dtype_) {
+        return true;
+    }
+    if (size() != 0 || sram_ != nullptr || in_psram()) {
+        return false;  // Only an empty, storage-free array can retype
+    }
+    dtype_ = t;
+    return true;
 }
 
 void Array::fill(calc_t v) {
@@ -91,12 +159,15 @@ void Array::fill(calc_t v) {
 // min(old, new) elements and zero-filling any growth.
 bool Array::set_shape(int nd, int d0, int d1) {
     const int new_size = nd == 1 ? d0 : d0 * d1;
-    if (d0 < 0 || d1 < 0 || new_size > kMaxElements) {
+    const int max_elems = dtype_ == Dtype::kComplex ? kMaxComplexElements : kMaxElements;
+    if (d0 < 0 || d1 < 0 || new_size > max_elems) {
         return false;
     }
     const int old_size = size();
     const size_t new_bytes = static_cast<size_t>(new_size) * dtype_size(dtype_);
-    const bool want_psram = new_bytes > ArrayStore::kSlabBytes;
+    // Complex arrays are PSRAM-only regardless of size (D37): the SRAM
+    // slab pool's bss stays committed to the real tier.
+    const bool want_psram = dtype_ == Dtype::kComplex || new_bytes > ArrayStore::kSlabBytes;
 
     if (new_size == 0) {
         clear();
@@ -147,12 +218,21 @@ bool Array::set_shape(int nd, int d0, int d1) {
     shape_[1] = nd == 2 ? d1 : 0;
 
     if (new_size > old_size) {
+        // Byte-based zero fill so it works for every dtype (a complex
+        // zero is all-zero bytes too).
         for (calc_t& c : g_chunk) {
             c = 0;
         }
-        for (int at = old_size; at < new_size; at += kSlabElements) {
-            const int m = new_size - at < kSlabElements ? new_size - at : kSlabElements;
-            write_range(at, m, g_chunk);
+        size_t off = static_cast<size_t>(old_size) * dtype_size(dtype_);
+        const size_t end = static_cast<size_t>(new_size) * dtype_size(dtype_);
+        while (off < end) {
+            const size_t m = end - off < sizeof(g_chunk) ? end - off : sizeof(g_chunk);
+            if (in_psram()) {
+                psram_backend::write(psram_addr_ + off, g_chunk, m);
+            } else {
+                std::memcpy(sram_ + off, g_chunk, m);
+            }
+            off += m;
         }
     }
     return true;

@@ -867,9 +867,9 @@ Result evaluate(const char* input) {
         res.kind = Kind::kScalar;
         res.scalar.ok = true;
         res.scalar.value = v.s;
-        engine().vars().ans() = v.s;
+        engine().vars().set_real(Variables::kAns, v.s);
         if (store.var >= 0) {
-            engine().vars().vars[store.var] = v.s;
+            engine().vars().set_real(store.var, v.s);
             res.scalar.stored_var = store.var;
         }
         return res;

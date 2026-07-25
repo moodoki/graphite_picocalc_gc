@@ -108,19 +108,45 @@ void HomeScreen::persist_history_line(const char* expr, const char* result) {
     fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
 }
 
+namespace {
+
+// variables.dat image (4D.15): versioned since complex storage widened
+// Variables — the pre-PCV1 file was a raw 224-byte vars[] dump with no
+// header, so it simply fails the magic check and is ignored (one-time
+// variable reset on first boot, same precedent as PCL/PCM/PCG bumps).
+struct VarsImage {
+    char magic[4];
+    math::calc_t vars[math::Variables::kCount];
+    math::calc_t imag[math::Variables::kCount];
+};
+constexpr char kVarsMagic[4] = {'P', 'C', 'V', '1'};
+
+}  // namespace
+
 void HomeScreen::save_variables() {
     auto& fs = platform::storage();
     if (!fs.mounted()) {
         return;
     }
     const auto& v = math::engine().vars();
-    fs.write_file(kVarsPath, reinterpret_cast<const uint8_t*>(v.vars), sizeof(v.vars));
+    static VarsImage img;
+    std::memcpy(img.magic, kVarsMagic, sizeof(img.magic));
+    std::memcpy(img.vars, v.vars, sizeof(img.vars));
+    std::memcpy(img.imag, v.imag, sizeof(img.imag));
+    fs.write_file(kVarsPath, reinterpret_cast<const uint8_t*>(&img), sizeof(img));
 }
 
 void HomeScreen::load_variables() {
     auto& fs = platform::storage();
     auto& v = math::engine().vars();
-    fs.read_file(kVarsPath, reinterpret_cast<uint8_t*>(v.vars), sizeof(v.vars));
+    static VarsImage img;
+    const int n = fs.read_file(kVarsPath, reinterpret_cast<uint8_t*>(&img), sizeof(img));
+    if (n != static_cast<int>(sizeof(img)) ||
+        std::memcmp(img.magic, kVarsMagic, sizeof(img.magic)) != 0) {
+        return;  // Missing, old-format, or truncated: keep defaults
+    }
+    std::memcpy(v.vars, img.vars, sizeof(v.vars));
+    std::memcpy(v.imag, img.imag, sizeof(v.imag));
 }
 
 void HomeScreen::load_state() {
@@ -256,6 +282,12 @@ void HomeScreen::evaluate_input() {
         if (lres.kind == math::listexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", lres.error);
             error = true;
+        } else if (lres.kind == math::listexpr::Kind::kScalar && lres.scalar_complex) {
+            // Standalone sum/mean of a complex list (4D.24): commit Ans
+            // here, mirroring the complexexpr contract.
+            math::engine().vars().set_complex(math::Variables::kAns, lres.cvalue.re,
+                                              lres.cvalue.im);
+            math::format_complex(lres.cvalue, math::number_mode(), result, sizeof(result));
         } else if (lres.kind == math::listexpr::Kind::kScalar) {
             format_scalar_result(lres.scalar, result, sizeof(result));
             error = !lres.scalar.ok;
@@ -292,8 +324,11 @@ void HomeScreen::evaluate_input() {
     // engine state; only this dispatch does, exactly once).
     char result[128];
     bool error = false;
-    const bool force_complex =
-        math::number_mode() != math::NumberMode::kReal || math::complexexpr::mentions_i(expr);
+    // Complex-valued variables force the complex path too (4D.15): in
+    // REAL mode that yields the pointed "Non-real result" error below;
+    // in RECT/POLAR the reference resolves normally.
+    const bool force_complex = math::number_mode() != math::NumberMode::kReal ||
+                               math::complexexpr::mentions_i(expr) || math::refs_complex_var(expr);
 
     if (force_complex) {
         const auto cres = math::complexexpr::evaluate(expr);
@@ -304,9 +339,9 @@ void HomeScreen::evaluate_input() {
             std::snprintf(result, sizeof(result), "Non-real result");
             error = true;
         } else if (cres.value.is_real()) {
-            math::engine().vars().ans() = cres.value.re;
+            math::engine().vars().set_real(math::Variables::kAns, cres.value.re);
             if (cres.stored_var >= 0) {
-                math::engine().vars().vars[cres.stored_var] = cres.value.re;
+                math::engine().vars().set_real(cres.stored_var, cres.value.re);
             }
             math::EvalResult r;
             r.ok = true;
@@ -314,7 +349,21 @@ void HomeScreen::evaluate_input() {
             r.stored_var = cres.stored_var;
             format_scalar_result(r, result, sizeof(result));
         } else {
-            math::format_complex(cres.value, math::number_mode(), result, sizeof(result));
+            // Complex commit (4D.15): Ans and the store target hold the
+            // full value; real-only readers error on them (D37).
+            math::engine().vars().set_complex(math::Variables::kAns, cres.value.re, cres.value.im);
+            if (cres.stored_var >= 0) {
+                math::engine().vars().set_complex(cres.stored_var, cres.value.re, cres.value.im);
+            }
+            char num[64];
+            math::format_complex(cres.value, math::number_mode(), num, sizeof(num));
+            if (cres.stored_var >= 0) {
+                const char name =
+                    cres.stored_var < 26 ? static_cast<char>('a' + cres.stored_var) : 't';  // theta
+                std::snprintf(result, sizeof(result), "%s%c%c", num, gfx::kGlyphStore, name);
+            } else {
+                std::snprintf(result, sizeof(result), "%s", num);
+            }
         }
     } else {
         const auto probe = math::complexexpr::evaluate(expr);

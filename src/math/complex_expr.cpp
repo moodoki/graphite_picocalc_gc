@@ -126,6 +126,24 @@ Complex parse_scalar_span(P& p) {
         while (ident_char(*p.s)) {
             ++p.s;
         }
+        // A bare variable token holding a complex value resolves here —
+        // eval_field is real-only and would reject it (4D.15). Real-
+        // valued variables keep taking the eval_field path below.
+        if (*p.s != '(') {
+            const auto ilen = static_cast<size_t>(p.s - start);
+            int slot = -1;
+            if (ilen == 1 && start[0] >= 'a' && start[0] <= 'z') {
+                slot = start[0] - 'a';
+            } else if (ilen == 3 && std::strncmp(start, "ans", 3) == 0) {
+                slot = Variables::kAns;
+            } else if (ilen == 5 && std::strncmp(start, "theta", 5) == 0) {
+                slot = Variables::kTheta;
+            }
+            const Variables& vars = engine().vars();
+            if (slot >= 0 && vars.is_complex(slot)) {
+                return {vars.vars[slot], vars.imag[slot]};
+            }
+        }
         if (*p.s == '(') {
             int depth = 0;
             const char* q = p.s;
@@ -158,6 +176,12 @@ Complex parse_scalar_span(P& p) {
     span[len] = 0;
     calc_t v = 0;
     if (!eval_field(span, &v)) {
+        // eval_field is real-only; a complex variable inside an opaque
+        // span (e.g. fac(a) with a = 2i) is a pointed error, not a
+        // syntax error (4D.15).
+        if (refs_complex_var(span)) {
+            return fail(p, "Non-real variable");
+        }
         return fail(p, "Syntax error");
     }
     return {v};
@@ -389,11 +413,8 @@ Result evaluate(const char* input) {
         return res;
     }
 
-    if (store_target >= 0 && !v.is_real()) {
-        res.error = "Complex results can't be stored";
-        return res;
-    }
-
+    // Complex values are storable since 4D.15 (widened Variables); the
+    // dispatch layer commits the store, same as for real results.
     res.ok = true;
     res.value = v;
     res.stored_var = store_target;

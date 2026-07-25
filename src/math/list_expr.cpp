@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "math/complex_expr.hpp"
 #include "math/format.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
@@ -203,7 +204,12 @@ bool contains_reduction_call(const char* s) {
 // (D24, lifting the D22 bare-arg limitation — sum(range(1,100)),
 // mean(l1*2)). Nested reductions resolve innermost-first: an argument
 // still containing a reduction call is skipped until a later pass.
-bool substitute_reductions(char* buf, size_t cap, const char** err) {
+// Complex lists (4D.24): sum/mean are well-defined componentwise but
+// can't splice into the real rewrite as a %.17g literal, so they are
+// supported only when the reduction call IS the whole expression —
+// *cval/*creturn deliver the complex scalar to evaluate(). Everything
+// else on a complex list errors (D37: never silently truncate).
+bool substitute_reductions(char* buf, size_t cap, const char** err, Complex* cval, bool* creturn) {
     bool changed = true;
     while (changed) {
         changed = false;
@@ -264,8 +270,34 @@ bool substitute_reductions(char* buf, size_t cap, const char** err) {
                     }
                     lst = &g_red;
                 }
-                calc_t v = 0;
                 const auto red = static_cast<Reduction>(ni);
+                if (lst->dtype() == Dtype::kComplex && red != Reduction::kLength) {
+                    if (red == Reduction::kSum || red == Reduction::kMean) {
+                        // Standalone call only (see the function comment).
+                        if (p == buf && *(close + 1) == 0) {
+                            Complex cs = listops::csum(*lst);
+                            const int cn = lst->size();
+                            g_red.clear();
+                            if (red == Reduction::kMean) {
+                                if (cn == 0) {
+                                    *err = "Undefined result";
+                                    return false;
+                                }
+                                cs = cs / Complex(static_cast<calc_t>(cn));
+                            }
+                            *cval = cs;
+                            *creturn = true;
+                            return true;
+                        }
+                        *err = "Complex sum/mean must stand alone";
+                        g_red.clear();
+                        return false;
+                    }
+                    *err = "Non-real list";
+                    g_red.clear();
+                    return false;
+                }
+                calc_t v = 0;
                 switch (red) {
                     case Reduction::kSum:
                         v = listops::sum(*lst);
@@ -317,7 +349,9 @@ bool eval_literal(const char* s, Array& out, Ctx& ctx) {
     const size_t len = std::strlen(s);
     const char* starts[kMaxLiteral];
     size_t lens[kMaxLiteral];
+    out.clear();
     if (len == 2) {  // "{}"
+        out.set_dtype(Dtype::kDouble);
         return out.resize(0);
     }
     const int count = split_args(s + 1, len - 2, starts, lens, kMaxLiteral);
@@ -325,6 +359,43 @@ bool eval_literal(const char* s, Array& out, Ctx& ctx) {
         ctx.err = "List literal too long";
         return false;
     }
+
+    // Complex literal (4D.24): any element naming `i` or a
+    // complex-valued variable makes the whole literal complex. This
+    // pass also length-checks every element for the loops below.
+    bool complex = false;
+    for (int i = 0; i < count; ++i) {
+        char arg[kMaxLen];
+        if (lens[i] >= sizeof(arg)) {
+            ctx.err = "Expression too long";
+            return false;
+        }
+        std::memcpy(arg, starts[i], lens[i]);
+        arg[lens[i]] = 0;
+        complex = complex || complexexpr::mentions_i(arg) || refs_complex_var(arg);
+    }
+
+    if (complex) {
+        out.set_dtype(Dtype::kComplex);
+        if (!out.resize(count)) {
+            ctx.err = "Out of list memory";
+            return false;
+        }
+        for (int i = 0; i < count; ++i) {
+            char arg[kMaxLen];
+            std::memcpy(arg, starts[i], lens[i]);
+            arg[lens[i]] = 0;
+            const auto r = complexexpr::evaluate(arg);
+            if (!r.ok) {
+                ctx.err = "Bad list element";
+                return false;
+            }
+            out.cset(i, r.value);
+        }
+        return true;
+    }
+
+    out.set_dtype(Dtype::kDouble);
     calc_t values[kMaxLiteral];
     for (int i = 0; i < count; ++i) {
         char arg[kMaxLen];
@@ -520,6 +591,236 @@ bool extract_operands(const char* s, char* out, size_t cap, Ctx& ctx) {
     return true;
 }
 
+// ---- Complex vector lift (4D.24, D37 v1 scope) ----
+//
+// When any operand list is complex (or the expression names `i` / a
+// complex-valued variable), the tinyexpr lift can't run. This narrow
+// evaluator covers exactly the committed v1 surface — sums and
+// differences of terms, each term a product of scalar factors and at
+// most one list factor, with division by scalars — and errors on
+// anything else. Grammar over the operand-rewritten text (lN / lopX):
+//   expr   := ['-'] term (('+'|'-') term)*
+//   term   := factor (('*'|'/') factor)*
+//   factor := list-token | scalar-span (evaluated via complexexpr)
+
+constexpr int kMaxCTerms = 8;
+
+struct CTerm {
+    Complex scalar{1.0, 0.0};
+    const Array* list = nullptr;
+    int sign = 1;
+};
+
+// The list the factor names, when the (sign-stripped) factor is exactly
+// one list token; flips *sign for each leading '-'.
+const Array* clift_list_factor(const char* f, int first_op, int ops, int* sign) {
+    while (*f == '+' || *f == '-' || *f == ' ') {
+        if (*f == '-') {
+            *sign = -*sign;
+        }
+        ++f;
+    }
+    const size_t flen = std::strlen(f);
+    if (flen == 2) {
+        const int slot = token_at(f, f);
+        if (slot >= 0) {
+            return &lists().list(slot);
+        }
+    }
+    for (int k = first_op; k < ops; ++k) {
+        if (std::strcmp(f, kOpNames[k]) == 0) {
+            return &g_op[k];
+        }
+    }
+    return nullptr;
+}
+
+bool clift_has_list_token(const char* f, int first_op, int ops) {
+    for (const char* p = f; *p != 0; ++p) {
+        if (token_at(f, p) >= 0) {
+            return true;
+        }
+        for (int k = first_op; k < ops; ++k) {
+            const size_t nl = std::strlen(kOpNames[k]);
+            if (std::strncmp(p, kOpNames[k], nl) == 0 && (p == f || !ident_char(p[-1])) &&
+                !ident_char(p[nl])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
+    CTerm terms[kMaxCTerms];
+    int nterms = 0;
+
+    const size_t len = std::strlen(rw);
+    size_t term_start = 0;
+    int next_sign = 1;
+    bool expecting = true;  // At an operand position (term/factor start)
+    int depth = 0;
+    for (size_t i = 0; i <= len; ++i) {
+        const char c = i < len ? rw[i] : '+';
+        if (c == '(') {
+            ++depth;
+            expecting = true;
+            continue;
+        }
+        if (c == ')') {
+            --depth;
+            expecting = false;
+            continue;
+        }
+        if (depth > 0) {
+            continue;
+        }
+        const bool exponent_sign =
+            (c == '+' || c == '-') && i >= 2 && (rw[i - 1] == 'e' || rw[i - 1] == 'E') &&
+            (std::isdigit(static_cast<unsigned char>(rw[i - 2])) != 0 || rw[i - 2] == '.');
+        if ((c == '+' || c == '-') && i < len && (expecting || exponent_sign)) {
+            continue;  // Unary sign / exponent sign, part of the factor text
+        }
+        if (c == '+' || c == '-') {
+            if (i > term_start) {
+                if (nterms == kMaxCTerms) {
+                    ctx.err = "Too many list terms";
+                    return false;
+                }
+                // Parse the term [term_start, i): factors at */ depth 0.
+                char termbuf[kMaxLen];
+                const size_t tlen = i - term_start;
+                if (tlen >= sizeof(termbuf)) {
+                    ctx.err = "Expression too long";
+                    return false;
+                }
+                std::memcpy(termbuf, rw + term_start, tlen);
+                termbuf[tlen] = 0;
+
+                CTerm& term = terms[nterms];
+                term.sign = next_sign;
+                size_t fstart = 0;
+                char fop = '*';
+                int fdepth = 0;
+                bool fexpect = true;
+                for (size_t j = 0; j <= tlen; ++j) {
+                    const char fc = j < tlen ? termbuf[j] : '*';
+                    if (fc == '(') {
+                        ++fdepth;
+                        fexpect = true;
+                        continue;
+                    }
+                    if (fc == ')') {
+                        --fdepth;
+                        fexpect = false;
+                        continue;
+                    }
+                    if (fdepth > 0) {
+                        continue;
+                    }
+                    if ((fc == '*' || fc == '/') && j < tlen && fexpect) {
+                        ctx.err = "Syntax error";
+                        return false;
+                    }
+                    if (fc != '*' && fc != '/') {
+                        if (fc != ' ') {
+                            fexpect = false;
+                        }
+                        continue;
+                    }
+                    char fbuf[kMaxLen];
+                    const size_t flen2 = j - fstart;
+                    if (flen2 == 0 || flen2 >= sizeof(fbuf)) {
+                        ctx.err = "Syntax error";
+                        return false;
+                    }
+                    std::memcpy(fbuf, termbuf + fstart, flen2);
+                    fbuf[flen2] = 0;
+
+                    int fsign = 1;
+                    const Array* lst = clift_list_factor(fbuf, first_op, ctx.ops, &fsign);
+                    if (lst != nullptr) {
+                        if (fop == '/') {
+                            ctx.err = "Cannot divide by a list";
+                            return false;
+                        }
+                        if (term.list != nullptr) {
+                            ctx.err = "Complex lists: one list per term";
+                            return false;
+                        }
+                        term.list = lst;
+                        if (fsign < 0) {
+                            term.sign = -term.sign;
+                        }
+                    } else {
+                        if (clift_has_list_token(fbuf, first_op, ctx.ops)) {
+                            ctx.err = "Complex lists support only +, -, scalar * and /";
+                            return false;
+                        }
+                        const auto r = complexexpr::evaluate(fbuf);
+                        if (!r.ok) {
+                            ctx.err = r.error;
+                            return false;
+                        }
+                        term.scalar = fop == '/' ? term.scalar / r.value : term.scalar * r.value;
+                    }
+                    fop = j < tlen ? fc : '*';
+                    fstart = j + 1;
+                    fexpect = true;
+                }
+                ++nterms;
+            }
+            next_sign = c == '-' ? -1 : 1;
+            term_start = i + 1;
+            expecting = true;
+            continue;
+        }
+        if (c != ' ') {
+            expecting = false;
+        }
+    }
+    if (depth != 0 || nterms == 0) {
+        ctx.err = "Syntax error";
+        return false;
+    }
+
+    int n = -1;
+    for (int t = 0; t < nterms; ++t) {
+        if (terms[t].list == nullptr) {
+            continue;
+        }
+        const int sz = terms[t].list->size();
+        if (n >= 0 && sz != n) {
+            ctx.err = "List length mismatch";
+            return false;
+        }
+        n = sz;
+    }
+    if (n < 0) {
+        ctx.err = "Expected a list";
+        return false;
+    }
+
+    out.clear();
+    out.set_dtype(Dtype::kComplex);
+    if (!out.resize(n)) {
+        ctx.err = "Out of list memory";
+        return false;
+    }
+    for (int i = 0; i < n; ++i) {
+        Complex acc(0.0, 0.0);
+        for (int t = 0; t < nterms; ++t) {
+            Complex v = terms[t].scalar;
+            if (terms[t].list != nullptr) {
+                v = v * terms[t].list->cget(i);
+            }
+            acc = terms[t].sign < 0 ? acc - v : acc + v;
+        }
+        out.cset(i, acc);
+    }
+    return true;
+}
+
 // Element-wise engine expression over l1..l6 plus extracted operands
 // (brace literals, wrapper calls) — the vector lift.
 bool eval_lift(const char* s, Array& out, Ctx& ctx) {
@@ -556,6 +857,28 @@ bool eval_lift(const char* s, Array& out, Ctx& ctx) {
         n = sz;
     }
 
+    // Complex participation (4D.24): a complex list/operand, `i`, or a
+    // complex-valued scalar variable routes to the narrow complex lift
+    // — the tinyexpr lift below is real-only.
+    bool any_complex = false;
+    for (int i = 0; i < ListStore::kCount && !any_complex; ++i) {
+        any_complex = used[i] && lists().list(i).dtype() == Dtype::kComplex;
+    }
+    for (int k = first_op; k < ctx.ops && !any_complex; ++k) {
+        any_complex = g_op[k].dtype() == Dtype::kComplex;
+    }
+    if (!any_complex) {
+        any_complex = complexexpr::mentions_i(rw) || refs_complex_var(rw);
+    }
+    if (any_complex && !mismatch) {
+        const bool cok = eval_clift(rw, first_op, out, ctx);
+        for (int k = first_op; k < ctx.ops; ++k) {
+            g_op[k].clear();
+        }
+        ctx.ops = first_op;
+        return cok;
+    }
+
     bool ok = false;
     if (mismatch) {
         ctx.err = "List length mismatch";
@@ -571,6 +894,10 @@ bool eval_lift(const char* s, Array& out, Ctx& ctx) {
             extras[nx++] = {kOpNames[k], &g_op_elem[k]};
         }
         void* h = engine().compile_with(rw, extras, nx);
+        // The scratch array may still be complex-typed from an earlier
+        // evaluation; the real lift always produces a real list.
+        out.clear();
+        out.set_dtype(Dtype::kDouble);
         if (h == nullptr) {
             ctx.err = "Syntax error";
         } else if (!out.resize(n)) {
@@ -681,6 +1008,10 @@ bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
             if (!eval_list_into(targ, out, ctx)) {
                 return false;
             }
+            if (out.dtype() == Dtype::kComplex) {
+                ctx.err = "Non-real list";  // No ordering on complex (D37)
+                return false;
+            }
             const bool ok = name[5] == 'a' ? listops::sort_asc(out) : listops::sort_desc(out);
             if (!ok) {
                 ctx.err = "Out of list memory";
@@ -699,6 +1030,14 @@ bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
         if (!arg_ok) {
             return false;
         }
+        if (temp.dtype() == Dtype::kComplex) {
+            temp.clear();
+            ctx.err = "Non-real list";  // cumsum/delta_list are real-only in v1 (D37)
+            return false;
+        }
+        // The scratch may be complex-typed from an earlier evaluation.
+        out.clear();
+        out.set_dtype(Dtype::kDouble);
         const bool ok =
             name[0] == 'c' ? listops::cumsum(temp, out) : listops::delta_list(temp, out);
         temp.clear();  // Release the slab/region promptly
@@ -788,6 +1127,11 @@ Result evaluate(const char* input) {
     const int sort_slot = in_place_sort_form(body, &asc);
     if (sort_slot >= 0) {
         Array& lst = lists().list(sort_slot);
+        if (lst.dtype() == Dtype::kComplex) {
+            res.kind = Kind::kError;
+            res.error = "Non-real list";  // No ordering on complex (D37)
+            return res;
+        }
         const bool ok = asc ? listops::sort_asc(lst) : listops::sort_desc(lst);
         if (!ok) {
             res.kind = Kind::kError;
@@ -815,9 +1159,33 @@ Result evaluate(const char* input) {
     // whole thing is a scalar expression for the normal engine path
     // (Ans update + scalar "->a" store included).
     const char* sub_err = nullptr;
-    if (!substitute_reductions(body, sizeof(body), &sub_err)) {
+    Complex csum_val;
+    bool csum_return = false;
+    if (!substitute_reductions(body, sizeof(body), &sub_err, &csum_val, &csum_return)) {
         res.kind = Kind::kError;
         res.error = sub_err;
+        return res;
+    }
+    if (csum_return) {
+        // Standalone sum/mean of a complex list (4D.24): a complex
+        // scalar. The dispatch layer commits Ans and formats it.
+        if (store >= 0) {
+            res.kind = Kind::kError;
+            res.error = "Store to l1-l6 needs a list";
+            return res;
+        }
+        // csum_return implies the argument list is complex — in REAL
+        // mode that's an error even when the sum lands on the real
+        // axis, matching the complex-list recall rule below.
+        if (number_mode() == NumberMode::kReal) {
+            res.kind = Kind::kError;
+            res.error = "Non-real result";  // D30 precedent
+            return res;
+        }
+        res.kind = Kind::kScalar;
+        res.scalar.ok = true;
+        res.scalar_complex = true;
+        res.cvalue = csum_val;
         return res;
     }
     if (!contains_list_token(body) && std::strchr(body, '{') == nullptr &&
@@ -836,6 +1204,13 @@ Result evaluate(const char* input) {
     if (!eval_list_into(body, g_result, ctx)) {
         res.kind = Kind::kError;
         res.error = ctx.err != nullptr ? ctx.err : "Syntax error";
+        return res;
+    }
+    // A complex list result needs a complex number mode (D30 precedent)
+    // — checked before the store below so REAL mode never commits one.
+    if (g_result.dtype() == Dtype::kComplex && number_mode() == NumberMode::kReal) {
+        res.kind = Kind::kError;
+        res.error = "Non-real result";
         return res;
     }
     res.list = &g_result;
@@ -863,12 +1238,17 @@ void format_list(const Array& a, char* buf, size_t buf_len) {
     size_t pos = 0;
     buf[pos++] = '{';
     const int n = a.size();
+    const bool complex = a.dtype() == Dtype::kComplex;
     for (int i = 0; i < n; ++i) {
-        char num[24];
+        char num[48];
         // Compact per-element formatting so more values fit before the
         // ",..." cutoff (testdrive 2026-07-20); the home screen lets you
         // pan the full list with LEFT/RIGHT.
-        format_number_compact(a.get(i), num, sizeof(num));
+        if (complex) {
+            format_complex(a.cget(i), number_mode(), num, sizeof(num));
+        } else {
+            format_number_compact(a.get(i), num, sizeof(num));
+        }
         const size_t need = std::strlen(num) + (i > 0 ? 1 : 0);
         if (pos + need + 6 > buf_len) {  // Room for ",<ellipsis>}" + NUL
             buf[pos++] = ',';

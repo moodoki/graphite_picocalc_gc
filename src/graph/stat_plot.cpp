@@ -93,6 +93,9 @@ const math::Array& list_of(int idx) {
 }
 
 bool stream_min_max(const math::Array& a, double* lo, double* hi) {
+    if (a.dtype() != math::Dtype::kDouble) {
+        return false;  // Complex lists don't plot (D37) — slot renders empty
+    }
     const int n = a.size();
     if (n < 1) {
         return false;
@@ -206,6 +209,9 @@ void recompute_slot(int slot, const Viewport& vp) {
     }
     const math::Array& x = list_of(p.x_list);
     const math::Array& y = list_of(p.y_list);
+    if (x.dtype() != math::Dtype::kDouble || y.dtype() != math::Dtype::kDouble) {
+        return;  // Complex lists don't plot (D37) — slot renders empty
+    }
     const int n = x.size();
     if (n < 1) {
         return;

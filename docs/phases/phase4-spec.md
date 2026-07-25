@@ -615,12 +615,16 @@ to Phase 5 or left as a standalone wishlist item.
   lists. Straightforward glue between the existing `Array`-backed list
   and matrix storage — no new storage model, just a conversion function
   in `matexpr`.
-- **Named/more lists**: raise the fixed 6-list (`l1`..`l6`) cap — either
-  more fixed slots or (bigger lift) named user lists. Scope the actual
-  cap increase against `ArrayStore` slab headroom (Pico 1 bss is already
-  tight — see D28's recurring watch item) before committing to "how
-  many"; this item is explicitly capped by that constraint, not by
-  design intent.
+- **Named/more lists**: raise the fixed 6-list (`l1`..`l6`) cap.
+  **Resolved 2026-07-26 (D38, P4-10): named user lists, full
+  integration** — `l1`..`l6` stay as fixed slots; named lists
+  (letter-first, `≤5` chars, capped count ~20) work everywhere a list
+  token works (listexpr, stats/regressions, stat-plot configs, list
+  editor), persisted one file per list plus a name directory on SD. A
+  named list is just an `Array`, so the existing slab→PSRAM spill in
+  `Array::set_shape` handles pool pressure — no new bss beyond the name
+  registry (D28's watch item still applies to that registry's fixed
+  arrays).
 - **Home-screen matrix literals** (design-departures idea A):
   `[[1,2][3,4]]` typed directly on the home screen, not just built in the
   matrix editor. Closes the D28 tradeoff. Parser-only change in
@@ -805,22 +809,22 @@ Solo developer, part-time (~20 hrs/week).
 | 4D.8 | Sequence editor screen + window/table integration | 8 | Enter `nMin`, `u(n)`, seed; graph/table work |
 | 4D.9 | `ZBox` (drag-select zoom) | 5 | Select region, window updates |
 | 4D.10 | `ZDecimal` / `ZSquare` | 3 | Bounds land on clean multiples / equal-aspect |
-| 4D.11 | `Shade()` + inequality shading | 5 | `y > x^2` shades correctly |
+| 4D.11 | `Shade()` + inequality shading; fnInt shading follows curve color, darkened/hatched (scope add, D38) | 6 | `y > x^2` shades correctly; fnInt region shades in the curve's palette color |
 | 4D.12 | `List►matr` / `Matr►list` | 3 | Round-trips `l1,l2 ↔ [A]` correctly |
-| 4D.13 | List cap increase (scope against Pico 1 headroom first) | 4 | New cap set, existing tests pass |
-| 4D.14 | Home-screen matrix literals | 4 | `[[1,2][3,4]]` evaluates from home screen |
+| 4D.13 | Named user lists, full integration (P4-10 resolved 2026-07-26, D38; l1–l6 stay fixed) | 15 | `{1,2}->⌊TEMP` stores; ⌊TEMP works in listexpr/stats/plots/editor; survives power cycle |
+| 4D.14 | Home-screen matrix literals + `MatAns` home-screen token (scope add, D38) | 5 | `[[1,2][3,4]]` evaluates from home screen; `MatAns` recalls the last matrix result |
 | 4D.15 | Complex-valued `Variables`/`Ans` storage | 10 | `2i->a` stores; `a` reads back as `2i` |
-| 4D.16 | `xyLine` + normal probability stat plots | 5 | Both plot types render correctly |
+| 4D.16 | ~~`xyLine` + normal probability stat plots~~ **Already shipped in 3D (Session 15, D27)** — all five `StatPlotType`s exist with renderers; row closed 2026-07-26 (D38) with zero work | ~~5~~ 0 | Both plot types render correctly (verified shipped) |
 | 4D.17 | Scientific constants catalog + menu | 4 | Insert `c` (speed of light) from menu |
 | 4D.18 | Unit conversions catalog + `convert()` | 6 | `convert(1, "mi", "km")` ≈ 1.609 |
 | 4D.19 | Auto power-off (APD) — feasibility check first | 8 | Idles to sleep, wakes on key press |
 | 4D.20 | Brightness/backlight persistence — feasibility check first | 4 | Setting survives power cycle |
-| 4D.21 | Build-identifier diag label | 2 | Diag screen shows hash or `dev` |
+| 4D.21 | ~~Build-identifier diag label~~ **DONE 2026-07-25** (`f444db9`, shipped early during the D10 bugfix session) | ~~2~~ 0 | Diag screen shows hash or `dev` ✓ |
 | 4D.22 | Vector ops (`dot`/`cross`/`norm`) + matrix Frobenius `norm` | 5 | `dot({1,2,3},{4,5,6})`=32; `norm([A])` correct |
 | 4D.23 | Matrix eigenvectors (real only, v1) | 10 | Eigenvector for each real eigenvalue of a diagonalizable matrix, correct direction/normalized |
 | 4D.24 | Complex-valued lists: PSRAM-only tagged storage, elementwise ops, `sum`/`mean`; error on `stdev`/regression/`sort` | 14 | `l1` holds `{1+i, 2-i}`; `sum(l1)`=`3`; `stdev(l1)` errors |
 | 4D.25 | Complex-valued matrices: full complex linear algebra (det/inverse/rref/ref/rank/solve), reuses 4D.24's storage tier | 22 | `inverse([A])` correct for a complex `[A]`; `det`/`rref` correct |
-| | **Subtotal** | **~160 hrs** | |
+| | **Subtotal** (revised 2026-07-26, D38: 4D.16/21 closed, 4D.13 regrown, two scope adds) | **~165 hrs** | |
 
 ### Summary
 
@@ -829,8 +833,8 @@ Solo developer, part-time (~20 hrs/week).
 | 4A: Matrix operations | 26–27 | ~46 | Matrix editor, arithmetic, rref/det/inverse/eigen, numeric solver |
 | 4B: Graph analysis (CALC) | 28–29 | ~51 | value/zero/min/max/intersect/dy-dx/fnInt, interactive on graph |
 | 4C: Complex numbers | 30–31 | ~38 | Complex type, functions, a+bi/polar mode |
-| 4D: GC completeness | 32–35 | ~160 | Sequence mode, zoom/shading, list↔matrix, vector ops, eigenvectors, complex lists/matrices, sci constants/units, home-screen matrix literals, complex storage, device polish |
-| **Total Phase 4** | **26–35 (~10-13 weeks)** | **~295 hrs** | Pre-release milestone: full TI-83/84+-class GC functionality, complex/matrix design departures fully closed (D37) |
+| 4D: GC completeness | 32–35 | ~165 | Sequence mode, zoom/shading, list↔matrix, vector ops, eigenvectors, complex lists/matrices, sci constants/units, home-screen matrix literals + MatAns, named lists, complex storage, device polish |
+| **Total Phase 4** | **26–35 (~10-13 weeks)** | **~300 hrs** | Pre-release milestone: full TI-83/84+-class GC functionality, complex/matrix design departures fully closed (D37); 4D open questions resolved + batching fixed (D38) |
 | *CAS engine — moved to Phase 5* | *32–36* | *~124* | *see [phase5-spec.md](phase5-spec.md) §11* |
 | *MicroPython — moved to Phase 6* | | *~61* | *see [phase6-spec.md](phase6-spec.md) §5* |
 
@@ -935,10 +939,10 @@ the wishlist rather than forcing it.
 | P4-7 | Complex eigenvalues for matrices (4A produces real only)? | Add conjugate-pair support in 4C, or defer | Week 30, task 4C — likely defer |
 | P4-8 | Polar `fnInt`: area ($\frac{1}{2}\int r^2 d\theta$) only, or also arc length? | Area matches TI; arc length is a nice extra | Week 29, task 4B.8 |
 | P4-9 | Number-mode default on first boot: REAL or RECTANGULAR? | REAL matches TI default; RECT is friendlier | Week 31, task 4C.9 |
-| P4-10 | List cap increase (4D.13): how many lists, fixed slots or named? | Bounded by Pico 1 `ArrayStore` headroom — scope at implementation time | Week 32-35, task 4D.13 |
+| P4-10 | List cap increase (4D.13): how many lists, fixed slots or named? | **Resolved 2026-07-26 (D38): named user lists, full integration** — l1–l6 stay fixed; named lists (letter-first, `≤5` chars, cap ~20) work everywhere a list token works; one file per list + a name directory on SD. Slab-pool pressure handled by the existing PSRAM spill in `Array::set_shape` | Week 32-35, task 4D.13 |
 | P4-11 | Complex storage (4D.15): do real-only readers (matexpr scalar subterms, listexpr) error or silently truncate on a complex-valued variable? | **Resolved 2026-07-24 (D37): error**, matching the REAL-mode precedent — generalizes to every real-only consumer of a complex value (variables, list elements, matrix elements), not just 4D.15 | Week 32-35, task 4D.15 |
-| P4-12 | Sequence mode: support two-sequence cross-reference (`u(n)` referencing `v(n-1)`) in v1, or single-sequence only? | TI supports cross-reference; single-sequence is simpler first cut | Week 32-35, task 4D.6 |
-| P4-13 | Eigenvectors (4D.23): algorithm — inverse iteration per eigenvalue vs. nullspace of `(A - λI)` via existing `rref`? How to handle repeated eigenvalues (defective matrices, geometric < algebraic multiplicity)? | `rref`-based nullspace reuses existing matrix code (D28) and is simpler to reason about at Pico-1 scale ($n \leq 10$) than iterative inverse iteration; repeated eigenvalues likely return "did not converge to a unique eigenvector" rather than silently guessing a basis | Week 32-35, task 4D.23 |
+| P4-12 | Sequence mode: support two-sequence cross-reference (`u(n)` referencing `v(n-1)`) in v1, or single-sequence only? | **Resolved 2026-07-26 (D38): full u/v/w + cross-reference in v1** — the evaluator iterates forward from `nMin` with memoization (all three sequences advance in lockstep), so `v(n-1)`/`u(n-2)` references are nearly free | Week 32-35, task 4D.6 |
+| P4-13 | Eigenvectors (4D.23): algorithm — inverse iteration per eigenvalue vs. nullspace of `(A - λI)` via existing `rref`? How to handle repeated eigenvalues (defective matrices, geometric < algebraic multiplicity)? | **Resolved 2026-07-26 (D38): `rref`-based nullspace** — reuses existing matrix code (D28), simple to reason about at Pico-1 scale ($n \leq 10$); repeated/defective eigenvalues return an explicit "no unique eigenvector" error rather than silently guessing a basis. Fallback if rref tolerance proves inadequate for clustered eigenvalues: inverse iteration (revisit trigger in D38) | Week 32-35, task 4D.23 |
 
 ---
 

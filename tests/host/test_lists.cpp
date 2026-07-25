@@ -461,12 +461,182 @@ void test_list_expr_d24() {
 
 }  // namespace
 
+// ---- 4D.24: complex-valued lists ----
+
+void check_clist(const math::Array& a, int i, double re, double im, const char* what) {
+    ++g_checks;
+    const math::Complex z = a.cget(i);
+    if (std::fabs(z.re - re) > 1e-9 || std::fabs(z.im - im) > 1e-9) {
+        std::printf("FAIL: %s [%d] -> (%.12g,%.12g) (expected (%.12g,%.12g))\n", what, i, z.re,
+                    z.im, re, im);
+        ++g_failures;
+    }
+}
+
+void check_list_error(const char* input, const char* expected, const char* what) {
+    ++g_checks;
+    const auto res = eval_list(input);
+    if (res.kind != math::listexpr::Kind::kError || res.error == nullptr ||
+        std::strcmp(res.error, expected) != 0) {
+        std::printf("FAIL: '%s' -> kind %d err '%s' (expected '%s') [%s]\n", input,
+                    static_cast<int>(res.kind), res.error != nullptr ? res.error : "-", expected,
+                    what);
+        ++g_failures;
+    }
+}
+
+void test_complex_array() {
+    math::Array a;
+    check(a.set_dtype(math::Dtype::kComplex), "retype empty array to complex");
+    check(a.resize(3), "resize complex 3");
+    check(a.in_psram(), "complex array is PSRAM-only even when tiny");
+    a.cset(0, {1, 2});
+    a.cset(1, {-0.5, 0});
+    a.cset(2, {0, -1});
+    check_clist(a, 0, 1, 2, "cset/cget 0");
+    check_clist(a, 1, -0.5, 0, "cset/cget 1");
+    check_clist(a, 2, 0, -1, "cset/cget 2");
+    check(std::isnan(a.get(0)), "real get on complex array is NaN (D37)");
+    check(!a.resize(math::Array::kMaxComplexElements + 1), "complex cap 5000 enforced");
+    check(a.resize(math::Array::kMaxComplexElements), "complex cap reachable");
+    check_clist(a, 0, 1, 2, "data survives grow to cap");
+    check_clist(a, 4999, 0, 0, "growth zero-fills");
+
+    // Retype requires an empty array.
+    check(!a.set_dtype(math::Dtype::kDouble), "retype non-empty fails");
+    a.clear();
+    check(a.set_dtype(math::Dtype::kDouble), "retype after clear");
+
+    // Bulk complex ranges.
+    math::Array b;
+    b.set_dtype(math::Dtype::kComplex);
+    check(b.resize(300), "complex 300");
+    math::Complex buf[3] = {{1, 1}, {2, -2}, {3, 0}};
+    b.write_range_c(297, 3, buf);
+    math::Complex rd[3];
+    b.read_range_c(297, 3, rd);
+    check(rd[0].re == 1 && rd[0].im == 1 && rd[1].im == -2 && rd[2].re == 3,
+          "complex range roundtrip");
+    b.clear();
+
+    // copy adapts dtype both directions; copy_complex promotes.
+    math::Array cr;
+    cr.resize(2);
+    cr.set(0, 5);
+    cr.set(1, 6);
+    math::Array cc;
+    check(math::listops::copy_complex(cr, cc), "copy_complex promotes");
+    check(cc.dtype() == math::Dtype::kComplex, "promoted dtype");
+    check_clist(cc, 0, 5, 0, "promoted value");
+    check(math::listops::copy(cr, cc), "copy real over complex retypes");
+    check(cc.dtype() == math::Dtype::kDouble && cc.get(1) == 6, "copy retyped to real");
+    check(math::listops::make_complex(cr), "make_complex migrates in place");
+    check(cr.dtype() == math::Dtype::kComplex, "make_complex dtype");
+    check_clist(cr, 1, 6, 0, "make_complex promoted value");
+    cr.clear();
+    cc.clear();
+}
+
+void test_complex_list_expr() {
+    using math::listexpr::Kind;
+    math::set_number_mode(math::NumberMode::kRectangular);
+
+    // Complex literal store + recall.
+    auto res = eval_list("{1+i, 2-i}->l1");
+    check(res.kind == Kind::kList && res.stored_list == 0, "complex literal stores to l1");
+    const math::Array& l1 = math::lists().list(0);
+    check(l1.dtype() == math::Dtype::kComplex && l1.size() == 2, "l1 is a complex list");
+    check_clist(l1, 0, 1, 1, "l1[0]");
+    check_clist(l1, 1, 2, -1, "l1[1]");
+
+    // Elementwise ops (v1 scope: +, -, scalar */).
+    res = eval_list("l1+l1");
+    check(res.kind == Kind::kList && res.list->dtype() == math::Dtype::kComplex, "l1+l1 kind");
+    check_clist(*res.list, 0, 2, 2, "l1+l1 [0]");
+    res = eval_list("2i*l1");
+    check(res.kind == Kind::kList, "2i*l1 kind");
+    check_clist(*res.list, 0, -2, 2, "2i*l1 [0]");   // 2i*(1+i) = -2+2i
+    check_clist(*res.list, 1, 2, 4, "2i*l1 [1]");    // 2i*(2-i) = 2+4i
+    res = eval_list("l1/2");
+    check(res.kind == Kind::kList, "l1/2 kind");
+    check_clist(*res.list, 0, 0.5, 0.5, "l1/2 [0]");
+    res = eval_list("l1-l1+1");
+    check(res.kind == Kind::kList, "l1-l1+1 kind");
+    check_clist(*res.list, 0, 1, 0, "l1-l1+1 broadcast scalar");
+    res = eval_list("{1,2}+i");
+    check(res.kind == Kind::kList && res.list->dtype() == math::Dtype::kComplex,
+          "real literal + i promotes");
+    check_clist(*res.list, 1, 2, 1, "{1,2}+i [1]");
+
+    // Mixed real list + complex list.
+    eval_list("{10,20}->l2");
+    check(math::lists().list(1).dtype() == math::Dtype::kDouble, "l2 stays real");
+    res = eval_list("l1+l2");
+    check(res.kind == Kind::kList, "l1+l2 kind");
+    check_clist(*res.list, 1, 22, -1, "l1+l2 [1]");
+
+    // sum/mean standalone.
+    res = eval_list("sum(l1)");
+    check(res.kind == Kind::kScalar && res.scalar_complex, "sum(l1) complex scalar");
+    check(std::fabs(res.cvalue.re - 3) < 1e-9 && std::fabs(res.cvalue.im - 0) < 1e-9,
+          "sum(l1) = 3");
+    res = eval_list("mean(l1)");
+    check(res.kind == Kind::kScalar && res.scalar_complex, "mean(l1) complex scalar");
+    check(std::fabs(res.cvalue.re - 1.5) < 1e-9 && std::fabs(res.cvalue.im - 0) < 1e-9,
+          "mean(l1) = 1.5");
+    check(math::lists().list(0).dtype() == math::Dtype::kComplex, "l1 unchanged by sum");
+
+    // Everything else errors (D37).
+    check_list_error("stdev(l1)", "Non-real list", "stdev errors");
+    check_list_error("median(l1)", "Non-real list", "median errors");
+    check_list_error("prod(l1)", "Non-real list", "prod errors");
+    check_list_error("sum(l1)+1", "Complex sum/mean must stand alone", "embedded sum errors");
+    check_list_error("sort_asc(l1)", "Non-real list", "in-place sort errors");
+    check_list_error("cumsum(l1)", "Non-real list", "cumsum errors");
+    check_list_error("sin(l1)", "Complex lists support only +, -, scalar * and /",
+                     "unsupported lift errors");
+    check_list_error("l1*l1", "Complex lists: one list per term", "list*list errors");
+    check_list_error("2/l1", "Cannot divide by a list", "divide by list errors");
+
+    // Length mismatch still reported.
+    eval_list("{1,2,3}->l3");
+    check_list_error("l1+l3", "List length mismatch", "complex length mismatch");
+
+    // Formatting: rectangular per-element.
+    char buf[120];
+    math::listexpr::format_list(l1, buf, sizeof(buf));
+    check(std::strchr(buf, '{') != nullptr && std::strchr(buf, '}') != nullptr,
+          "format_list braces");
+
+    // REAL mode: complex list results error before any store.
+    math::set_number_mode(math::NumberMode::kReal);
+    check_list_error("{1+i}->l4", "Non-real result", "REAL mode rejects complex literal");
+    check(math::lists().list(3).dtype() == math::Dtype::kDouble, "l4 untouched in REAL mode");
+    check_list_error("l1", "Non-real result", "REAL mode rejects complex recall");
+    res = eval_list("sum(l1)");
+    check(res.kind == Kind::kError, "REAL mode rejects complex sum");
+    math::set_number_mode(math::NumberMode::kRectangular);
+
+    // Real store into a complex slot retypes it back.
+    res = eval_list("{7,8}->l1");
+    check(res.kind == Kind::kList && math::lists().list(0).dtype() == math::Dtype::kDouble,
+          "real store retypes l1");
+
+    // Cleanup for any later tests.
+    math::lists().list(0).resize(0);
+    math::lists().list(1).resize(0);
+    math::lists().list(2).resize(0);
+    math::set_number_mode(math::NumberMode::kReal);
+}
+
 int main() {
     test_array_basics();
     test_array_tiers();
     test_list_ops();
     test_list_expr();
     test_list_expr_d24();
+    test_complex_array();
+    test_complex_list_expr();
 
     std::printf("test_lists: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

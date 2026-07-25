@@ -19,6 +19,7 @@ calc_t g_by[kChunk];
 calc_t g_bf[kChunk];
 
 constexpr const char* kErrEmpty = "Empty list";
+constexpr const char* kErrComplex = "Non-real list";
 constexpr const char* kErrLen = "List length mismatch";
 constexpr const char* kErrNonFinite = "Non-finite data";
 constexpr const char* kErrFreq = "Freq must be int >= 0";
@@ -197,6 +198,12 @@ MedRanks med_ranks(long long base, long long h) {
 
 OneVarStats one_var_impl(const Array& data, const Array* freq) {
     OneVarStats s;
+    // Real-only (D37): variance/ordering aren't defined for the
+    // complex lists 4D.24 added — error, never truncate.
+    if (data.dtype() != Dtype::kDouble || (freq != nullptr && freq->dtype() != Dtype::kDouble)) {
+        s.error = kErrComplex;
+        return s;
+    }
     const int n = data.size();
     if (n == 0) {
         s.error = kErrEmpty;
@@ -331,6 +338,10 @@ bool solve_linear(calc_t a[kMaxDim][kMaxDim], calc_t* b, int n) {
 // Basic length/finiteness gate shared by every regression. Returns n,
 // or -1 with *err set.
 int check_pairs(const Array& xs, const Array& ys, const char** err) {
+    if (xs.dtype() != Dtype::kDouble || ys.dtype() != Dtype::kDouble) {
+        *err = kErrComplex;  // Real-only (D37)
+        return -1;
+    }
     const int n = xs.size();
     if (ys.size() != n) {
         *err = kErrLen;
@@ -986,6 +997,10 @@ OneVarStats one_var_weighted(const Array& data, const Array& freq) {
 
 TwoVarStats two_var(const Array& x, const Array& y) {
     TwoVarStats s;
+    if (x.dtype() != Dtype::kDouble || y.dtype() != Dtype::kDouble) {
+        s.error = kErrComplex;  // Real-only (D37)
+        return s;
+    }
     const int n = x.size();
     if (n == 0) {
         s.error = kErrEmpty;

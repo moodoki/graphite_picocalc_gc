@@ -289,7 +289,6 @@ public:
         font.draw_string(fb, 8, y, "ESC exits.", kGrayLine, kBlack);
         y += lh;
         font.draw_string(fb, 8, y, "Type files on home for SD list.", kGrayLine, kBlack);
-        y += lh;
 
         // Color bars: visual check for channel order / 565->666 conversion.
         const int bar_y = platform::kScreenH - 24;

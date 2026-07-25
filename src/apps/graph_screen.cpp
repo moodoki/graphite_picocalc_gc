@@ -191,18 +191,18 @@ void GraphScreen::finish_analysis() {
         vslot = math::Variables::kTheta;
         vname = kThetaLabel;
     }
-    vars.vars[vslot] = r.indep;
+    vars.set_real(vslot, r.indep);
     switch (op) {
         case graph::AnalysisOp::kZero:
         case graph::AnalysisOp::kIntersect:
-            vars.ans() = r.indep;
+            vars.set_real(math::Variables::kAns, r.indep);
             break;
         case graph::AnalysisOp::kDerivative:
         case graph::AnalysisOp::kIntegral:
-            vars.ans() = r.aux;
+            vars.set_real(math::Variables::kAns, r.aux);
             break;
         default:  // value, min, max
-            vars.ans() = r.y;
+            vars.set_real(math::Variables::kAns, r.y);
             break;
     }
 
@@ -345,7 +345,7 @@ void GraphScreen::recompute_function(const graph::Viewport& vp) {
         if (!active_[fi]) {
             continue;
         }
-        void* compiled = eng.compile(fns.expr[fi]);
+        void* compiled = eng.compile(fns.expr[fi], 'x' - 'a');
         if (compiled == nullptr) {
             active_[fi] = false;
             continue;
@@ -377,8 +377,8 @@ void GraphScreen::recompute_parametric(const graph::Viewport& vp) {
         if (!pactive_[p]) {
             continue;
         }
-        void* xh = eng.compile(st.param.x_expr[p]);
-        void* yh = eng.compile(st.param.y_expr[p]);
+        void* xh = eng.compile(st.param.x_expr[p], 't' - 'a');
+        void* yh = eng.compile(st.param.y_expr[p], 't' - 'a');
         if (xh == nullptr || yh == nullptr) {
             pactive_[p] = false;
             eng.free_compiled(xh);
@@ -421,7 +421,7 @@ void GraphScreen::recompute_polar(const graph::Viewport& vp) {
         if (!pactive_[p]) {
             continue;
         }
-        void* rh = eng.compile(st.polar.expr[p]);
+        void* rh = eng.compile(st.polar.expr[p], math::Variables::kTheta);
         if (rh == nullptr) {
             pactive_[p] = false;
             continue;
@@ -496,8 +496,8 @@ void GraphScreen::zoom_fit() {
                     st.param.y_expr[p][0] == 0) {
                     continue;
                 }
-                void* xh = eng.compile(st.param.x_expr[p]);
-                void* yh = eng.compile(st.param.y_expr[p]);
+                void* xh = eng.compile(st.param.x_expr[p], 't' - 'a');
+                void* yh = eng.compile(st.param.y_expr[p], 't' - 'a');
                 if (xh != nullptr && yh != nullptr) {
                     graph::ParametricSource src(eng, xh, yh, st.t_min, st.t_max, st.t_step);
                     sweep(src);
@@ -514,7 +514,7 @@ void GraphScreen::zoom_fit() {
                 if (!st.polar.enabled[p] || st.polar.expr[p][0] == 0) {
                     continue;
                 }
-                void* rh = eng.compile(st.polar.expr[p]);
+                void* rh = eng.compile(st.polar.expr[p], math::Variables::kTheta);
                 if (rh != nullptr) {
                     graph::PolarSource src(eng, rh, st.theta_min, st.theta_max, st.theta_step);
                     sweep(src);
@@ -531,7 +531,7 @@ void GraphScreen::zoom_fit() {
                 if (!fns.enabled[fi] || fns.expr[fi][0] == 0) {
                     continue;
                 }
-                void* compiled = eng.compile(fns.expr[fi]);
+                void* compiled = eng.compile(fns.expr[fi], 'x' - 'a');
                 if (compiled != nullptr) {
                     graph::FunctionSource src(eng, compiled);
                     // FunctionSource walks one x per viewport column, so

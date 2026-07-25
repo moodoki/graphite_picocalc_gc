@@ -95,8 +95,7 @@ void Display::push_rect(int x, int y, int w, int h, const uint16_t* px) {
     lcd_spi_raise_cs();
 }
 
-void __not_in_flash_func(Display::push_rect_dma)(int x, int y, int w, int h,
-                                                 const uint16_t* px) {
+void __not_in_flash_func(Display::push_rect_dma)(int x, int y, int w, int h, const uint16_t* px) {
     if (w <= 0 || h <= 0) {
         return;
     }
