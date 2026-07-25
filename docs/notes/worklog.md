@@ -340,8 +340,45 @@ scoping: SPI push dominates compute, so the win is freeing core 0 during
 the ~160 ms push, not a single-frame latency cut). The diagnostic was a
 temporary `framebuffer.cpp` edit, fully reverted; the Pico 1 is back on
 the clean production build (blocking `push_rect`, boots healthy, `psram-bulk:
-OK` + battery heartbeats). **Next (this session, in progress): resolve the
-FIFO handshake and stand the pipeline back up.**
+OK` + battery heartbeats).
+
+**3. D10 ROOT-CAUSED AND FIXED (same session): XIP flash contention, not
+the FIFO.** Continued the diagnosis by rebuilding the core-1 service
+incrementally with instrumentation (a timeout-guarded one-shot run from
+the main loop so it lands after USB enumeration and can't wedge the
+device):
+- **Step 1 — raw FIFO echo** (core 1 pops a value, pushes it back +100):
+  **works flawlessly**, round-trips in a few us with USB connected. So the
+  multicore FIFO handshake was *never* the problem.
+- **Step 2 — core 1 runs the actual `push_rect_dma` + ack** (the exact
+  pattern the dead D10 service used): **hard-wedged the whole chip** — USB
+  dropped entirely (a hard fault, not a soft hang; a hang would have hit
+  core 0's ack timeout and kept printing). Needed a BOOTSEL-catcher poller
+  + power cycle to recover.
+- **Developer observation that cracked it**: the crashing firmware boots
+  fine with the **USB cable unplugged**. So the fault needs *both* core-1
+  display access *and* an active USB stack on core 0.
+- **Static read of `lcdspi`**: no IRQ / no DMA / no lock of its own —
+  nothing in its logic to hard-fault. But `spi_write_fast`/`spi_finish`
+  were already deliberately marked `__not_in_flash_func` (RAM-resident),
+  a strong hint the SPI hot path can't safely execute from flash. The
+  rest of the core-1 path (`push_rect_dma`, `dma_push`, `convert_565_666`,
+  `define_region_spi`, `hw_send_spi`, CS toggles) ran from flash.
+- **Hypothesis → fix → verified**: the RP2040 XIP cache is shared; core
+  0's tinyusb/`stdio_usb` servicing (active only with USB plugged) churns
+  XIP while core 1 executes the display path from flash → hard fault.
+  Marking that whole path `__not_in_flash_func` (RAM-resident) removes the
+  contention. **Confirmed on HW**: core 1 now runs `push_rect_dma` and
+  acks reliably with USB connected — pushes 1..11+ all `ack=1` (~2 ms for
+  a 4-row band), `psram-bulk: OK`/battery heartbeats keep flowing, no
+  crash, and the developer confirmed the color-cycling test band renders
+  correctly at the bottom of the screen. This also explains why the same
+  `push_rect_dma` ran fine on **core 0** (only one core hitting XIP at a
+  time). Fix committed as the RAM-residency change to `display.cpp` +
+  `lcdspi.c` (the `mc-diag` scaffolding in `main.cpp` was reverted).
+  **Next: wire the production dual-core pipeline** into `framebuffer.cpp`
+  (core 0 renders the next dirty strip while core 1 DMAs the current one),
+  now that the blocker is gone — see D10 addendum in `decisions.md`.
 
 ## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
 

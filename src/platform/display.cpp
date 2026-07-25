@@ -31,7 +31,10 @@ void init_luts() {
 }
 
 // Convert a run of RGB565 pixels to 3-byte RGB666 wire format.
-void convert_565_666(const uint16_t* src, uint8_t* dst, int count) {
+// RAM-resident: the dual-core display service (D10 revival) runs this on
+// core 1, and executing it from flash (XIP) contends with core 0's USB
+// stack — see the 2026-07-25 worklog. Matches lcdspi's spi_write_fast.
+void __not_in_flash_func(convert_565_666)(const uint16_t* src, uint8_t* dst, int count) {
     for (int i = 0; i < count; ++i) {
         const uint16_t p = src[i];
         *dst++ = lut5[(p >> 11) & 0x1F];  // R
@@ -47,7 +50,7 @@ uint8_t staging[2][kChunkPixels * 3];
 
 int dma_chan = -1;
 
-void dma_push(const uint8_t* buf, int bytes) {
+void __not_in_flash_func(dma_push)(const uint8_t* buf, int bytes) {
     dma_channel_config cfg = dma_channel_get_default_config(dma_chan);
     channel_config_set_transfer_data_size(&cfg, DMA_SIZE_8);
     channel_config_set_read_increment(&cfg, true);
@@ -56,7 +59,7 @@ void dma_push(const uint8_t* buf, int bytes) {
     dma_channel_configure(dma_chan, &cfg, &spi_get_hw(Pico_LCD_SPI_MOD)->dr, buf, bytes, true);
 }
 
-void dma_wait() {
+void __not_in_flash_func(dma_wait)() {
     if (dma_chan >= 0) {
         dma_channel_wait_for_finish_blocking(dma_chan);
     }
@@ -92,7 +95,8 @@ void Display::push_rect(int x, int y, int w, int h, const uint16_t* px) {
     lcd_spi_raise_cs();
 }
 
-void Display::push_rect_dma(int x, int y, int w, int h, const uint16_t* px) {
+void __not_in_flash_func(Display::push_rect_dma)(int x, int y, int w, int h,
+                                                 const uint16_t* px) {
     if (w <= 0 || h <= 0) {
         return;
     }

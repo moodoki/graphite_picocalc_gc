@@ -76,7 +76,7 @@ void lcd_set_text_color(int fc, int bc) {
     gui_bcolour = bc;
 }
 
-void define_region_spi(int xstart, int ystart, int xend, int yend, int rw) {
+void __not_in_flash_func(define_region_spi)(int xstart, int ystart, int xend, int yend, int rw) {
     unsigned char coord[4];
     lcd_spi_lower_cs();
     gpio_put(Pico_LCD_DC, 0);//gpio_put(Pico_LCD_DC,0);
@@ -484,7 +484,7 @@ void hw_read_spi(unsigned char *buff, int cnt) {
     spi_read_blocking(Pico_LCD_SPI_MOD, 0xff, buff, cnt);
 }
 
-void hw_send_spi(const unsigned char *buff, int cnt) {
+void __not_in_flash_func(hw_send_spi)(const unsigned char *buff, int cnt) {
 
     spi_write_blocking(Pico_LCD_SPI_MOD, buff, cnt);
 
@@ -651,11 +651,11 @@ void pico_lcd_init() {
 #endif
 }
 
-void lcd_spi_raise_cs(void) {
+void __not_in_flash_func(lcd_spi_raise_cs)(void) {
     gpio_put(Pico_LCD_CS, 1);
 }
 
-void lcd_spi_lower_cs(void) {
+void __not_in_flash_func(lcd_spi_lower_cs)(void) {
 
     gpio_put(Pico_LCD_CS, 0);
 
