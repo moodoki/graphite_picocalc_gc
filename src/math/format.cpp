@@ -151,6 +151,11 @@ int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len)
     if (buf_len == 0) {
         return 0;
     }
+    // A real value displays as a plain number in every mode — polar
+    // included ("5", never "5<0"; list-editor observation 2026-07-26).
+    if (z.is_real()) {
+        return format_number(z.re, buf, buf_len);
+    }
     if (mode == NumberMode::kPolar) {
         calc_t theta = z.argument();
         if (angle_mode() == AngleMode::kDegrees) {
@@ -161,10 +166,6 @@ int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len)
         format_number(z.modulus(), rbuf, sizeof(rbuf));
         format_number(theta, tbuf, sizeof(tbuf));
         return std::snprintf(buf, buf_len, "%s%c%s", rbuf, kAngleGlyph, tbuf);
-    }
-
-    if (z.is_real()) {
-        return format_number(z.re, buf, buf_len);
     }
 
     char imag[24] = {};

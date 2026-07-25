@@ -11,6 +11,7 @@
 #include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "math/functions.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
 #include "apps/graph_screen.hpp"
@@ -44,13 +45,21 @@ void format_cell(double v, char* buf, size_t cap) {
     }
 }
 
-// Complex cell (4D.24): format_complex, falling back to a short
-// %.3g+%.3gi form when the full form overflows the cell.
+// Complex cell (4D.24): format_complex, falling back to a short form
+// when the full form overflows the cell. The fallback follows the
+// number mode too — a polar-mode cell must never regress to a+bi
+// (observation 2026-07-26).
 void format_cell_c(const math::Complex& z, char* buf, size_t cap) {
     char full[48];
     math::format_complex(z, math::number_mode(), full, sizeof(full));
     if (std::strlen(full) <= 11) {
         std::snprintf(buf, cap, "%s", full);
+    } else if (math::number_mode() == math::NumberMode::kPolar) {
+        double theta = z.argument();
+        if (math::angle_mode() == math::AngleMode::kDegrees) {
+            theta = math::fn::deg(theta);
+        }
+        std::snprintf(buf, cap, "%.3g%c%.3g", z.modulus(), math::kAngleGlyph, theta);
     } else {
         std::snprintf(buf, cap, "%.3g%+.3g%c", z.re, z.im, math::kImagUnitGlyph);
     }

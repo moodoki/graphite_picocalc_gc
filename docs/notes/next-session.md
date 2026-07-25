@@ -21,27 +21,19 @@ PCL2 — the dtype byte was already there). Host suite 12/12 binaries,
 **1305 checks** (test_lists 134→196, test_complex_expr 44→74). Also fixed
 two pre-existing lint failures from 2026-07-25 (framebuffer int-to-ptr
 NOLINT, main.cpp dead store). Flashed to the **Pico 1** and boot-verified
-(bss 213,332, ~57 KB headroom). Full detail: `worklog.md` 2026-07-26 entry,
-`decisions.md` D38.
+(bss 213,332, ~57 KB headroom). **Same day, third block: the Batch 1
+hands-on eval PASSED on the Pico 1** (full checklist — complex vars,
+lists, editor, PCV1 reset + persistence, graph sanity). One finding —
+weird complex display in the list editor under polar mode (complex
+elements fell back to a+bi, real-valued ones showed `r∠0`) — was
+root-caused (a missing `is_real()` short-circuit in `format_complex`'s
+polar branch + a rect-hardcoded 11-char cell fallback), **fixed,
+reflashed, and developer-confirmed** the same day. Full detail:
+`worklog.md` 2026-07-26 entry + addendum, `decisions.md` D38.
 
 ## The next job
 
-1. **HW-PENDING: 4D Batch 1 hands-on eval on the Pico 1** (flashed
-   2026-07-26, boot-verified over serial; the full checklist is in
-   `worklog.md`'s HW-PENDING table). Short form:
-   - RECT mode: `2i->a` stores; `a` recalls as `2i`; `a+1`, `a*a`,
-     `conj(a)` work; `fac(a)` errors "Non-real variable"; REAL mode: `a`
-     gives "Non-real result".
-   - `{1+i,2-i}->l1`; recall `l1`; `l1+l1`, `2i*l1`, `l1/2`, `l1+l2`
-     (real l2); `sum(l1)`=`3`; `stdev(l1)`/`sort_asc(l1)` error; REAL mode
-     recall errors.
-   - List editor: complex cells render; entering `3+2i` into a real list
-     migrates it; delete/clear behave; complex l1 survives a power cycle;
-     variables reset once (PCV1) then persist — incl. a complex `a`
-     surviving a reboot.
-   - Graph sanity: with a complex value stored in x, `Y1=sin(x)` still
-     graphs (the sweep-slot exclusion).
-2. **Batch 2 per the D38 plan: complex matrices (4D.25)**, ~22 h est —
+1. **Batch 2 per the D38 plan: complex matrices (4D.25)**, ~22 h est —
    generalize `matops` (det/inverse/rref/ref/rank/augment/reshape/
    identity/power/transpose/solve_linear) to `Complex` via the
    static-row-buffer kernels; magnitude-based pivoting; matrix editor
@@ -57,7 +49,7 @@ NOLINT, main.cpp dead store). Flashed to the **Pico 1** and boot-verified
    idea H — polymorphic variables — stays undecided, revisit after 4D
    ships, same checkpoint as F). **Phase 5 (CAS)** then **Phase 6
    (app framework + MicroPython)** follow 4D per D32/D33.
-3. **D10 follow-ups, non-blocking** (both from 2026-07-25, no phase home):
+2. **D10 follow-ups, non-blocking** (both from 2026-07-25, no phase home):
    - **Extend the display pipeline to Pico 2** — its full-framebuffer push
      is still synchronous on core 0 (RP2350 board wasn't in hand). When it
      is: route the full-frame push through core 1 and re-verify the
@@ -67,7 +59,7 @@ NOLINT, main.cpp dead store). Flashed to the **Pico 1** and boot-verified
      redraw measured 1.17 s). Those want `GraphScreen::recompute_function`
      (`src/apps/graph_screen.cpp:313`) parallelized — needs a second
      engine/vars context (shared `X` mutation), not just a spawned task.
-4. **Low-priority, not blocking**: Pico 2 perf feel for Phase 3/4 features
+3. **Low-priority, not blocking**: Pico 2 perf feel for Phase 3/4 features
    has never been re-measured against current code (only the pre-Phase-3
    2.25 baseline exists). The D35 fixes are board-generic so the Pico 2
    should already benefit, but that's unverified — it's now **two builds
@@ -118,8 +110,10 @@ is actually scheduled.
   temp heartbeats, idle die temp 28-31 C); bss **213,332 bytes** (+1,148
   over 212,184 — the `imag[]` array + PCV1 image + editor scratch),
   ~57 KB headroom — keep watching per the D28 watch item. Phases 2-3 and
-  4A-4C are HW-verified on this board. **No open bug findings; one open
-  HW-PENDING row: the Batch 1 hands-on eval** ("The next job" #1).
+  4A-4C are HW-verified on this board, and **the 4D Batch 1 hands-on eval
+  passed 2026-07-26** (incl. the same-day polar-display fix, reflashed and
+  confirmed). **No open bug findings, no open HW-PENDING rows for this
+  board.**
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware

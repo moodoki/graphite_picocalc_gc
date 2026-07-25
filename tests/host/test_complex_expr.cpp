@@ -219,6 +219,11 @@ void test_format_complex() {
     math::format_complex(math::Complex(2, 2), math::NumberMode::kPolar, buf, sizeof(buf));
     to_glyphs("2.828427125<0.7853981634", want, sizeof(want));
     check(std::strcmp(buf, want) == 0, "polar 2+2i");
+
+    // A real value is a plain number in polar mode too — never "5<0"
+    // (list-editor observation 2026-07-26).
+    math::format_complex(math::Complex(5, 0), math::NumberMode::kPolar, buf, sizeof(buf));
+    check(std::strcmp(buf, "5") == 0, "polar mode real value stays plain");
 }
 
 void test_number_mode_default() {
