@@ -83,6 +83,11 @@ private:
 // Core 1 entry point: services display push jobs forever.
 void display_service_main();
 
+// Launch the core-1 display service (strip mode only). Call once at boot
+// after platform::init(). No-op in full-framebuffer mode (Pico 2), where
+// the push stays synchronous on core 0. Idempotent.
+void start_display_service();
+
 // Framebuffer singleton used by the render loop.
 Framebuffer& framebuffer();
 

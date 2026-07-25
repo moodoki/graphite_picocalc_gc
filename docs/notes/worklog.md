@@ -380,6 +380,27 @@ device):
   (core 0 renders the next dirty strip while core 1 DMAs the current one),
   now that the blocker is gone — see D10 addendum in `decisions.md`.
 
+**4. Production dual-core display pipeline WIRED (same session,
+HW-validated).** Revived `gfx::display_service_main` as the real core-1
+service (pop job → `push_rect_dma` → ack) and rebuilt strip-mode
+`render_frame` as a two-buffer pipeline: core 0 renders strip N+1 into one
+ping-pong buffer while core 1 DMAs strip N from the other; a buffer is
+reused only after its push is acked (`outstanding < 2`), and `render_frame`
+drains all acks before returning so callers still see a completed frame.
+`start_display_service()` launches core 1 once at boot (strip mode / Pico 1
+only — the Pico 2 full-framebuffer path stays synchronous on core 0 and is
+untouched, since that board isn't in hand to test). A `service_running`
+guard keeps a synchronous core-0 fallback if any render ever runs before
+the launch. Concurrency is clean: the only `push_rect` callers are in
+`framebuffer.cpp`, and `render_frame` is only ever called from core 0
+(main loop + stats "Computing…"), so core 1 is the sole SPI driver — no
+cross-core bus contention. Cost: +10 KB bss for the second strip buffer
+(212184 total, ~57 KB headroom). **HW-validated on the Pico 1**: developer
+exercised home screen, expression entry, history scroll, screen
+transitions — renders correctly (no torn/stale strips), no hang, feels at
+least as responsive as before. This closes the D10 dual-core display leg
+end to end (root cause → fix → pipeline).
+
 ## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
 
 Docs/planning-only session — no application source touched, only

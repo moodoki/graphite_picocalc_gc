@@ -304,9 +304,14 @@ int main() {
 
     math::fn::seed_rand(get_rand_64());
 
-    // Display rendering is synchronous on core 0 (the dual-core display
-    // handshake hangs on hardware — see D10). Core 1 is left idle.
     platform::display().set_backlight(200);
+
+    // Dual-core display pipeline (D10, revived 2026-07-25): core 1 DMAs
+    // the current strip while core 0 renders the next. Strip mode (Pico 1)
+    // only; no-op on the full-framebuffer path. Must precede the first
+    // render_frame below. The D10 stall was XIP flash contention with
+    // core 0's USB stack, fixed by RAM-residency — see the D10 addendum.
+    gfx::start_display_service();
 
     apps::home_screen().load_state();
     apps::load_graph_state();

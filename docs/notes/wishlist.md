@@ -19,6 +19,18 @@ only of features that don't yet have a home.
   (`graph/`, `render/`) — substantial scope, likely its own sub-phase or
   phase if ever picked up, not a small addition. No design work done;
   raised as a stretch idea only, no phase home yet.
+- **Skip drawing grid lines that are too dense to see** (usage feedback
+  2026-07-25): when the graph window is zoomed out far enough that grid
+  lines fall closer than a few pixels apart, drawing them all is slow and
+  the grid isn't even legible — the lines merge into a solid wash. Cull /
+  coarsen (or skip) grid rendering once the pixel spacing between adjacent
+  grid lines drops below a threshold, since it costs render time for no
+  visible benefit. Perf-only, no visual loss. Likely approach: **cap the
+  grid-line count per axis based on that axis's range** — derive a max
+  number of lines each axis will draw (or a minimum pixel spacing) from
+  its min/max, so a very wide/tall window coarsens the grid step instead
+  of drawing thousands of merged lines. Unplanned; small, localized to the
+  graph grid renderer (`graph/` / `render/`).
 - **Antialiased / higher-res font rendering (D31)**: the rasterized fonts
   (JuliaMono, Iosevka) read worse than the bitmap fonts at 8px 1bpp on the
   PicoCalc; antialiasing or a higher-resolution panel would likely help.
