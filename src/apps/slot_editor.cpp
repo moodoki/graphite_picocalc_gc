@@ -131,6 +131,10 @@ bool SlotEditorScreen::on_key(const platform::KeyEvent& ev) {
             ui::screen_manager().pop();
             return true;
         default:
+            if (field_key(selected_, ev)) {
+                invalidate_row(selected_);
+                return true;
+            }
             return false;
     }
 }
@@ -150,7 +154,7 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
             fb.fill_rect(0, y - 2, platform::kScreenW, row_h_, platform::Color::from_rgb(0, 0, 60));
         }
 
-        char label[8];
+        char label[12];  // "u(nMin)=" needs 9 (4D.8)
         field_label(i, label, sizeof(label));
         font.draw_string(fb, 4, y, label, field_label_color(i));
 
@@ -178,12 +182,16 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
             }
         }
 
-        // Enable checkbox at the right edge.
+        // Enable checkbox at the right edge; shade marker beside it.
         if (field_has_checkbox(i)) {
             const int box_x = platform::kScreenW - 16;
             fb.draw_rect(box_x, y, 12, 12, kGrayLine);
             if (field_checked(i)) {
                 fb.fill_rect(box_x + 3, y + 3, 6, 6, kGreen);
+            }
+            const char marker = field_marker(i);
+            if (marker != 0) {
+                font.draw_char(fb, box_x - font.width() - 2, y, marker, field_label_color(i));
             }
         }
     }
@@ -191,7 +199,7 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
     // Softkey bar
     const int sk = platform::kScreenH - 20;
     fb.fill_rect(0, sk, platform::kScreenW, 20, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 2, sk + 4, "ENTER:EDIT SPC:SEL DEL:CLR F5:GRPH", kGrayLine);
+    font.draw_string(fb, 2, sk + 4, softkey_text(), kGrayLine);
 }
 
 }  // namespace apps

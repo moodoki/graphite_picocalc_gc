@@ -83,6 +83,24 @@ private:
     bool dirty_ = true;
     graph::TraceCursor trace_;
 
+    // ZBox (4D.9): free 2-D pixel cursor, two ENTER-committed corners
+    // become the new window. Pure state — render only draws it.
+    struct ZBoxSession {
+        bool active = false;
+        int step = 0;  // 0 = picking corner 1, 1 = picking corner 2
+        int x0 = 0;
+        int y0 = 0;
+        int cx = 0;
+        int cy = 0;
+    } zbox_;
+
+    // Shade(lower, upper) between two curves (4D.11, function mode).
+    // 'H' starts the two-pick flow (UP/DOWN choose, ENTER commit) and
+    // toggles an existing shade off. Not persisted (TI ClrDraw-style).
+    int shade_lo_ = -1;
+    int shade_hi_ = -1;
+    int shade_pick_ = 0;  // 0 idle, 1 picking lower, 2 picking upper
+
     // Interactive CALC session (4B). The cursor rides trace_ (slot +
     // index) while inputs are collected; results are computed on the
     // final ENTER and only drawn from cached state (strip-safe).
@@ -107,9 +125,16 @@ private:
 
     void draw_axes(gfx::Framebuffer& fb) const;
     void draw_axis_labels(gfx::Framebuffer& fb) const;
-    void draw_function(gfx::Framebuffer& fb, int fi) const;
+    void draw_function(gfx::Framebuffer& fb, int fi, bool thick = false) const;
     void draw_param_curve(gfx::Framebuffer& fb, int p) const;
     void draw_trace(gfx::Framebuffer& fb) const;
+
+    // Zoom/shading (4D.9-11).
+    bool handle_zbox_key(const platform::KeyEvent& ev);
+    void draw_zbox(gfx::Framebuffer& fb) const;
+    bool handle_shade_pick_key(const platform::KeyEvent& ev);
+    void draw_shades(gfx::Framebuffer& fb) const;
+    void start_shade_pick();
 
     // CALC-session helpers (4B).
     bool handle_analysis_key(const platform::KeyEvent& ev);

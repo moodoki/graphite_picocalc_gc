@@ -44,6 +44,13 @@ protected:
     // Called after a commit; may move selection / re-enter editing
     // (parametric auto-focuses the paired field here).
     virtual void after_commit(int /*i*/) {}
+    // Unhandled non-editing keys reach the subclass (the Y= editor's
+    // shade-style cycle, 4D.11). Return true when consumed.
+    virtual bool field_key(int /*i*/, const platform::KeyEvent& /*ev*/) { return false; }
+    // Optional one-char marker drawn left of the checkbox (shade style).
+    virtual char field_marker(int /*i*/) const { return 0; }
+    // Softkey bar text (Y= appends its shade key).
+    virtual const char* softkey_text() const { return "ENTER:EDIT SPC:SEL DEL:CLR F5:GRPH"; }
 
     void invalidate_row(int i);
     void begin_edit();

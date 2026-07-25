@@ -1,5 +1,6 @@
 #include "apps/y_editor.hpp"
 
+#include <cstdint>
 #include <cstdio>
 
 #include "apps/graph_model.hpp"
@@ -51,6 +52,26 @@ void YEditorScreen::clear_field(int i) {
 
 bool YEditorScreen::field_checked(int i) const {
     return y_functions().enabled[i];
+}
+
+bool YEditorScreen::field_key(int i, const platform::KeyEvent& ev) {
+    // 'S' cycles inequality shading: none -> above -> below (4D.11).
+    if (ev.ch == 's' || ev.ch == 'S') {
+        auto& mode = graph::state().shade_mode[i];
+        mode = static_cast<uint8_t>((mode + 1) % 3);
+        save_graph_state();
+        return true;
+    }
+    return false;
+}
+
+char YEditorScreen::field_marker(int i) const {
+    const uint8_t mode = graph::state().shade_mode[i];
+    return mode == 1 ? '^' : (mode == 2 ? 'v' : 0);
+}
+
+const char* YEditorScreen::softkey_text() const {
+    return "ENTER:EDIT SPC:SEL DEL:CLR S:SHD F5:GRPH";
 }
 
 YEditorScreen& y_editor_screen() {

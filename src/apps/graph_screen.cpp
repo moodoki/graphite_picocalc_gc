@@ -80,6 +80,8 @@ void GraphScreen::on_activate() {
     // CalcMenuScreen pops (activating us) before starting the new one.
     analysis_.cancel();
     analysis_line_[0] = 0;
+    zbox_.active = false;
+    shade_pick_ = 0;
 }
 
 void GraphScreen::start_trace() {
@@ -795,15 +797,191 @@ void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
     }
 }
 
-void GraphScreen::draw_function(gfx::Framebuffer& fb, int fi) const {
+void GraphScreen::draw_function(gfx::Framebuffer& fb, int fi, bool thick) const {
     // Replay the column cache through the shared segment logic.
-    const graph::PlotStyle style{function_color(fi), false};
+    const graph::PlotStyle style{function_color(fi), thick};
     graph::Plotter plotter;
     plotter.begin();
     for (int px = 0; px < kWidth; ++px) {
         const int py = plot_y_[fi][px];
         plotter.point(fb, px, py, py != kOffscreen, style);
     }
+}
+
+// Shaded regions (4D.11), drawn beneath the curves from the column
+// cache only (strip-safe). Function mode: per-slot inequality shading
+// (persisted shade_mode) and the transient Shade(lower, upper) band.
+void GraphScreen::draw_shades(gfx::Framebuffer& fb) const {
+    if (mode() != graph::Mode::kFunction) {
+        return;
+    }
+    const auto& st = graph::state();
+    const int bottom = top_ + height_ - 1;
+    auto col_fill = [&](int px, int a, int b, platform::Color c) {
+        const int y0 = a < top_ ? top_ : a;
+        const int y1 = b > bottom ? bottom : b;
+        if (y1 >= y0) {
+            fb.draw_vline(px, y0, y1 - y0 + 1, c);
+        }
+    };
+    for (int fi = 0; fi < graph::kFunctionSlots; ++fi) {
+        if (!active_[fi] || st.shade_mode[fi] == 0) {
+            continue;
+        }
+        const platform::Color c = function_color_dim(fi);
+        for (int px = 0; px < kWidth; ++px) {
+            const int py = plot_y_[fi][px];
+            if (py == kOffscreen) {
+                continue;
+            }
+            if (st.shade_mode[fi] == 1) {  // y > f(x): above the curve
+                col_fill(px, top_, py, c);
+            } else {  // y < f(x): below
+                col_fill(px, py, bottom, c);
+            }
+        }
+    }
+    if (shade_lo_ >= 0 && shade_hi_ >= 0 && active_[shade_lo_] && active_[shade_hi_]) {
+        const platform::Color c = function_color_dim(shade_lo_);
+        for (int px = 0; px < kWidth; ++px) {
+            const int pl = plot_y_[shade_lo_][px];
+            const int pu = plot_y_[shade_hi_][px];
+            if (pl == kOffscreen || pu == kOffscreen) {
+                continue;
+            }
+            col_fill(px, pl < pu ? pl : pu, pl < pu ? pu : pl, c);
+        }
+    }
+}
+
+void GraphScreen::start_shade_pick() {
+    if (mode() != graph::Mode::kFunction) {
+        return;
+    }
+    if (shade_lo_ >= 0) {  // Toggle an existing shade off
+        shade_lo_ = -1;
+        shade_hi_ = -1;
+        shade_pick_ = 0;
+        return;
+    }
+    if (dirty_) {
+        recompute();
+    }
+    int first = -1;
+    for (int i = 0; i < slot_count(); ++i) {
+        if (slot_active(i)) {
+            first = i;
+            break;
+        }
+    }
+    if (first < 0) {
+        return;
+    }
+    trace_.active = false;
+    trace_.slot = first;
+    shade_pick_ = 1;
+}
+
+bool GraphScreen::handle_shade_pick_key(const platform::KeyEvent& ev) {
+    using platform::Key;
+    switch (ev.key) {
+        case Key::kUp:
+        case Key::kDown:
+            for (int step = 0; step < slot_count(); ++step) {
+                trace_.slot = (trace_.slot + 1) % slot_count();
+                if (slot_active(trace_.slot)) {
+                    break;
+                }
+            }
+            return true;
+        case Key::kEnter:
+            if (shade_pick_ == 1) {
+                shade_lo_ = trace_.slot;
+                shade_pick_ = 2;
+            } else {
+                shade_hi_ = trace_.slot;
+                shade_pick_ = 0;
+            }
+            return true;
+        case Key::kEscape:
+            shade_pick_ = 0;
+            shade_lo_ = -1;
+            shade_hi_ = -1;
+            return true;
+        default:
+            return true;
+    }
+}
+
+bool GraphScreen::handle_zbox_key(const platform::KeyEvent& ev) {
+    using platform::Key;
+    const int step = ev.alt_held ? 10 : 2;
+    switch (ev.key) {
+        case Key::kLeft:
+            zbox_.cx -= step;
+            break;
+        case Key::kRight:
+            zbox_.cx += step;
+            break;
+        case Key::kUp:
+            zbox_.cy -= step;
+            break;
+        case Key::kDown:
+            zbox_.cy += step;
+            break;
+        case Key::kEnter:
+            if (zbox_.step == 0) {
+                zbox_.x0 = zbox_.cx;
+                zbox_.y0 = zbox_.cy;
+                zbox_.step = 1;
+            } else {
+                // Commit: the two corners become the window (min 4 px
+                // each way so a double-ENTER can't produce a degenerate
+                // or inverted range).
+                const int dx = zbox_.cx > zbox_.x0 ? zbox_.cx - zbox_.x0 : zbox_.x0 - zbox_.cx;
+                const int dy = zbox_.cy > zbox_.y0 ? zbox_.cy - zbox_.y0 : zbox_.y0 - zbox_.cy;
+                if (dx >= 4 && dy >= 4) {
+                    const graph::Viewport vp = viewport();
+                    auto& w = graph_window();
+                    w.x_min = vp.data_x(zbox_.x0 < zbox_.cx ? zbox_.x0 : zbox_.cx);
+                    w.x_max = vp.data_x(zbox_.x0 > zbox_.cx ? zbox_.x0 : zbox_.cx);
+                    // Larger pixel y = smaller data y.
+                    w.y_min = vp.data_y(zbox_.y0 > zbox_.cy ? zbox_.y0 : zbox_.cy);
+                    w.y_max = vp.data_y(zbox_.y0 < zbox_.cy ? zbox_.y0 : zbox_.cy);
+                    save_window();
+                    dirty_ = true;
+                }
+                zbox_.active = false;
+            }
+            break;
+        case Key::kEscape:
+            zbox_.active = false;
+            break;
+        default:
+            break;
+    }
+    zbox_.cx = zbox_.cx < 0 ? 0 : (zbox_.cx >= kWidth ? kWidth - 1 : zbox_.cx);
+    const int bottom = top_ + height_ - 1;
+    zbox_.cy = zbox_.cy < top_ ? top_ : (zbox_.cy > bottom ? bottom : zbox_.cy);
+    return true;
+}
+
+void GraphScreen::draw_zbox(gfx::Framebuffer& fb) const {
+    using namespace platform::colors;
+    // Crosshair cursor.
+    const int arm = 6;
+    fb.draw_hline(zbox_.cx - arm, zbox_.cy, 2 * arm + 1, kCursor);
+    fb.draw_vline(zbox_.cx, zbox_.cy - arm, 2 * arm + 1, kCursor);
+    // Rubber-band rectangle once the first corner is committed.
+    if (zbox_.step == 1) {
+        const int x0 = zbox_.x0 < zbox_.cx ? zbox_.x0 : zbox_.cx;
+        const int y0 = zbox_.y0 < zbox_.cy ? zbox_.y0 : zbox_.cy;
+        const int wpx = (zbox_.x0 > zbox_.cx ? zbox_.x0 : zbox_.cx) - x0 + 1;
+        const int hpx = (zbox_.y0 > zbox_.cy ? zbox_.y0 : zbox_.cy) - y0 + 1;
+        fb.draw_rect(x0, y0, wpx, hpx, kGreen);
+    }
+    draw_readout_strip(fb, zbox_.step == 0 ? "ZBox: corner 1  ENTER set / ESC"
+                                           : "ZBox: corner 2  ENTER zoom / ESC");
 }
 
 // Replays the parameter-step cache (parametric and polar).
@@ -944,8 +1122,10 @@ void GraphScreen::draw_analysis(gfx::Framebuffer& fb) const {
             if (s.op == graph::AnalysisOp::kIntegral && mode() == graph::Mode::kFunction) {
                 // Shade between the curve and the x-axis over [a, b],
                 // then repaint the curve on top. Reads only the column
-                // cache — strip-safe.
-                const platform::Color shade = platform::Color::from_rgb(0, 70, 110);
+                // cache — strip-safe. The fill follows the curve's own
+                // palette color, darkened (4D.11 scope add; was a fixed
+                // blue — HW feedback 2026-07-22).
+                const platform::Color shade = function_color_dim(s.slot);
                 int c0 = vp.px_x(s.vals[0]);
                 int c1 = vp.px_x(s.vals[1]);
                 if (c1 < c0) {
@@ -1028,6 +1208,12 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
     }
     if (analysis_.active || analysis_.done) {
         return handle_analysis_key(ev);
+    }
+    if (zbox_.active) {
+        return handle_zbox_key(ev);
+    }
+    if (shade_pick_ != 0) {
+        return handle_shade_pick_key(ev);
     }
     // Global F-key scheme (2026-07-18 remap, TI-84-shaped):
     // F1 editor, F2 window, F3 mode, F4 trace, F5 table toggle,
@@ -1113,6 +1299,31 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
                 dirty_ = true;
                 return true;
             }
+            if (ev.ch == 'd' || ev.ch == 'D') {  // ZDecimal (4D.10)
+                zoom_decimal(kWidth, height_);
+                dirty_ = true;
+                return true;
+            }
+            if (ev.ch == 'q' || ev.ch == 'Q') {  // ZSquare (4D.10)
+                zoom_square(kWidth, height_);
+                dirty_ = true;
+                return true;
+            }
+            if (ev.ch == 'b' || ev.ch == 'B') {  // ZBox (4D.9)
+                if (dirty_) {
+                    recompute();
+                }
+                trace_.active = false;
+                zbox_ = ZBoxSession{};
+                zbox_.active = true;
+                zbox_.cx = kWidth / 2;
+                zbox_.cy = top_ + height_ / 2;
+                return true;
+            }
+            if (ev.ch == 'h' || ev.ch == 'H') {  // Shade(lower,upper) (4D.11)
+                start_shade_pick();
+                return true;
+            }
             if (ev.ch == 'z' || ev.ch == 'Z') {  // ZoomStat (3D, D27)
                 // Only the data-space bounds below matter here; the pixel
                 // cache this rebuilds is immediately superseded by the
@@ -1183,6 +1394,7 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
                          kGrayLine);
         }
     }
+    draw_shades(fb);  // Beneath the curves (4D.11)
     for (int s = 0; s < slot_count(); ++s) {
         if (!slot_active(s)) {
             continue;
@@ -1193,7 +1405,8 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
         } else if (param_style()) {
             draw_param_curve(fb, s);
         } else {
-            draw_function(fb, s);
+            // The shade-pick candidate draws thick so the choice reads.
+            draw_function(fb, s, shade_pick_ != 0 && s == trace_.slot);
         }
     }
     if (trace_.active) {
@@ -1201,6 +1414,15 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     }
     if (analysis_.active || analysis_.done) {
         draw_analysis(fb);
+    }
+    if (zbox_.active) {
+        draw_zbox(fb);
+    }
+    if (shade_pick_ != 0) {
+        char line[48];
+        std::snprintf(line, sizeof(line), "Shade: %s curve? Y%d  ENTER/ESC",
+                      shade_pick_ == 1 ? "lower" : "upper", trace_.slot + 1);
+        draw_readout_strip(fb, line);
     }
 
     // Hint uses the pre-compile enabled state (Phase 1 behavior): a

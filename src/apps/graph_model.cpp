@@ -42,6 +42,22 @@ platform::Color function_color(int index) {
     return kPalette[index % kNumFuncs];
 }
 
+platform::Color function_color_dim(int index) {
+    using platform::Color;
+    // The palette above at ~40% brightness: visibly "the same hue" but
+    // dark enough that the curve and grid stay readable on top (4D.11).
+    static constexpr Color kDim[kNumFuncs] = {
+        Color::from_rgb(16, 40, 100),  // blue
+        Color::from_rgb(92, 16, 16),   // red
+        Color::from_rgb(0, 76, 0),     // green
+        Color::from_rgb(88, 16, 88),   // magenta
+        Color::from_rgb(102, 60, 0),   // orange
+        Color::from_rgb(0, 80, 88),    // cyan
+        Color::from_rgb(100, 88, 16),  // yellow
+    };
+    return kDim[index % kNumFuncs];
+}
+
 // Unified persistence (task 2.23): every change writes the whole
 // GraphState image. The old per-file writers are gone; their names
 // stay as thin wrappers so Phase 1 call sites don't churn.
@@ -149,6 +165,29 @@ void zoom_out() {
     const double hy = g_window.y_max - g_window.y_min;
     g_window.x_min = cx - hx;
     g_window.x_max = cx + hx;
+    g_window.y_min = cy - hy;
+    g_window.y_max = cy + hy;
+    save_window();
+}
+
+void zoom_decimal(int width, int height) {
+    // 0.1 units per pixel, centered on the origin, so trace x values
+    // land on clean tenths (4D.10). The x axis spreads over width-1
+    // steps (Viewport::data_x), the y axis over `height` rows.
+    g_window.x_min = -0.05 * (width - 1);
+    g_window.x_max = 0.05 * (width - 1);
+    g_window.y_min = -0.05 * height;
+    g_window.y_max = 0.05 * height;
+    g_window.x_scl = 1.0;
+    g_window.y_scl = 1.0;
+    save_window();
+}
+
+void zoom_square(int width, int height) {
+    // Keep the x range; refit y about its center so one unit spans the
+    // same pixel distance on both axes (4D.10; panel pixels are square).
+    const double cy = (g_window.y_min + g_window.y_max) / 2.0;
+    const double hy = (g_window.x_max - g_window.x_min) * height / width / 2.0;
     g_window.y_min = cy - hy;
     g_window.y_max = cy + hy;
     save_window();
