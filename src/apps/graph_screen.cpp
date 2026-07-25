@@ -12,6 +12,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "math/seq_expr.hpp"
 #include "apps/calc_menu.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/mode_screen.hpp"
@@ -23,6 +24,7 @@
 #include "graph/parametric_source.hpp"
 #include "graph/plotter.hpp"
 #include "graph/polar_source.hpp"
+#include "graph/seq_points.hpp"
 #include "graph/stat_plot.hpp"
 
 namespace apps {
@@ -93,6 +95,9 @@ void GraphScreen::start_trace() {
 }
 
 void GraphScreen::begin_analysis(graph::AnalysisOp op) {
+    if (mode() == graph::Mode::kSeq) {
+        return;  // CALC ops are continuous-curve constructs (4D v1)
+    }
     if (dirty_) {
         recompute();  // Typed-command entry: slot caches may be stale
     }
@@ -257,6 +262,8 @@ int GraphScreen::slot_count() const {
             return graph::kParametricSlots;
         case graph::Mode::kPolar:
             return graph::kPolarSlots;
+        case graph::Mode::kSeq:
+            return graph::kSeqSlots;
         default:
             return graph::kFunctionSlots;
     }
@@ -280,6 +287,14 @@ double GraphScreen::trace_value() const {
             return st.t_min + trace_.index * st.t_step;
         case graph::Mode::kPolar:
             return st.theta_min + trace_.index * st.theta_step;
+        case graph::Mode::kSeq: {
+            // Web polyline points come in pairs per step (4D.7).
+            if (st.seq_style == 1) {
+                const int steps = trace_.index / 2;
+                return st.n_min + steps + 1;
+            }
+            return st.plot_start + trace_.index * st.plot_step;
+        }
         default:
             return viewport().data_x(trace_.index);
     }
@@ -299,6 +314,13 @@ void GraphScreen::sync_trace_to_value(double v) {
                 trace_.index = static_cast<int>(std::lround((v - st.theta_min) / st.theta_step));
             }
             break;
+        case graph::Mode::kSeq:
+            if (st.seq_style == 1) {
+                trace_.index = static_cast<int>(std::lround((v - st.n_min - 1) * 2));
+            } else if (st.plot_step > 0) {
+                trace_.index = static_cast<int>(std::lround((v - st.plot_start) / st.plot_step));
+            }
+            break;
         default:
             trace_.index = viewport().px_x(v);
             break;
@@ -316,6 +338,9 @@ void GraphScreen::recompute() {
             break;
         case graph::Mode::kPolar:
             recompute_polar(vp);
+            break;
+        case graph::Mode::kSeq:
+            recompute_seq(vp);
             break;
         default:
             recompute_function(vp);
@@ -448,6 +473,77 @@ void GraphScreen::recompute_polar(const graph::Viewport& vp) {
     eng.vars().vars[math::Variables::kTheta] = saved_theta;
 }
 
+void GraphScreen::recompute_seq(const graph::Viewport& vp) {
+    auto& st = graph::state();
+    auto& eng = math::engine();
+
+    // The sweep writes the shared N variable; preserve the user's value.
+    const math::calc_t saved_n = eng.vars()['n'];
+    math::seqexpr::refresh();  // Pick up edits to referenced variables
+    math::seqexpr::begin(graph::make_seq_def(st));
+    const bool web = st.seq_style == 1;
+
+    for (int s = 0; s < graph::kSeqSlots; ++s) {
+        pcount_[s] = 0;
+        active_[s] = false;
+        const bool on = st.seq.enabled[s] && st.seq.expr[s][0] != 0 && math::seqexpr::defined(s);
+        // Web plots need a pure own-lag-1 recurrence (4D.7); others skip.
+        pactive_[s] = on && (!web || math::seqexpr::lag1_only(s));
+        if (!pactive_[s]) {
+            continue;
+        }
+        if (!web) {
+            // Time series: (n, u(n)) into the parameter-step cache.
+            graph::SeqSource src(s, st.plot_start, st.n_max, st.plot_step);
+            src.begin(vp);
+            double x = 0.0;
+            double y = 0.0;
+            bool defined = false;
+            int n = 0;
+            while (n < kMaxCurvePoints && src.next(&x, &y, &defined)) {
+                if (defined) {
+                    ppx_[s][n] = clamp_px(vp.px_x(x));
+                    ppy_[s][n] = clamp_px(vp.px_y(y));
+                } else {
+                    ppx_[s][n] = 0;
+                    ppy_[s][n] = kOffscreen;
+                }
+                ++n;
+            }
+            pcount_[s] = static_cast<int16_t>(n);
+            continue;
+        }
+        // Web plot: the map curve y=f(x) rides the (otherwise free)
+        // function-mode column cache; the cobweb path — (u_k, u_k+1)
+        // then across to the diagonal — rides the point cache. render()
+        // adds the y=x line from pure viewport math.
+        active_[s] = true;
+        for (int px = 0; px < kWidth; ++px) {
+            const double y = math::seqexpr::map_value(s, vp.data_x(px));
+            plot_y_[s][px] = std::isfinite(y) ? clamp_px(vp.px_y(y)) : kOffscreen;
+        }
+        const long n0 = std::lround(st.n_min);
+        const long nmax = std::lround(st.n_max);
+        double prev = math::seqexpr::value(s, n0);
+        int n = 0;
+        for (long k = n0 + 1; k <= nmax && n + 1 < kMaxCurvePoints; ++k) {
+            const double cur = math::seqexpr::value(s, k);
+            if (!std::isfinite(prev) || !std::isfinite(cur)) {
+                break;
+            }
+            ppx_[s][n] = clamp_px(vp.px_x(prev));
+            ppy_[s][n] = clamp_px(vp.px_y(cur));
+            ++n;
+            ppx_[s][n] = clamp_px(vp.px_x(cur));
+            ppy_[s][n] = clamp_px(vp.px_y(cur));
+            ++n;
+            prev = cur;
+        }
+        pcount_[s] = static_cast<int16_t>(n);
+    }
+    eng.vars()['n'] = saved_n;
+}
+
 void GraphScreen::zoom_fit() {
     // ZoomFit ('F', task 4.7): function mode refits y over the current
     // x range (TI behavior); parametric/polar refit both axes to the
@@ -522,6 +618,20 @@ void GraphScreen::zoom_fit() {
                 eng.free_compiled(rh);
             }
             eng.vars().vars[math::Variables::kTheta] = saved_theta;
+            break;
+        }
+        case graph::Mode::kSeq: {
+            const math::calc_t saved_n = eng.vars()['n'];
+            math::seqexpr::refresh();
+            math::seqexpr::begin(graph::make_seq_def(st));
+            for (int s = 0; s < graph::kSeqSlots; ++s) {
+                if (!st.seq.enabled[s] || st.seq.expr[s][0] == 0 || !math::seqexpr::defined(s)) {
+                    continue;
+                }
+                graph::SeqSource src(s, st.plot_start, st.n_max, st.plot_step);
+                sweep(src);
+            }
+            eng.vars()['n'] = saved_n;
             break;
         }
         default: {
@@ -725,11 +835,17 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         py = ppy_[p][i];
         const auto& st = graph::state();
         const bool polar = mode() == graph::Mode::kPolar;
+        const bool seq = mode() == graph::Mode::kSeq;
         // The last cached point may be the sample clamped to the range
         // end (sources close the curve when step doesn't divide range),
         // so cap the readout at max rather than extrapolating the grid.
-        const double grid = polar ? st.theta_min + i * st.theta_step : st.t_min + i * st.t_step;
-        const double param = std::min(grid, polar ? st.theta_max : st.t_max);
+        double param = 0;
+        if (seq) {
+            param = std::min(trace_value(), st.n_max);
+        } else {
+            const double grid = polar ? st.theta_min + i * st.theta_step : st.t_min + i * st.t_step;
+            param = std::min(grid, polar ? st.theta_max : st.t_max);
+        }
         char tb[24];
         char xb[24];
         char yb[24];
@@ -737,8 +853,13 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         const double nan = std::numeric_limits<double>::quiet_NaN();
         math::format_number(py == kOffscreen ? nan : vp.data_x(px), xb, sizeof(xb));
         math::format_number(py == kOffscreen ? nan : vp.data_y(py), yb, sizeof(yb));
-        std::snprintf(line, sizeof(line), "%s%d  %s=%s x=%s y=%s", polar ? "r" : "P", p + 1,
-                      polar ? kThetaLabel : "t", tb, xb, yb);
+        if (seq) {
+            std::snprintf(line, sizeof(line), "%c  n=%s x=%s y=%s", static_cast<char>('u' + p), tb,
+                          xb, yb);
+        } else {
+            std::snprintf(line, sizeof(line), "%s%d  %s=%s x=%s y=%s", polar ? "r" : "P", p + 1,
+                          polar ? kThetaLabel : "t", tb, xb, yb);
+        }
     } else {
         px = trace_.index;
         py = plot_y_[trace_.slot][px];
@@ -936,6 +1057,9 @@ bool GraphScreen::on_key(const platform::KeyEvent& ev) {
             }
             return true;
         case Key::kF6:  // CALC menu (4B; F6 = Shift+F1 on the unit)
+            if (mode() == graph::Mode::kSeq) {
+                return true;  // CALC ops don't apply to sequences (4D v1)
+            }
             ui::screen_manager().push(&calc_menu());
             return true;
         case Key::kMinus:
@@ -1047,11 +1171,26 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     draw_axes(fb);
     // Stat plots under the curves so regression overlays stay on top.
     graph::draw_stat_plots(fb, viewport());
+    const bool seq_web = mode() == graph::Mode::kSeq && graph::state().seq_style == 1;
+    if (seq_web) {
+        // The y=x diagonal the cobweb bounces off (pure viewport math).
+        const auto& w = graph_window();
+        const graph::Viewport vp = viewport();
+        const double lo = w.x_min > w.y_min ? w.x_min : w.y_min;
+        const double hi = w.x_max < w.y_max ? w.x_max : w.y_max;
+        if (lo < hi) {
+            fb.draw_line(vp.px_x(lo), clamp_px(vp.px_y(lo)), vp.px_x(hi), clamp_px(vp.px_y(hi)),
+                         kGrayLine);
+        }
+    }
     for (int s = 0; s < slot_count(); ++s) {
         if (!slot_active(s)) {
             continue;
         }
-        if (param_style()) {
+        if (seq_web) {
+            draw_function(fb, s);  // The map curve (column cache)
+            draw_param_curve(fb, s);
+        } else if (param_style()) {
             draw_param_curve(fb, s);
         } else {
             draw_function(fb, s);
@@ -1082,6 +1221,13 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
             }
             break;
         }
+        case graph::Mode::kSeq: {
+            const auto& sf = graph::state().seq;
+            for (int s = 0; s < graph::kSeqSlots; ++s) {
+                any = any || (sf.enabled[s] && sf.expr[s][0] != 0);
+            }
+            break;
+        }
         default:
             any = y_functions().any_enabled();
             break;
@@ -1102,6 +1248,8 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
             title = "GRAPH PARAM";
         } else if (mode() == graph::Mode::kPolar) {
             title = "GRAPH POLAR";
+        } else if (mode() == graph::Mode::kSeq) {
+            title = graph::state().seq_style == 1 ? "GRAPH SEQ WEB" : "GRAPH SEQ";
         }
         ui::draw_status_bar(fb, title);
     }
@@ -1111,6 +1259,8 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
         editor_key = "PAR";
     } else if (mode() == graph::Mode::kPolar) {
         editor_key = "R=";
+    } else if (mode() == graph::Mode::kSeq) {
+        editor_key = "u=";
     }
     const char* const keys[6] = {editor_key, "WIN", "MODE", "TRC", "TBL", "CALC"};
     ui::draw_softkeys(fb, keys);

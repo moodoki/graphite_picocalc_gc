@@ -7,6 +7,7 @@ constexpr ModeDescriptor kDescriptors[] = {
     {Mode::kFunction, 'x', 7, "Y"},
     {Mode::kParametric, 't', 6, ""},
     {Mode::kPolar, 0, 6, "r"},
+    {Mode::kSeq, 'n', 3, "u"},
 };
 }  // namespace
 

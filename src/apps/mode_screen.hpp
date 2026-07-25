@@ -14,7 +14,7 @@ public:
     void render(gfx::Framebuffer& fb) override;
 
 private:
-    static constexpr int kNumRows = 6;
+    static constexpr int kNumRows = 7;
     int selected_ = 0;
 
     void adjust(int dir) const;

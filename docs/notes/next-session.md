@@ -33,17 +33,16 @@ reflashed, and developer-confirmed** the same day. Full detail:
 
 ## The next job
 
-1. **Batch 3 per the D38 plan: sequence graphing (4D.6-8)**, ~26 h est —
-   `Mode::kSeq` + `SeqFunctions` POD in GraphState (**PCG5→PCG6 bump,
-   must also reserve Batch 4's shade-config fields** so the device sees
-   one reset, not two); new `math/seq_expr` (forward-iteration memo,
-   u/v/w cross-ref), `graph/seq_points`, `apps/seq_editor` (new files go
-   in CMakeLists.txt + scripts/host-tests.sh); ~17 switch-on-mode sites
-   (graph_screen recompute/slots/trace/zoomfit/labels, nav, window rows
-   nMin/nMax/plotStart, table integer-n column memoized, mode_screen
-   kModeCount 3→4, help, softkeys). **Batch 2 (complex matrices, 4D.25)
-   shipped 2026-07-26** — HW-PENDING eval row open. Remaining after
-   Batch 3 (D38, risk-first): zoom/shading (4D.9-11) → data/catalog glue
+1. **Batch 4 per the D38 plan: zoom + shading (4D.9-11)**, ~14 h est —
+   `ZDecimal`/`ZSquare` presets (letter keys, graph_model helpers);
+   `ZBox` two-corner cursor session (AnalysisSession-shaped, free 2-D
+   pixel cursor); `Shade(lower,upper)` + inequality shading (y>f(x)
+   above/below) generalizing the fnInt column fill, **fnInt shading in
+   the curve's color** (scope add); shade config persists in the
+   `shade_mode[7]` fields **already reserved in PCG6** (no new reset).
+   **Batches 2 (complex matrices) and 3 (sequence graphing, PCG6)
+   shipped 2026-07-26** — both HW-PENDING eval rows open. Remaining
+   after Batch 4 (D38, risk-first): data/catalog glue
    (4D.12/14/17/18/22) → named lists (4D.13) → display/formatting
    (4D.1-5) → eigenvectors (4D.23) → device polish (4D.19-20, needs the
    board). Task table:
@@ -107,16 +106,18 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 now carries 4D Batch 2** (complex matrices, 2026-07-26,
-  same day as Batch 1) on top of Batch 1 (complex variables/Ans + lists),
-  the 2026-07-25 work (factorial fix, D10 RAM-residency fix + dual-core
-  pipeline, die temp/build id) and the D35 state. Flashed and
-  boot-verified over serial (temp + psram-bulk heartbeats healthy); bss
-  **218,156 bytes** (+4,824 over Batch 1's 213,332 — the complex-capable
-  union row buffers in `matops`), ~52 KB headroom — keep watching per the
-  D28 watch item. Phases 2-3 and 4A-4C are HW-verified on this board, and
-  the 4D Batch 1 hands-on eval passed 2026-07-26. **One open HW-PENDING
-  row: the 4D Batch 2 complex-matrix checklist** (worklog table).
+- **The Pico 1 now carries 4D Batch 3** (sequence graphing, 2026-07-26,
+  same day as Batches 1-2) on top of Batch 2 (complex matrices), Batch 1
+  (complex variables/Ans + lists), the 2026-07-25 work and the D35
+  state. Flashed and boot-verified over serial (temp + psram-bulk
+  heartbeats healthy); bss **219,332 bytes** (+1,176 over Batch 2 —
+  SeqFunctions in GraphState ×2 via the persist image), ~51 KB headroom
+  — keep watching per the D28 watch item. **First boot after this flash:
+  PCG6 one-time graph-state reset** (expected; window/mode/plots back to
+  defaults once). Phases 2-3 and 4A-4C are HW-verified on this board,
+  and the 4D Batch 1 hands-on eval passed 2026-07-26. **Two open
+  HW-PENDING rows: the 4D Batch 2 (complex matrices) and Batch 3
+  (sequence graphing) checklists** (worklog table).
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware

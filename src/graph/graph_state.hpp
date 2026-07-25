@@ -15,6 +15,7 @@ namespace graph {
 constexpr int kFunctionSlots = 7;    // Y1..Y7
 constexpr int kParametricSlots = 6;  // (X1T,Y1T)..(X6T,Y6T)
 constexpr int kPolarSlots = 6;       // r1..r6
+constexpr int kSeqSlots = 3;         // u, v, w (4D.6-8)
 
 // Shared x/y canvas window. All modes plot into it; parametric/polar
 // add their parameter ranges in GraphState. Defaults are ZStandard:
@@ -56,6 +57,16 @@ struct PolarFunctions {
     bool enabled[kPolarSlots] = {};
 };
 
+// Sequence mode (4D.6-8, D38/P4-12): u/v/w recurrences with seeds.
+// seed2 (the value at nMin+1) is consumed only when the expression
+// references an (n-2) lag — the editor's seed field accepts "{a,b}".
+struct SeqFunctions {
+    char expr[kSeqSlots][config::kMaxExprLen] = {};
+    bool enabled[kSeqSlots] = {};
+    double seed1[kSeqSlots] = {};  // u(nMin)
+    double seed2[kSeqSlots] = {};  // u(nMin+1)
+};
+
 // Statistical plots (sub-phase 3D, D27): three TI-style slots drawn in
 // the graph viewport alongside the mode's functions. Configured via
 // the typed `plot` command; data comes from the l1..l6 lists at draw
@@ -88,6 +99,7 @@ struct GraphState {
     YFunctions y;  // function mode (Phase 1)
     ParametricFunctions param;
     PolarFunctions polar;
+    SeqFunctions seq;
 
     GraphWindow window;
 
@@ -101,6 +113,22 @@ struct GraphState {
     double theta_min = 0.0;
     double theta_max = 6.28318530717958647692;
     double theta_step = 0.05;
+
+    // Sequence n range (4D.8; TI defaults). Doubles so the window
+    // screen's shared field editing applies; consumers round to long.
+    double n_min = 1.0;
+    double n_max = 10.0;
+    double plot_start = 1.0;
+    double plot_step = 1.0;
+    // Sequence plot style (MODE row): 0 = time series (n vs u(n)),
+    // 1 = web (map curve + y=x + cobweb path; own-lag-1 sequences only).
+    uint8_t seq_style = 0;
+
+    // Reserved for Batch 4 (4D.9-11): per-Y-slot inequality shading
+    // (0 none, 1 above, 2 below) + spare bytes, carried in the PCG6
+    // bump so Batch 4 doesn't force a second one-time reset (D38).
+    uint8_t shade_mode[kFunctionSlots] = {};
+    uint8_t reserved_4d[8] = {};
 
     TableConfig table;
 

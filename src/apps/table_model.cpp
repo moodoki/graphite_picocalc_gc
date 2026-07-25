@@ -1,10 +1,13 @@
 #include "apps/table_model.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <limits>
 
 #include "gfx/font.hpp"
 #include "math/engine.hpp"
+#include "math/seq_expr.hpp"
+#include "graph/seq_points.hpp"
 
 namespace apps {
 
@@ -65,6 +68,19 @@ int polar_slot_for(const graph::GraphState& st, int col) {
     return -1;
 }
 
+int seq_slot_for(const graph::GraphState& st, int col) {
+    int c = 0;
+    for (int i = 0; i < graph::kSeqSlots; ++i) {
+        if (st.seq.enabled[i] && st.seq.expr[i][0] != 0) {
+            if (c == col) {
+                return i;
+            }
+            ++c;
+        }
+    }
+    return -1;
+}
+
 // Compile-eval-free one expression at `value` written into `var_slot`.
 double eval_expr_at(const char* expr, int var_slot, double value) {
     auto& eng = math::engine();
@@ -93,6 +109,13 @@ int table_column_count(const graph::GraphState& state) {
         case graph::Mode::kPolar:
             for (int i = 0; i < graph::kPolarSlots; ++i) {
                 if (state.polar.enabled[i] && state.polar.expr[i][0] != 0) {
+                    ++n;
+                }
+            }
+            break;
+        case graph::Mode::kSeq:
+            for (int i = 0; i < graph::kSeqSlots; ++i) {
+                if (state.seq.enabled[i] && state.seq.expr[i][0] != 0) {
                     ++n;
                 }
             }
@@ -126,6 +149,13 @@ void table_column_label(const graph::GraphState& state, int col, char* buf, size
             }
             break;
         }
+        case graph::Mode::kSeq: {
+            const int s = seq_slot_for(state, col);
+            if (s >= 0) {
+                std::snprintf(buf, buf_len, "%c", 'u' + s);
+            }
+            break;
+        }
         default: {
             const int s = function_slot_for(state, col);
             if (s >= 0) {
@@ -142,6 +172,8 @@ const char* table_independent_label(const graph::GraphState& state) {
             return "T";
         case graph::Mode::kPolar:
             return kThetaLabel;
+        case graph::Mode::kSeq:
+            return "n";
         default:
             return "x";
     }
@@ -177,6 +209,21 @@ int evaluate_table_row(const graph::GraphState& state, double independent_value,
                                                   independent_value);
             }
             eng.vars().vars[math::Variables::kTheta] = saved;
+            break;
+        }
+        case graph::Mode::kSeq: {
+            // Integer n only; the forward-iteration memo makes a
+            // top-to-bottom row sweep O(1) per row (4D.6).
+            const math::calc_t saved = eng.vars()['n'];
+            math::seqexpr::begin(graph::make_seq_def(state));
+            const double fl = std::floor(independent_value);
+            const bool integer_n = fl == independent_value;
+            for (int c = 0; c < n; ++c) {
+                const int s = seq_slot_for(state, c);
+                results[c] =
+                    (s < 0 || !integer_n) ? kNaN : math::seqexpr::value(s, static_cast<long>(fl));
+            }
+            eng.vars()['n'] = saved;
             break;
         }
         default: {

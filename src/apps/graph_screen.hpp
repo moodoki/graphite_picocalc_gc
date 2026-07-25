@@ -97,6 +97,7 @@ private:
     void recompute_function(const graph::Viewport& vp);
     void recompute_parametric(const graph::Viewport& vp);
     void recompute_polar(const graph::Viewport& vp);
+    void recompute_seq(const graph::Viewport& vp);
     graph::Viewport viewport() const;
 
     // Active-mode slot helpers for trace navigation.

@@ -17,7 +17,7 @@ public:
     void render(gfx::Framebuffer& fb) override;
 
 private:
-    static constexpr int kMaxFields = 9;
+    static constexpr int kMaxFields = 10;
 
     struct FieldRef {
         const char* name;

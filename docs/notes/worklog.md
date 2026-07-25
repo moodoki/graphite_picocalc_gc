@@ -284,10 +284,65 @@ Still to verify on hardware:
 | Session 17 — Phase 4B graph analysis / CALC menu (D29; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 17 itself) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale as the Session 16 row above; the full CALC-menu checklist, including the strip-render-risky tangent-line/shaded-fnInt draws, passed on the Pico 1 the same day |
 | Session 18 — Phase 4C complex numbers (D30; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 18 itself) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale; full complex-number checklist passed on the Pico 1 the same day (note: this checklist's own r∠θ description is stale — superseded by the real ∠ glyph, D31; and its "spot check the real catalog" item is now known to have one gap, the `!` postfix-factorial bug root-caused the same day, see the paragraph above) |
 | 4D Batch 1 — complex variables/Ans (4D.15) + complex lists (4D.24) — **CLEARED 2026-07-26, same day** | Developer ran the full checklist on the Pico 1 (complex var store/recall/errors, complex list literals/arithmetic/reductions, editor entry + migration, PCV1 one-time reset + persistence, graph sanity with a complex x) — all passed. One finding: complex display in the list editor was weird under polar mode (complex elements fell back to a+bi; real-valued elements showed `r∠0`) — **root-caused and FIXED the same day** (see the 2026-07-26 addendum below), reflashed, and developer-confirmed working as intended |
+| 4D Batch 3 — sequence graphing (4D.6-8; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial) | **First boot: PCG6 one-time graph-state reset** (window/mode/plots to defaults, then persistence resumes). MODE > Graph mode now cycles FUNC/PARAM/POLAR/SEQ; new "Seq plot" row (TIME/WEB). F1 in SEQ mode opens the sequence editor: enter `u(n)=u(n-1)+1`, seed `u(nMin)=1`, check enable → F5 graph plots the ramp; trace (F4) reads `u  n=… x=… y=…` and steps by PlotStep. Fibonacci: `u(n)=u(n-1)+u(n-2)` with seed `{1,1}` → 1,1,2,3,5,8… in the table (F5 TBL, integer n column; non-integer TblStart rows show NaN by design). Cross-ref: `v(n)=2*u(n-1)`. Window (F2) shows nMin/nMax/PlotStart/PlotStep + X/Y (10 rows). ZoomFit ('F') fits the time series. WEB mode: `u(n)=0.5*u(n-1)+2`, seed 1 → map line + y=x diagonal + cobweb stair converging to 4; non-eligible seqs (cross-ref/lag-2/explicit-n) don't draw in WEB. F6 CALC is a no-op in SEQ mode (v1). Bad forms error out (slot inactive): `u(n)` circular, `u(n-3)`, `u(3)`. Regression: FUNC/PARAM/POLAR plotting, trace, table, split, stat plots unaffected; persistence of all modes' slots across a power cycle (post-PCG6-reset) |
 | 4D Batch 2 — complex matrices (4D.25; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial) | Editor: type `1+i` into a real matrix cell in a+bi mode → whole matrix migrates to the complex tier, cells show short complex forms, entry line shows the full form; polar mode shows `r∠θ` cells; REAL mode entry of `2i` errors "Non-real result"; F8 clear reverts the matrix to real. Home: `det([A])` on a complex `[A]` (e.g. `[[1+i,2][3,4-i]]` → `-1+3i`), `[A]^-1` then `[A]*Ans`-style check by hand, `rref`/`ref`/`rank`/`transpose`/`augment`/`[A]^2`, `i*[B]` and `2i*[B]` on a real `[B]`, mixed `[A]+[B]`, element read `[A](1,1)`, complex scalar store `det([A])->z`. REAL mode: any expression touching a complex matrix errors "Non-real result". `eigenvals([A])` on a complex matrix errors "Non-real matrix". Persistence: complex matrix survives a power cycle (PCM2 header unchanged, 16 B/elem payload); old firmware would skip it as corrupt. Regression: real-matrix arithmetic/editor/persistence unchanged; big real matrix ops still fine |
 | Session 19 — font system + real math glyphs, `eig` alias, list UX (D31; flashed 2026-07-21, **Terminus** default build, boots healthy, PSRAM/storage/battery telemetry clean) | This session's own on-device font comparison across all five builds is already done (D31: Terminus picked as the shipped default; Unifont good with the 2px lift; Spleen best if a thicker font is wanted; JuliaMono worst, Iosevka a bit unbalanced) — remaining is a **glyph-correctness sweep on the Terminus build in situ**: home-screen complex results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row (`a+bi`/`r∠θ`), pretty-printed expressions (`π`, `θ`, inline `√(x)`, `3+2i` via the plain-text fallback), stats `σx`/`σy`/`Σx`/`Σx²`/`Σy`/`Σy²`/`Σxy`/`r²`, inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace + table polar label `θ`, and `…` truncation in list/matrix/complex history + slot editor. Also: `eig` as a drop-in alias for `eigenvals([A])` (whole-expression only, same as `eigenvals`/`dim`); list history LEFT/RIGHT horizontal scroll on the newest result when the input line is empty, using the new compact (4-sig-fig) number format so more list elements fit per screen. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis, table all unaffected. **Informally spot-checked 2026-07-22** during the Phase 4A-4C Pico 1 pass — complex/MODE-row/pretty-print/stats glyphs incidentally seen and reported looking correct — but not a dedicated sweep against this row's own full list (still worth doing properly if time allows) |
 
 ---
+
+## 2026-07-26 — 4D Batch 3 shipped: sequence graphing (4D.6-8), PCG6
+
+Third D38 batch, same day. Host suite green across **14 binaries** (new
+`test_seq`, 51 checks — **1429 total**); lint + format clean; both
+boards build; **flashed to the Pico 1** and boot-verified over serial.
+Pico 1 bss **219,332** (+1,176 over Batch 2 — SeqFunctions in
+GraphState, doubled by the persistence image mirror), ~51 KB headroom.
+
+1. **`math::seqexpr`** (new `math/seq_expr.{hpp,cpp}`): u/v/w
+   recurrences per D38/P4-12 — full cross-reference at n-1/n-2 lags.
+   Lag references can't ride tinyexpr, so `begin()` **rewrites**
+   `u(n-1)` → placeholder variables (`u1`…`w2`) bound to memo storage
+   via the existing `Engine::compile_with` extras seam, and compiles
+   each sequence once (textual/seed/nMin match = no-op, so per-row
+   table calls stay cheap). `value(s, n)` advances **all three
+   sequences in lockstep** from nMin with a rolling two-deep memo —
+   forward sweeps are O(1)/step, backward jumps restart from nMin,
+   `kMaxN = 10000` bounds the iteration (§9). Seeds: seed1 = u(nMin);
+   seed2 = u(nMin+1), consumed only by (n-2)-referencing sequences;
+   no-lag expressions evaluate directly at any n. Malformed refs
+   (`u(n)` circular, `u(n-3)`, `u(3)`) fail compile → slot undefined.
+   The engine's `n` variable is the sweep slot (complex-check skipped,
+   callers save/restore like x/t/theta).
+2. **Graph integration** (4D.7): `Mode::kSeq` + descriptor;
+   `graph/seq_points.{hpp,cpp}` (SeqSource time-series PointSource +
+   `make_seq_def`); GraphScreen `recompute_seq` fills the existing
+   parameter-step point caches (time series), and **web/cobweb mode**
+   reuses the (free in seq mode) function-mode column cache for the map
+   curve f(x), the point cache for the cobweb stair, and draws the y=x
+   diagonal from viewport math — all strip-safe (§8: render reads
+   caches only). Web mode requires a pure own-lag-1 recurrence
+   (`lag1_only`); others skip. Trace rides the caches (`u  n=…` readout;
+   web points pair up per step); ZoomFit sweeps the time series; **F6
+   CALC is blocked in seq mode** (continuous-curve constructs, v1).
+3. **Editor + screens** (4D.8): `apps/seq_editor.{hpp,cpp}`
+   (SlotEditorScreen subclass: nMin row, per-seq expr row with checkbox
+   + seed row accepting `1` or `{1,2}`); WINDOW gains
+   nMin/nMax/PlotStart/PlotStep rows in seq mode (10 rows, tightened
+   row height); MODE Graph-mode cycles 4 modes + new **"Seq plot"
+   TIME/WEB row**; table shows an integer-n column (`n` label, u/v/w
+   value columns, non-integer rows NaN; the memo makes a top-to-bottom
+   row sweep incremental); nav routes F1 to the seq editor; help
+   updated.
+4. **Persistence: PCG5→PCG6** — GraphState gains `SeqFunctions` (exprs,
+   enables, two seeds), the n-range quartet, `seq_style`, **plus the
+   reserved Batch 4 shading fields** (`shade_mode[7]` + 8 spare bytes)
+   so zoom/shading lands without a second reset (D38). One-time
+   graph-state reset on first boot, established precedent.
+5. **Tests**: new `tests/host/test_seq.cpp` (51 checks: ramp/geometric/
+   Fibonacci-lag-2/cross-ref/mutual/three-seq, explicit formulas, bad
+   forms, nMin offsets, kMaxN cap, memo-across-begin, refresh() picking
+   up variable edits, web eligibility + map_value). `test_graph` link
+   list gains seq_expr/seq_points (table_model dependency).
 
 ## 2026-07-26 — 4D Batch 2 shipped: complex matrices (4D.25)
 

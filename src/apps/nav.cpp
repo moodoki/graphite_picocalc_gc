@@ -4,6 +4,7 @@
 #include "apps/graph_screen.hpp"
 #include "apps/param_editor.hpp"
 #include "apps/polar_editor.hpp"
+#include "apps/seq_editor.hpp"
 #include "apps/y_editor.hpp"
 #include "graph/graph_state.hpp"
 
@@ -16,6 +17,9 @@ void push_mode_editor() {
             break;
         case graph::Mode::kPolar:
             ui::screen_manager().push(&polar_editor_screen());
+            break;
+        case graph::Mode::kSeq:
+            ui::screen_manager().push(&seq_editor_screen());
             break;
         default:
             ui::screen_manager().push(&y_editor_screen());

@@ -19,10 +19,10 @@ namespace apps {
 namespace {
 constexpr int kTopY = 32;
 
-// 6 fields (function mode) get roomy rows; 9 (parametric) still must
-// end above the softkey bar at y=300: 32 + 9*28 = 284.
+// 6 fields (function mode) get roomy rows; 9 (parametric) and 10 (seq)
+// still must end above the softkey bar at y=300: 32 + 10*26 = 292.
 int row_height(int count) {
-    return count > 6 ? 28 : 32;
+    return count > 9 ? 26 : (count > 6 ? 28 : 32);
 }
 }  // namespace
 
@@ -38,6 +38,11 @@ int WindowScreen::fields(FieldRef* out) {
         out[n++] = {"THmin", &st.theta_min};
         out[n++] = {"THmax", &st.theta_max};
         out[n++] = {"THstep", &st.theta_step};
+    } else if (st.mode == graph::Mode::kSeq) {
+        out[n++] = {"nMin", &st.n_min};
+        out[n++] = {"nMax", &st.n_max};
+        out[n++] = {"PlotStart", &st.plot_start};
+        out[n++] = {"PlotStep", &st.plot_step};
     }
     out[n++] = {"Xmin", &w.x_min};
     out[n++] = {"Xmax", &w.x_max};

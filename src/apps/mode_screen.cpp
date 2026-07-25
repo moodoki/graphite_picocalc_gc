@@ -24,7 +24,8 @@ constexpr int kRowDisplay = 1;
 constexpr int kRowFixDigits = 2;
 constexpr int kRowGraphMode = 3;
 constexpr int kRowNumber = 4;
-constexpr int kRowReboot = 5;
+constexpr int kRowSeqPlot = 5;  // Sequence-mode plot style (4D.7)
+constexpr int kRowReboot = 6;
 }  // namespace
 
 void ModeScreen::adjust(int dir) const {
@@ -51,13 +52,17 @@ void ModeScreen::adjust(int dir) const {
             save_graph_state();
             break;
         case kRowGraphMode: {
-            constexpr int kModeCount = 3;  // Function, Parametric, Polar
+            constexpr int kModeCount = 4;  // Function, Parametric, Polar, Seq
             int m = static_cast<int>(graph::state().mode) + dir;
             m = (m % kModeCount + kModeCount) % kModeCount;
             graph::state().mode = static_cast<graph::Mode>(m);
             save_graph_state();
             break;
         }
+        case kRowSeqPlot:
+            graph::state().seq_style = graph::state().seq_style == 0 ? 1 : 0;
+            save_graph_state();
+            break;
         case kRowNumber: {
             constexpr int kCount = 3;  // REAL, RECTANGULAR, POLAR
             int m = static_cast<int>(math::number_mode()) + dir;
@@ -123,8 +128,13 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     ui::draw_status_bar(fb, "MODE");
 
     const char* const rows[kNumRows][2] = {
-        {"Angle", nullptr},      {"Display", nullptr}, {"Fix digits", nullptr},
-        {"Graph mode", nullptr}, {"Number", nullptr},  {"Reboot to bootloader", nullptr},
+        {"Angle", nullptr},
+        {"Display", nullptr},
+        {"Fix digits", nullptr},
+        {"Graph mode", nullptr},
+        {"Number", nullptr},
+        {"Seq plot", nullptr},
+        {"Reboot to bootloader", nullptr},
     };
 
     char angle_val[8];
@@ -142,7 +152,10 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
         gmode_val = "PARAM";
     } else if (graph::state().mode == graph::Mode::kPolar) {
         gmode_val = "POLAR";
+    } else if (graph::state().mode == graph::Mode::kSeq) {
+        gmode_val = "SEQ";
     }
+    const char* seq_plot_val = graph::state().seq_style == 1 ? "WEB" : "TIME";
     char number_buf[8];
     const char* number_val = "REAL";
     if (math::number_mode() == math::NumberMode::kRectangular) {
@@ -155,8 +168,8 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
         number_val = number_buf;
     }
 
-    const char* const values[kNumRows] = {angle_val, disp_val,   fix_val,
-                                          gmode_val, number_val, "[ENTER]"};
+    const char* const values[kNumRows] = {angle_val,  disp_val,     fix_val,  gmode_val,
+                                          number_val, seq_plot_val, "[ENTER]"};
 
     for (int i = 0; i < kNumRows; ++i) {
         const int y = kTopY + i * kRowH;

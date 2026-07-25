@@ -117,6 +117,7 @@ add_executable(picocalc_graphcalc
     src/math/solve_expr.cpp
     src/math/complex.cpp
     src/math/complex_expr.cpp
+    src/math/seq_expr.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -128,6 +129,7 @@ add_executable(picocalc_graphcalc
     src/graph/function_source.cpp
     src/graph/parametric_source.cpp
     src/graph/polar_source.cpp
+    src/graph/seq_points.cpp
     src/graph/stat_plot.cpp
     src/graph/trace.cpp
     src/graph/analysis.cpp
@@ -148,6 +150,7 @@ add_executable(picocalc_graphcalc
     src/apps/y_editor.cpp
     src/apps/param_editor.cpp
     src/apps/polar_editor.cpp
+    src/apps/seq_editor.cpp
     src/apps/graph_screen.cpp
     src/apps/window_screen.cpp
     src/apps/mode_screen.cpp

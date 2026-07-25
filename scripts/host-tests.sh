@@ -55,9 +55,10 @@ echo "== Compiling + linking test_graph =="
     src/graph/graph_mode.cpp src/graph/graph_state.cpp \
     src/graph/function_source.cpp src/graph/parametric_source.cpp \
     src/graph/polar_source.cpp src/graph/trace.cpp \
+    src/graph/seq_points.cpp \
     src/apps/table_model.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
-    src/math/complex.cpp \
+    src/math/complex.cpp src/math/seq_expr.cpp \
     src/math/catalog.cpp src/math/dist.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_graph"
@@ -141,6 +142,17 @@ echo "== Compiling + linking test_complex_expr =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_complex_expr"
 
+echo "== Compiling + linking test_seq =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_seq.cpp \
+    src/math/seq_expr.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_seq"
+
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -178,6 +190,9 @@ echo "== Running test_solve =="
 
 echo "== Running test_analysis =="
 "$OUT/test_analysis"
+
+echo "== Running test_seq =="
+"$OUT/test_seq"
 
 echo "== Running test_stats =="
 "$OUT/test_stats"
