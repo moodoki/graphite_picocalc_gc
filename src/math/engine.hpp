@@ -86,4 +86,12 @@ Engine& engine();
 // on parse error or a non-finite result; the field keeps its old value.
 bool eval_field(const char* text, calc_t* out);
 
+// Rewrite postfix factorial `<primary>!` into `fac(<primary>)`, the same
+// pass Engine::evaluate runs before compiling. Exposed so the complex
+// evaluator (math::complexexpr) can share it — otherwise `5!` fails as a
+// syntax error whenever input routes through the complex path (non-REAL
+// mode or an `i`-bearing expression). Returns false if the result won't
+// fit in out_len or a bare `!` has no preceding operand.
+bool preprocess_factorial(const char* in, char* out, size_t out_len);
+
 }  // namespace math

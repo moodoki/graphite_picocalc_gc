@@ -65,6 +65,13 @@ void test_arithmetic() {
     check_ok("1/i", 0, -1, "1/i");
     check_ok("-i", 0, -1, "unary minus i");
     check_ok("2^3", 8, 0, "real power stays real", 1e-8);
+    // Postfix factorial must work on the complex path too (shares
+    // Engine's `!`->fac() rewrite; regression for the non-REAL-mode
+    // syntax-error bug root-caused 2026-07-22).
+    check_ok("5!", 120, 0, "postfix factorial");
+    check_ok("3!+2", 8, 0, "factorial then add");
+    check_ok("(2+1)!", 6, 0, "factorial of paren group");
+    check_ok("2*4!", 48, 0, "factorial binds before multiply");
 }
 
 void test_functions() {

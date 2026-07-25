@@ -364,8 +364,19 @@ Result evaluate(const char* input) {
         }
     }
 
+    // Postfix factorial (`5!` -> `fac(5)`): the complex parser has no `!`
+    // rule of its own, so share Engine's rewrite before parsing —
+    // otherwise `5!` fails as a syntax error on this path (non-REAL mode
+    // or an `i`-bearing expression). fac() itself resolves through
+    // eval_field's real engine, same as any other scalar-span call.
+    char processed[kMaxLen];
+    if (!preprocess_factorial(body, processed, sizeof(processed))) {
+        res.error = "Syntax error";
+        return res;
+    }
+
     P p;
-    p.s = body;
+    p.s = processed;
     const Complex v = parse_expr(p);
     if (p.err == nullptr) {
         skip_ws(p);

@@ -287,6 +287,62 @@ Still to verify on hardware:
 
 ---
 
+## 2026-07-25 — Bugfix session: `!` factorial on the complex path fixed; D10 stall isolated to the multicore FIFO (DMA cleared)
+
+Bug-fixing session on the Pico 1 (connected throughout, flashed via
+`picotool load -f` — the `cp` xattr complaint recurred and aborted the
+BOOTSEL-volume copy, so picotool was the reliable path all session).
+
+**1. `!` factorial bug FIXED (the last open Pico 1 finding from 3D.14).**
+Root cause (root-caused 2026-07-22 by code scan, worklog that date):
+`math::complexexpr::evaluate` has no postfix-`!` rule of its own, and
+`math::engine`'s `!`→`fac()` rewrite lived in an anonymous-namespace
+`preprocess()` it couldn't reach — so `5!` failed as a syntax error
+whenever input routed through the complex path (any non-REAL Number mode,
+or an `i`-bearing expression). Note `fac(5)` already worked there (it
+falls through `parse_scalar_span`→`eval_field`), only the postfix form
+broke. **Fix**: exposed `math::preprocess_factorial()` (a thin public
+wrapper over the existing anonymous `preprocess`) in `engine.hpp`, and
+called it in `complexexpr::evaluate` on the trimmed body before parsing;
+`fac()` itself still resolves through `eval_field`'s real engine like any
+other scalar span. Added 4 host checks to `test_complex_expr`
+(`5!`→120, `3!+2`→8, `(2+1)!`→6, `2*4!`→48) — all green (host suite
+54/54). **HW-verified**: `5!`→120 and `4!`→24 on the Pico 1 in complex
+mode. bss unchanged at 201896 (no new static data).
+
+**2. D10 dual-core stall — DIAGNOSED: it was never the DMA, it's the
+multicore FIFO handshake.** Item 1b from `next-session.md`, the queued
+first step ("diagnose the FIFO stall — timing/handshake bug vs. real HW
+constraint — before rebuilding"). Hypothesis going in: the D10
+(2026-07-10) "core-1 FIFO stall on frame 1" was really a **DMA-to-SPI
+hang** misattributed to the FIFO, because the dead core-1 service's job
+handler called `push_rect_dma` (the DMA path, which has *never* run on
+hardware — the shipped blocking path uses `spi_write_fast`), and if that
+DMA never completed the service never acked, so core 0 blocked on
+`drain_acks()` forever — indistinguishable from a FIFO stall. The same
+D10 session had also found the vendored *bulk-PSRAM DMA* hung, making a
+shared DMA fault plausible. **Test**: routed strip-mode pushes through
+`push_rect_dma` synchronously on core 0 (no multicore), with per-render
+timing prints, flashed, observed. **Result: DMA-to-SPI is healthy.** The
+home screen renders correctly via DMA; full-frame ~160-172 ms (20 strips),
+partial band ~15 ms. Confirmed on **warm reboot** *and* a **genuine cold
+power-on** (correct home screen at frame 1 + live `dma-push:` heartbeat
+while rails settle) — so the display DMA has **no** dependency on the
+D14 PSRAM/SD rail settle: it sources pixels from the SRAM `strip_buf`,
+on its own `dma_claim_unused_channel` channel, on the SPI peripheral —
+nothing to do with the PSRAM QSPI/PIO or the D10 bulk-PSRAM-PIO fix.
+Bonus: DMA (~160 ms) beats the blocking path (~200 ms, D10) even without
+dual-core, since chunk conversion overlaps transfer.
+**Conclusion**: the D10 stall lives in the **multicore FIFO handshake**,
+not DMA — which de-risks reviving D10's compute/core-0 + DMA-push/core-1
+display pipeline (the highest-value dual-core target per the 2026-07-24
+scoping: SPI push dominates compute, so the win is freeing core 0 during
+the ~160 ms push, not a single-frame latency cut). The diagnostic was a
+temporary `framebuffer.cpp` edit, fully reverted; the Pico 1 is back on
+the clean production build (blocking `push_rect`, boots healthy, `psram-bulk:
+OK` + battery heartbeats). **Next (this session, in progress): resolve the
+FIFO handshake and stand the pipeline back up.**
+
 ## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
 
 Docs/planning-only session — no application source touched, only

@@ -100,6 +100,10 @@ bool preprocess(const char* in, char* out, size_t out_len) {
 
 }  // namespace
 
+bool preprocess_factorial(const char* in, char* out, size_t out_len) {
+    return preprocess(in, out, out_len);
+}
+
 calc_t& Variables::operator[](char name) {
     // Lowercase only (case-sensitive since 2026-07-18).
     if (name >= 'a' && name <= 'z') {
