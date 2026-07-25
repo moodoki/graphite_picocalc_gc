@@ -401,6 +401,33 @@ transitions — renders correctly (no torn/stale strips), no hang, feels at
 least as responsive as before. This closes the D10 dual-core display leg
 end to end (root cause → fix → pipeline).
 
+**5. Perf measured (A/B on the Pico 1, temporary `render_frame`
+instrumentation, reverted after).** Synchronous blocking `push_rect` (the
+pre-session shipped path) vs. the DMA pipeline, matched by render load,
+full-frame redraw (20 strips, rows 0-320):
+- light render (~13 ms compute): **173.6 → 146.5 ms, −27 ms (~16%)**
+- medium render (~28 ms compute): **190.3 → 147.8 ms, −42 ms (~22%)**
+- status band (2 strips, the common dirty-band case): **15.4 → 13.5 ms,
+  −2 ms (~12%)**
+
+Headline finding: **pipeline frame time is flat at ~146-148 ms regardless
+of render load** (up to the ~28 ms tested) because the render compute now
+*fully hides* under the push, whereas synchronous time grows linearly with
+compute — so the benefit grows with screen complexity. Decomposing the
+~27 ms light-frame win: ~14 ms from DMA vs blocking push (the push itself,
+~160 → ~146 ms, conversion overlaps transfer) + ~13 ms from render/push
+overlap. **Push floor ≈ 146 ms** (~7.3 ms/strip = SPI wire time,
+irreducible without a faster SPI clock). **Compute-bound screens get ~0
+benefit** — one graph redraw showed `total=1,177,314 render=1,169,899`
+(the render callback alone was 1.17 s); the pipeline only hides compute up
+to the ~146 ms push budget, so heavier screens need the *secondary* D10
+candidate (parallelize `recompute_function` onto a second engine) or plot
+optimization, not this pipeline. Also noted: this design still blocks
+core 0 in `drain_acks` (frame completes before `render_frame` returns), so
+the win is frame-time, not "core 0 free for input during the push" —
+that would need a deeper async redesign, unnecessary for the 16-22%
+already gained.
+
 ## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
 
 Docs/planning-only session — no application source touched, only

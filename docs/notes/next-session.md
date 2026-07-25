@@ -1,74 +1,64 @@
 # Start here — next session
 
-**Last session:** 2026-07-24, a docs/planning-only session — no
-application source touched, no board reflashed (both boards are still in
-their 2026-07-22 (D35) flash state — see "Key things to note"). Four
-blocks, in order: **(1)** Discussed reviving D10's original dual-core
-display pipeline (core-0 compute + core-1 DMA push) — the multicore-FIFO
-stall that killed it was never root-caused, workaround shipped instead —
-and surveyed the rest of the codebase for other parallelization
-candidates. Concluded D10's pipeline is the highest-value target (SPI
-push time dominates over compute); `GraphScreen::recompute_function`'s
-shared `math::engine()` instance is a secondary, harder candidate; matrix
-ops and iterative regression fits were ruled out as inherently
-sequential. Queued into the next bug-fixing session alongside the `!` fix
-— see "The next job" #1b. **(2)** A soak/feedback session (both boards)
-using the testdrive-observations skill — already logged and committed
-separately, `testdrive-2026-07-24-observations.md` (commit 0c2cdae) — no
-need to redo it; MatAns/fnInt-shading feedback was already 4D-scoped
-(see "The next job" #2), and its vector-ops/eigenvector feedback fed
-directly into (3) below. **(3)** Pulled design-departures ideas E
-(vector ops: `dot`/`cross`/`norm`) and G (new: matrix eigenvectors,
-real-only v1) into Phase 4D as **4D.22**/**4D.23** — **D36**. **(4)**
-Immediately after, worked through the remaining departures (C: complex
-lists, D: complex matrices, F: unify `matexpr`/`complexexpr`/`listexpr`)
-and closed all of them as real decisions rather than deferring to a
-post-4D pass — **D37**: P4-11 resolved (real-only readers error on a
-complex value, don't silently truncate — generalized to list/matrix
-elements too); **C and D both go**, as **4D.24**/**4D.25**, routed
-exclusively through the PSRAM tier so Pico 1's fixed 28-slab SRAM pool
-doesn't grow (D's v1 is full complex linear algebra, excluding
-eigendecomposition of a complex matrix); **F** committed as a real
-follow-on once 4D ships, not indefinite parking. A same-session follow-up
-question — how much work to make variables fully polymorphic
-(MATLAB-style, collapsing the `A`-`Z`/`[A]`-`[J]`/`l1`-`l6` namespaces
-themselves, not just the evaluators) — was scoped as new idea **H** but
-**explicitly left undecided**, revisit after 4D ships (same checkpoint as
-F). 4D's subtotal grew ~109 → ~160 hrs this session (Phase 4 total
-~244 → ~295 hrs). Full detail: `worklog.md`'s 2026-07-24 entries,
-`decisions.md` D36/D37, `design-departures-matrix-complex.md` (status:
-A-G closed, H open).
+**Last session:** 2026-07-25, a bug-fixing session on the Pico 1 (connected
+throughout; flashed via `picotool load -f` all session — the `cp` xattr
+complaint recurred, so picotool was the reliable path). Cleared **both**
+queued jobs from the prior handoff plus a perf measurement. Three commits:
+**(1)** `5852c35` — **`!` factorial fixed** on the complex path (shared
+engine's `!`→`fac()` rewrite via a new public `math::preprocess_factorial`;
+`5!`/`4!` HW-verified). Closes the last open 3D.14 finding. **(2)**
+`04128a3` — **D10 dual-core stall root-caused and fixed.** Bisected on HW:
+the raw multicore FIFO handshake works flawlessly (echo round-trips in us);
+DMA-to-SPI works on core 0 (warm + cold boot); but core 1 running
+`push_rect_dma` *hard-wedges the chip* (USB drops). Developer's key tell —
+the crashing firmware boots fine with USB unplugged — pinned it to **XIP
+flash contention**: core 0's tinyusb/`stdio_usb` churns the shared XIP
+cache while core 1 executes the display path from flash → hard fault. Fix:
+mark the whole core-1 display path `__not_in_flash_func` (RAM-resident),
+extending what the vendored driver already did for `spi_write_fast`/
+`spi_finish`. **(3)** `a7fa78f` — **production dual-core display pipeline
+wired** (`display_service_main` + two-buffer strip pipeline in
+`render_frame`; core 0 renders strip N+1 while core 1 DMAs strip N; Pico 1
+strip-mode only, Pico 2 full-framebuffer path left synchronous/untouched).
+HW-validated (correct render, no tearing/hang). **Measured** (A/B vs the
+old blocking path, full-frame redraw): **−16%** light render, **−22%**
+medium, **−12%** status band; pipeline frame time is flat ~146-148 ms
+(compute hides under the push, so the win grows with screen complexity),
+push floor ~146 ms = SPI wire time. Also recorded a graph usage-feedback
+wishlist item (cap grid-line count per axis by range when too dense to
+see). Full detail: `worklog.md`'s 2026-07-25 entry, `decisions.md` D10
+addendum. **Phase 4D remains the next major work — unchanged from the
+2026-07-24 plan below.**
 
 ## The next job
 
-1. **Fix the `!` factorial bug** (root-caused 2026-07-22, not yet applied):
-   `math::complexexpr::evaluate` (`src/math/complex_expr.cpp`) needs the same
-   postfix-`!`→`fac()` rewrite `math::engine`'s `preprocess()` already has
-   (`src/math/engine.cpp`), or bare-`!` expressions need to route through
-   `math::engine()` even in non-REAL Number mode. Small, well-understood fix
-   — good to knock out before or alongside Phase 4D. See the worklog
-   2026-07-22 entry for the full trace.
-1b. **Revisit the D10 dual-core display stall (2026-07-24 scoping)**: queued
-   into the next bug-fixing session alongside the `!` fix, not a Phase 4D
-   item. D10 (2026-07-10) found that routing the strip push through a
-   core-1 service over the multicore FIFO stalled on the very first frame;
-   the workaround (synchronous core-0 rendering) shipped and the FIFO stall
-   itself was never root-caused — `display_service_main`/`push_rect_dma`
-   are still in the tree, unused, per D10's "revisit when." Since D11/D35,
-   profiling has consistently shown SPI push time dominating over compute
-   (recompute ~15-17 ms vs. ~200 ms full-frame push pre-D13), so the
-   highest-value target is pipelining: core 0 computes the next dirty strip
-   while core 1 DMAs the current one out — not data-splitting a single hot
-   function. First step is diagnosing the actual FIFO stall (timing/
-   handshake bug vs. a real hardware constraint) before rebuilding on top of
-   it. Secondary, lower-priority candidate surfaced in the same scoping
-   pass: `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`)
-   sweeps up to 10 independent `Y=` slots but shares one `math::engine()`
-   instance (mutates a shared `X` var) — parallelizing it needs a second
-   engine/vars context, not just a spawned task. Matrix ops (`inverse`,
-   `eigen_core`, etc.) and iterative regression fits (`lm_fit`, `poly_fit`)
-   were reviewed and ruled out — row-reduction/iteration is inherently
-   sequential, not a 2-core split candidate.
+1. **DONE 2026-07-25 — `!` factorial bug fixed** (`5852c35`).
+   `math::complexexpr::evaluate` now shares engine's `!`→`fac()` rewrite via
+   the new public `math::preprocess_factorial` (`engine.hpp`/`.cpp`), applied
+   to the trimmed body before parsing. Host tests + `5!`/`4!` on the Pico 1.
+1b. **DONE 2026-07-25 — D10 dual-core display stall RESOLVED end to end**
+   (`04128a3` root cause + RAM-residency fix, `a7fa78f` production pipeline).
+   The "FIFO stall" was never the FIFO (echo handshake is flawless) and never
+   DMA (fine on core 0) — it was **XIP flash contention**: core 1 executing
+   the display path from flash hard-faults while core 0's USB stack churns
+   the shared XIP cache. Fixed by making the core-1 display path
+   `__not_in_flash_func`. Pipeline shipped (core 0 renders strip N+1 while
+   core 1 DMAs strip N); measured −16..22% on full-frame redraws. Full trace:
+   `worklog.md` 2026-07-25, `decisions.md` D10 addendum. **Two follow-ups
+   left open** (not blocking, no phase home):
+   - **Extend the pipeline to Pico 2** — its full-framebuffer push is still
+     synchronous on core 0 (left untouched because the RP2350 board wasn't in
+     hand to test). When it is: route the full-frame push through core 1 too
+     and re-verify the RAM-residency fix on the RP2350.
+   - **Secondary compute-parallelization candidate** (unchanged from the
+     2026-07-24 scoping, still open): the pipeline gives ~0 benefit on
+     compute-bound screens (render > ~146 ms push budget — a heavy graph
+     redraw measured 1.17 s in the render callback). Those want
+     `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`)
+     parallelized — it sweeps up to 10 independent `Y=` slots but shares one
+     `math::engine()` instance (mutates a shared `X`), so it needs a second
+     engine/vars context, not just a spawned task. Matrix ops and iterative
+     regression fits stay ruled out (inherently sequential).
 2. **Phase 4D (GC completeness)** is the next major work, per
    `phase4-spec.md` §7 (weeks 32-35) — the closing pass that rounds Phase 4
    out into the project's pre-release milestone (sequence graphing, fuller
@@ -166,26 +156,26 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 is now four commits ahead of the Session 19 build** that it
-  was first reflashed to this session (task 3D.14, no code changes at that
-  point) — the same physical flash session then picked up Phase 4A-4C
-  (docs/investigation only), and finally the four D35 perf fixes (stat-plot
-  point cache, list-editor dirty bands, one-file-per-list persistence,
-  one-file-per-matrix persistence), each built, flashed, and
-  developer-confirmed in turn. Current state: boots healthy, telemetry
-  clean over serial; bss **201896 bytes** (was ~193.5 KB pre-D35), still
+- **The Pico 1 now carries the 2026-07-25 bug-fixing work** on top of the
+  D35 state: the `!` factorial fix (`5852c35`), the D10 RAM-residency fix
+  (`04128a3`), and the dual-core display pipeline (`a7fa78f`) — each built,
+  flashed, and developer-confirmed in turn, and the board is back on the
+  clean production pipeline build. Current state: boots healthy, telemetry
+  clean over serial; bss **212184 bytes** (was 201896 pre-pipeline; +10 KB
+  is the second strip buffer for the double-buffered pipeline), still
   comfortably inside the ~76 KB headroom watched since D28. Phase 2 +
   Phase 3 are HW-verified on this board (3D.14 pass, closes D18/Phase 3),
   and Phase 4A-4C are HW-verified on this board (full pass, see the
   Phase 4A-4C worklog entry). Font/glyph correctness was informally
   spot-checked during the Phase 4A-4C pass and reported looking correct
-  (not a dedicated sweep). Only one non-blocking finding remains open on
-  this board: the `!` factorial bug (root-caused, fix not yet applied —
-  see "The next job" #1). The list-editor/scatter-plot perf feel that was
-  open at the start of the day is **fixed and confirmed (D35)** — see
-  "Open design threads" below and `worklog.md`'s fourth 2026-07-22 entry.
-- **No GraphState layout change this session** — still **PCG5** (last
-  bumped Session 18/D30), no new one-time reset on this flash.
+  (not a dedicated sweep). **No open bug findings remain on this board** —
+  the `!` factorial bug is now fixed (was the last one). The
+  list-editor/scatter-plot perf feel is fixed (D35), and the whole render
+  path now runs through the dual-core pipeline (D10 resolved).
+- **No GraphState/persistence layout change 2026-07-25** — still **PCG5**
+  (last bumped Session 18/D30); list/matrix formats unchanged (PCL2/PCM2,
+  D35). The 2026-07-25 work was engine/render-path only, no on-disk change,
+  so no new one-time reset.
 - **List/matrix persistence changed shape this session (D35)**: the old
   single `lists.dat` / `matrices.dat` (magics PCL1 / PCM1) are replaced by
   one file per store — `/picocalc/list1.dat`..`list6.dat` (magic PCL2) and
@@ -285,11 +275,9 @@ observed across either pass.
   shapes; big-radical display and true subscripts (`Sₓ`, `σₓ`) remain
   KIV/wishlist items (D31).
 - **Pico 1 watch-items (task 3D.14 + Phase 4A-4C, 2026-07-22)**: `!`
-  (factorial) throws a syntax error in non-REAL Number mode — **root-caused
-  by code scan** (`complexexpr` lacks `engine`'s postfix-`!` rewrite,
-  reproduces on any board, not a keyboard quirk), fix identified but not
-  yet applied (see "The next job" #1) — **still the only unresolved item
-  in this bullet**. The list editor and 5000-point scatter plot sluggishness
+  (factorial) syntax error in non-REAL Number mode — **FIXED 2026-07-25**
+  (`5852c35`, `complexexpr` now shares engine's postfix-`!` rewrite;
+  `5!`/`4!` HW-verified). The list editor and 5000-point scatter plot sluggishness
   are **fixed as of the same day (D35)**: bucketed stat-plot point cache,
   list-editor dirty-band narrowing, and (the real bottleneck behind "large
   lists feel sluggish to enter") one-file-per-list/matrix SD persistence —
@@ -303,8 +291,10 @@ observed across either pass.
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —
   the last deferred HW item); 340-point curve cache cap; audio HAL; licensing (D17 —
   display/keyboard rewrites remain); dual-core display service (D10
-  addendum — **now scoped for the next bug-fixing session, see "The next
-  job" #1b**); **stale diag-screen label** (`src/main.cpp:213`) — still
+  addendum — **DONE 2026-07-25: root-caused + fixed + pipeline shipped,
+  see "The next job" #1b; two non-blocking follow-ups there — Pico 2
+  full-frame pipeline, and compute-parallelizing `recompute_function`**);
+  **stale diag-screen label** (`src/main.cpp:213`) — still
   hardcoded `"[milestone 1]"` from the Phase 1 bootstrap, never updated
   through milestones 2-5 or phases 2-4. Replace with the current phase
   (e.g. "Phase 4") and a build identifier: git short hash if the tree is
