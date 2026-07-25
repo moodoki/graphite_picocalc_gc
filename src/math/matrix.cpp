@@ -9,13 +9,25 @@ namespace math::matops {
 namespace {
 
 // Streaming row buffers. Never more than three rows are in flight at
-// once (e.g. mul: one A row, one B row, one accumulator row).
-calc_t g_rowa[kMaxRowElems];
-calc_t g_rowb[kMaxRowElems];
-calc_t g_rowc[kMaxRowElems];
+// once (e.g. mul: one A row, one B row, one accumulator row). Complex
+// kernels (4D.25) view the same storage as Complex rows through a
+// union, so the complex tier costs one buffer set, not two (the D37
+// "bss stays real-only" budget bends by the 2x element width only).
+union RowBuf {
+    calc_t d[kMaxRowElems];
+    Complex c[kMaxRowElems];
+    // Complex's default ctor is non-trivial (member initializers), so
+    // the union needs a user-provided one; start life as the real view.
+    RowBuf() : d{} {}
+};
+RowBuf g_rowa;
+RowBuf g_rowb;
+RowBuf g_rowc;
 
 // Working copies for the elimination algorithms and power().
 Array g_mwork[2];
+// make_complex() staging (never aliases the matrix being migrated).
+Array g_staging;
 
 const char* const kErrNotMatrix = "Not a matrix";
 const char* const kErrDim = "Dim mismatch";
@@ -23,6 +35,7 @@ const char* const kErrNotSquare = "Not square";
 const char* const kErrTooLarge = "Matrix too large";
 const char* const kErrMemory = "Out of matrix memory";
 const char* const kErrSingular = "Singular matrix";
+const char* const kErrComplexMat = "Non-real matrix";
 
 bool valid(const Array& a) {
     return a.is_matrix() && a.dim(0) >= 1 && a.dim(1) >= 1;
@@ -33,58 +46,451 @@ bool dims_ok(int rows, int cols) {
            rows * cols <= Array::kMaxElements;
 }
 
+// Retype an output array (expression temps are recycled and may carry
+// a stale dtype from the previous expression).
+bool retype(Array& out, Dtype t) {
+    if (out.dtype() == t) {
+        return true;
+    }
+    out.clear();
+    return out.set_dtype(t);
+}
+
+Dtype join(const Array& a, const Array& b) {
+    return (a.dtype() == Dtype::kComplex || b.dtype() == Dtype::kComplex) ? Dtype::kComplex
+                                                                          : Dtype::kDouble;
+}
+
+// ---- Element-type shims (4D.25) ----
+//
+// The row-streaming kernels below are templated on one of these two
+// policies. RealOps is the original calc_t fast path; CplxOps reads
+// promote a kDouble source to Complex on the fly (mixed real/complex
+// operands), and pivoting magnitude is the modulus.
+
+struct RealOps {
+    using T = calc_t;
+    static T* elems(RowBuf& b) { return b.d; }
+    static T at(const Array& a, int r, int c) { return a.get(r, c); }
+    static void put(Array& a, int r, int c, T v) { a.set(r, c, v); }
+    static void read(const Array& a, int first, int count, RowBuf& b) {
+        a.read_range(first, count, b.d);
+    }
+    static void write(Array& a, int first, int count, const RowBuf& b) {
+        a.write_range(first, count, b.d);
+    }
+    static calc_t mag(T v) { return std::fabs(v); }
+    static T one() { return 1.0; }
+};
+
+struct CplxOps {
+    using T = Complex;
+    static T* elems(RowBuf& b) { return b.c; }
+    static T at(const Array& a, int r, int c) { return a.cget(r, c); }
+    static void put(Array& a, int r, int c, const T& v) { a.cset(r, c, v); }
+    static void read(const Array& a, int first, int count, RowBuf& b) {
+        if (a.dtype() == Dtype::kComplex) {
+            a.read_range_c(first, count, b.c);
+            return;
+        }
+        // Promote a real range in place: widen back-to-front so no
+        // source element is overwritten before it has been read.
+        a.read_range(first, count, b.d);
+        for (int i = count - 1; i >= 0; --i) {
+            b.c[i] = Complex(b.d[i]);
+        }
+    }
+    static void write(Array& a, int first, int count, const RowBuf& b) {
+        a.write_range_c(first, count, b.c);
+    }
+    static calc_t mag(const T& v) { return v.modulus(); }
+    static T one() { return {1.0, 0.0}; }
+};
+
 // Pivot tolerance, relative to the matrix's largest magnitude (so
 // scaling A by 1e-6 doesn't turn it "singular").
-calc_t pivot_eps(const Array& a) {
+template <typename Ops>
+calc_t pivot_eps_t(const Array& a) {
     calc_t maxabs = 0;
     const int n = a.size();
     for (int at = 0; at < n; at += kMaxRowElems) {
         const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
-        a.read_range(at, m, g_rowa);
+        Ops::read(a, at, m, g_rowa);
+        const auto* p = Ops::elems(g_rowa);
         for (int i = 0; i < m; ++i) {
-            maxabs = std::max(std::fabs(g_rowa[i]), maxabs);
+            maxabs = std::max(Ops::mag(p[i]), maxabs);
         }
     }
     return 1e-12 * (maxabs > 1.0 ? maxabs : 1.0);
 }
 
-void read_row(const Array& a, int r, calc_t* buf) {
-    a.read_range(r * a.dim(1), a.dim(1), buf);
+template <typename Ops>
+void read_row_t(const Array& a, int r, RowBuf& buf) {
+    Ops::read(a, r * a.dim(1), a.dim(1), buf);
 }
 
-void write_row(Array& a, int r, const calc_t* buf) {
-    a.write_range(r * a.dim(1), a.dim(1), buf);
+template <typename Ops>
+void write_row_t(Array& a, int r, const RowBuf& buf) {
+    Ops::write(a, r * a.dim(1), a.dim(1), buf);
 }
 
-void swap_rows(Array& a, int r1, int r2) {
+template <typename Ops>
+void swap_rows_t(Array& a, int r1, int r2) {
     if (r1 == r2) {
         return;
     }
-    read_row(a, r1, g_rowa);
-    read_row(a, r2, g_rowb);
-    write_row(a, r1, g_rowb);
-    write_row(a, r2, g_rowa);
+    read_row_t<Ops>(a, r1, g_rowa);
+    read_row_t<Ops>(a, r2, g_rowb);
+    write_row_t<Ops>(a, r1, g_rowb);
+    write_row_t<Ops>(a, r2, g_rowa);
 }
 
 // a[dst,:] += factor * a[src,:]
-void add_scaled_row(Array& a, int dst, int src, calc_t factor) {
+template <typename Ops>
+void add_scaled_row_t(Array& a, int dst, int src, const typename Ops::T& factor) {
     const int cols = a.dim(1);
-    read_row(a, dst, g_rowa);
-    read_row(a, src, g_rowb);
+    read_row_t<Ops>(a, dst, g_rowa);
+    read_row_t<Ops>(a, src, g_rowb);
+    auto* pa = Ops::elems(g_rowa);
+    auto* pb = Ops::elems(g_rowb);
     for (int c = 0; c < cols; ++c) {
-        g_rowa[c] += factor * g_rowb[c];
+        pa[c] = pa[c] + factor * pb[c];
     }
-    write_row(a, dst, g_rowa);
+    write_row_t<Ops>(a, dst, g_rowa);
 }
 
-void scale_row(Array& a, int r, calc_t factor) {
+template <typename Ops>
+void scale_row_t(Array& a, int r, const typename Ops::T& factor) {
     const int cols = a.dim(1);
-    read_row(a, r, g_rowa);
+    read_row_t<Ops>(a, r, g_rowa);
+    auto* pa = Ops::elems(g_rowa);
     for (int c = 0; c < cols; ++c) {
-        g_rowa[c] *= factor;
+        pa[c] = pa[c] * factor;
     }
-    write_row(a, r, g_rowa);
+    write_row_t<Ops>(a, r, g_rowa);
 }
+
+template <typename Ops>
+void elementwise_t(const Array& a, const Array& b, Array& out, bool subtract) {
+    const int rows = a.dim(0);
+    const int cols = a.dim(1);
+    for (int r = 0; r < rows; ++r) {
+        read_row_t<Ops>(a, r, g_rowa);
+        read_row_t<Ops>(b, r, g_rowb);
+        auto* pa = Ops::elems(g_rowa);
+        auto* pb = Ops::elems(g_rowb);
+        for (int c = 0; c < cols; ++c) {
+            pa[c] = subtract ? pa[c] - pb[c] : pa[c] + pb[c];
+        }
+        write_row_t<Ops>(out, r, g_rowa);
+    }
+}
+
+// C[i,:] = sum_k A[i,k] * B[k,:] — row-major streaming friendly for
+// the PSRAM tier (no strided column reads).
+template <typename Ops>
+void mul_t(const Array& a, const Array& b, Array& out) {
+    const int rows = a.dim(0);
+    const int inner = a.dim(1);
+    const int cols = b.dim(1);
+    for (int i = 0; i < rows; ++i) {
+        read_row_t<Ops>(a, i, g_rowa);
+        auto* pa = Ops::elems(g_rowa);
+        auto* pc = Ops::elems(g_rowc);
+        for (int c = 0; c < cols; ++c) {
+            pc[c] = typename Ops::T{};
+        }
+        for (int k = 0; k < inner; ++k) {
+            if (Ops::mag(pa[k]) == 0) {
+                continue;
+            }
+            read_row_t<Ops>(b, k, g_rowb);
+            auto* pb = Ops::elems(g_rowb);
+            for (int c = 0; c < cols; ++c) {
+                pc[c] = pc[c] + pa[k] * pb[c];
+            }
+        }
+        write_row_t<Ops>(out, i, g_rowc);
+    }
+}
+
+// Read a source row, scatter it as a destination column. The scatter
+// is per-element, but each element is touched exactly once.
+template <typename Ops>
+void transpose_t(const Array& a, Array& out) {
+    const int rows = a.dim(0);
+    const int cols = a.dim(1);
+    for (int r = 0; r < rows; ++r) {
+        read_row_t<Ops>(a, r, g_rowa);
+        const auto* pa = Ops::elems(g_rowa);
+        for (int c = 0; c < cols; ++c) {
+            Ops::put(out, c, r, pa[c]);
+        }
+    }
+}
+
+template <typename Ops>
+void augment_t(const Array& a, const Array& b, Array& out) {
+    const int rows = a.dim(0);
+    const int ca = a.dim(1);
+    const int cb = b.dim(1);
+    for (int r = 0; r < rows; ++r) {
+        read_row_t<Ops>(a, r, g_rowc);
+        read_row_t<Ops>(b, r, g_rowb);
+        auto* pc = Ops::elems(g_rowc);
+        const auto* pb = Ops::elems(g_rowb);
+        for (int i = 0; i < cb; ++i) {
+            pc[ca + i] = pb[i];
+        }
+        Ops::write(out, r * (ca + cb), ca + cb, g_rowc);
+    }
+}
+
+template <typename Ops>
+void reshape_t(const Array& a, int rows, int cols, Array& out) {
+    // Zero-fill through the row buffer (Array::fill is real-only).
+    auto* pb = Ops::elems(g_rowb);
+    for (int i = 0; i < kMaxRowElems; ++i) {
+        pb[i] = typename Ops::T{};
+    }
+    const int n = out.size();
+    for (int at = 0; at < n; at += kMaxRowElems) {
+        Ops::write(out, at, n - at < kMaxRowElems ? n - at : kMaxRowElems, g_rowb);
+    }
+    if (a.size() == 0 || !a.is_matrix()) {
+        return;
+    }
+    const int copy_rows = rows < a.dim(0) ? rows : a.dim(0);
+    const int copy_cols = cols < a.dim(1) ? cols : a.dim(1);
+    for (int r = 0; r < copy_rows; ++r) {
+        Ops::read(a, r * a.dim(1), copy_cols, g_rowa);
+        Ops::write(out, r * cols, copy_cols, g_rowa);
+    }
+}
+
+// out := I_n (out already sized n x n with the right dtype).
+template <typename Ops>
+void fill_identity_t(Array& out, int n) {
+    auto* pa = Ops::elems(g_rowa);
+    for (int c = 0; c < n; ++c) {
+        pa[c] = typename Ops::T{};
+    }
+    for (int r = 0; r < n; ++r) {
+        if (r > 0) {
+            pa[r - 1] = typename Ops::T{};
+        }
+        pa[r] = Ops::one();
+        write_row_t<Ops>(out, r, g_rowa);
+    }
+}
+
+// Forward elimination to (unreduced) row echelon form, in place.
+// Returns the pivot count; *sign flips per row swap (for det).
+template <typename Ops>
+int forward_eliminate_t(Array& w, calc_t eps, int* sign) {
+    const int rows = w.dim(0);
+    const int cols = w.dim(1);
+    int pivots = 0;
+    for (int col = 0; col < cols && pivots < rows; ++col) {
+        int best = -1;
+        calc_t best_abs = eps;
+        for (int r = pivots; r < rows; ++r) {
+            const calc_t v = Ops::mag(Ops::at(w, r, col));
+            if (v > best_abs) {
+                best_abs = v;
+                best = r;
+            }
+        }
+        if (best < 0) {
+            continue;  // No pivot in this column
+        }
+        if (best != pivots && sign != nullptr) {
+            *sign = -*sign;
+        }
+        swap_rows_t<Ops>(w, best, pivots);
+        const typename Ops::T piv = Ops::at(w, pivots, col);
+        for (int r = pivots + 1; r < rows; ++r) {
+            const typename Ops::T v = Ops::at(w, r, col);
+            if (Ops::mag(v) != 0) {
+                add_scaled_row_t<Ops>(w, r, pivots, -(v / piv));
+            }
+        }
+        ++pivots;
+    }
+    return pivots;
+}
+
+template <typename Ops>
+bool det_t(const Array& a, typename Ops::T* out, const char** err) {
+    const int n = a.dim(0);
+    if (n <= 3) {  // Direct expansion — no working copy needed
+        if (n == 1) {
+            *out = Ops::at(a, 0, 0);
+        } else if (n == 2) {
+            *out = Ops::at(a, 0, 0) * Ops::at(a, 1, 1) - Ops::at(a, 0, 1) * Ops::at(a, 1, 0);
+        } else {
+            *out = Ops::at(a, 0, 0) *
+                       (Ops::at(a, 1, 1) * Ops::at(a, 2, 2) - Ops::at(a, 1, 2) * Ops::at(a, 2, 1)) -
+                   Ops::at(a, 0, 1) *
+                       (Ops::at(a, 1, 0) * Ops::at(a, 2, 2) - Ops::at(a, 1, 2) * Ops::at(a, 2, 0)) +
+                   Ops::at(a, 0, 2) *
+                       (Ops::at(a, 1, 0) * Ops::at(a, 2, 1) - Ops::at(a, 1, 1) * Ops::at(a, 2, 0));
+        }
+        return true;
+    }
+    Array& w = g_mwork[0];
+    if (!copy(a, w)) {
+        *err = kErrMemory;
+        return false;
+    }
+    int sign = 1;
+    const int pivots = forward_eliminate_t<Ops>(w, pivot_eps_t<Ops>(a), &sign);
+    if (pivots < n) {
+        *out = typename Ops::T{};  // Rank-deficient: det is exactly 0
+    } else {
+        typename Ops::T det = Ops::one();
+        if (sign < 0) {
+            det = -det;
+        }
+        for (int i = 0; i < n; ++i) {
+            det = det * Ops::at(w, i, i);
+        }
+        *out = det;
+    }
+    w.clear();
+    return true;
+}
+
+template <typename Ops>
+bool inverse_t(const Array& a, Array& out, const char** err) {
+    const int n = a.dim(0);
+    Array& w = g_mwork[0];
+    if (!copy(a, w)) {
+        w.clear();
+        *err = kErrMemory;
+        return false;
+    }
+    fill_identity_t<Ops>(out, n);
+    const calc_t eps = pivot_eps_t<Ops>(a);
+    bool ok = true;
+    // Gauss-Jordan: every row op on W is mirrored on `out`, which
+    // starts as I and ends as A^-1.
+    for (int col = 0; col < n; ++col) {
+        int best = -1;
+        calc_t best_abs = eps;
+        for (int r = col; r < n; ++r) {
+            const calc_t v = Ops::mag(Ops::at(w, r, col));
+            if (v > best_abs) {
+                best_abs = v;
+                best = r;
+            }
+        }
+        if (best < 0) {
+            *err = kErrSingular;
+            ok = false;
+            break;
+        }
+        swap_rows_t<Ops>(w, best, col);
+        swap_rows_t<Ops>(out, best, col);
+        const typename Ops::T inv_piv = Ops::one() / Ops::at(w, col, col);
+        scale_row_t<Ops>(w, col, inv_piv);
+        scale_row_t<Ops>(out, col, inv_piv);
+        for (int r = 0; r < n; ++r) {
+            if (r == col) {
+                continue;
+            }
+            const typename Ops::T v = Ops::at(w, r, col);
+            if (Ops::mag(v) != 0) {
+                add_scaled_row_t<Ops>(w, r, col, -v);
+                add_scaled_row_t<Ops>(out, r, col, -v);
+            }
+        }
+    }
+    w.clear();
+    return ok;
+}
+
+template <typename Ops>
+void rref_t(const Array& a, Array& out) {
+    const int rows = out.dim(0);
+    const int cols = out.dim(1);
+    const calc_t eps = pivot_eps_t<Ops>(a);
+    int pivots = 0;
+    for (int col = 0; col < cols && pivots < rows; ++col) {
+        int best = -1;
+        calc_t best_abs = eps;
+        for (int r = pivots; r < rows; ++r) {
+            const calc_t v = Ops::mag(Ops::at(out, r, col));
+            if (v > best_abs) {
+                best_abs = v;
+                best = r;
+            }
+        }
+        if (best < 0) {
+            continue;
+        }
+        swap_rows_t<Ops>(out, best, pivots);
+        scale_row_t<Ops>(out, pivots, Ops::one() / Ops::at(out, pivots, col));
+        for (int r = 0; r < rows; ++r) {
+            if (r == pivots) {
+                continue;
+            }
+            const typename Ops::T v = Ops::at(out, r, col);
+            if (Ops::mag(v) != 0) {
+                add_scaled_row_t<Ops>(out, r, pivots, -v);
+            }
+        }
+        ++pivots;
+    }
+}
+
+}  // namespace
+
+bool copy(const Array& src, Array& dst) {
+    if (!retype(dst, src.dtype()) || !dst.resize(src.dim(0), src.dim(1))) {
+        return false;
+    }
+    const int n = src.size();
+    if (src.dtype() == Dtype::kComplex) {
+        for (int at = 0; at < n; at += kMaxRowElems) {
+            const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
+            src.read_range_c(at, m, g_rowc.c);
+            dst.write_range_c(at, m, g_rowc.c);
+        }
+        return true;
+    }
+    for (int at = 0; at < n; at += kMaxRowElems) {
+        const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
+        src.read_range(at, m, g_rowc.d);
+        dst.write_range(at, m, g_rowc.d);
+    }
+    return true;
+}
+
+bool make_complex(Array& m) {
+    if (m.dtype() == Dtype::kComplex) {
+        return true;
+    }
+    if (!m.is_matrix()) {
+        return false;
+    }
+    g_staging.clear();
+    if (!g_staging.set_dtype(Dtype::kComplex) || !g_staging.resize(m.dim(0), m.dim(1))) {
+        g_staging.clear();
+        return false;
+    }
+    const int n = m.size();
+    for (int at = 0; at < n; at += kMaxRowElems) {
+        const int cnt = n - at < kMaxRowElems ? n - at : kMaxRowElems;
+        CplxOps::read(m, at, cnt, g_rowa);  // Promotes the real elements
+        g_staging.write_range_c(at, cnt, g_rowa.c);
+    }
+    const bool ok = copy(g_staging, m);
+    g_staging.clear();
+    return ok;
+}
+
+namespace {
 
 bool elementwise(const Array& a, const Array& b, Array& out, bool subtract, const char** err) {
     if (!valid(a) || !valid(b)) {
@@ -97,70 +503,19 @@ bool elementwise(const Array& a, const Array& b, Array& out, bool subtract, cons
         *err = kErrDim;
         return false;
     }
-    if (!out.resize(rows, cols)) {
+    if (!retype(out, join(a, b)) || !out.resize(rows, cols)) {
         *err = kErrMemory;
         return false;
     }
-    for (int r = 0; r < rows; ++r) {
-        read_row(a, r, g_rowa);
-        read_row(b, r, g_rowb);
-        for (int c = 0; c < cols; ++c) {
-            g_rowa[c] = subtract ? g_rowa[c] - g_rowb[c] : g_rowa[c] + g_rowb[c];
-        }
-        write_row(out, r, g_rowa);
+    if (out.dtype() == Dtype::kComplex) {
+        elementwise_t<CplxOps>(a, b, out, subtract);
+    } else {
+        elementwise_t<RealOps>(a, b, out, subtract);
     }
     return true;
-}
-
-// Forward elimination to (unreduced) row echelon form, in place.
-// Returns the pivot count; *sign flips per row swap (for det).
-int forward_eliminate(Array& w, calc_t eps, int* sign) {
-    const int rows = w.dim(0);
-    const int cols = w.dim(1);
-    int pivots = 0;
-    for (int col = 0; col < cols && pivots < rows; ++col) {
-        int best = -1;
-        calc_t best_abs = eps;
-        for (int r = pivots; r < rows; ++r) {
-            const calc_t v = std::fabs(w.get(r, col));
-            if (v > best_abs) {
-                best_abs = v;
-                best = r;
-            }
-        }
-        if (best < 0) {
-            continue;  // No pivot in this column
-        }
-        if (best != pivots && sign != nullptr) {
-            *sign = -*sign;
-        }
-        swap_rows(w, best, pivots);
-        const calc_t piv = w.get(pivots, col);
-        for (int r = pivots + 1; r < rows; ++r) {
-            const calc_t v = w.get(r, col);
-            if (v != 0) {
-                add_scaled_row(w, r, pivots, -v / piv);
-            }
-        }
-        ++pivots;
-    }
-    return pivots;
 }
 
 }  // namespace
-
-bool copy(const Array& src, Array& dst) {
-    if (!dst.resize(src.dim(0), src.dim(1))) {
-        return false;
-    }
-    const int n = src.size();
-    for (int at = 0; at < n; at += kMaxRowElems) {
-        const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
-        src.read_range(at, m, g_rowc);
-        dst.write_range(at, m, g_rowc);
-    }
-    return true;
-}
 
 bool add(const Array& a, const Array& b, Array& out, const char** err) {
     return elementwise(a, b, out, false, err);
@@ -186,27 +541,14 @@ bool mul(const Array& a, const Array& b, Array& out, const char** err) {
         *err = kErrTooLarge;
         return false;
     }
-    if (!out.resize(rows, cols)) {
+    if (!retype(out, join(a, b)) || !out.resize(rows, cols)) {
         *err = kErrMemory;
         return false;
     }
-    // C[i,:] = sum_k A[i,k] * B[k,:] — row-major streaming friendly
-    // for the PSRAM tier (no strided column reads).
-    for (int i = 0; i < rows; ++i) {
-        read_row(a, i, g_rowa);
-        for (int c = 0; c < cols; ++c) {
-            g_rowc[c] = 0;
-        }
-        for (int k = 0; k < inner; ++k) {
-            if (g_rowa[k] == 0) {
-                continue;
-            }
-            read_row(b, k, g_rowb);
-            for (int c = 0; c < cols; ++c) {
-                g_rowc[c] += g_rowa[k] * g_rowb[c];
-            }
-        }
-        write_row(out, i, g_rowc);
+    if (out.dtype() == Dtype::kComplex) {
+        mul_t<CplxOps>(a, b, out);
+    } else {
+        mul_t<RealOps>(a, b, out);
     }
     return true;
 }
@@ -216,18 +558,45 @@ bool scalar_mul(const Array& a, calc_t k, Array& out, const char** err) {
         *err = kErrNotMatrix;
         return false;
     }
-    if (!out.resize(a.dim(0), a.dim(1))) {
+    if (a.dtype() == Dtype::kComplex) {
+        return scalar_mul(a, Complex(k), out, err);
+    }
+    if (!retype(out, Dtype::kDouble) || !out.resize(a.dim(0), a.dim(1))) {
         *err = kErrMemory;
         return false;
     }
     const int n = a.size();
     for (int at = 0; at < n; at += kMaxRowElems) {
         const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
-        a.read_range(at, m, g_rowa);
+        a.read_range(at, m, g_rowa.d);
         for (int i = 0; i < m; ++i) {
-            g_rowa[i] *= k;
+            g_rowa.d[i] *= k;
         }
-        out.write_range(at, m, g_rowa);
+        out.write_range(at, m, g_rowa.d);
+    }
+    return true;
+}
+
+bool scalar_mul(const Array& a, const Complex& k, Array& out, const char** err) {
+    if (!valid(a)) {
+        *err = kErrNotMatrix;
+        return false;
+    }
+    if (a.dtype() == Dtype::kDouble && k.im == 0) {
+        return scalar_mul(a, k.re, out, err);
+    }
+    if (!retype(out, Dtype::kComplex) || !out.resize(a.dim(0), a.dim(1))) {
+        *err = kErrMemory;
+        return false;
+    }
+    const int n = a.size();
+    for (int at = 0; at < n; at += kMaxRowElems) {
+        const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
+        CplxOps::read(a, at, m, g_rowa);
+        for (int i = 0; i < m; ++i) {
+            g_rowa.c[i] = g_rowa.c[i] * k;
+        }
+        out.write_range_c(at, m, g_rowa.c);
     }
     return true;
 }
@@ -237,19 +606,14 @@ bool transpose(const Array& a, Array& out, const char** err) {
         *err = kErrNotMatrix;
         return false;
     }
-    const int rows = a.dim(0);
-    const int cols = a.dim(1);
-    if (!out.resize(cols, rows)) {
+    if (!retype(out, a.dtype()) || !out.resize(a.dim(1), a.dim(0))) {
         *err = kErrMemory;
         return false;
     }
-    // Read a source row, scatter it as a destination column. The
-    // scatter is per-element, but each element is touched exactly once.
-    for (int r = 0; r < rows; ++r) {
-        read_row(a, r, g_rowa);
-        for (int c = 0; c < cols; ++c) {
-            out.set(c, r, g_rowa[c]);
-        }
+    if (out.dtype() == Dtype::kComplex) {
+        transpose_t<CplxOps>(a, out);
+    } else {
+        transpose_t<RealOps>(a, out);
     }
     return true;
 }
@@ -259,20 +623,11 @@ bool identity(int n, Array& out, const char** err) {
         *err = kErrDim;
         return false;
     }
-    if (!out.resize(n, n)) {
+    if (!retype(out, Dtype::kDouble) || !out.resize(n, n)) {
         *err = kErrMemory;
         return false;
     }
-    for (int c = 0; c < n; ++c) {
-        g_rowa[c] = 0;
-    }
-    for (int r = 0; r < n; ++r) {
-        if (r > 0) {
-            g_rowa[r - 1] = 0;
-        }
-        g_rowa[r] = 1;
-        write_row(out, r, g_rowa);
-    }
+    fill_identity_t<RealOps>(out, n);
     return true;
 }
 
@@ -292,14 +647,14 @@ bool augment(const Array& a, const Array& b, Array& out, const char** err) {
         *err = kErrTooLarge;
         return false;
     }
-    if (!out.resize(rows, ca + cb)) {
+    if (!retype(out, join(a, b)) || !out.resize(rows, ca + cb)) {
         *err = kErrMemory;
         return false;
     }
-    for (int r = 0; r < rows; ++r) {
-        read_row(a, r, g_rowc);
-        b.read_range(r * cb, cb, g_rowc + ca);
-        write_row(out, r, g_rowc);
+    if (out.dtype() == Dtype::kComplex) {
+        augment_t<CplxOps>(a, b, out);
+    } else {
+        augment_t<RealOps>(a, b, out);
     }
     return true;
 }
@@ -309,19 +664,16 @@ bool reshape(const Array& a, int rows, int cols, Array& out, const char** err) {
         *err = kErrDim;
         return false;
     }
-    if (!out.resize(rows, cols)) {
+    // An empty source (editor DIM creating a matrix) starts real.
+    const Dtype t = (a.is_matrix() && a.size() > 0) ? a.dtype() : Dtype::kDouble;
+    if (!retype(out, t) || !out.resize(rows, cols)) {
         *err = kErrMemory;
         return false;
     }
-    out.fill(0);
-    if (a.size() == 0 || !a.is_matrix()) {
-        return true;
-    }
-    const int copy_rows = rows < a.dim(0) ? rows : a.dim(0);
-    const int copy_cols = cols < a.dim(1) ? cols : a.dim(1);
-    for (int r = 0; r < copy_rows; ++r) {
-        a.read_range(r * a.dim(1), copy_cols, g_rowa);
-        out.write_range(r * cols, copy_cols, g_rowa);
+    if (out.dtype() == Dtype::kComplex) {
+        reshape_t<CplxOps>(a, rows, cols, out);
+    } else {
+        reshape_t<RealOps>(a, rows, cols, out);
     }
     return true;
 }
@@ -331,40 +683,34 @@ bool determinant(const Array& a, calc_t* out, const char** err) {
         *err = kErrNotMatrix;
         return false;
     }
-    const int n = a.dim(0);
-    if (a.dim(1) != n) {
+    if (a.dtype() == Dtype::kComplex) {
+        *err = kErrComplexMat;  // Real-only entry point (D37): never truncate
+        return false;
+    }
+    if (a.dim(1) != a.dim(0)) {
         *err = kErrNotSquare;
         return false;
     }
-    if (n <= 3) {  // Direct expansion — no working copy needed
-        if (n == 1) {
-            *out = a.get(0, 0);
-        } else if (n == 2) {
-            *out = a.get(0, 0) * a.get(1, 1) - a.get(0, 1) * a.get(1, 0);
-        } else {
-            *out = a.get(0, 0) * (a.get(1, 1) * a.get(2, 2) - a.get(1, 2) * a.get(2, 1)) -
-                   a.get(0, 1) * (a.get(1, 0) * a.get(2, 2) - a.get(1, 2) * a.get(2, 0)) +
-                   a.get(0, 2) * (a.get(1, 0) * a.get(2, 1) - a.get(1, 1) * a.get(2, 0));
-        }
-        return true;
-    }
-    Array& w = g_mwork[0];
-    if (!copy(a, w)) {
-        *err = kErrMemory;
+    return det_t<RealOps>(a, out, err);
+}
+
+bool determinant(const Array& a, Complex* out, const char** err) {
+    if (!valid(a)) {
+        *err = kErrNotMatrix;
         return false;
     }
-    int sign = 1;
-    const int pivots = forward_eliminate(w, pivot_eps(a), &sign);
-    if (pivots < n) {
-        *out = 0;  // Rank-deficient: det is exactly 0
-    } else {
-        calc_t det = sign;
-        for (int i = 0; i < n; ++i) {
-            det *= w.get(i, i);
-        }
-        *out = det;
+    if (a.dim(1) != a.dim(0)) {
+        *err = kErrNotSquare;
+        return false;
     }
-    w.clear();
+    if (a.dtype() == Dtype::kComplex) {
+        return det_t<CplxOps>(a, out, err);
+    }
+    calc_t d = 0;
+    if (!det_t<RealOps>(a, &d, err)) {
+        return false;
+    }
+    *out = Complex(d);
     return true;
 }
 
@@ -378,49 +724,12 @@ bool inverse(const Array& a, Array& out, const char** err) {
         *err = kErrNotSquare;
         return false;
     }
-    Array& w = g_mwork[0];
-    if (!copy(a, w) || !identity(n, out, err)) {
-        w.clear();
+    if (!retype(out, a.dtype()) || !out.resize(n, n)) {
         *err = kErrMemory;
         return false;
     }
-    const calc_t eps = pivot_eps(a);
-    bool ok = true;
-    // Gauss-Jordan: every row op on W is mirrored on `out`, which
-    // starts as I and ends as A^-1.
-    for (int col = 0; col < n; ++col) {
-        int best = -1;
-        calc_t best_abs = eps;
-        for (int r = col; r < n; ++r) {
-            const calc_t v = std::fabs(w.get(r, col));
-            if (v > best_abs) {
-                best_abs = v;
-                best = r;
-            }
-        }
-        if (best < 0) {
-            *err = kErrSingular;
-            ok = false;
-            break;
-        }
-        swap_rows(w, best, col);
-        swap_rows(out, best, col);
-        const calc_t inv_piv = 1.0 / w.get(col, col);
-        scale_row(w, col, inv_piv);
-        scale_row(out, col, inv_piv);
-        for (int r = 0; r < n; ++r) {
-            if (r == col) {
-                continue;
-            }
-            const calc_t v = w.get(r, col);
-            if (v != 0) {
-                add_scaled_row(w, r, col, -v);
-                add_scaled_row(out, r, col, -v);
-            }
-        }
-    }
-    w.clear();
-    return ok;
+    return a.dtype() == Dtype::kComplex ? inverse_t<CplxOps>(a, out, err)
+                                        : inverse_t<RealOps>(a, out, err);
 }
 
 bool ref(const Array& a, Array& out, const char** err) {
@@ -432,7 +741,11 @@ bool ref(const Array& a, Array& out, const char** err) {
         *err = kErrMemory;
         return false;
     }
-    forward_eliminate(out, pivot_eps(a), nullptr);
+    if (out.dtype() == Dtype::kComplex) {
+        forward_eliminate_t<CplxOps>(out, pivot_eps_t<CplxOps>(a), nullptr);
+    } else {
+        forward_eliminate_t<RealOps>(out, pivot_eps_t<RealOps>(a), nullptr);
+    }
     return true;
 }
 
@@ -445,35 +758,10 @@ bool rref(const Array& a, Array& out, const char** err) {
         *err = kErrMemory;
         return false;
     }
-    const int rows = out.dim(0);
-    const int cols = out.dim(1);
-    const calc_t eps = pivot_eps(a);
-    int pivots = 0;
-    for (int col = 0; col < cols && pivots < rows; ++col) {
-        int best = -1;
-        calc_t best_abs = eps;
-        for (int r = pivots; r < rows; ++r) {
-            const calc_t v = std::fabs(out.get(r, col));
-            if (v > best_abs) {
-                best_abs = v;
-                best = r;
-            }
-        }
-        if (best < 0) {
-            continue;
-        }
-        swap_rows(out, best, pivots);
-        scale_row(out, pivots, 1.0 / out.get(pivots, col));
-        for (int r = 0; r < rows; ++r) {
-            if (r == pivots) {
-                continue;
-            }
-            const calc_t v = out.get(r, col);
-            if (v != 0) {
-                add_scaled_row(out, r, pivots, -v);
-            }
-        }
-        ++pivots;
+    if (out.dtype() == Dtype::kComplex) {
+        rref_t<CplxOps>(a, out);
+    } else {
+        rref_t<RealOps>(a, out);
     }
     return true;
 }
@@ -488,7 +776,11 @@ bool rank(const Array& a, int* out, const char** err) {
         *err = kErrMemory;
         return false;
     }
-    *out = forward_eliminate(w, pivot_eps(a), nullptr);
+    if (w.dtype() == Dtype::kComplex) {
+        *out = forward_eliminate_t<CplxOps>(w, pivot_eps_t<CplxOps>(a), nullptr);
+    } else {
+        *out = forward_eliminate_t<RealOps>(w, pivot_eps_t<RealOps>(a), nullptr);
+    }
     w.clear();
     return true;
 }
@@ -544,10 +836,15 @@ namespace {
 // spectrum as Complex (real results carry im == 0), never erroring on
 // a complex-conjugate pair itself — that's now a legitimate spectrum
 // entry rather than a domain error. `eig` must hold at least
-// kMaxEigen entries.
+// kMaxEigen entries. Input stays real-only (D37): a complex-valued
+// matrix errors rather than reading truncated real parts.
 bool eigen_core(const Array& a, Complex* eig, int* out_count, const char** err) {
     if (!valid(a)) {
         *err = kErrNotMatrix;
+        return false;
+    }
+    if (a.dtype() == Dtype::kComplex) {
+        *err = kErrComplexMat;
         return false;
     }
     const int n = a.dim(0);
@@ -562,9 +859,9 @@ bool eigen_core(const Array& a, Complex* eig, int* out_count, const char** err) 
     // n <= 10: the whole problem fits an SRAM scratch matrix.
     calc_t h[kMaxEigen][kMaxEigen];
     for (int r = 0; r < n; ++r) {
-        read_row(a, r, g_rowa);
+        a.read_range(r * n, n, g_rowa.d);
         for (int c = 0; c < n; ++c) {
-            h[r][c] = g_rowa[c];
+            h[r][c] = g_rowa.d[c];
         }
     }
 
@@ -728,7 +1025,7 @@ bool eigenvalues(const Array& a, Array& out, const char** err) {
     for (int i = 0; i < found; ++i) {
         real_eig[i] = eig[i].re;
     }
-    if (!out.resize(found)) {
+    if (!retype(out, Dtype::kDouble) || !out.resize(found)) {
         *err = kErrMemory;
         return false;
     }

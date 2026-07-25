@@ -43,13 +43,36 @@ void check_err(bool ok, const char* err, const char* expected, const char* what)
     }
 }
 
-// Fill a rows x cols matrix from a flat row-major initializer.
+// Fill a rows x cols matrix from a flat row-major initializer (also
+// reverts a complex-retyped Array back to the real tier).
 bool fill(math::Array& m, int rows, int cols, const double* vals) {
-    if (!m.resize(rows, cols)) {
+    m.clear();
+    if (!m.set_dtype(math::Dtype::kDouble) || !m.resize(rows, cols)) {
         return false;
     }
     m.write_range(0, rows * cols, vals);
     return true;
+}
+
+// Complex fill (4D.25).
+bool cfill(math::Array& m, int rows, int cols, const math::Complex* vals) {
+    m.clear();
+    if (!m.set_dtype(math::Dtype::kComplex) || !m.resize(rows, cols)) {
+        return false;
+    }
+    m.write_range_c(0, rows * cols, vals);
+    return true;
+}
+
+void check_cnear(const math::Complex& got, double re, double im, const char* what,
+                 double tol = 1e-9) {
+    ++g_checks;
+    if (std::isnan(got.re) || std::isnan(got.im) || std::fabs(got.re - re) > tol ||
+        std::fabs(got.im - im) > tol) {
+        std::printf("FAIL: %s -> (%.12g,%.12g) (expected (%.12g,%.12g))\n", what, got.re, got.im,
+                    re, im);
+        ++g_failures;
+    }
 }
 
 void check_matrix(const math::Array& m, int rows, int cols, const double* expected,
@@ -709,6 +732,193 @@ void test_store() {
     check(store.matrix(0).size() == 0, "store [A] cleared");
 }
 
+// ---- 4D.25: complex matrices ----
+
+void test_complex_matops() {
+    using namespace math;
+    Array a;
+    Array b;
+    Array out;
+    const char* err = nullptr;
+
+    // A = [[1+i, 2],[3, 4-i]]
+    const Complex va[4] = {{1, 1}, {2, 0}, {3, 0}, {4, -1}};
+    check(cfill(a, 2, 2, va), "cfill A");
+    check(a.in_psram(), "complex matrix rides the PSRAM tier");
+
+    // det(A) = (1+i)(4-i) - 6 = -1+3i
+    Complex d;
+    check(matops::determinant(a, &d, &err), "complex det ok");
+    check_cnear(d, -1, 3, "complex det value");
+    // The real-only det entry point refuses complex input (D37).
+    calc_t rd = 0;
+    err = nullptr;
+    check_err(matops::determinant(a, &rd, &err), err, "Non-real matrix", "real det on complex");
+
+    // A * A^-1 = I
+    check(matops::inverse(a, out, &err), "complex inverse ok");
+    Array prod;
+    check(matops::mul(a, out, prod, &err), "A * Ainv ok");
+    check_cnear(prod.cget(0, 0), 1, 0, "A*Ainv [0,0]");
+    check_cnear(prod.cget(0, 1), 0, 0, "A*Ainv [0,1]");
+    check_cnear(prod.cget(1, 0), 0, 0, "A*Ainv [1,0]");
+    check_cnear(prod.cget(1, 1), 1, 0, "A*Ainv [1,1]");
+
+    // Complex scalar times a real matrix promotes.
+    Array r;
+    const double vr[4] = {1, 2, 3, 4};
+    check(fill(r, 2, 2, vr), "fill real R");
+    check(matops::scalar_mul(r, Complex(0, 1), out, &err), "i * real matrix ok");
+    check(out.dtype() == Dtype::kComplex, "i * real matrix is complex");
+    check_cnear(out.cget(1, 0), 0, 3, "i*3 = 3i");
+
+    // Mixed real/complex elementwise + augment promote too.
+    check(matops::add(a, r, out, &err), "mixed add ok");
+    check_cnear(out.cget(0, 0), 2, 1, "mixed add [0,0]");
+    check_cnear(out.cget(1, 1), 8, -1, "mixed add [1,1]");
+    check(matops::augment(r, a, out, &err), "mixed augment ok");
+    check(out.dim(0) == 2 && out.dim(1) == 4 && out.dtype() == Dtype::kComplex,
+          "mixed augment shape/dtype");
+    check_cnear(out.cget(0, 2), 1, 1, "mixed augment value");
+
+    // Transpose.
+    check(matops::transpose(a, out, &err), "complex transpose ok");
+    check_cnear(out.cget(0, 1), 3, 0, "transpose [0,1]");
+    check_cnear(out.cget(1, 0), 2, 0, "transpose [1,0]");
+    check_cnear(out.cget(1, 1), 4, -1, "transpose [1,1]");
+
+    // (i*I)^2 = -I.
+    const Complex vj[4] = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+    check(cfill(b, 2, 2, vj), "cfill iI");
+    check(matops::power(b, 2, out, &err), "complex power ok");
+    check_cnear(out.cget(0, 0), -1, 0, "power [0,0]");
+    check_cnear(out.cget(0, 1), 0, 0, "power [0,1]");
+
+    // rref([[i,2i],[1,3]]) = I; rank 2.
+    const Complex vc2[4] = {{0, 1}, {0, 2}, {1, 0}, {3, 0}};
+    check(cfill(b, 2, 2, vc2), "cfill rref input");
+    check(matops::rref(b, out, &err), "complex rref ok");
+    check_cnear(out.cget(0, 0), 1, 0, "rref [0,0]");
+    check_cnear(out.cget(0, 1), 0, 0, "rref [0,1]");
+    check_cnear(out.cget(1, 1), 1, 0, "rref [1,1]");
+    int rk = 0;
+    check(matops::rank(b, &rk, &err) && rk == 2, "complex rank 2");
+
+    // Rank-deficient: [[i,2i],[2i,4i]] — rank 1, det 0, singular inverse.
+    const Complex vr1[4] = {{0, 1}, {0, 2}, {0, 2}, {0, 4}};
+    check(cfill(b, 2, 2, vr1), "cfill rank-1");
+    check(matops::rank(b, &rk, &err) && rk == 1, "complex rank 1");
+    check(matops::determinant(b, &d, &err), "singular complex det ok");
+    check_cnear(d, 0, 0, "singular complex det 0");
+    err = nullptr;
+    check_err(matops::inverse(b, out, &err), err, "Singular matrix", "complex singular inverse");
+
+    // Eigen stays real-input (D37).
+    Array eout;
+    err = nullptr;
+    check_err(matops::eigenvalues(b, eout, &err), err, "Non-real matrix", "eigenvalues complex");
+    Complex ce[matops::kMaxEigen];
+    int cnt = 0;
+    err = nullptr;
+    check_err(matops::eigenvalues_complex(b, ce, &cnt, &err), err, "Non-real matrix",
+              "eigenvalues_complex complex");
+
+    // copy adopts the source dtype.
+    Array dst;
+    check(fill(dst, 1, 1, vr), "fill dst real");
+    check(matops::copy(a, dst), "copy complex ok");
+    check(dst.dtype() == Dtype::kComplex, "copy adopts complex");
+    check_cnear(dst.cget(1, 1), 4, -1, "copy value");
+
+    // make_complex migrates in place, preserving shape and values.
+    Array mr;
+    const double vmr[6] = {1, 2, 3, 4, 5, 6};
+    check(fill(mr, 2, 3, vmr), "fill 2x3 for migration");
+    check(matops::make_complex(mr), "make_complex ok");
+    check(mr.dtype() == Dtype::kComplex && mr.dim(0) == 2 && mr.dim(1) == 3,
+          "make_complex shape/dtype");
+    check_cnear(mr.cget(1, 2), 6, 0, "make_complex value");
+    check(matops::make_complex(mr), "make_complex idempotent");
+
+    // reshape preserves dtype; new cells are complex zero.
+    check(matops::reshape(a, 3, 3, out, &err), "complex reshape ok");
+    check(out.dtype() == Dtype::kComplex, "reshape keeps complex");
+    check_cnear(out.cget(0, 0), 1, 1, "reshape kept value");
+    check_cnear(out.cget(2, 2), 0, 0, "reshape zero fill");
+
+    // identity into a previously-complex temp retypes to real.
+    check(matops::identity(2, out, &err), "identity after complex ok");
+    check(out.dtype() == Dtype::kDouble, "identity retypes real");
+    check_near(out.get(1, 1), 1.0, "identity value");
+}
+
+void test_complex_expr_layer() {
+    using namespace math;
+    set_number_mode(NumberMode::kRectangular);
+
+    // [A] complex, [B] real.
+    const Complex va[4] = {{1, 1}, {2, 0}, {3, 0}, {4, -1}};
+    check(cfill(matrices().matrix(0), 2, 2, va), "cexpr fill [A]");
+    const double vb[4] = {5, 6, 7, 8};
+    check(fill(matrices().matrix(1), 2, 2, vb), "cexpr fill [B]");
+
+    // det([A]) is a complex scalar; Ans commits complex.
+    auto res = eval_mat("det([A])");
+    check(res.kind == matexpr::Kind::kScalar && res.scalar_complex, "det([A]) complex scalar");
+    check_cnear(res.cvalue, -1, 3, "det([A]) value");
+    check(engine().vars().is_complex(Variables::kAns), "complex Ans committed");
+
+    // Element access promotes.
+    res = eval_mat("[A](1,1)");
+    check(res.kind == matexpr::Kind::kScalar && res.scalar_complex, "[A](1,1) complex");
+    check_cnear(res.cvalue, 1, 1, "[A](1,1) value");
+
+    // Complex scalar subterms scale a real matrix.
+    res = eval_mat("i*[B]");
+    check(res.kind == matexpr::Kind::kMatrix && res.matrix->dtype() == Dtype::kComplex,
+          "i*[B] complex matrix");
+    check_cnear(res.matrix->cget(0, 0), 0, 5, "i*[B] value");
+    res = eval_mat("2i*[B]");
+    check(res.kind == matexpr::Kind::kMatrix, "2i shorthand parses");
+    check_cnear(res.matrix->cget(0, 1), 0, 12, "2i*[B] value");
+
+    // Mixed matrix arithmetic.
+    res = eval_mat("[A]+[B]");
+    check(res.kind == matexpr::Kind::kMatrix, "[A]+[B] ok");
+    check_cnear(res.matrix->cget(0, 0), 6, 1, "[A]+[B] value");
+
+    // Stores preserve the dtype (and complex scalars store to vars).
+    res = eval_mat("[A]->[C]");
+    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 2 &&
+              matrices().matrix(2).dtype() == Dtype::kComplex,
+          "[A]->[C] keeps complex");
+    res = eval_mat("[A](1,1)->z");
+    check(res.kind == matexpr::Kind::kScalar && res.scalar_complex &&
+              engine().vars().is_complex('z' - 'a'),
+          "complex scalar var store");
+    engine().vars().set_real('z' - 'a', 0);
+
+    // format_matrix uses the complex formatter.
+    char buf[96];
+    matexpr::format_matrix(matrices().matrix(0), buf, sizeof(buf));
+    check(std::strchr(buf, kImagUnitGlyph) != nullptr, "format_matrix complex glyph");
+
+    // eigenvals of a complex matrix errors (D37).
+    check_mat_error("eigenvals([A])", "Non-real matrix", "eigenvals complex errors");
+
+    // REAL mode gates every complex touch (Batch 1 rule).
+    set_number_mode(NumberMode::kReal);
+    check_mat_error("[A]+[A]", "Non-real result", "REAL gate on complex [X]");
+    check_mat_error("det([A])", "Non-real result", "REAL gate on det");
+    check_mat_error("i*[B]", "Non-real result", "REAL gate on complex scalar");
+    check_mat_scalar("det([B])", -2.0, "real det still fine in REAL mode");
+
+    // Cleanup: real store slots, real Ans, REAL mode.
+    check(fill(matrices().matrix(0), 1, 1, vb), "cexpr cleanup [A]");
+    check(fill(matrices().matrix(2), 1, 1, vb), "cexpr cleanup [C]");
+    engine().vars().set_real(Variables::kAns, 0);
+}
+
 }  // namespace
 
 int main() {
@@ -726,6 +936,8 @@ int main() {
     test_expr_errors();
     test_format_matrix();
     test_store();
+    test_complex_matops();
+    test_complex_expr_layer();
 
     std::printf("test_matrix: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

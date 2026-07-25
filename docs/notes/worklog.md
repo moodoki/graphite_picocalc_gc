@@ -284,9 +284,69 @@ Still to verify on hardware:
 | Session 17 — Phase 4B graph analysis / CALC menu (D29; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 17 itself) | F6 "CALC" softkey on the graph screen (all three modes) and typed `calc`/`analyze`: menu feel, cursor-riding curve pick, the TI-style step prompts ("Left Bound?"/"Right Bound?"/"Guess?", "First curve?"/"Second curve?" for intersect). Value/Zero/Min/Max/dy-dx/fnInt on a function (e.g. `4-x^2`), a parametric pair (unit circle slope), and a polar curve (cardioid/circle area) in both angle modes. Tangent-line draw for dy/dx; shaded fnInt region (function mode) for strip artifacts; result readout + Ans/independent-variable store. Intersect on two curves, and the same-curve-refusal case. Judge whether the min/max "Guess?" step feels wrong given it doesn't feed Brent's bracket (D29 judgment call). Regression: existing trace/table/split/matrix/stats/dist/infer screens unaffected. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale as the Session 16 row above; the full CALC-menu checklist, including the strip-render-risky tangent-line/shaded-fnInt draws, passed on the Pico 1 the same day |
 | Session 18 — Phase 4C complex numbers (D30; flashed to the Pico 2 as part of Session 19's build 2026-07-21, though not hands-on walked there — the "NOT flashed" note in the original entry below only describes the state as of Session 18 itself) | MODE screen "Number" row cycles REAL/a+bi/r<t and persists (first boot after upgrade: **PCG5 one-time graph-state reset**). Home screen in REAL mode: `3+2i`, `sqrt(-4)`, `(1+i)^2` etc. now say "Non-real result" instead of showing `NaN` — judge whether that read is clear. Switch to a+bi: `3+2i`, `sqrt(-4)`->`2i`, `(1+i)^2`->`2i`, `e^(i*pi)`->`-1`, `abs(3+4i)`->5, `conj`/`real`/`imag`, store `5->a` works, `2i->a` errors "Complex results can't be stored". Switch to r<t (polar) mode: same expressions display as `r<theta` (ASCII `<` stand-in for ∠ — judge if that reads OK or needs a real glyph). Non-REAL mode should still reach the rest of the real catalog (`ncr(5,2)`, `round(3.456,1)`, distributions) as long as their own arguments aren't complex — spot check a few. Matrix: `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) now shows `{i,-i}` as text instead of erroring; storing it (`-> l1`) still errors. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis all unaffected — this was the largest single-session diff yet (7 new/changed math source files) so a broad sanity pass is worth it, not just the new surface. **Pico 2 leg closed as a formality (2026-07-22)** — same rationale; full complex-number checklist passed on the Pico 1 the same day (note: this checklist's own r∠θ description is stale — superseded by the real ∠ glyph, D31; and its "spot check the real catalog" item is now known to have one gap, the `!` postfix-factorial bug root-caused the same day, see the paragraph above) |
 | 4D Batch 1 — complex variables/Ans (4D.15) + complex lists (4D.24) — **CLEARED 2026-07-26, same day** | Developer ran the full checklist on the Pico 1 (complex var store/recall/errors, complex list literals/arithmetic/reductions, editor entry + migration, PCV1 one-time reset + persistence, graph sanity with a complex x) — all passed. One finding: complex display in the list editor was weird under polar mode (complex elements fell back to a+bi; real-valued elements showed `r∠0`) — **root-caused and FIXED the same day** (see the 2026-07-26 addendum below), reflashed, and developer-confirmed working as intended |
+| 4D Batch 2 — complex matrices (4D.25; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial) | Editor: type `1+i` into a real matrix cell in a+bi mode → whole matrix migrates to the complex tier, cells show short complex forms, entry line shows the full form; polar mode shows `r∠θ` cells; REAL mode entry of `2i` errors "Non-real result"; F8 clear reverts the matrix to real. Home: `det([A])` on a complex `[A]` (e.g. `[[1+i,2][3,4-i]]` → `-1+3i`), `[A]^-1` then `[A]*Ans`-style check by hand, `rref`/`ref`/`rank`/`transpose`/`augment`/`[A]^2`, `i*[B]` and `2i*[B]` on a real `[B]`, mixed `[A]+[B]`, element read `[A](1,1)`, complex scalar store `det([A])->z`. REAL mode: any expression touching a complex matrix errors "Non-real result". `eigenvals([A])` on a complex matrix errors "Non-real matrix". Persistence: complex matrix survives a power cycle (PCM2 header unchanged, 16 B/elem payload); old firmware would skip it as corrupt. Regression: real-matrix arithmetic/editor/persistence unchanged; big real matrix ops still fine |
 | Session 19 — font system + real math glyphs, `eig` alias, list UX (D31; flashed 2026-07-21, **Terminus** default build, boots healthy, PSRAM/storage/battery telemetry clean) | This session's own on-device font comparison across all five builds is already done (D31: Terminus picked as the shipped default; Unifont good with the 2px lift; Spleen best if a thicker font is wanted; JuliaMono worst, Iosevka a bit unbalanced) — remaining is a **glyph-correctness sweep on the Terminus build in situ**: home-screen complex results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row (`a+bi`/`r∠θ`), pretty-printed expressions (`π`, `θ`, inline `√(x)`, `3+2i` via the plain-text fallback), stats `σx`/`σy`/`Σx`/`Σx²`/`Σy`/`Σy²`/`Σxy`/`r²`, inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace + table polar label `θ`, and `…` truncation in list/matrix/complex history + slot editor. Also: `eig` as a drop-in alias for `eigenvals([A])` (whole-expression only, same as `eigenvals`/`dim`); list history LEFT/RIGHT horizontal scroll on the newest result when the input line is empty, using the new compact (4-sig-fig) number format so more list elements fit per screen. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis, table all unaffected. **Informally spot-checked 2026-07-22** during the Phase 4A-4C Pico 1 pass — complex/MODE-row/pretty-print/stats glyphs incidentally seen and reported looking correct — but not a dedicated sweep against this row's own full list (still worth doing properly if time allows) |
 
 ---
+
+## 2026-07-26 — 4D Batch 2 shipped: complex matrices (4D.25)
+
+Second D38 batch, same day. Host suite green across all 12 binaries —
+**1378 checks** (test_matrix 233→306); lint + format clean; both boards
+build; **flashed to the Pico 1** and boot-verified over serial (temp +
+psram-bulk heartbeats healthy). Pico 1 bss **218,156** (+4,824 over
+Batch 1's 213,332 — exactly the union row-buffer widening below), ~52 KB
+headroom; D28 watch continues.
+
+1. **`matops` generalized to Complex** (`src/math/matrix.cpp` rewrite):
+   the row-streaming kernels are now templated over an element-type
+   policy (`RealOps`/`CplxOps`) — det/inverse/rref/ref/rank/add/sub/
+   mul/scalar_mul/transpose/augment/reshape/power/copy all take both
+   dtypes; pivoting compares **moduli**; mixed real/complex operands
+   promote to a complex result (`CplxOps::read` widens real rows
+   back-to-front in place). The three 200-elem row buffers became a
+   `calc_t`/`Complex` **union** (one buffer set serves both tiers;
+   +4.8 KB bss instead of +9.6). Output temps retype per expression
+   (`retype()` — recycled `g_temp`s may carry a stale dtype).
+   `determinant` gained a Complex overload (the calc_t entry point now
+   errors **"Non-real matrix"** on complex input, D37); `scalar_mul`
+   gained a `Complex k` overload; new `matops::make_complex(Array&)`
+   (2-D in-place dtype migration, mirrors `listops::make_complex`).
+   `eigen_core` **stays real-input** and errors "Non-real matrix" (D37).
+2. **matexpr scalars ride Complex** (`src/math/mat_expr.cpp`): the
+   parser's scalar `Value` is now a `Complex`; scalar spans fall back to
+   `complexexpr::evaluate` when `eval_field` refuses (`i`, `2i`
+   shorthand — the digit scanner folds a trailing `i` — and
+   complex-valued variables); `det`/element access return complex
+   scalars; `^` uses `c_pow` off the real fast path; complex scalar
+   results commit **complex Ans/var stores** (`Result.scalar_complex` +
+   `cvalue`, mirroring listexpr's Batch 1 shape; home screen formats
+   via `format_complex`). REAL-mode gating is strict (Batch 1 rule): a
+   complex `[X]` operand errors "Non-real result" at the token, and a
+   complex result (e.g. `i*[B]` over a real `[B]`) errors at commit.
+   `format_matrix` formats complex elements mode-aware.
+3. **Matrix editor complex entry/display** (`src/apps/matrix_editor.cpp`):
+   cell entry falls back to `complexexpr` exactly like the list editor
+   (REAL mode → "Non-real result"; complex value → `make_complex`
+   migration with a "Complex max 5000 cells" cap message); cells render
+   short mode-aware complex forms (`format_cell_c`, same 11-char
+   fallback shape as the list editor); the entry line shows the full
+   `format_complex` form (`cur_val_` widened 24→48); F8 clear reverts
+   the slot to the real dtype.
+4. **Persistence** (`src/math/matrices_persist.cpp`): complex payloads
+   under the unchanged **PCM2** header (the dtype byte was already
+   there) — 16 B/elem chunks through the same 2 KB buffer
+   (`kChunkComplex = 128`), complex load requires PSRAM (late-init
+   retry, D14) and caps at `kMaxComplexElements`; older firmware treats
+   a complex image as corrupt and skips it (established precedent).
+5. **Tests**: `test_matrix` +73 checks (complex det/inverse round-trip
+   `A*A^-1=I`/rref/rank/power/transpose/augment/mixed promotion/
+   make_complex/reshape-dtype/identity-retype; matexpr complex layer
+   incl. REAL-mode gates, dtype-preserving stores, complex Ans, format
+   glyph). `scripts/host-tests.sh`: test_matrix links complex_expr.cpp.
+
+No persistence-format bump needed this batch (PCM2 already carried
+dtype). HW-PENDING row added (checklist above in the table).
 
 ## 2026-07-26 — Phase 4D STARTED: D38 batch plan; Batch 1 shipped — complex variables/Ans (4D.15) + complex lists (4D.24)
 

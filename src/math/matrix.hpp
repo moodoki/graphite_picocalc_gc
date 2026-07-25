@@ -14,6 +14,13 @@ class Storage;
 // reference-returning Matrix class sketch doesn't fit, the same
 // deviation lists made in Phase 3.
 //
+// Complex matrices (4D.25, D37/D38): every op below except the eigen
+// pair is dtype-generic — kernels are templated over the element type,
+// pivoting compares moduli, and a mixed real/complex input promotes to
+// a complex output. Complex matrices ride 4D.24's storage tier
+// (PSRAM-only, kMaxComplexElements cap). eigenvalues* stay real-input
+// (D37) and error "Non-real matrix" instead of truncating.
+//
 // All `out` parameters must be distinct Arrays from the inputs; the
 // expression layer and editor guarantee this by computing into temps.
 // On failure: returns false, `*err` gets a static message, and `out`
@@ -28,13 +35,19 @@ constexpr int kMaxRowElems = 200;  // Streaming row-buffer width
 constexpr int kMaxEigen = 10;      // QR eigenvalue size limit
 constexpr int kMaxPower = 100;     // [A]^n repeated-multiply cap
 
-// dst := src (2-D resize + chunked copy).
+// dst := src (2-D resize + chunked copy; dst adopts src's dtype).
 bool copy(const Array& src, Array& dst);
+
+// In-place real -> complex dtype migration (matrix editor complex
+// entry, 4D.25 — the 2-D analog of listops::make_complex). False when
+// the complex tier can't hold it (PSRAM down, or > kMaxComplexElements).
+bool make_complex(Array& m);
 
 bool add(const Array& a, const Array& b, Array& out, const char** err);
 bool sub(const Array& a, const Array& b, Array& out, const char** err);
 bool mul(const Array& a, const Array& b, Array& out, const char** err);
 bool scalar_mul(const Array& a, calc_t k, Array& out, const char** err);
+bool scalar_mul(const Array& a, const Complex& k, Array& out, const char** err);
 bool transpose(const Array& a, Array& out, const char** err);
 bool identity(int n, Array& out, const char** err);
 // Horizontal concatenation [a | b] (row counts must match).
@@ -45,8 +58,11 @@ bool augment(const Array& a, const Array& b, Array& out, const char** err);
 bool reshape(const Array& a, int rows, int cols, Array& out, const char** err);
 
 // LU with partial pivoting (direct expansion for 1x1/2x2/3x3). A
-// singular matrix yields *out = 0, not an error.
+// singular matrix yields *out = 0, not an error. The calc_t entry
+// point is real-only and errors "Non-real matrix" on complex input
+// (D37); the Complex overload takes both dtypes.
 bool determinant(const Array& a, calc_t* out, const char** err);
+bool determinant(const Array& a, Complex* out, const char** err);
 // Gauss-Jordan with partial pivoting.
 bool inverse(const Array& a, Array& out, const char** err);
 // (Reduced) row echelon form; non-square accepted.

@@ -34,6 +34,12 @@ struct Result {
     Kind kind = Kind::kNone;
     // kScalar: ok/value/stored_var filled (Ans updated, like engine).
     EvalResult scalar;
+    // kScalar with a non-real value (4D.25: det/element access of a
+    // complex matrix, complex scalar subterms): cvalue holds it and
+    // scalar.value only carries the real part. Ans/store are committed
+    // here (set_complex); the caller just formats cvalue.
+    bool scalar_complex = false;
+    Complex cvalue;
     // kMatrix: the value to display — the result buffer (also exposed
     // as mat_ans()), or the stored [X] slot.
     const Array* matrix = nullptr;

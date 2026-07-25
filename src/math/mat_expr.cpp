@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "math/complex_expr.hpp"
 #include "math/format.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
@@ -89,11 +90,23 @@ bool trim_into(const char* s, char* buf, size_t cap) {
 
 // ---- Recursive-descent evaluator ----
 
+// Scalars ride as Complex since 4D.25 (det/element access of a complex
+// matrix, i-bearing subterms); real values just carry im == 0 and all
+// real behavior is unchanged.
 struct Value {
     bool is_matrix = false;
-    calc_t s = 0;
+    Complex s;
     const Array* m = nullptr;
 };
+
+// v as an exact real integer (indices, dims, exponents).
+bool real_int(const Complex& v, int* out) {
+    if (v.im != 0 || v.re != std::floor(v.re)) {
+        return false;
+    }
+    *out = static_cast<int>(v.re);
+    return true;
+}
 
 struct P {
     const char* s = nullptr;  // Cursor
@@ -128,7 +141,9 @@ Value fail(P& p, const char* msg) {
 }
 
 // Scalar primary: a number, constant/variable, or a scalar function
-// call — the span is handed to eval_field (full engine syntax).
+// call — the span is handed to eval_field (full engine syntax), with
+// the complex evaluator as fallback for i-bearing/complex-variable
+// spans (4D.25).
 Value parse_scalar_span(P& p) {
     const char* start = p.s;
     if (std::isdigit(static_cast<unsigned char>(*p.s)) != 0 || *p.s == '.') {
@@ -143,6 +158,9 @@ Value parse_scalar_span(P& p) {
             while (std::isdigit(static_cast<unsigned char>(*p.s)) != 0) {
                 ++p.s;
             }
+        }
+        if (*p.s == 'i' && !ident_char(p.s[1])) {
+            ++p.s;  // "2i" shorthand: fold the unit into the span
         }
     } else if (std::isalpha(static_cast<unsigned char>(*p.s)) != 0) {
         while (ident_char(*p.s)) {
@@ -181,9 +199,18 @@ Value parse_scalar_span(P& p) {
     std::memcpy(span, start, len);
     span[len] = 0;
     Value v;
-    if (!eval_field(span, &v.s)) {
+    calc_t rv = 0;
+    if (eval_field(span, &rv)) {
+        v.s = Complex(rv);
+        return v;
+    }
+    // i-bearing spans ("i", "2i") and complex-valued variables don't
+    // ride the real field evaluator (4D.15/4D.25).
+    const auto cr = complexexpr::evaluate(span);
+    if (!cr.ok) {
         return fail(p, "Syntax error");
     }
+    v.s = cr.value;
     return v;
 }
 
@@ -220,7 +247,8 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
             return fail(p, "Syntax error");
         }
         ++p.s;
-        if (n.is_matrix || n.s != std::floor(n.s)) {
+        int ni = 0;
+        if (n.is_matrix || !real_int(n.s, &ni)) {
             return fail(p, "Bad identity size");
         }
         Array* out = claim_temp(p);
@@ -230,7 +258,7 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
         Value v;
         v.is_matrix = true;
         v.m = out;
-        if (!matops::identity(static_cast<int>(n.s), *out, &p.err)) {
+        if (!matops::identity(ni, *out, &p.err)) {
             return kBad;
         }
         return v;
@@ -266,9 +294,11 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
 
     if (std::strcmp(fn.name, "det") == 0) {
         Value v;
-        if (!matops::determinant(*a.m, &v.s, &p.err)) {
+        Complex d;
+        if (!matops::determinant(*a.m, &d, &p.err)) {
             return kBad;
         }
+        v.s = d;
         return v;
     }
     if (std::strcmp(fn.name, "rank") == 0) {
@@ -277,7 +307,7 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
             return kBad;
         }
         Value v;
-        v.s = rk;
+        v.s = Complex(rk);
         return v;
     }
 
@@ -313,6 +343,12 @@ Value parse_primary(P& p) {
         if (m.size() == 0) {
             return fail(p, "Matrix is empty");
         }
+        // REAL mode never touches a complex matrix (4D.25, mirroring
+        // Batch 1's strict complex-list rule) — even ops with real
+        // results error, so nothing silently reads real parts.
+        if (m.dtype() == Dtype::kComplex && number_mode() == NumberMode::kReal) {
+            return fail(p, "Non-real result");
+        }
         skip_ws(p);
         if (*p.s == '(') {  // Element access: [A](row, col), 1-based
             ++p.s;
@@ -334,16 +370,16 @@ Value parse_primary(P& p) {
                 return fail(p, "Expected (row, col)");
             }
             ++p.s;
-            if (r.is_matrix || c.is_matrix || r.s != std::floor(r.s) || c.s != std::floor(c.s)) {
+            int ri = 0;
+            int ci = 0;
+            if (r.is_matrix || c.is_matrix || !real_int(r.s, &ri) || !real_int(c.s, &ci)) {
                 return fail(p, "Expected (row, col)");
             }
-            const int ri = static_cast<int>(r.s);
-            const int ci = static_cast<int>(c.s);
             if (ri < 1 || ri > m.dim(0) || ci < 1 || ci > m.dim(1)) {
                 return fail(p, "Index out of range");
             }
             Value v;
-            v.s = m.get(ri - 1, ci - 1);
+            v.s = m.cget(ri - 1, ci - 1);  // Promotes a real element
             return v;
         }
         Value v;
@@ -411,7 +447,8 @@ Value parse_power(P& p) {
         if (p.err != nullptr) {
             return kBad;
         }
-        if (e.is_matrix || e.s != std::floor(e.s)) {
+        int pe = 0;
+        if (e.is_matrix || !real_int(e.s, &pe)) {
             return fail(p, "Bad matrix exponent");
         }
         Array* out = claim_temp(p);
@@ -421,7 +458,7 @@ Value parse_power(P& p) {
         Value v;
         v.is_matrix = true;
         v.m = out;
-        if (!matops::power(*base.m, static_cast<int>(e.s), *out, &p.err)) {
+        if (!matops::power(*base.m, pe, *out, &p.err)) {
             return kBad;
         }
         return v;
@@ -435,7 +472,11 @@ Value parse_power(P& p) {
         return fail(p, "Bad exponent");
     }
     Value v;
-    v.s = std::pow(base.s, e.s);
+    if (base.s.im == 0 && e.s.im == 0) {
+        v.s = Complex(std::pow(base.s.re, e.s.re));  // Real fast path, unchanged semantics
+    } else {
+        v.s = c_pow(base.s, e.s);
+    }
     return v;
 }
 
@@ -497,7 +538,7 @@ Value combine_mul(P& p, const Value& a, const Value& b, bool divide) {
         return fail(p, "Matrix division: use ^-1");
     }
     const Array& m = a.is_matrix ? *a.m : *b.m;
-    const calc_t k = a.is_matrix ? (divide ? 1.0 / b.s : b.s) : a.s;
+    const Complex k = a.is_matrix ? (divide ? Complex(1.0) / b.s : b.s) : a.s;
     Array* out = claim_temp(p);
     if (out == nullptr) {
         return kBad;
@@ -859,18 +900,35 @@ Result evaluate(const char* input) {
             res.error = "Store target mismatch";
             return res;
         }
-        if (!std::isfinite(v.s)) {
+        if (!std::isfinite(v.s.re) || !std::isfinite(v.s.im)) {
             res.kind = Kind::kError;
             res.error = "Undefined result";
             return res;
         }
+        if (!v.s.is_real() && number_mode() == NumberMode::kReal) {
+            res.kind = Kind::kError;
+            res.error = "Non-real result";  // D30 precedent
+            return res;
+        }
         res.kind = Kind::kScalar;
         res.scalar.ok = true;
-        res.scalar.value = v.s;
-        engine().vars().set_real(Variables::kAns, v.s);
-        if (store.var >= 0) {
-            engine().vars().set_real(store.var, v.s);
-            res.scalar.stored_var = store.var;
+        res.scalar.value = v.s.re;
+        if (v.s.is_real()) {
+            engine().vars().set_real(Variables::kAns, v.s.re);
+            if (store.var >= 0) {
+                engine().vars().set_real(store.var, v.s.re);
+                res.scalar.stored_var = store.var;
+            }
+        } else {
+            // Complex commit (4D.25): Ans/store hold the full value;
+            // real-only readers error on them (D37).
+            res.scalar_complex = true;
+            res.cvalue = v.s;
+            engine().vars().set_complex(Variables::kAns, v.s.re, v.s.im);
+            if (store.var >= 0) {
+                engine().vars().set_complex(store.var, v.s.re, v.s.im);
+                res.scalar.stored_var = store.var;
+            }
         }
         return res;
     }
@@ -879,6 +937,14 @@ Result evaluate(const char* input) {
         release_temps();
         res.kind = Kind::kError;
         res.error = "Store target mismatch";
+        return res;
+    }
+    // A complex matrix value can arise in REAL mode without any [X]
+    // being complex (e.g. i*[B]) — gate the result too.
+    if (v.m->dtype() == Dtype::kComplex && number_mode() == NumberMode::kReal) {
+        release_temps();
+        res.kind = Kind::kError;
+        res.error = "Non-real result";
         return res;
     }
     // Keep the result in the persistent MatAns buffer, then release
@@ -921,11 +987,16 @@ void format_matrix(const Array& m, char* buf, size_t buf_len) {
     const int rows = m.dim(0);
     const int cols = m.dim(1);
     bool truncated = false;
+    const bool cplx = m.dtype() == Dtype::kComplex;
     for (int r = 0; r < rows && !truncated; ++r) {
         buf[pos++] = '[';
         for (int c = 0; c < cols; ++c) {
-            char num[24];
-            format_number(m.get(r, c), num, sizeof(num));
+            char num[48];
+            if (cplx) {
+                format_complex(m.cget(r, c), number_mode(), num, sizeof(num));
+            } else {
+                format_number(m.get(r, c), num, sizeof(num));
+            }
             const size_t need = std::strlen(num) + (c > 0 ? 1 : 0);
             // Room for the number plus "...]]" + NUL in the worst case
             if (pos + need + 7 > buf_len) {

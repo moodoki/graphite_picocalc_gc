@@ -232,6 +232,19 @@ void HomeScreen::evaluate_input() {
         if (mres.kind == math::matexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", mres.error);
             error = true;
+        } else if (mres.kind == math::matexpr::Kind::kScalar && mres.scalar_complex) {
+            // Complex scalar from a matrix expression (4D.25: det /
+            // element access); matexpr already committed Ans/store.
+            char num[64];
+            math::format_complex(mres.cvalue, math::number_mode(), num, sizeof(num));
+            if (mres.scalar.stored_var >= 0) {
+                const char name = mres.scalar.stored_var < 26
+                                      ? static_cast<char>('a' + mres.scalar.stored_var)
+                                      : 't';  // theta
+                std::snprintf(result, sizeof(result), "%s%c%c", num, gfx::kGlyphStore, name);
+            } else {
+                std::snprintf(result, sizeof(result), "%s", num);
+            }
         } else if (mres.kind == math::matexpr::Kind::kScalar) {
             format_scalar_result(mres.scalar, result, sizeof(result));
             error = !mres.scalar.ok;

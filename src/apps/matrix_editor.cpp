@@ -8,8 +8,10 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "math/functions.hpp"
 #include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 #include "apps/graph_screen.hpp"
@@ -44,6 +46,33 @@ void format_cell(double v, char* buf, size_t cap) {
         std::snprintf(buf, cap, "%s", full);
     } else {
         std::snprintf(buf, cap, "%.4g", v);
+    }
+}
+
+// Complex cell (4D.25): full form when it fits, else a short
+// mode-aware fallback (same shape as the list editor's).
+void format_cell_c(const math::Complex& z, char* buf, size_t cap) {
+    char full[48];
+    math::format_complex(z, math::number_mode(), full, sizeof(full));
+    if (std::strlen(full) <= 11) {
+        std::snprintf(buf, cap, "%s", full);
+    } else if (math::number_mode() == math::NumberMode::kPolar) {
+        double theta = z.argument();
+        if (math::angle_mode() == math::AngleMode::kDegrees) {
+            theta = math::fn::deg(theta);
+        }
+        std::snprintf(buf, cap, "%.3g%c%.3g", z.modulus(), math::kAngleGlyph, theta);
+    } else {
+        std::snprintf(buf, cap, "%.3g%+.3g%c", z.re, z.im, math::kImagUnitGlyph);
+    }
+}
+
+// The matrix's cell text, complex-aware.
+void cell_text(const math::Array& m, int row, int col, char* buf, size_t cap) {
+    if (m.dtype() == math::Dtype::kComplex) {
+        format_cell_c(m.cget(row, col), buf, cap);
+    } else {
+        format_cell(m.get(row, col), buf, cap);
     }
 }
 
@@ -111,7 +140,7 @@ void MatrixEditorScreen::refresh_cells() {
             const int row = row_off_ + r;
             const int col = col_off_ + c;
             if (row < rows && col < cols) {
-                format_cell(m.get(row, col), cells_[r][c], sizeof(cells_[r][c]));
+                cell_text(m, row, col, cells_[r][c], sizeof(cells_[r][c]));
             } else {
                 cells_[r][c][0] = 0;
             }
@@ -131,7 +160,12 @@ void MatrixEditorScreen::refresh_cells() {
         } else {
             std::snprintf(prompt_, sizeof(prompt_), "%c(%d,%d)=", name, cur_row_ + 1, cur_col_ + 1);
         }
-        math::format_number(m.get(cur_row_, cur_col_), cur_val_, sizeof(cur_val_));
+        if (m.dtype() == math::Dtype::kComplex) {
+            math::format_complex(m.cget(cur_row_, cur_col_), math::number_mode(), cur_val_,
+                                 sizeof(cur_val_));
+        } else {
+            math::format_number(m.get(cur_row_, cur_col_), cur_val_, sizeof(cur_val_));
+        }
     }
 }
 
@@ -174,13 +208,43 @@ void MatrixEditorScreen::begin_edit(const platform::KeyEvent* first_key) {
 
 void MatrixEditorScreen::commit_edit() {
     double v = 0;
+    bool complex_val = false;
+    math::Complex cv;
     if (!math::eval_field(input_.text(), &v)) {
-        msg_ = "Bad value";
+        // Complex entry (4D.25): `i`-bearing values and complex-valued
+        // variables don't ride the real field evaluator.
+        const auto cr = math::complexexpr::evaluate(input_.text());
+        if (!cr.ok) {
+            msg_ = "Bad value";
+            invalidate_entry();
+            return;
+        }
+        if (cr.value.is_real()) {
+            v = cr.value.re;
+        } else if (math::number_mode() == math::NumberMode::kReal) {
+            msg_ = "Non-real result";  // D30 precedent
+            invalidate_entry();
+            return;
+        } else {
+            complex_val = true;
+            cv = cr.value;
+        }
+    }
+    math::Array& m = math::matrices().matrix(cur_slot_);
+    // A complex element migrates the whole matrix to the complex tier
+    // (PSRAM-only, D37) before the write.
+    if (complex_val && !math::matops::make_complex(m)) {
+        msg_ = m.size() > math::Array::kMaxComplexElements ? "Complex max 5000 cells"
+                                                           : "Out of matrix memory";
+        editing_ = false;
         invalidate_entry();
         return;
     }
-    math::Array& m = math::matrices().matrix(cur_slot_);
-    m.set(cur_row_, cur_col_, v);
+    if (m.dtype() == math::Dtype::kComplex) {
+        m.cset(cur_row_, cur_col_, complex_val ? cv : math::Complex(v));
+    } else {
+        m.set(cur_row_, cur_col_, v);
+    }
     editing_ = false;
     save_matrices();
     // Advance right, wrapping to the next row (TI-style).
@@ -334,6 +398,9 @@ bool MatrixEditorScreen::on_key(const platform::KeyEvent& ev) {
                 return true;
             }
             math::matrices().matrix(cur_slot_).clear();
+            // Clearing also reverts a complex matrix to the real tier
+            // (mirrors the list editor's F8, 4D.24/25).
+            math::matrices().matrix(cur_slot_).set_dtype(math::Dtype::kDouble);
             cur_row_ = 0;
             cur_col_ = 0;
             row_off_ = 0;

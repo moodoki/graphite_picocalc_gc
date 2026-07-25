@@ -47,7 +47,7 @@ private:
     char col_heads_[kVisibleCols][16] = {};  // "C12"
     char row_heads_[kVisibleRows][16] = {};  // "R12"
     char prompt_[32] = {};                   // "A(2,3)=" / "rows,cols="
-    char cur_val_[24] = {};
+    char cur_val_[48] = {};                  // Complex full forms run long (4D.25)
 
     const math::Array& current() const;
     bool read_only() const { return cur_slot_ == kAnsSlot; }
