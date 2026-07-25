@@ -151,7 +151,7 @@ namespace {
 // The lookup array is only needed during te_compile — the pointers it
 // captures (into vars and static function code) outlive it. Returns the
 // number of entries written; `lookup` must hold at least kLookupCount.
-constexpr int kLookupCount = 24 + 2 + kMaxCatalogEntries;
+constexpr int kLookupCount = 24 + 2 + kMaxCatalogEntries + kMaxConstants;
 
 int build_lookup(Variables& vars, te_variable* lookup) {
     static char names[26][2];
@@ -172,6 +172,14 @@ int build_lookup(Variables& vars, te_variable* lookup) {
     }
     lookup[li++] = {"theta", &vars.vars[Variables::kTheta], TE_VARIABLE, nullptr};
     lookup[li++] = {"ans", &vars.vars[Variables::kAns], TE_VARIABLE, nullptr};
+
+    // Scientific constants (4D.17): read-only identifiers bound to the
+    // catalog's own descriptor storage (multi-char, so no a-z shadow).
+    int c_count = 0;
+    const ConstDescriptor* cs = constants(&c_count);
+    for (int i = 0; i < c_count; ++i) {
+        lookup[li++] = {cs[i].name, &cs[i].value, TE_VARIABLE, nullptr};
+    }
 
     // Functions come from the shared catalog (task 2.26) so the help
     // browser and the parser cannot drift apart. Help-only rows

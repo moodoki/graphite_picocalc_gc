@@ -118,6 +118,7 @@ add_executable(picocalc_graphcalc
     src/math/complex.cpp
     src/math/complex_expr.cpp
     src/math/seq_expr.cpp
+    src/math/units.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -136,6 +137,7 @@ add_executable(picocalc_graphcalc
     src/graph/analysis_cursor.cpp
     src/apps/nav.cpp
     src/apps/home_screen.cpp
+    src/apps/const_screen.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/calc_menu.cpp

@@ -142,6 +142,17 @@ echo "== Compiling + linking test_complex_expr =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_complex_expr"
 
+echo "== Compiling + linking test_units =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_units.cpp \
+    src/math/units.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/complex.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_units"
+
 echo "== Compiling + linking test_seq =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -190,6 +201,9 @@ echo "== Running test_solve =="
 
 echo "== Running test_analysis =="
 "$OUT/test_analysis"
+
+echo "== Running test_units =="
+"$OUT/test_units"
 
 echo "== Running test_seq =="
 "$OUT/test_seq"

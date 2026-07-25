@@ -447,6 +447,9 @@ void rref_t(const Array& a, Array& out) {
 }  // namespace
 
 bool copy(const Array& src, Array& dst) {
+    if (&src == &dst) {
+        return true;  // MatAns -> MatAns self-copy (4D.14)
+    }
     if (!retype(dst, src.dtype()) || !dst.resize(src.dim(0), src.dim(1))) {
         return false;
     }
@@ -828,6 +831,34 @@ bool power(const Array& a, int p, Array& out, const char** err) {
     }
     t.clear();
     return ok;
+}
+
+bool norm_f(const Array& a, calc_t* out, const char** err) {
+    if (!valid(a)) {
+        *err = kErrNotMatrix;
+        return false;
+    }
+    double acc = 0;
+    const int n = a.size();
+    if (a.dtype() == Dtype::kComplex) {
+        for (int at = 0; at < n; at += kMaxRowElems) {
+            const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
+            a.read_range_c(at, m, g_rowa.c);
+            for (int i = 0; i < m; ++i) {
+                acc += g_rowa.c[i].re * g_rowa.c[i].re + g_rowa.c[i].im * g_rowa.c[i].im;
+            }
+        }
+    } else {
+        for (int at = 0; at < n; at += kMaxRowElems) {
+            const int m = n - at < kMaxRowElems ? n - at : kMaxRowElems;
+            a.read_range(at, m, g_rowa.d);
+            for (int i = 0; i < m; ++i) {
+                acc += g_rowa.d[i] * g_rowa.d[i];
+            }
+        }
+    }
+    *out = std::sqrt(acc);
+    return true;
 }
 
 namespace {

@@ -98,12 +98,49 @@ const FnDescriptor kCatalog[] = {
     // Numeric solver (Phase 4A): solve_expr intercepts; bare `solve`
     // opens the solver screen.
     {"solve", "solve(f,x,lo,hi)", "Root of f (or guess)", nullptr, 4},
+    // 4D data/catalog glue (Batch 5): all intercepted before the
+    // engine (list/matrix/string arguments).
+    {"dot", "dot(A,B)", "Dot product (lists)", nullptr, 2},
+    {"cross", "cross(A,B)", "Cross product (3-elem)", nullptr, 2},
+    {"norm", "norm(A)", "Euclid/Frobenius norm", nullptr, 1},
+    {"convert", "convert(v, mi, km)", "Unit conversion", nullptr, 3},
+    {"list2mat", "list2mat(l1,l2)", "Lists to columns", nullptr, 2},
+    {"mat2list", "mat2list([A],l1)", "Columns to lists", nullptr, 2},
 };
 
 constexpr int kCount = sizeof(kCatalog) / sizeof(kCatalog[0]);
 static_assert(kCount <= kMaxCatalogEntries, "grow kMaxCatalogEntries");
 
+// Scientific constants (4D.17): CODATA 2018/2022 values, TI-84-style
+// set. Summaries fit the picker's ~26-char column.
+const ConstDescriptor kConstants[] = {
+    {"clight", "c", "Speed of light (m/s)", 299792458.0},
+    {"grav", "g", "Std gravity (m/s2)", 9.80665},
+    {"bigg", "G", "Gravitational const", 6.67430e-11},
+    {"planck", "h", "Planck (J s)", 6.62607015e-34},
+    {"hbar", "hbar", "Reduced Planck (J s)", 1.054571817e-34},
+    {"navo", "Na", "Avogadro (1/mol)", 6.02214076e23},
+    {"boltz", "kB", "Boltzmann (J/K)", 1.380649e-23},
+    {"rgas", "R", "Gas const (J/mol K)", 8.314462618},
+    {"faraday", "F", "Faraday (C/mol)", 96485.33212},
+    {"qe", "e-", "Elementary charge (C)", 1.602176634e-19},
+    {"melec", "me", "Electron mass (kg)", 9.1093837139e-31},
+    {"mprot", "mp", "Proton mass (kg)", 1.67262192595e-27},
+    {"mneut", "mn", "Neutron mass (kg)", 1.67492750056e-27},
+    {"amu", "u", "Atomic mass unit (kg)", 1.66053906892e-27},
+    {"eps0", "eps0", "Vacuum permittivity", 8.8541878188e-12},
+    {"mu0", "mu0", "Vacuum permeability", 1.25663706127e-6},
+};
+
+constexpr int kConstCount = sizeof(kConstants) / sizeof(kConstants[0]);
+static_assert(kConstCount <= kMaxConstants, "grow kMaxConstants");
+
 }  // namespace
+
+const ConstDescriptor* constants(int* count) {
+    *count = kConstCount;
+    return kConstants;
+}
 
 const FnDescriptor* catalog(int* count) {
     *count = kCount;

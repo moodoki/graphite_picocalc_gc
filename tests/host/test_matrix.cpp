@@ -919,6 +919,104 @@ void test_complex_expr_layer() {
     engine().vars().set_real(Variables::kAns, 0);
 }
 
+// ---- Batch 5 (4D.12/14/22): literals, MatAns, list<->matrix, norm ----
+
+void test_matrix_literals() {
+    using namespace math;
+    const double vaa[4] = {1, 2, 3, 4};
+    auto res = eval_mat("[[1,2][3,4]]");
+    check(res.kind == matexpr::Kind::kMatrix, "literal evaluates");
+    check_matrix(*res.matrix, 2, 2, vaa, "literal values");
+
+    const double vrow[3] = {5, 7, 11};
+    check_mat_result("[[2+3,7,11]]", 1, 3, vrow, "1-row literal with exprs");
+
+    const double vsum[4] = {2, 4, 6, 8};
+    check_mat_result("[[1,2][3,4]]+[[1,2][3,4]]", 2, 2, vsum, "literal arithmetic");
+    check_mat_scalar("det([[1,2][3,4]])", -2.0, "det of literal");
+
+    res = eval_mat("[[1,2][3,4]] -> [E]");
+    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 4, "literal store");
+    check_near(matrices().matrix(4).get(1, 0), 3.0, "stored literal value");
+
+    check_mat_error("[[1,2][3]]", "Dim mismatch", "ragged literal errors");
+    check_mat_error("[[1,2][3,4]", "Syntax error", "unterminated literal");
+
+    // Complex literal in RECT mode; gated in REAL.
+    set_number_mode(NumberMode::kRectangular);
+    res = eval_mat("[[i,0][0,1]]");
+    check(res.kind == matexpr::Kind::kMatrix && res.matrix->dtype() == Dtype::kComplex,
+          "complex literal");
+    check_cnear(res.matrix->cget(0, 0), 0, 1, "complex literal value");
+    set_number_mode(NumberMode::kReal);
+    check_mat_error("[[i,0][0,1]]", "Non-real result", "REAL gates complex literal");
+}
+
+void test_matans_token() {
+    using namespace math;
+    const double vaa[4] = {1, 2, 3, 4};
+    check(eval_mat("[[1,2][3,4]]").kind == matexpr::Kind::kMatrix, "seed MatAns");
+    check_mat_result("matans", 2, 2, vaa, "matans recalls");
+    const double vdbl[4] = {2, 4, 6, 8};
+    check_mat_result("2*matans", 2, 2, vdbl, "matans in expression");
+    check_mat_scalar("det(matans)", -8.0, "det(matans) after 2*matans");
+    auto res = eval_mat("matans -> [F]");
+    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 5, "matans store");
+}
+
+void test_list_matrix_bridge() {
+    using namespace math;
+    // l1 = {1,2,3}, l2 = {4,5} (shorter: zero-pads).
+    auto& l1 = lists().list(0);
+    auto& l2 = lists().list(1);
+    l1.clear();
+    check(l1.set_dtype(Dtype::kDouble) && l1.resize(3), "l1 resize");
+    l1.set(0, 1);
+    l1.set(1, 2);
+    l1.set(2, 3);
+    l2.clear();
+    check(l2.set_dtype(Dtype::kDouble) && l2.resize(2), "l2 resize");
+    l2.set(0, 4);
+    l2.set(1, 5);
+
+    const double vpk[6] = {1, 4, 2, 5, 3, 0};
+    check_mat_result("list2mat(l1,l2)", 3, 2, vpk, "list2mat packs columns");
+    auto res = eval_mat("list2mat(l1,l2) -> [G]");
+    check(res.stored_matrix == 6, "list2mat store");
+
+    // Round-trip back out.
+    res = eval_mat("mat2list([G], l3, l4)");
+    check(res.kind == matexpr::Kind::kText, "mat2list returns text");
+    check((res.lists_mask & 0b1100) == 0b1100, "mat2list mask");
+    check(lists().list(2).size() == 3 && lists().list(2).get(2) == 3, "l3 column values");
+    check(lists().list(3).size() == 3 && lists().list(3).get(1) == 5, "l4 column values");
+
+    check_mat_error("list2mat(x)", "list2mat takes l1-l6 args", "list2mat bad arg");
+    check_mat_error("mat2list([G])", "mat2list needs ([A], l1, ...)", "mat2list no targets");
+    check_mat_error("mat2list([G], l3) -> [C]", "mat2list must stand alone", "mat2list store");
+
+    l1.clear();
+    l2.clear();
+    lists().list(2).clear();
+    lists().list(3).clear();
+}
+
+void test_frobenius_norm() {
+    using namespace math;
+    const double v[4] = {3, 4, 0, 0};
+    check(fill(matrices().matrix(7), 2, 2, v), "norm fill [H]");
+    check_mat_scalar("norm([H])", 5.0, "Frobenius norm");
+    check_mat_scalar("norm([H])^2", 25.0, "norm in expression");
+    // Complex: sqrt(|i|^2 + |2|^2) = sqrt(5).
+    set_number_mode(NumberMode::kRectangular);
+    const Complex vc[2] = {{0, 1}, {2, 0}};
+    check(cfill(matrices().matrix(7), 1, 2, vc), "norm cfill");
+    check_mat_scalar("norm([H])", std::sqrt(5.0), "complex Frobenius norm");
+    set_number_mode(NumberMode::kReal);
+    matrices().matrix(7).clear();
+    matrices().matrix(7).set_dtype(Dtype::kDouble);
+}
+
 }  // namespace
 
 int main() {
@@ -938,6 +1036,10 @@ int main() {
     test_store();
     test_complex_matops();
     test_complex_expr_layer();
+    test_matrix_literals();
+    test_matans_token();
+    test_list_matrix_bridge();
+    test_frobenius_norm();
 
     std::printf("test_matrix: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

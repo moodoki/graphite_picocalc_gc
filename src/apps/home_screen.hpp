@@ -24,6 +24,10 @@ public:
     // main registers it here so the typed `diag` command can push it.
     void set_diag_screen(ui::Screen* s) { diag_screen_ = s; }
 
+    // Append text at the input line's end (the `const` picker inserts
+    // the selected constant's identifier, 4D.17).
+    void insert_text(const char* s);
+
 private:
     static constexpr int kMaxHistory = 50;
 

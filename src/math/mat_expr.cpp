@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "math/complex_expr.hpp"
@@ -53,6 +54,20 @@ int matrix_token_at(const char* p) {
 bool contains_matrix_token(const char* s) {
     for (const char* p = s; *p != 0; ++p) {
         if (matrix_token_at(p) >= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Standalone identifier `name` anywhere in s (the MatAns token gate).
+bool contains_ident(const char* s, const char* name) {
+    const size_t nl = std::strlen(name);
+    for (const char* p = s; *p != 0; ++p) {
+        if (p > s && ident_char(p[-1])) {
+            continue;
+        }
+        if (std::strncmp(p, name, nl) == 0 && !ident_char(p[nl])) {
             return true;
         }
     }
@@ -223,10 +238,10 @@ struct MatFn {
 // results) are here too; dim/eigenvals are whole-expression forms
 // handled in evaluate() and rejected here.
 const MatFn kMatFns[] = {
-    {"inverse", 1}, {"transpose", 1}, {"rref", 1}, {"ref", 1},
-    {"augment", 2}, {"identity", 1},  {"det", 1},  {"rank", 1},
-    {"dim", 1},     {"eigenvals", 1}, {"eig", 1},  // alias of eigenvals (whole-expression form
-                                                   // only)
+    {"inverse", 1},  {"transpose", 1}, {"rref", 1}, {"ref", 1},  {"augment", 2},
+    {"identity", 1}, {"det", 1},       {"rank", 1}, {"norm", 1},  // Frobenius (4D.22)
+    {"dim", 1},      {"eigenvals", 1}, {"eig", 1},  // alias of eigenvals (whole-expression form
+                                                    // only)
 };
 
 Value parse_matrix_fn(P& p, const MatFn& fn) {
@@ -310,6 +325,15 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
         v.s = Complex(rk);
         return v;
     }
+    if (std::strcmp(fn.name, "norm") == 0) {
+        calc_t nf = 0;
+        if (!matops::norm_f(*a.m, &nf, &p.err)) {
+            return kBad;
+        }
+        Value v;
+        v.s = Complex(nf);
+        return v;
+    }
 
     Array* out = claim_temp(p);
     if (out == nullptr) {
@@ -333,8 +357,166 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
     return ok ? v : kBad;
 }
 
+// Home-screen matrix literal [[1,2][3,4]] (4D.14): rows of full scalar
+// expressions; complex elements make a complex matrix. Materializes
+// into an expression temp.
+Value parse_matrix_literal(P& p) {
+    constexpr int kMaxLit = 64;
+    static Complex vals[kMaxLit];  // Static: rows*cols scratch off the stack
+    ++p.s;                         // Outer '['
+    int rows = 0;
+    int cols = 0;
+    int count = 0;
+    bool any_complex = false;
+    while (true) {
+        skip_ws(p);
+        if (*p.s != '[') {
+            return fail(p, "Syntax error");
+        }
+        ++p.s;
+        int c = 0;
+        while (true) {
+            const Value v = parse_expr(p);
+            if (p.err != nullptr) {
+                return kBad;
+            }
+            if (v.is_matrix) {
+                return fail(p, "Syntax error");
+            }
+            if (count >= kMaxLit) {
+                return fail(p, "Matrix literal too large");
+            }
+            vals[count++] = v.s;
+            any_complex = any_complex || v.s.im != 0;
+            ++c;
+            skip_ws(p);
+            if (*p.s == ',') {
+                ++p.s;
+                continue;
+            }
+            if (*p.s == ']') {
+                ++p.s;
+                break;
+            }
+            return fail(p, "Syntax error");
+        }
+        if (rows == 0) {
+            cols = c;
+        } else if (c != cols) {
+            return fail(p, "Dim mismatch");
+        }
+        ++rows;
+        skip_ws(p);
+        if (*p.s == '[') {
+            continue;
+        }
+        if (*p.s == ']') {
+            ++p.s;
+            break;
+        }
+        return fail(p, "Syntax error");
+    }
+    if (any_complex && number_mode() == NumberMode::kReal) {
+        return fail(p, "Non-real result");
+    }
+    Array* out = claim_temp(p);
+    if (out == nullptr) {
+        return kBad;
+    }
+    out->clear();
+    if (!out->set_dtype(any_complex ? Dtype::kComplex : Dtype::kDouble) ||
+        !out->resize(rows, cols)) {
+        return fail(p, "Out of matrix memory");
+    }
+    for (int i = 0; i < count; ++i) {
+        if (any_complex) {
+            out->cset(i, vals[i]);
+        } else {
+            out->set(i, vals[i].re);
+        }
+    }
+    Value v;
+    v.is_matrix = true;
+    v.m = out;
+    return v;
+}
+
+// list2mat(l1, l2, ...) (4D.12): pack lists into matrix columns.
+// Shorter lists zero-pad to the longest.
+Value parse_list2mat(P& p) {
+    ++p.s;  // '('
+    int src[6];
+    int nsrc = 0;
+    while (true) {
+        skip_ws(p);
+        if (p.s[0] != 'l' || p.s[1] < '1' || p.s[1] > '6' || ident_char(p.s[2])) {
+            return fail(p, "list2mat takes l1-l6 args");
+        }
+        if (nsrc >= 6) {
+            return fail(p, "list2mat: too many lists");
+        }
+        src[nsrc++] = p.s[1] - '1';
+        p.s += 2;
+        skip_ws(p);
+        if (*p.s == ',') {
+            ++p.s;
+            continue;
+        }
+        if (*p.s == ')') {
+            ++p.s;
+            break;
+        }
+        return fail(p, "Syntax error");
+    }
+    int rows = 0;
+    bool any_complex = false;
+    for (int i = 0; i < nsrc; ++i) {
+        const Array& lst = lists().list(src[i]);
+        rows = lst.size() > rows ? lst.size() : rows;
+        any_complex = any_complex || lst.dtype() == Dtype::kComplex;
+    }
+    if (rows == 0) {
+        return fail(p, "List is empty");
+    }
+    if (rows > matops::kMaxRowElems) {
+        return fail(p, "Matrix too large");
+    }
+    if (any_complex && number_mode() == NumberMode::kReal) {
+        return fail(p, "Non-real result");
+    }
+    Array* out = claim_temp(p);
+    if (out == nullptr) {
+        return kBad;
+    }
+    out->clear();
+    if (!out->set_dtype(any_complex ? Dtype::kComplex : Dtype::kDouble) ||
+        !out->resize(rows, nsrc)) {
+        return fail(p, "Out of matrix memory");
+    }
+    for (int c = 0; c < nsrc; ++c) {
+        const Array& lst = lists().list(src[c]);
+        for (int r = 0; r < rows; ++r) {
+            const Complex v = r < lst.size() ? lst.cget(r) : Complex(0.0);
+            if (any_complex) {
+                out->cset(r, c, v);
+            } else {
+                out->set(r, c, v.re);
+            }
+        }
+    }
+    Value v;
+    v.is_matrix = true;
+    v.m = out;
+    return v;
+}
+
 Value parse_primary(P& p) {
     skip_ws(p);
+
+    // Matrix literal (4D.14): "[[" opens a row list, not an [X] token.
+    if (p.s[0] == '[' && p.s[1] == '[') {
+        return parse_matrix_literal(p);
+    }
 
     const int slot = matrix_token_at(p.s);
     if (slot >= 0) {
@@ -403,6 +585,24 @@ Value parse_primary(P& p) {
     }
 
     if (std::isalpha(static_cast<unsigned char>(*p.s)) != 0) {
+        // MatAns: the last matrix result as a typed token (4D.14).
+        if (std::strncmp(p.s, "matans", 6) == 0 && !ident_char(p.s[6])) {
+            p.s += 6;
+            if (g_mresult.size() == 0) {
+                return fail(p, "No matrix result");
+            }
+            if (g_mresult.dtype() == Dtype::kComplex && number_mode() == NumberMode::kReal) {
+                return fail(p, "Non-real result");
+            }
+            Value v;
+            v.is_matrix = true;
+            v.m = &g_mresult;
+            return v;
+        }
+        if (std::strncmp(p.s, "list2mat", 8) == 0 && p.s[8] == '(') {
+            p.s += 8;
+            return parse_list2mat(p);
+        }
         for (const MatFn& fn : kMatFns) {
             const size_t nl = std::strlen(fn.name);
             if (std::strncmp(p.s, fn.name, nl) == 0 && p.s[nl] == '(') {
@@ -706,9 +906,12 @@ Result evaluate(const char* input) {
         return res;
     }
 
-    // Involves matrices at all? [X] tokens, or identity() (the only
-    // matrix producer that needs no matrix input).
-    if (!contains_matrix_token(body) && !contains_call(body, "identity")) {
+    // Involves matrices at all? [X] tokens, matrix literals `[[`,
+    // identity()/list2mat() (matrix producers without matrix input),
+    // or the MatAns token (4D.14).
+    if (!contains_matrix_token(body) && !contains_call(body, "identity") &&
+        !contains_call(body, "list2mat") && !contains_call(body, "mat2list") &&
+        !contains_ident(body, "matans") && std::strstr(body, "[[") == nullptr) {
         return res;
     }
 
@@ -737,6 +940,116 @@ Result evaluate(const char* input) {
     }
 
     release_temps();
+
+    // mat2list([X], l1, l2, ...) (4D.12): unpack matrix columns into
+    // the listed targets. Side-effecting, so whole-expression only.
+    {
+        const char* inner = nullptr;
+        size_t inner_len = 0;
+        if (whole_call(body, "mat2list", &inner, &inner_len)) {
+            res.kind = Kind::kError;
+            if (store.valid) {
+                res.error = "mat2list must stand alone";
+                return res;
+            }
+            char args[kMaxLen];
+            if (inner_len >= sizeof(args)) {
+                res.error = "Expression too long";
+                return res;
+            }
+            std::memcpy(args, inner, inner_len);
+            args[inner_len] = 0;
+            // First arg: a matrix-valued expression up to the first
+            // top-level comma; the rest are l1-l6 targets.
+            int depth = 0;
+            char* comma = nullptr;
+            for (char* q = args; *q != 0; ++q) {
+                if (*q == '(' || *q == '[' || *q == '{') {
+                    ++depth;
+                } else if (*q == ')' || *q == ']' || *q == '}') {
+                    --depth;
+                } else if (*q == ',' && depth == 0) {
+                    comma = q;
+                    break;
+                }
+            }
+            if (comma == nullptr) {
+                res.error = "mat2list needs ([A], l1, ...)";
+                return res;
+            }
+            *comma = 0;
+            Value v;
+            if (!eval_matrix_body(args, &v, &res.error)) {
+                release_temps();
+                return res;
+            }
+            int targets[6];
+            int nt = 0;
+            const char* q = comma + 1;
+            while (*q != 0) {
+                while (*q == ' ') {
+                    ++q;
+                }
+                if (q[0] != 'l' || q[1] < '1' || q[1] > '6') {
+                    release_temps();
+                    res.error = "mat2list targets are l1-l6";
+                    return res;
+                }
+                if (nt >= 6) {
+                    release_temps();
+                    res.error = "mat2list: too many lists";
+                    return res;
+                }
+                targets[nt++] = q[1] - '1';
+                q += 2;
+                while (*q == ' ') {
+                    ++q;
+                }
+                if (*q == ',') {
+                    ++q;
+                } else if (*q != 0) {
+                    release_temps();
+                    res.error = "Syntax error";
+                    return res;
+                }
+            }
+            if (nt == 0) {
+                release_temps();
+                res.error = "mat2list needs ([A], l1, ...)";
+                return res;
+            }
+            const int rows = v.m->dim(0);
+            const int cols = v.m->dim(1);
+            const bool cplx = v.m->dtype() == Dtype::kComplex;
+            for (int t = 0; t < nt; ++t) {
+                if (t >= cols) {
+                    break;  // More targets than columns: extras untouched
+                }
+                Array& dst = lists().list(targets[t]);
+                dst.clear();
+                if (!dst.set_dtype(cplx ? Dtype::kComplex : Dtype::kDouble) || !dst.resize(rows)) {
+                    release_temps();
+                    res.error = "Out of list memory";
+                    return res;
+                }
+                for (int r = 0; r < rows; ++r) {
+                    if (cplx) {
+                        dst.cset(r, v.m->cget(r, t));
+                    } else {
+                        dst.set(r, v.m->get(r, t));
+                    }
+                }
+                res.lists_mask = static_cast<uint8_t>(res.lists_mask | (1U << targets[t]));
+            }
+            release_temps();
+            res.kind = Kind::kText;
+            res.error = nullptr;
+            std::snprintf(g_ctext, sizeof(g_ctext), "Done (%d list%s)", nt < cols ? nt : cols,
+                          (nt < cols ? nt : cols) == 1 ? "" : "s");
+            res.text = g_ctext;
+            return res;
+        }
+    }
 
     // Whole-expression list forms: dim(...) and eigenvals(...).
     for (int which = 0; which < 2; ++which) {

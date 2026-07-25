@@ -33,19 +33,19 @@ reflashed, and developer-confirmed** the same day. Full detail:
 
 ## The next job
 
-1. **Batch 5 per the D38 plan: data & catalog glue
-   (4D.12/14/17/18/22)**, ~18 h est — `List►matr`/`Matr►list`
-   conversions (mat_expr); home-screen matrix literals `[[1,2][3,4]]` +
-   typed **`MatAns`** token (scope add); vector ops `dot`/`cross`/`norm`
-   (listexpr/matexpr interception, Frobenius `norm([A])`); scientific
-   constants (`math/constants` flat table + catalog 0-arity entries +
-   `const` picker — watch kMaxCatalogEntries/kLookupCount caps); units
-   as typed `convert(value,"from","to")` pre-engine interceptor (string
-   args can't ride tinyexpr — same dispatch pattern as listexpr).
-   **Batches 2-4 shipped 2026-07-26** — three HW-PENDING eval rows
-   open. Remaining after Batch 5 (D38): named lists (4D.13) →
-   display/formatting (4D.1-5) → eigenvectors (4D.23) → device polish
-   (4D.19-20, needs the board). Task table:
+1. **Batch 6 per the D38 plan: named lists (4D.13, full integration
+   per P4-10)**, ~15 h est — keep `l1`-`l6` fixed; named lists
+   (letter-first, ≤5 chars, cap ~20) usable everywhere a list token
+   works (listexpr, stats/regressions, stat-plot configs, list editor
+   create/rename/delete UI); name registry + one file per list on SD
+   (`/picocalc/listNAME.dat` + directory index); an entry is just an
+   `Array` (complex dtype support falls out of Batch 1); watch
+   slab-pool contention (28-slab SRAM pool; PSRAM spill handled by
+   set_shape) and the D28 bss watch for the registry's fixed arrays.
+   **Batches 2-5 shipped 2026-07-26** — four HW-PENDING eval rows open.
+   Remaining after Batch 6 (D38): display/formatting (4D.1-5) →
+   eigenvectors (4D.23) → device polish (4D.19-20, needs the board).
+   Task table:
    `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the idea A-G →
    task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
@@ -106,18 +106,19 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 now carries 4D Batch 4** (zoom + shading, 2026-07-26,
-  same day as Batches 1-3) on top of Batch 3 (sequence graphing, PCG6),
-  Batch 2 (complex matrices), Batch 1 (complex variables/Ans + lists),
-  the 2026-07-25 work and the D35 state. Flashed and boot-verified over
-  serial (temp + psram-bulk heartbeats healthy); bss **219,372 bytes**
-  (+40 over Batch 3), ~51 KB headroom — keep watching per the D28 watch
-  item. **The PCG6 one-time graph-state reset happened at the Batch 3
-  flash** (Batch 4 reuses the reserved fields — no further reset).
-  Phases 2-3 and 4A-4C are HW-verified on this board, and the 4D Batch 1
-  hands-on eval passed 2026-07-26. **Three open HW-PENDING rows: the 4D
-  Batch 2 (complex matrices), Batch 3 (sequence graphing) and Batch 4
-  (zoom/shading) checklists** (worklog table).
+- **The Pico 1 now carries 4D Batch 5** (data & catalog glue,
+  2026-07-26, same day as Batches 1-4) on top of Batch 4 (zoom/shading),
+  Batch 3 (sequence graphing, PCG6), Batch 2 (complex matrices), Batch 1
+  (complex variables/Ans + lists), the 2026-07-25 work and the D35
+  state. Flashed and boot-verified over serial (temp + psram-bulk
+  heartbeats healthy); bss **220,432 bytes** (+1,060 over Batch 4),
+  ~50 KB headroom — keep watching per the D28 watch item. The PCG6
+  one-time graph-state reset happened at the Batch 3 flash (Batches 4-5
+  add no persistence bumps). Phases 2-3 and 4A-4C are HW-verified on
+  this board, and the 4D Batch 1 hands-on eval passed 2026-07-26.
+  **Four open HW-PENDING rows: the 4D Batch 2 (complex matrices),
+  Batch 3 (sequence graphing), Batch 4 (zoom/shading) and Batch 5
+  (data/catalog glue) checklists** (worklog table).
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware

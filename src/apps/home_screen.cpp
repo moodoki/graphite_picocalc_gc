@@ -15,9 +15,11 @@
 #include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 #include "math/solve_expr.hpp"
+#include "math/units.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/calc_menu.hpp"
+#include "apps/const_screen.hpp"
 #include "apps/dist_screen.hpp"
 #include "apps/files_screen.hpp"
 #include "apps/graph_screen.hpp"
@@ -222,6 +224,18 @@ void HomeScreen::evaluate_input() {
             return;
         }
     }
+    // Unit conversions (4D.18): convert(v,"mi","km") calls become
+    // numeric literals the same way (string args can't ride tinyexpr).
+    if (math::unitexpr::contains_convert(expr)) {
+        const char* uerr = nullptr;
+        if (!math::unitexpr::substitute(expr, sizeof(expr), &uerr)) {
+            push_entry(input_.text(), uerr, true);
+            input_.clear();
+            hist_nav_ = -1;
+            pending_[0] = 0;
+            return;
+        }
+    }
 
     // Matrix expressions (Phase 4A) get next crack — [X] tokens are
     // unambiguous. Kind::kNone means "not matrix syntax".
@@ -278,6 +292,11 @@ void HomeScreen::evaluate_input() {
             }
             if (mres.lists_modified) {
                 math::lists().save(platform::storage(), mres.stored_list);
+            }
+            for (int i = 0; i < 6; ++i) {  // mat2list wrote several (4D.12)
+                if ((mres.lists_mask & (1U << i)) != 0) {
+                    math::lists().save(platform::storage(), i);
+                }
             }
         }
         input_.clear();
@@ -475,11 +494,23 @@ bool HomeScreen::handle_command(const char* cmd) {
         ui::screen_manager().push(&calc_menu());
         return true;
     }
+    // Scientific-constants picker (4D.17).
+    if (std::strcmp(cmd, "const") == 0 || std::strcmp(cmd, "constants") == 0) {
+        ui::screen_manager().push(&const_screen());
+        return true;
+    }
     if (std::strcmp(cmd, "diag") == 0 && diag_screen_ != nullptr) {
         ui::screen_manager().push(diag_screen_);
         return true;
     }
     return false;
+}
+
+void HomeScreen::insert_text(const char* s) {
+    char buf[ui::InputLine::kCapacity];
+    std::snprintf(buf, sizeof(buf), "%s%s", input_.text(), s);
+    input_.set_text(buf);
+    invalidate_input();
 }
 
 bool HomeScreen::on_key(const platform::KeyEvent& ev) {

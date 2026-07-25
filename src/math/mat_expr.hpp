@@ -54,7 +54,10 @@ struct Result {
     int stored_list = -1;            // ->lk target, else -1
     bool matrices_modified = false;  // Caller should persist this matrix (stored_matrix)
     bool lists_modified = false;     // Caller should persist this list (stored_list)
-    const char* error = nullptr;     // kError (static string)
+    // mat2list (4D.12) writes several lists at once: bit k set = lk
+    // was written and needs persisting (independent of stored_list).
+    uint8_t lists_mask = 0;
+    const char* error = nullptr;  // kError (static string)
 };
 
 Result evaluate(const char* input);

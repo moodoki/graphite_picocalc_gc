@@ -72,6 +72,10 @@ bool rank(const Array& a, int* out, const char** err);
 // p >= -1: -1 = inverse, 0 = identity, else repeated multiplication.
 bool power(const Array& a, int p, Array& out, const char** err);
 
+// Frobenius norm (4D.22): sqrt of the sum of squared element
+// magnitudes — real-valued for both dtypes.
+bool norm_f(const Array& a, calc_t* out, const char** err);
+
 // Real eigenvalues via Hessenberg + shifted QR, n <= kMaxEigen. `out`
 // is a 1-D list (descending), so results flow into l1..l6 and list
 // expressions. A complex conjugate pair is an error (D28): lists are

@@ -629,6 +629,49 @@ void test_complex_list_expr() {
     math::set_number_mode(math::NumberMode::kReal);
 }
 
+// Vector ops (4D.22, Batch 5): dot/cross/norm whole-expression forms.
+void test_vector_ops() {
+    using math::listexpr::Kind;
+
+    auto res = eval_list("{1,2,3}->l1");
+    check(res.kind == Kind::kList, "vec: seed l1");
+    res = eval_list("{4,5,6}->l2");
+    check(res.kind == Kind::kList, "vec: seed l2");
+
+    res = eval_list("dot(l1,l2)");
+    check(res.kind == Kind::kScalar && res.scalar.ok && res.scalar.value == 32.0, "dot(l1,l2)");
+    check(math::engine().vars().vars[math::Variables::kAns] == 32.0, "dot commits Ans");
+    res = eval_list("dot({1,0},{0,1})");
+    check(res.kind == Kind::kScalar && res.scalar.value == 0.0, "dot of literals");
+
+    const double vx[3] = {-3, 6, -3};
+    check_list_result("cross(l1,l2)", vx, 3);
+    res = eval_list("cross(l1,l2)->l3");
+    check(res.kind == Kind::kList && res.stored_list == 2, "cross store");
+    check(math::lists().list(2).get(1) == 6.0, "cross stored value");
+
+    res = eval_list("norm({3,4})");
+    check(res.kind == Kind::kScalar && res.scalar.value == 5.0, "norm({3,4})");
+
+    check_list_error("dot(l1,{1,2})", "Dim mismatch");
+    check_list_error("cross({1,2},{3,4})", "cross needs 3-elem lists");
+    check_list_error("norm(l1,l2)", "norm takes one list");
+    check_list_error("dot(l1)", "Need two lists");
+
+    // Complex lists refuse (v1, D37).
+    math::set_number_mode(math::NumberMode::kRectangular);
+    res = eval_list("{1+2i,3}->l4");
+    check(res.kind == Kind::kList, "vec: seed complex l4");
+    check_list_error("norm(l4)", "Non-real list");
+    math::lists().list(3).clear();
+    math::lists().list(3).set_dtype(math::Dtype::kDouble);
+    math::set_number_mode(math::NumberMode::kReal);
+
+    math::lists().list(0).resize(0);
+    math::lists().list(1).resize(0);
+    math::lists().list(2).resize(0);
+}
+
 int main() {
     test_array_basics();
     test_array_tiers();
@@ -637,6 +680,7 @@ int main() {
     test_list_expr_d24();
     test_complex_array();
     test_complex_list_expr();
+    test_vector_ops();
 
     std::printf("test_lists: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -1155,6 +1155,140 @@ Result evaluate(const char* input) {
         return res;
     }
 
+    // Vector ops (4D.22), whole-expression forms: dot(A,B), cross(A,B)
+    // (3-element lists), norm(A). Arguments are any list-valued
+    // expressions; real-only in v1 ("Non-real list", D37).
+    {
+        static Array s_va;
+        static Array s_vb;
+        const char* inner = nullptr;
+        size_t inner_len = 0;
+        int op = -1;  // 0 = dot, 1 = cross, 2 = norm
+        if (wrapper_form(body, "dot", &inner, &inner_len)) {
+            op = 0;
+        } else if (wrapper_form(body, "cross", &inner, &inner_len)) {
+            op = 1;
+        } else if (wrapper_form(body, "norm", &inner, &inner_len)) {
+            op = 2;
+        }
+        if (op >= 0) {
+            res.kind = Kind::kError;
+            char args[kMaxLen];
+            if (inner_len >= sizeof(args)) {
+                res.error = "Expression too long";
+                return res;
+            }
+            std::memcpy(args, inner, inner_len);
+            args[inner_len] = 0;
+            char* comma = nullptr;
+            int depth = 0;
+            for (char* q = args; *q != 0; ++q) {
+                if (*q == '(' || *q == '{') {
+                    ++depth;
+                } else if (*q == ')' || *q == '}') {
+                    --depth;
+                } else if (*q == ',' && depth == 0) {
+                    comma = q;
+                    break;
+                }
+            }
+            if ((op == 2) != (comma == nullptr)) {
+                res.error = op == 2 ? "norm takes one list" : "Need two lists";
+                return res;
+            }
+            if (comma != nullptr) {
+                *comma = 0;
+            }
+            Ctx ctx;
+            if (!eval_list_into(args, s_va, ctx)) {
+                res.error = ctx.err != nullptr ? ctx.err : "Syntax error";
+                return res;
+            }
+            if (comma != nullptr) {
+                Ctx ctx2;
+                if (!eval_list_into(comma + 1, s_vb, ctx2)) {
+                    s_va.clear();
+                    res.error = ctx2.err != nullptr ? ctx2.err : "Syntax error";
+                    return res;
+                }
+            }
+            if (s_va.dtype() == Dtype::kComplex ||
+                (comma != nullptr && s_vb.dtype() == Dtype::kComplex)) {
+                s_va.clear();
+                s_vb.clear();
+                res.error = "Non-real list";
+                return res;
+            }
+            if (op == 1) {  // cross: 3-element lists, list result
+                if (s_va.size() != 3 || s_vb.size() != 3) {
+                    s_va.clear();
+                    s_vb.clear();
+                    res.error = "cross needs 3-elem lists";
+                    return res;
+                }
+                double a[3];
+                double b[3];
+                s_va.read_range(0, 3, a);
+                s_vb.read_range(0, 3, b);
+                s_va.clear();
+                s_vb.clear();
+                g_result.clear();
+                if (!g_result.set_dtype(Dtype::kDouble) || !g_result.resize(3)) {
+                    res.error = "Out of list memory";
+                    return res;
+                }
+                g_result.set(0, a[1] * b[2] - a[2] * b[1]);
+                g_result.set(1, a[2] * b[0] - a[0] * b[2]);
+                g_result.set(2, a[0] * b[1] - a[1] * b[0]);
+                res.list = &g_result;
+                if (store >= 0) {
+                    if (!listops::copy(g_result, lists().list(store))) {
+                        res.error = "Out of list memory";
+                        return res;
+                    }
+                    res.stored_list = store;
+                    res.lists_modified = true;
+                    res.list = &lists().list(store);
+                }
+                res.kind = Kind::kList;
+                res.error = nullptr;
+                return res;
+            }
+            // dot / norm: scalar results.
+            if (store >= 0) {
+                s_va.clear();
+                s_vb.clear();
+                res.error = "Store to l1-l6 needs a list";
+                return res;
+            }
+            double v = 0;
+            if (op == 0) {
+                if (s_va.size() != s_vb.size() || s_va.size() == 0) {
+                    s_va.clear();
+                    s_vb.clear();
+                    res.error = "Dim mismatch";
+                    return res;
+                }
+                for (int i = 0; i < s_va.size(); ++i) {
+                    v += s_va.get(i) * s_vb.get(i);
+                }
+            } else {
+                for (int i = 0; i < s_va.size(); ++i) {
+                    v += s_va.get(i) * s_va.get(i);
+                }
+                v = std::sqrt(v);
+            }
+            s_va.clear();
+            s_vb.clear();
+            engine().vars().set_real(Variables::kAns, v);
+            res.kind = Kind::kScalar;
+            res.error = nullptr;
+            res.scalar.ok = true;
+            res.scalar.value = v;
+            return res;
+        }
+    }
+
     // Scalar reductions become literals; if nothing listy remains the
     // whole thing is a scalar expression for the normal engine path
     // (Ans update + scalar "->a" store included).
