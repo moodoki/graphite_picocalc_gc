@@ -411,10 +411,9 @@ bool inverse_t(const Array& a, Array& out, const char** err) {
 }
 
 template <typename Ops>
-void rref_t(const Array& a, Array& out) {
+void rref_t(Array& out, calc_t eps) {
     const int rows = out.dim(0);
     const int cols = out.dim(1);
-    const calc_t eps = pivot_eps_t<Ops>(a);
     int pivots = 0;
     for (int col = 0; col < cols && pivots < rows; ++col) {
         int best = -1;
@@ -762,9 +761,9 @@ bool rref(const Array& a, Array& out, const char** err) {
         return false;
     }
     if (out.dtype() == Dtype::kComplex) {
-        rref_t<CplxOps>(a, out);
+        rref_t<CplxOps>(out, pivot_eps_t<CplxOps>(a));
     } else {
-        rref_t<RealOps>(a, out);
+        rref_t<RealOps>(out, pivot_eps_t<RealOps>(a));
     }
     return true;
 }
@@ -1066,6 +1065,112 @@ bool eigenvalues(const Array& a, Array& out, const char** err) {
 
 bool eigenvalues_complex(const Array& a, Complex* out, int* count, const char** err) {
     return eigen_core(a, out, count, err);
+}
+
+bool eigenvectors(const Array& a, Array& out, const char** err) {
+    Complex eig[kMaxEigen];
+    int found = 0;
+    if (!eigen_core(a, eig, &found, err)) {
+        return false;
+    }
+    const int n = found;
+    for (int i = 0; i < n; ++i) {
+        if (!eig[i].is_real()) {
+            *err = "Complex eigenvalues";
+            return false;
+        }
+    }
+    // Distinct eigenvalues only (D38/P4-13): a repeated eigenvalue has
+    // either a whole eigenspace (no unique choice) or none (defective).
+    for (int i = 1; i < n; ++i) {
+        if (std::fabs(eig[i].re - eig[i - 1].re) <=
+            1e-8 * (std::fabs(eig[i].re) > 1.0 ? std::fabs(eig[i].re) : 1.0)) {
+            *err = "No unique eigenvector";
+            return false;
+        }
+    }
+    if (!retype(out, Dtype::kDouble) || !out.resize(n, n)) {
+        *err = kErrMemory;
+        return false;
+    }
+    // Working copies: B = A - lambda I in g_mwork[1], its rref in
+    // g_mwork[0] (both free here — eigen_core used only SRAM scratch).
+    Array& b = g_mwork[1];
+    Array& r = g_mwork[0];
+    for (int k = 0; k < n; ++k) {
+        const calc_t lambda = eig[k].re;
+        bool ok = copy(a, b);
+        for (int i = 0; ok && i < n; ++i) {
+            b.set(i, i, b.get(i, i) - lambda);
+        }
+        ok = ok && copy(b, r);
+        if (!ok) {
+            b.clear();
+            r.clear();
+            *err = kErrMemory;
+            return false;
+        }
+        // Looser epsilon than rref()'s 1e-12-relative: lambda carries
+        // QR error, so (A - lambda I) is only near-singular.
+        rref_t<RealOps>(r, 1e4 * pivot_eps_t<RealOps>(b));
+        // Pivot columns: each nonzero row's leading entry. Exactly one
+        // free column = a 1-D nullspace.
+        bool is_pivot[kMaxEigen] = {};
+        int rank = 0;
+        for (int row = 0; row < n; ++row) {
+            for (int col = 0; col < n; ++col) {
+                if (std::fabs(r.get(row, col)) > 0.5) {
+                    is_pivot[col] = true;
+                    ++rank;
+                    break;
+                }
+            }
+        }
+        if (rank != n - 1) {
+            b.clear();
+            r.clear();
+            *err = "No unique eigenvector";
+            return false;
+        }
+        int free_col = -1;
+        for (int col = 0; col < n; ++col) {
+            if (!is_pivot[col]) {
+                free_col = col;
+                break;
+            }
+        }
+        // v[free] = 1; each pivot row gives v[pivot_col] = -R[row][free].
+        calc_t v[kMaxEigen] = {};
+        v[free_col] = 1.0;
+        for (int row = 0; row < n; ++row) {
+            for (int col = 0; col < n; ++col) {
+                if (std::fabs(r.get(row, col)) > 0.5) {  // Leading 1
+                    v[col] = -r.get(row, free_col);
+                    break;
+                }
+            }
+        }
+        // Normalize to unit length; sign so the largest-magnitude
+        // component (first on ties) is positive — deterministic output.
+        calc_t norm = 0;
+        for (int i = 0; i < n; ++i) {
+            norm += v[i] * v[i];
+        }
+        norm = std::sqrt(norm);
+        int big = 0;
+        for (int i = 1; i < n; ++i) {
+            if (std::fabs(v[i]) > std::fabs(v[big])) {
+                big = i;
+            }
+        }
+        const calc_t scale = (v[big] < 0 ? -1.0 : 1.0) / norm;
+        for (int i = 0; i < n; ++i) {
+            out.set(i, k, v[i] * scale);
+        }
+    }
+    b.clear();
+    r.clear();
+    return true;
 }
 
 }  // namespace math::matops

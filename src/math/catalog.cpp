@@ -95,6 +95,7 @@ const FnDescriptor kCatalog[] = {
     {"dim", "dim([A])", "{rows, cols} list", nullptr, 1},
     {"eigenvals", "eigenvals([A])", "Real eigenvalues", nullptr, 1},
     {"eig", "eig([A])", "Eigenvalues (alias)", nullptr, 1},
+    {"eigenvec", "eigenvec([A])", "Eigenvector columns", nullptr, 1},
     // Numeric solver (Phase 4A): solve_expr intercepts; bare `solve`
     // opens the solver screen.
     {"solve", "solve(f,x,lo,hi)", "Root of f (or guess)", nullptr, 4},

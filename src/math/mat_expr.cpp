@@ -240,6 +240,7 @@ struct MatFn {
 const MatFn kMatFns[] = {
     {"inverse", 1},  {"transpose", 1}, {"rref", 1}, {"ref", 1},  {"augment", 2},
     {"identity", 1}, {"det", 1},       {"rank", 1}, {"norm", 1},  // Frobenius (4D.22)
+    {"eigenvec", 1},                                              // 4D.23
     {"dim", 1},      {"eigenvals", 1}, {"eig", 1},  // alias of eigenvals (whole-expression form
                                                     // only)
 };
@@ -351,6 +352,8 @@ Value parse_matrix_fn(P& p, const MatFn& fn) {
         ok = matops::rref(*a.m, *out, &p.err);
     } else if (std::strcmp(fn.name, "ref") == 0) {
         ok = matops::ref(*a.m, *out, &p.err);
+    } else if (std::strcmp(fn.name, "eigenvec") == 0) {
+        ok = matops::eigenvectors(*a.m, *out, &p.err);
     } else {  // augment (b was parsed above; the null check is for the analyzer)
         ok = b.m != nullptr && matops::augment(*a.m, *b.m, *out, &p.err);
     }

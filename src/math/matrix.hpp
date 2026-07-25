@@ -89,6 +89,13 @@ bool eigenvalues(const Array& a, Array& out, const char** err);
 // real part (a conjugate pair's +i entry precedes its -i entry).
 bool eigenvalues_complex(const Array& a, Complex* out, int* count, const char** err);
 
+// Eigenvectors (4D.23, D38/P4-13): unit eigenvector per eigenvalue as
+// the columns of `out` (same descending order as eigenvalues()), each
+// found as the rref nullspace of (A - lambda I). Real-input, distinct
+// real eigenvalues only: complex pairs error "Complex eigenvalues",
+// repeated/defective spectra error "No unique eigenvector".
+bool eigenvectors(const Array& a, Array& out, const char** err);
+
 }  // namespace math::matops
 
 namespace math {

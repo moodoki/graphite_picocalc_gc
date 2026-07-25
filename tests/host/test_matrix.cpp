@@ -1017,6 +1017,71 @@ void test_frobenius_norm() {
     matrices().matrix(7).set_dtype(Dtype::kDouble);
 }
 
+// Eigenvectors (4D.23, Batch 8): rref nullspace of (A - lambda I).
+void test_eigenvectors() {
+    using namespace math;
+    Array a;
+    Array v;
+    const char* err = nullptr;
+
+    // Diagonal: eigenvalues {3, 1} -> columns e1, e2.
+    const double vd[4] = {3, 0, 0, 1};
+    check(fill(a, 2, 2, vd), "evec fill diag");
+    check(matops::eigenvectors(a, v, &err), "evec diag ok");
+    const double ve[4] = {1, 0, 0, 1};
+    check_matrix(v, 2, 2, ve, "evec diag columns", 1e-8);
+
+    // Symmetric [[2,1],[1,2]]: lambda 3 -> [1,1]/sqrt2, lambda 1 -> [1,-1]/sqrt2.
+    const double vs[4] = {2, 1, 1, 2};
+    check(fill(a, 2, 2, vs), "evec fill sym");
+    check(matops::eigenvectors(a, v, &err), "evec sym ok");
+    const double s = std::sqrt(0.5);
+    check_near(v.get(0, 0), s, "sym v1[0]", 1e-8);
+    check_near(v.get(1, 0), s, "sym v1[1]", 1e-8);
+    check_near(std::fabs(v.get(0, 1)), s, "sym v2 magnitude", 1e-8);
+    check_near(v.get(0, 1) + v.get(1, 1), 0.0, "sym v2 antisymmetric", 1e-8);
+
+    // A*V == V*D column-wise for a general 3x3.
+    const double vg[9] = {4, 1, 0, 1, 3, 1, 0, 1, 2};
+    check(fill(a, 3, 3, vg), "evec fill 3x3");
+    Array evals;
+    check(matops::eigenvalues(a, evals, &err), "evec 3x3 eigenvalues");
+    check(matops::eigenvectors(a, v, &err), "evec 3x3 ok");
+    for (int k = 0; k < 3; ++k) {
+        const double lambda = evals.get(k);
+        for (int i = 0; i < 3; ++i) {
+            double av = 0;
+            for (int j = 0; j < 3; ++j) {
+                av += a.get(i, j) * v.get(j, k);
+            }
+            check_near(av, lambda * v.get(i, k), "evec 3x3 A*v = lambda*v", 1e-7);
+        }
+    }
+
+    // Defective (Jordan block) and repeated spectra refuse.
+    const double vj[4] = {2, 1, 0, 2};
+    check(fill(a, 2, 2, vj), "evec fill jordan");
+    err = nullptr;
+    check_err(matops::eigenvectors(a, v, &err), err, "No unique eigenvector", "evec defective");
+    const double vi[4] = {1, 0, 0, 1};
+    check(fill(a, 2, 2, vi), "evec fill identity");
+    err = nullptr;
+    check_err(matops::eigenvectors(a, v, &err), err, "No unique eigenvector", "evec repeated");
+
+    // Rotation: complex pair refuses.
+    const double vr[4] = {0, -1, 1, 0};
+    check(fill(a, 2, 2, vr), "evec fill rotation");
+    err = nullptr;
+    check_err(matops::eigenvectors(a, v, &err), err, "Complex eigenvalues", "evec complex");
+
+    // matexpr exposure: composable matrix result.
+    check(fill(matrices().matrix(8), 2, 2, vd), "evec fill [I]");
+    check_mat_result("eigenvec([I])", 2, 2, ve, "eigenvec([I])");
+    const double v2e[4] = {2, 0, 0, 2};
+    check_mat_result("2*eigenvec([I])", 2, 2, v2e, "2*eigenvec composes");
+    matrices().matrix(8).clear();
+}
+
 }  // namespace
 
 int main() {
@@ -1040,6 +1105,7 @@ int main() {
     test_matans_token();
     test_list_matrix_bridge();
     test_frobenius_norm();
+    test_eigenvectors();
 
     std::printf("test_matrix: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

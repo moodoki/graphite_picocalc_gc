@@ -33,15 +33,22 @@ reflashed, and developer-confirmed** the same day. Full detail:
 
 ## The next job
 
-1. **Batch 8 per the D38 plan: matrix eigenvectors (4D.23)**, ~10 h
-   est — for each real eigenvalue from the existing QR core: rref
-   nullspace of (A−λI) via `matops::rref`, normalize;
-   repeated/defective → explicit "no unique eigenvector" error;
-   real-input only (D36/D37). Expose `eigenvec(...)` in matexpr +
-   catalog; host tests with known diagonalizable/defective cases.
-   **Batches 2-7 shipped 2026-07-26** — six HW-PENDING eval rows open.
-   Remaining after Batch 8 (D38): device polish (4D.19-20, needs the
-   board in hand — soft-sleep APD + settings.dat PCS1). Task table:
+1. **Batch 9 per the D38 plan: device polish (4D.19-20)**, ~12 h est —
+   **needs the board in hand for interactive testing** (the only 4D
+   batch left). New `platform/power.{hpp,cpp}`: inactivity timer in the
+   main-loop key drain; on timeout → backlight 0 (± DISPOFF via an
+   exported `spi_write_command` wrapper in `src/platform/display.cpp` —
+   drivers stay read-only); any key wakes. **All STM32 traffic paced +
+   gated on `Keyboard::bus_idle()`** (never poll back-to-back).
+   Brightness + kbd-backlight (vendored `set_kbd_backlight`, unused)
+   settings rows; persist APD timeout + levels in new
+   `/picocalc/settings.dat` (own magic **PCS1**; restore hooks the
+   late-init path for D14 cold-boot SD settle). No deep sleep in v1
+   (core-1 display service + tinyusb risk). **Batches 2-8 shipped
+   2026-07-26 — SEVEN HW-PENDING eval rows open** (worklog table);
+   working those evals down is likely the better next session than
+   Batch 9. **Phase 4D closing** afterwards triggers the F-evaluator
+   follow-on check (D37) and the idea-H revisit. Task table:
    `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the idea A-G →
    task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
@@ -102,21 +109,21 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 now carries 4D Batch 7** (display & formatting,
-  2026-07-26, same day as Batches 1-6) on top of Batches 1-6 (complex
-  variables/lists, complex matrices, sequence graphing PCG6,
-  zoom/shading, data/catalog glue, named lists), the 2026-07-25 work
-  and the D35 state. Flashed and boot-verified over serial (temp +
-  psram-bulk heartbeats healthy); bss **222,484 bytes** (unchanged from
-  Batch 6 — Batch 7 is flash/text only), ~48 KB headroom — keep
-  watching per the D28 watch item. The PCG6 one-time graph-state reset
-  happened at the Batch 3 flash; no later batch adds a reset (Batch 6
-  added new files `listdir.dat`/`nlist<idx>.dat`). Phases 2-3 and 4A-4C
-  are HW-verified on this board, and the 4D Batch 1 hands-on eval
-  passed 2026-07-26. **Six open HW-PENDING rows: the 4D Batch 2-7
-  checklists** (worklog table). All five font builds regenerated with
-  glyph slot 141 this batch — the non-default font builds
-  (`build/pico2-jm|io|uni|term`) remain stale as before.
+- **The Pico 1 now carries 4D Batch 8** (eigenvectors, 2026-07-26, same
+  day as Batches 1-7) on top of Batches 1-7 (complex variables/lists,
+  complex matrices, sequence graphing PCG6, zoom/shading, data/catalog
+  glue, named lists, display/formatting), the 2026-07-25 work and the
+  D35 state. Flashed and boot-verified over serial (temp + psram-bulk
+  heartbeats healthy); bss **222,484 bytes** (flat since Batch 6),
+  ~48 KB headroom — keep watching per the D28 watch item. The PCG6
+  one-time graph-state reset happened at the Batch 3 flash; no later
+  batch adds a reset (Batch 6 added new files
+  `listdir.dat`/`nlist<idx>.dat`). Phases 2-3 and 4A-4C are HW-verified
+  on this board, and the 4D Batch 1 hands-on eval passed 2026-07-26.
+  **Seven open HW-PENDING rows: the 4D Batch 2-8 checklists** (worklog
+  table). All five font headers were regenerated with glyph slot 141 in
+  Batch 7 — the non-default font builds (`build/pico2-jm|io|uni|term`)
+  remain stale as before.
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware
