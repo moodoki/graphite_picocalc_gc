@@ -50,6 +50,10 @@ int main() {
         expect(n != nullptr && n->bin.a->type == NodeType::kText &&
                    n->bin.b->type == NodeType::kText,
                "'1/2' operands are Text");
+        // 4D.5: the bar row (num height + 1) sits half a char above the
+        // node baseline, centering on the midline of adjacent text.
+        expect(n != nullptr && n->baseline == 12 + 1 + 12 / 2,
+               "'1/2' bar centers on text midline");
     }
 
     // Complex operand: (1+2)/x keeps a paren numerator, still a fraction

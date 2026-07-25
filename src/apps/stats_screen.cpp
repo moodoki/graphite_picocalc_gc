@@ -48,8 +48,12 @@ void pos_label(int pos, char* buf, int cap) {
 
 // Result-line labels in real math notation (testdrive 2026-07-21):
 // lowercase sigma for population stddev, uppercase Sigma for the sums.
-const char kSigX[] = {gfx::kGlyphSigmaLower, 'x', 0};                        // σx
-const char kSigY[] = {gfx::kGlyphSigmaLower, 'y', 0};                        // σy
+const char kSigX[] = {gfx::kGlyphSigmaLower, 'x', 0};  // σx (2-Var, beside σy)
+const char kSigY[] = {gfx::kGlyphSigmaLower, 'y', 0};  // σy
+// 1-Var labels use a true subscript x (4D.4; no subscript-y exists in
+// Unicode/the fonts, so the 2-Var x/y pairs stay plain for symmetry).
+const char kSigXSub[] = {gfx::kGlyphSigmaLower, gfx::kGlyphSubX, 0};         // σₓ
+const char kSxSub[] = {'S', gfx::kGlyphSubX, 0};                             // Sₓ
 const char kSumX[] = {gfx::kGlyphSigmaUpper, 'x', 0};                        // Σx
 const char kSumX2[] = {gfx::kGlyphSigmaUpper, 'x', gfx::kGlyphSuperTwo, 0};  // Σx²
 const char kSumY[] = {gfx::kGlyphSigmaUpper, 'y', 0};                        // Σy
@@ -169,8 +173,8 @@ void StatsScreen::calculate() {
         add_line(buf);
         add_kv("n", s.n);
         add_kv("mean", s.mean);
-        add_kv("Sx", s.sample_stddev);
-        add_kv(kSigX, s.pop_stddev);
+        add_kv(kSxSub, s.sample_stddev);
+        add_kv(kSigXSub, s.pop_stddev);
         add_kv(kSumX, s.sum);
         add_kv(kSumX2, s.sum_sq);
         add_kv("min", s.min_val);

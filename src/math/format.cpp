@@ -101,6 +101,26 @@ int format_number(calc_t x, char* buf, size_t buf_len) {
         normalize_mantissa(tmp, exponent);
         return std::snprintf(buf, buf_len, "%se%d", tmp, exponent);
     }
+    if (g_mode == DisplayMode::kEng) {
+        // Engineering notation (4D.1): exponent a multiple of 3,
+        // mantissa in [1, 1000). Zero displays plain.
+        if (x == 0.0) {
+            return std::snprintf(buf, buf_len, "0");
+        }
+        int e3 = static_cast<int>(std::floor(std::log10(std::fabs(x)) / 3.0)) * 3;
+        double mant = x / std::pow(10.0, e3);
+        if (std::fabs(mant) >= 1000.0) {  // log10 edge at exact powers
+            mant /= 1000.0;
+            e3 += 3;
+        } else if (std::fabs(mant) < 1.0) {
+            mant *= 1000.0;
+            e3 -= 3;
+        }
+        char tmp[40];
+        std::snprintf(tmp, sizeof(tmp), "%.9g", mant);
+        strip_zeros(tmp);
+        return std::snprintf(buf, buf_len, "%se%d", tmp, e3);
+    }
 
     const double ax = std::fabs(x);
 

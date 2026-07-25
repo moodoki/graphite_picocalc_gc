@@ -51,6 +51,7 @@ constexpr char kGlyphNotEqual = '\x89';    // 137 not-equal (U+2260)
 constexpr char kGlyphEllipsis = '\x8a';    // 138 horizontal ellipsis (U+2026)
 constexpr char kGlyphSuperTwo = '\x8b';    // 139 superscript two (U+00B2)
 constexpr char kGlyphSqrt = '\x8c';        // 140 square-root radical (U+221A)
+constexpr char kGlyphSubX = '\x8d';        // 141 subscript x (U+2093, 4D.4)
 
 // Main text font: Spleen 8x16 (D9 — replaced the interim Coyote 8x12).
 const Font& main_font();

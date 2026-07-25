@@ -9,7 +9,7 @@ namespace math {
 
 // Display format (task 5.3). kFloat is the default auto formatter;
 // kFix forces a fixed number of decimals; kSci forces scientific.
-enum class DisplayMode { kFloat, kFix, kSci };
+enum class DisplayMode { kFloat, kFix, kSci, kEng };
 
 DisplayMode display_mode();
 void set_display_mode(DisplayMode m);

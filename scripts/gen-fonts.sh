@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 python3 scripts/bdf_to_utft.py drivers/spleen/spleen-8x16.bdf spleen8x16 \
-    --first 32 --last 140 \
+    --first 32 --last 141 \
     --map 127:960 --map 130:963 --map 131:931 --map 133:956 \
     --extra scripts/mathglyphs-8x16.txt > src/gfx/fonts/spleen8x16.h
 

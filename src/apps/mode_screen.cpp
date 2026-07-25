@@ -39,7 +39,7 @@ void ModeScreen::adjust(int dir) const {
             break;
         case kRowDisplay: {
             int m = static_cast<int>(math::display_mode()) + dir;
-            const int count = 3;
+            const int count = 4;  // FLOAT, FIX, SCI, ENG (4D.1)
             m = (m % count + count) % count;
             math::set_display_mode(static_cast<math::DisplayMode>(m));
             graph::state().display = math::display_mode();
@@ -144,6 +144,7 @@ void ModeScreen::render(gfx::Framebuffer& fb) {
     std::snprintf(disp_val, sizeof(disp_val), "%s",
                   math::display_mode() == math::DisplayMode::kFix   ? "FIX"
                   : math::display_mode() == math::DisplayMode::kSci ? "SCI"
+                  : math::display_mode() == math::DisplayMode::kEng ? "ENG"
                                                                     : "FLOAT");
     char fix_val[8];
     std::snprintf(fix_val, sizeof(fix_val), "%d", math::fix_digits());

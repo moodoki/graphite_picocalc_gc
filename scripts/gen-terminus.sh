@@ -31,10 +31,10 @@ PY=.venv/bin/python
 # --hexshift 2: Unifont's baseline sits 2px lower than Terminus, so lift
 # the baked math glyphs to line up with Terminus's characters.
 "$PY" scripts/bdf_to_utft.py "$TMP/ter-u16n.bdf" terminus8x16 \
-    --first 32 --last 140 --hexfont "$TMP/unifont_all.hex" --hexshift 2 \
+    --first 32 --last 141 --hexfont "$TMP/unifont_all.hex" --hexshift 2 \
     --hexmap 127:0x3C0 --hexmap 128:0x2220 --hexmap 129:0x3B8 --hexmap 130:0x3C3 \
     --hexmap 131:0x3A3 --hexmap 132:0x3C7 --hexmap 133:0x3BC --hexmap 134:0x2139 \
-    --hexmap 135:0x21D2 --hexmap 136:0x03BB --hexmap 137:0x2260 --hexmap 138:0x2026 --hexmap 139:0x00B2 --hexmap 140:0x221A \
+    --hexmap 135:0x21D2 --hexmap 136:0x03BB --hexmap 137:0x2260 --hexmap 138:0x2026 --hexmap 139:0x00B2 --hexmap 140:0x221A --hexmap 141:0x2093 \
     > src/gfx/fonts/terminus8x16.h
 
 if command -v clang-format &>/dev/null; then

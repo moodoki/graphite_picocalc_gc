@@ -33,20 +33,15 @@ reflashed, and developer-confirmed** the same day. Full detail:
 
 ## The next job
 
-1. **Batch 7 per the D38 plan: display & formatting (4D.1-5)**,
-   ~20 h est — **ENG** display mode (`DisplayMode` member + branch in
-   `format_number`, reuse `normalize_mantissa`; bump the MODE screen's
-   hardcoded display count); **▶Frac/▶Dec** (new `math/frac.{hpp,cpp}`
-   bounded continued-fraction, den ≤ 10000; postfix `>frac` token +
-   home-screen hook); **π-tick labels** (rational-multiple-of-π
-   detector sharing frac.hpp, in `draw_axis_labels`); **subscripts**
-   (baked subscript-x glyph slot 141 + gen scripts +
-   mathglyphs-8x16.txt; optional `NodeType::kSubscript` mirroring
-   `make_super`); **fraction centering** (baseline fix in
-   `layout_builder.cpp` `make_fraction`, host-test in test_layout).
-   **Batches 2-6 shipped 2026-07-26** — five HW-PENDING eval rows open.
-   Remaining after Batch 7 (D38): eigenvectors (4D.23) → device polish
-   (4D.19-20, needs the board). Task table:
+1. **Batch 8 per the D38 plan: matrix eigenvectors (4D.23)**, ~10 h
+   est — for each real eigenvalue from the existing QR core: rref
+   nullspace of (A−λI) via `matops::rref`, normalize;
+   repeated/defective → explicit "no unique eigenvector" error;
+   real-input only (D36/D37). Expose `eigenvec(...)` in matexpr +
+   catalog; host tests with known diagonalizable/defective cases.
+   **Batches 2-7 shipped 2026-07-26** — six HW-PENDING eval rows open.
+   Remaining after Batch 8 (D38): device polish (4D.19-20, needs the
+   board in hand — soft-sleep APD + settings.dat PCS1). Task table:
    `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the idea A-G →
    task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
@@ -107,21 +102,21 @@ is actually scheduled.
   confirmed on the Pico 1. The HW-PENDING table is now clear except the
   deferred Pico 2 perf re-baseline and the still-informal Session 19 font
   sweep.
-- **The Pico 1 now carries 4D Batch 6** (named lists, 2026-07-26, same
-  day as Batches 1-5) on top of Batch 5 (data/catalog glue), Batch 4
-  (zoom/shading), Batch 3 (sequence graphing, PCG6), Batch 2 (complex
-  matrices), Batch 1 (complex variables/Ans + lists), the 2026-07-25
-  work and the D35 state. Flashed and boot-verified over serial (temp +
-  psram-bulk heartbeats healthy); bss **222,484 bytes** (+2,052 over
-  Batch 5 — the named-list registry), ~48 KB headroom — keep watching
-  per the D28 watch item. The PCG6 one-time graph-state reset happened
-  at the Batch 3 flash (Batches 4-6 add no graph-state bumps; Batch 6
-  adds NEW files `listdir.dat`/`nlist<idx>.dat`, no resets). Phases 2-3
-  and 4A-4C are HW-verified on this board, and the 4D Batch 1 hands-on
-  eval passed 2026-07-26. **Five open HW-PENDING rows: the 4D Batch 2
-  (complex matrices), Batch 3 (sequence graphing), Batch 4
-  (zoom/shading), Batch 5 (data/catalog glue) and Batch 6 (named lists)
-  checklists** (worklog table).
+- **The Pico 1 now carries 4D Batch 7** (display & formatting,
+  2026-07-26, same day as Batches 1-6) on top of Batches 1-6 (complex
+  variables/lists, complex matrices, sequence graphing PCG6,
+  zoom/shading, data/catalog glue, named lists), the 2026-07-25 work
+  and the D35 state. Flashed and boot-verified over serial (temp +
+  psram-bulk heartbeats healthy); bss **222,484 bytes** (unchanged from
+  Batch 6 — Batch 7 is flash/text only), ~48 KB headroom — keep
+  watching per the D28 watch item. The PCG6 one-time graph-state reset
+  happened at the Batch 3 flash; no later batch adds a reset (Batch 6
+  added new files `listdir.dat`/`nlist<idx>.dat`). Phases 2-3 and 4A-4C
+  are HW-verified on this board, and the 4D Batch 1 hands-on eval
+  passed 2026-07-26. **Six open HW-PENDING rows: the 4D Batch 2-7
+  checklists** (worklog table). All five font builds regenerated with
+  glyph slot 141 this batch — the non-default font builds
+  (`build/pico2-jm|io|uni|term`) remain stale as before.
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware

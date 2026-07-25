@@ -7,6 +7,7 @@
 
 #include "math/catalog.hpp"
 #include "math/engine.hpp"
+#include "math/frac.hpp"
 #include "math/functions.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
@@ -15,6 +16,14 @@ namespace {
 
 int g_failures = 0;
 int g_checks = 0;
+
+void check(bool ok, const char* what) {
+    ++g_checks;
+    if (!ok) {
+        std::printf("FAIL: %s\n", what);
+        ++g_failures;
+    }
+}
 
 void check_near(const char* expr, double expected, double tol = 1e-9) {
     ++g_checks;
@@ -207,8 +216,43 @@ int main() {
     check_fmt(12345, "1.23e4");
     check_fmt(0.005, "5.00e-3");
     check_fmt(INFINITY, "Inf");  // Specials still apply in FIX/SCI
+    // ENG (4D.1): exponents are multiples of 3, mantissa in [1, 1000).
+    math::set_display_mode(math::DisplayMode::kEng);
+    check_fmt(12345, "12.345e3");
+    check_fmt(0.005, "5e-3");
+    check_fmt(1000, "1e3");
+    check_fmt(999, "999e0");
+    check_fmt(-2500000, "-2.5e6");
+    check_fmt(0.0001234, "123.4e-6");
+    check_fmt(5, "5e0");
+    check_fmt(0, "0");
     math::set_display_mode(math::DisplayMode::kFloat);
     math::set_fix_digits(2);
+
+    // ---- 4D.2 fractions (frac.hpp) ----
+    {
+        long p = 0;
+        long q = 1;
+        check(math::frac::decimal_to_fraction(0.75, 10000, &p, &q) && p == 3 && q == 4,
+              "0.75 = 3/4");
+        check(math::frac::decimal_to_fraction(-1.0 / 3.0, 10000, &p, &q) && p == -1 && q == 3,
+              "-1/3 detected");
+        check(math::frac::decimal_to_fraction(5, 10000, &p, &q) && p == 5 && q == 1,
+              "integer is /1");
+        check(!math::frac::decimal_to_fraction(0.7071067811865476, 10000, &p, &q),
+              "irrational refused");
+        char fb[24];
+        check(math::frac::format_fraction(0.4, 10000, fb, sizeof(fb)) &&
+                  std::strcmp(fb, "2/5") == 0,
+              "format 2/5");
+        check(math::frac::pi_multiple(3.14159265358979 / 2, 12, 6, &p, &q) && p == 1 && q == 2,
+              "pi/2 detected");
+        check(math::frac::pi_multiple(3 * 3.14159265358979323846 / 4, 12, 6, &p, &q) && p == 3 &&
+                  q == 4,
+              "3pi/4 detected");
+        check(!math::frac::pi_multiple(3.0, 12, 6, &p, &q), "3 is not a pi multiple");
+        check(!math::frac::pi_multiple(0.0, 12, 6, &p, &q), "0 excluded");
+    }
 
     // ---- 5.4 error handling: division by zero yields Inf/NaN, no crash ----
     {

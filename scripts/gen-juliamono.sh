@@ -25,10 +25,10 @@ PY=.venv/bin/python
 [ -x "$PY" ] || PY=python3
 
 "$PY" scripts/ttf_to_utft.py "$TTF" juliamono8x16 \
-    --first 32 --last 140 --width 8 --height 16 --pxsize 14 --baseline 13 \
+    --first 32 --last 141 --width 8 --height 16 --pxsize 14 --baseline 13 \
     --map 127:0x3C0 --map 128:0x2220 --map 129:0x3B8 --map 130:0x3C3 \
     --map 131:0x3A3 --map 132:0x3C7 --map 133:0x3BC --map 134:0x1D456 \
-    --map 135:0x21D2 --map 136:0x03BB --map 137:0x2260 --map 138:0x2026 --map 139:0x00B2 --map 140:0x221A \
+    --map 135:0x21D2 --map 136:0x03BB --map 137:0x2260 --map 138:0x2026 --map 139:0x00B2 --map 140:0x221A --map 141:0x2093 \
     > src/gfx/fonts/juliamono8x16.h
 
 if command -v clang-format &>/dev/null; then

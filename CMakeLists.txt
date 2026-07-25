@@ -100,6 +100,7 @@ add_executable(picocalc_graphcalc
     src/math/engine.cpp
     src/math/functions.cpp
     src/math/format.cpp
+    src/math/frac.cpp
     src/math/catalog.cpp
     src/math/array.cpp
     src/math/array_backend_pico.cpp

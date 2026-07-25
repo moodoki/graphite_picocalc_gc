@@ -97,7 +97,7 @@ bool is_simple(const LayoutNode* n) {
             n->type == NodeType::kFraction || n->type == NodeType::kSuperscript || is_call(n));
 }
 
-LayoutNode* make_fraction(LayoutNode* num, LayoutNode* den) {
+LayoutNode* make_fraction(LayoutNode* num, LayoutNode* den, const Metrics& m) {
     auto* n = pool_new<LayoutNode>();
     if (n == nullptr) {
         return num;  // Degrade gracefully
@@ -108,7 +108,10 @@ LayoutNode* make_fraction(LayoutNode* num, LayoutNode* den) {
     const int wider = num->width > den->width ? num->width : den->width;
     n->width = wider + 4;
     n->height = num->height + den->height + 3;  // bar + two 1px gaps
-    n->baseline = num->height + 1;              // bar row = math baseline
+    // The bar centers on the midline of baseline-aligned text siblings
+    // (4D.5; a text node's baseline is its bottom row, so the old
+    // "bar row = baseline" hung the whole stack half a line too low).
+    n->baseline = num->height + 1 + m.char_h / 2;
     return n;
 }
 
@@ -301,7 +304,7 @@ struct Parser {
             ++p;
             LayoutNode* rhs = parse_unary();
             if (op == '/' && is_simple(cur) && is_simple(rhs) && count == 0) {
-                cur = make_fraction(cur, rhs);
+                cur = make_fraction(cur, rhs, m);
             } else {
                 if (count == 0) {
                     items[count++] = cur;

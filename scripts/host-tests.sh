@@ -36,7 +36,7 @@ echo "== Compiling + linking test_math =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
     tests/host/test_math.cpp src/math/engine.cpp src/math/functions.cpp \
-    src/math/format.cpp src/math/catalog.cpp src/math/dist.cpp \
+    src/math/format.cpp src/math/frac.cpp src/math/catalog.cpp src/math/dist.cpp \
     src/math/complex.cpp \
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_math"

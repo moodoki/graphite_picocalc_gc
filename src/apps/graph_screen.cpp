@@ -12,6 +12,7 @@
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "math/frac.hpp"
 #include "math/seq_expr.hpp"
 #include "apps/calc_menu.hpp"
 #include "apps/graph_model.hpp"
@@ -717,9 +718,26 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
 
 namespace {
 // Tick-label formatting: 4 significant digits keeps irrational scl
-// steps short (pi/2 -> "1.571", not full double precision — HW
-// feedback 2026-07-18). KIV: symbolic pi / pi-fraction tick labels.
+// steps short (pi/2 -> "1.571"). Values that are small rational
+// multiples of pi label symbolically instead — "pi/2", "3pi/4", "2pi"
+// with the real pi glyph (4D.3; ZTrig's pi/2 grid reads properly).
 void tick_label(double v, char* buf, size_t buf_len) {
+    long p = 0;
+    long q = 1;
+    if (math::frac::pi_multiple(v, 12, 6, &p, &q)) {
+        char num[8] = {};
+        if (p == -1) {
+            num[0] = '-';
+        } else if (p != 1) {
+            std::snprintf(num, sizeof(num), "%ld", p);
+        }
+        if (q == 1) {
+            std::snprintf(buf, buf_len, "%s%c", num, gfx::kGlyphPi);
+        } else {
+            std::snprintf(buf, buf_len, "%s%c/%ld", num, gfx::kGlyphPi, q);
+        }
+        return;
+    }
     std::snprintf(buf, buf_len, "%.4g", v);
 }
 }  // namespace
