@@ -19,18 +19,6 @@ only of features that don't yet have a home.
   (`graph/`, `render/`) — substantial scope, likely its own sub-phase or
   phase if ever picked up, not a small addition. No design work done;
   raised as a stretch idea only, no phase home yet.
-- **Skip drawing grid lines that are too dense to see** (usage feedback
-  2026-07-25): when the graph window is zoomed out far enough that grid
-  lines fall closer than a few pixels apart, drawing them all is slow and
-  the grid isn't even legible — the lines merge into a solid wash. Cull /
-  coarsen (or skip) grid rendering once the pixel spacing between adjacent
-  grid lines drops below a threshold, since it costs render time for no
-  visible benefit. Perf-only, no visual loss. Likely approach: **cap the
-  grid-line count per axis based on that axis's range** — derive a max
-  number of lines each axis will draw (or a minimum pixel spacing) from
-  its min/max, so a very wide/tall window coarsens the grid step instead
-  of drawing thousands of merged lines. Unplanned; small, localized to the
-  graph grid renderer (`graph/` / `render/`).
 - **Antialiased / higher-res font rendering (D31)**: the rasterized fonts
   (JuliaMono, Iosevka) read worse than the bitmap fonts at 8px 1bpp on the
   PicoCalc; antialiasing or a higher-resolution panel would likely help.
@@ -77,6 +65,15 @@ only of features that don't yet have a home.
 
 ## Completed / Closed
 
+- **Coarsen too-dense grid lines** (usage feedback 2026-07-25) → **shipped
+  same day**, no phase/D-number (small, localized fix). When `Xscl`/`Yscl`
+  is tiny relative to the axis range, `GraphScreen::draw_axes` coarsens the
+  grid step to the smallest multiple of `scl` spaced >= 4 px, so a
+  wide/tall window draws the largest meaningful grid (~80 lines/axis max)
+  instead of thousands of merged lines — faster and legible, no visual
+  change at normal scales. Tick labels snap to the coarsened grid step so
+  they stay on grid lines. HW-confirmed on the Pico 1. Shared `thin_factor`
+  helper in `src/apps/graph_screen.cpp`.
 - **Complex numbers** → Phase 4 sub-phase **4C**, shipped as **D30** (2026-07-20,
   see [decisions.md](./decisions.md) D30 and
   [phase4-spec.md](../phases/phase4-spec.md) §5). Adds a `Complex` type,

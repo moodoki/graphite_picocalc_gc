@@ -428,6 +428,18 @@ the win is frame-time, not "core 0 free for input during the push" —
 that would need a deeper async redesign, unnecessary for the 16-22%
 already gained.
 
+**6. Grid usage-feedback fix (same session, HW-confirmed).** Acted on the
+wishlist item logged earlier this session: a tiny `Xscl`/`Yscl` relative to
+the axis range made `GraphScreen::draw_axes` draw thousands of merged grid
+lines (slow + an illegible wash). Added a `thin_factor(per_px, min_px)`
+helper and coarsen the grid step to the smallest multiple of `scl` spaced
+>= 4 px — the "largest meaningful grid" — bounding line count to ~80/axis;
+no change at normal scales (factor 1). Tick labels now snap to the
+coarsened grid step (`grid_every * thin_factor(...)`) so they stay on grid
+lines (a no-op when the grid isn't coarsened). HW-confirmed on the Pico 1:
+dense case renders fast and legible, normal case unchanged. Wishlist item
+moved to Completed/Closed (no phase/D-number).
+
 ## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
 
 Docs/planning-only session — no application source touched, only

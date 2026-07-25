@@ -43,6 +43,28 @@ graph::Mode mode() {
     return graph::state().mode;
 }
 
+// Grid/label thinning: the smallest integer k >= 1 such that k grid
+// steps span at least min_px pixels. `per_px` is the pixel span of one
+// scl step. Used to coarsen a too-dense grid (thousands of merged lines
+// when scl is tiny relative to the range — slow, and an illegible wash)
+// down to the largest meaningful grid, and to keep tick labels spaced.
+int thin_factor(double per_px, double min_px) {
+    if (per_px >= min_px || per_px <= 0.0) {
+        return 1;
+    }
+    // Cap before the int cast: an absurdly small scl relative to the
+    // range makes min_px/per_px astronomically large (int overflow / UB).
+    // The cap still keeps the line count bounded for any sane input.
+    const double k = std::ceil(min_px / per_px);
+    constexpr double kMaxFactor = 1'000'000.0;
+    return static_cast<int>(k < kMaxFactor ? k : kMaxFactor);
+}
+
+// Minimum pixels between drawn grid lines. Below this they merge into a
+// solid wash and cost render time for nothing, so the step is coarsened
+// to the smallest multiple of scl that clears this spacing.
+constexpr double kMinGridPx = 4.0;
+
 // Parametric and polar both sweep a parameter into the shared
 // point-per-step cache; function mode uses the column cache.
 bool param_style() {
@@ -546,18 +568,25 @@ void GraphScreen::draw_axes(gfx::Framebuffer& fb) const {
     const graph::Viewport vp = viewport();
 
     // Grid lines at x_scl / y_scl (dark gray — must recede behind plots).
+    // A scl that's tiny relative to the range would draw thousands of
+    // merged lines (slow, illegible); coarsen the step to the largest
+    // meaningful grid — the smallest multiple of scl spaced >= kMinGridPx.
     if (w.x_scl > 0) {
-        const double start = std::ceil(w.x_min / w.x_scl) * w.x_scl;
-        const auto nx = static_cast<int>(std::floor((w.x_max - start) / w.x_scl));
+        const double per_px = w.x_scl * kWidth / (w.x_max - w.x_min);
+        const double step = w.x_scl * thin_factor(per_px, kMinGridPx);
+        const double start = std::ceil(w.x_min / step) * step;
+        const auto nx = static_cast<int>(std::floor((w.x_max - start) / step));
         for (int i = 0; i <= nx; ++i) {
-            fb.draw_vline(vp.px_x(start + i * w.x_scl), top_, height_, kGridLine);
+            fb.draw_vline(vp.px_x(start + i * step), top_, height_, kGridLine);
         }
     }
     if (w.y_scl > 0) {
-        const double start = std::ceil(w.y_min / w.y_scl) * w.y_scl;
-        const auto ny = static_cast<int>(std::floor((w.y_max - start) / w.y_scl));
+        const double per_px = w.y_scl * height_ / (w.y_max - w.y_min);
+        const double step = w.y_scl * thin_factor(per_px, kMinGridPx);
+        const double start = std::ceil(w.y_min / step) * step;
+        const auto ny = static_cast<int>(std::floor((w.y_max - start) / step));
         for (int i = 0; i <= ny; ++i) {
-            fb.draw_hline(0, vp.px_y(start + i * w.y_scl), kWidth, kGridLine);
+            fb.draw_hline(0, vp.px_y(start + i * step), kWidth, kGridLine);
         }
     }
 
@@ -596,7 +625,10 @@ void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
 
     if (w.x_scl > 0) {
         const double per_px = w.x_scl * kWidth / (w.x_max - w.x_min);
-        const int every = per_px >= 48.0 ? 1 : static_cast<int>(std::ceil(48.0 / per_px));
+        // Space labels >= ~48px, but as a multiple of the (possibly
+        // coarsened) grid step so labels stay on grid lines.
+        const int grid_every = thin_factor(per_px, kMinGridPx);
+        const int every = grid_every * thin_factor(per_px * grid_every, 48.0);
         const double step = w.x_scl * every;
         const double start = std::ceil(w.x_min / step) * step;
         // Below the x-axis when it's in view (flipping above if that
@@ -623,7 +655,8 @@ void GraphScreen::draw_axis_labels(gfx::Framebuffer& fb) const {
 
     if (w.y_scl > 0) {
         const double per_px = w.y_scl * height_ / (w.y_max - w.y_min);
-        const int every = per_px >= 24.0 ? 1 : static_cast<int>(std::ceil(24.0 / per_px));
+        const int grid_every = thin_factor(per_px, kMinGridPx);
+        const int every = grid_every * thin_factor(per_px * grid_every, 24.0);
         const double step = w.y_scl * every;
         const double start = std::ceil(w.y_min / step) * step;
         const bool axis_in_view = w.x_min <= 0 && w.x_max >= 0;
