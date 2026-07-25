@@ -163,9 +163,39 @@ target_include_directories(picocalc_graphcalc PRIVATE
     drivers/
 )
 
+# Build identifier for the diag screen: git short hash, suffixed "-dev"
+# when the working tree is dirty. CI builds a clean checkout so they show
+# a traceable hash; local dev builds (usually dirty) show "<hash>-dev".
+# Captured at configure time — reconfigure (or a clean CI build) to
+# refresh the hash after committing.
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+execute_process(
+    COMMAND git status --porcelain
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_DIRTY
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT GIT_HASH)
+    set(GIT_HASH "nogit")
+endif()
+if(GIT_DIRTY)
+    set(PICOCALC_BUILD_ID "${GIT_HASH}-dev")
+else()
+    set(PICOCALC_BUILD_ID "${GIT_HASH}")
+endif()
+message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
+    PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PSRAM_MUTEX=1
     PSRAM_ASYNC=0
     PSRAM_PIN_CS=20
@@ -204,6 +234,7 @@ target_link_libraries(picocalc_graphcalc
     hardware_pio
     hardware_pwm
     hardware_timer
+    hardware_adc
     i2ckbd
     lcdspi
     pwm_sound

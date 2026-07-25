@@ -1,11 +1,11 @@
-// PicoCalc Graphing Calculator — entry point.
+// PicoCalc Graphing Calculator (Graphite) — entry point.
 //
 // Core 0: application (input, logic, rendering into the framebuffer).
-// Core 1: display service (RGB565->666 conversion + SPI DMA push).
+// Core 1: display service (RGB565->666 conversion + SPI DMA push, D10).
 //
-// Milestone 1 state: boots to a hardware diagnostics screen that
-// exercises display, keyboard, PSRAM, and SD card. Replaced by the
-// calculator home screen in milestone 2.
+// Boots to the calculator home screen; the hardware diagnostics screen
+// (DiagScreen: display/keyboard/PSRAM/SD/battery/die-temp self-tests) is
+// reachable via the typed `diag` command.
 
 #include <cstdint>
 #include <cstdio>
@@ -27,6 +27,11 @@
 #include "math/matrix.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
+
+// Build id from CMake (git short hash, "-dev" when the tree is dirty).
+#ifndef PICOCALC_BUILD_ID
+#define PICOCALC_BUILD_ID "unknown"
+#endif
 
 namespace {
 
@@ -211,6 +216,12 @@ public:
         fb.clear(kBlack);
         int y = 8;
         font.draw_string(fb, 8, y, "Graphite GC", kGreen, kBlack);
+        // Phase + build id, right-aligned on the title line (git short
+        // hash, "-dev" when the tree is dirty).
+        char line[48];
+        std::snprintf(line, sizeof(line), "Phase 4C [%s]", PICOCALC_BUILD_ID);
+        font.draw_string(fb, platform::kScreenW - 8 - font.text_width(line), y, line, kGrayLine,
+                         kBlack);
         y += lh * 2;
 
 #if PICOCALC_PICO2
@@ -220,7 +231,6 @@ public:
 #endif
         y += lh;
 
-        char line[48];
         std::snprintf(line, sizeof(line), "Display: OK  Keyboard: %s",
                       g_init_status.keyboard ? "OK" : "FAIL");
         font.draw_string(fb, 8, y, line, kWhite, kBlack);
@@ -255,6 +265,11 @@ public:
             std::snprintf(line, sizeof(line), "Battery: unavailable");
         }
         font.draw_string(fb, 8, y, line, batt.percent >= 0 ? kWhite : kRed, kBlack);
+        y += lh;
+
+        const float temp = platform::die_temp_c();
+        std::snprintf(line, sizeof(line), "Die temp: %.1f C", static_cast<double>(temp));
+        font.draw_string(fb, 8, y, line, kWhite, kBlack);
         y += lh * 2;
 
         std::snprintf(line, sizeof(line), "Keys seen: %d", key_count_);
@@ -275,8 +290,6 @@ public:
         y += lh;
         font.draw_string(fb, 8, y, "Type files on home for SD list.", kGrayLine, kBlack);
         y += lh;
-        std::snprintf(line, sizeof(line), "Frame: %lu", static_cast<unsigned long>(frame_++));
-        font.draw_string(fb, 8, y, line, kCursor, kBlack);
 
         // Color bars: visual check for channel order / 565->666 conversion.
         const int bar_y = platform::kScreenH - 24;
@@ -289,7 +302,6 @@ public:
 private:
     platform::KeyEvent last_key_;
     int key_count_ = 0;
-    uint32_t frame_ = 0;
 };
 
 DiagScreen g_diag_screen;
@@ -475,6 +487,18 @@ int main() {
                 printf("psram-bulk: %s step=%d (1KB write %lu us, read %lu us)\n", verdict,
                        g_bulk_fail_step, static_cast<unsigned long>(g_bulk_write_us),
                        static_cast<unsigned long>(g_bulk_read_us));
+            }
+        }
+
+        // Die-temperature heartbeat (30 s, like battery/psram-bulk). The
+        // on-chip sensor reads junction temp — useful for watching the
+        // Pico 1 overclock + core-1 display service thermals.
+        {
+            static uint32_t last_temp_report_ms = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            if (now_ms > 3'000 && now_ms - last_temp_report_ms >= 30'000) {
+                last_temp_report_ms = now_ms;
+                printf("temp: die %.1f C\n", static_cast<double>(platform::die_temp_c()));
             }
         }
 

@@ -294,16 +294,12 @@ observed across either pass.
   addendum — **DONE 2026-07-25: root-caused + fixed + pipeline shipped,
   see "The next job" #1b; two non-blocking follow-ups there — Pico 2
   full-frame pipeline, and compute-parallelizing `recompute_function`**);
-  **stale diag-screen label** (`src/main.cpp:213`) — still
-  hardcoded `"[milestone 1]"` from the Phase 1 bootstrap, never updated
-  through milestones 2-5 or phases 2-4. Replace with the current phase
-  (e.g. "Phase 4") and a build identifier: git short hash if the tree is
-  clean, else `dev` — so GitHub Actions builds show a traceable hash and
-  local dev builds (usually dirty) show `dev`. Needs CMake to capture
-  `git rev-parse --short HEAD` + a clean/dirty check (`git status
-  --porcelain`) and pass it through as a compile definition; the
-  `main.cpp:6-8` header comment describing "Milestone 1 state" is also
-  stale and should go.
+  **stale diag-screen label — DONE 2026-07-25**: `main.cpp` header comment
+  de-staled; diag title line now shows `Phase 4C [<hash>-dev]` right-aligned
+  (build id via CMake `PICOCALC_BUILD_ID` = `git rev-parse --short HEAD` +
+  dirty check); leftover per-strip `Frame:` counter removed. Also added a
+  **die-temperature read** (`platform::die_temp_c()`, on-chip ADC ch 4) on
+  the diag screen + a `temp:` 30 s serial heartbeat (idle ~28-31 C).
 
 ## Feature wishlist
 

@@ -440,6 +440,24 @@ lines (a no-op when the grid isn't coarsened). HW-confirmed on the Pico 1:
 dense case renders fast and legible, normal case unchanged. Wishlist item
 moved to Completed/Closed (no phase/D-number).
 
+**7. Die-temperature read + diag-screen cleanup (same session, HW-confirmed).**
+Added `platform::die_temp_c()` reading the RP2040/RP2350 on-chip sensor
+(ADC input 4, no external pin; `hardware_adc` linked). Shown on the diag
+screen and on a 30 s `temp:` serial heartbeat — useful for watching the
+Pico 1 overclock + core-1 pipeline thermals (idle reads ~28-31 C, i.e. the
+overclock/dual-core cost is negligible). The read is cached with a 500 ms
+min-refresh so it's stable within a frame: `render()` runs once per strip
+(~20x/frame) and must be idempotent — a live per-strip re-read made a digit
+on a strip boundary show two values (half-character glitch). Also closed
+the stale-diag-screen backlog item: fixed the "Milestone 1" header comment;
+added a **build id** (`git rev-parse --short HEAD`, `-dev` when the tree is
+dirty) captured in CMake as `PICOCALC_BUILD_ID` and shown right-aligned on
+the diag title line as `Phase 4C [<hash>-dev]`; and **removed the leftover
+`Frame:` counter** — a Phase-1 bring-up artifact that did `frame_++` inside
+`render()`, so it incremented per strip and its glyph straddled a strip
+boundary (same class of glitch). HW-confirmed on the Pico 1: build id, die
+temp, and the tightened layout all render cleanly, no glitch.
+
 ## 2026-07-24 — Docs/planning: D10 dual-core scoping, matrix/complex design departures closed (D36, D37), idea H raised
 
 Docs/planning-only session — no application source touched, only

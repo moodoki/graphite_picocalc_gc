@@ -1,7 +1,9 @@
 #include "platform/system.hpp"
 
+#include <cmath>
 #include <cstdio>
 
+#include "hardware/adc.h"
 #include "hardware/i2c.h"
 #include "pico/time.h"
 
@@ -155,6 +157,37 @@ uint64_t uptime_us() {
 
 uint32_t uptime_ms() {
     return static_cast<uint32_t>(time_us_64() / 1000);
+}
+
+float die_temp_c() {
+    // ADC input 4 is the internal temperature sensor on both the RP2040
+    // and RP2350; it has no external pin, so this never conflicts with
+    // GPIO. Lazily bring the ADC up (nothing else uses it).
+    static bool inited = false;
+    if (!inited) {
+        adc_init();
+        adc_set_temp_sensor_enabled(true);
+        inited = true;
+    }
+    // Cache with a short min-refresh so the value is stable within a
+    // frame. render() runs once per strip (~20x/frame) and must be
+    // idempotent (strip-safety rule); the sensor's LSB is noisy, so a
+    // live re-read per strip made a digit on a strip boundary show two
+    // different values (half-character glitch). A frame renders well
+    // under this interval, so every strip in a frame sees one value.
+    static float cached = std::nanf("");
+    static uint32_t last_ms = 0;
+    const auto now = static_cast<uint32_t>(time_us_64() / 1000);
+    if (std::isnan(cached) || now - last_ms >= 500) {
+        adc_select_input(4);
+        // 12-bit result over the 3.3 V reference.
+        const uint16_t raw = adc_read();
+        const float voltage = static_cast<float>(raw) * (3.3F / 4096.0F);
+        // Datasheet transfer function: T = 27 - (V - 0.706) / 0.001721.
+        cached = 27.0F - (voltage - 0.706F) / 0.001721F;
+        last_ms = now;
+    }
+    return cached;
 }
 
 }  // namespace platform
