@@ -70,7 +70,8 @@ reflashed, and developer-confirmed** the same day. Full detail:
      and Phase 6 (app framework + MicroPython) will both add
      significant static footprint — worth a dedicated pass to review
      for dead weight / bloat and trim before piling on more, rather than
-     finding out mid-Phase-5 that the budget is gone.
+     finding out mid-Phase-5 that the budget is gone. Research starting
+     point: `size-optimization-ideas.md`.
    - Then **Phase 5 (CAS)** per D32/D33.
    - **Three follow-up bugs from the 2026-07-27 eval, not yet
      root-caused or fixed** (non-blocking): SEQ-mode trace
