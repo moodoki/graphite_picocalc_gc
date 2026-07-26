@@ -22,8 +22,8 @@ investigated or fixed — logged verbatim for a future session to triage.
   ZSquare, ZBox (crosshair/rubber-band/Alt-move/ESC-cancel), per-function
   shade toggle (none/above/below) with persistence, two-curve `H` band
   shading, and fnInt shaded-region color all checked out.
-- **π tick labels (Batch 7 re-confirm)**: fixed — π/2, π, 3π/2, 2π render
-  with the real glyph now.
+- **`π` tick labels (Batch 7 re-confirm)**: fixed — `π/2`, `π`, `3π/2`, `2π`
+  render with the real glyph now.
 
 ## Bugs
 

@@ -17,7 +17,7 @@ investigated or fixed — logged verbatim for a future session to triage.
 ## Bugs
 
 1. **2-Var stats subscripts not rendering.** Batch 7 (4D.1-5) shipped true
-   subscript glyphs (Sₓ/σₓ) for 1-Var stats results. Observed: 1-Var stats
+   subscript glyphs (`Sₓ`/`σₓ`) for 1-Var stats results. Observed: 1-Var stats
    subscripts render correctly; **2-Var stats does not use the subscript
    glyphs**. (Note: the worklog's Batch 7 row already flags that no
    subscript-y glyph exists for 2-Var's Sx/Sy pairs — this observation

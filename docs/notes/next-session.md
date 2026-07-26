@@ -1,6 +1,23 @@
 # Start here — next session
 
-**Last session:** 2026-07-26 — **Phase 4D started.** Two blocks: **(1)** a
+**Last session:** 2026-07-27 — **on-device eval only, no code changes.**
+Hands-on test-drive on the Pico 1 (current Phase 4D build) covered the last
+three open HW-PENDING rows — Batch 2 (complex matrices), Batch 3 (sequence
+graphing), Batch 4 (zoom + shading) — all PASS. Batch 3 found two new minor
+bugs, not yet fixed: SEQ-mode trace (F4) doesn't snap to exact n/u(n) values
+(shows float noise instead of the exact integers the table shows), and the
+sequence editor's color swatch tracks recursive-vs-explicit form rather than
+the assigned plot color (recursive always red, explicit always white — the
+graph itself still plots correctly). Also re-confirmed the `π` tick-label fix
+(2026-07-26) renders correctly. Two UI-friction feature requests logged, no
+fix yet: cap displayed decimal digits on matrix results; multi-character
+constant names are hard to read in the constants picker (kiv). **All nine
+D38 batches (Phase 4D) are now hardware-verified on the Pico 1** — see
+`worklog.md`'s 2026-07-27 entry and
+`testdrive-2026-07-27-observations.md` for the full report. Phase 4D itself
+is not yet declared closed — see "The next job" below for what's left.
+
+**Previous session:** 2026-07-26 — **Phase 4D started.** Two blocks: **(1)** a
 full 4D planning pass, every open question resolved — recorded as
 **`decisions.md` D38** (4D.16 found already shipped in 3D/D27, closed
 zero-work; 4D.21 closed; P4-10 = named user lists full integration; P4-12 =
@@ -33,22 +50,31 @@ reflashed, and developer-confirmed** the same day. Full detail:
 
 ## The next job
 
-1. **Phase 4D is CODE-COMPLETE (all 9 batches shipped 2026-07-26,
-   single session).** The next job is the **hands-on eval backlog:
-   EIGHT HW-PENDING rows** (Batches 2-9, worklog table) — complex
-   matrices, sequence graphing (incl. the PCG6 first-boot reset,
-   already absorbed), zoom/shading, data/catalog glue, named lists,
-   display/formatting, eigenvectors, and the device-polish batch
-   (APD sleep/wake + brightness — the one that genuinely needs
-   hands-on care: first new STM32 write path since battery; watch for
-   I2C weirdness/wedges). Work them top-down or per-feature; findings
-   → fix same-session per this session's precedent. **After the evals
-   pass, Phase 4D closes**: run the F-evaluator follow-on check (D37),
-   revisit idea H (polymorphic variables), update `ti-parity.md` and
-   the README status table, then **Phase 5 (CAS)** per D32/D33.
-   Task table:
-   `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the idea A-G →
-   task-ID map is in D37 and
+1. **Phase 4D is CODE-COMPLETE and its on-device eval backlog is now
+   CLEAR (all 9 D38 batches hardware-verified on the Pico 1 — Batch 1
+   and Batches 5-9 on 2026-07-26, Batches 2-4 on 2026-07-27).** What's
+   left before Phase 4D can be declared closed:
+   - Run the **F-evaluator follow-on check (D37)**.
+   - Revisit **idea H (polymorphic variables)** — stays undecided.
+   - Update **`ti-parity.md` and the README status table** (README
+     Status blurb + Features bullet + Project-status table row all
+     still say "code-complete, evals pending" — flip to reflect the
+     evals passing once the above two items are also resolved, or
+     sooner if the developer wants that split into two steps).
+   - Then **Phase 5 (CAS)** per D32/D33.
+   - **Two follow-up bugs from the 2026-07-27 eval, not yet
+     root-caused or fixed** (non-blocking, cosmetic): SEQ-mode trace
+     (F4) doesn't snap to exact n/u(n) values (float noise instead of
+     the table's exact integers); the sequence editor's color swatch
+     tracks recursive-vs-explicit form instead of the assigned plot
+     color (graph itself is correct either way).
+   - **Two UI-friction feature requests, no fix proposed yet**: matrix
+     results with many decimal places are hard to read (consider
+     capping displayed digits); multi-character constant names are
+     hard to read in the constants picker (kiv — design thought
+     needed).
+   Task table: `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the
+   idea A-G → task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
    idea H — polymorphic variables — stays undecided, revisit after 4D
    ships, same checkpoint as F). **Phase 5 (CAS)** then **Phase 6
@@ -117,9 +143,11 @@ is actually scheduled.
   `settings.dat` PCS1 (Batch 9 — created on first `settings` change).
   **Batch 9's APD defaults to 5 min**: an idle unit now dims its screen;
   any key wakes it (the wake key is swallowed). Phases 2-3 and 4A-4C
-  are HW-verified on this board; 4D Batch 1's eval passed 2026-07-26.
-  **Eight open HW-PENDING rows: the 4D Batch 2-9 checklists** (worklog
-  table). All five font headers were regenerated with glyph slot 141 in
+  are HW-verified on this board; **all nine 4D Batch 1-9 checklists are
+  now cleared** (Batch 1 + 5-9 on 2026-07-26, Batches 2-4 on 2026-07-27
+  — see worklog table). Two non-blocking findings from the 2026-07-27
+  pass (SEQ trace snap, SEQ color swatch) are carried in "The next job"
+  above. All five font headers were regenerated with glyph slot 141 in
   Batch 7 — the non-default font builds (`build/pico2-jm|io|uni|term`)
   remain stale as before. The Pico 2 is now NINE builds behind.
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
