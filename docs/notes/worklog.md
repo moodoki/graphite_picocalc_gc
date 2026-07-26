@@ -304,11 +304,17 @@ ASCII 32..126 only) but `kGlyphPi` is slot 127 — one past the end, so
 `draw_char` silently drew nothing. The 8x16 mathglyphs pipeline never
 covered the small font ("π has always been 8x16-only" per gen-fonts.sh).
 
-Fix: new hand-drawn `scripts/mathglyphs-5x8.txt` (slot 127 π, full-width
-bar over two 1px legs, Spleen x-height rows) + gen-fonts.sh 5x8 line now
-`--last 127 --extra`; spleen5x8.h regenerated (8x16 regen byte-identical).
-Host suite + lint green; flashed to the Pico 1, boot verified. Re-check
-the π ticks in the Batch 7 eval row with this build.
+Fix (two rounds, same day): first a hand-drawn 5x8 π via `--extra`; then
+reworked per developer preference to a **copied glyph** like the 8x16
+fonts use — new `bdf_to_utft.py --donor FILE` (fallback BDF for --map
+codepoints the primary lacks, cell size must match) sourcing π (U+03C0)
+from Markus Kuhn's public-domain X11 fixed 5x8, vendored at
+`drivers/ucs-fixed/5x8.bdf` (vendored, not fetched, so the default-font
+regen stays offline; both fonts are 5x8/ascent-7 so it bakes unshifted).
+gen-fonts.sh 5x8 line: `--last 127 --map 127:960 --donor ...`; the
+hand-drawn mathglyphs-5x8.txt is gone. spleen5x8.h regenerated (8x16
+byte-identical). Host suite + lint green; flashed to the Pico 1, boot
+verified. Re-check the π ticks in the Batch 7 eval row with this build.
 
 ## 2026-07-26 — 4D Batch 9 shipped: device polish (4D.19-20) — **Phase 4D CODE-COMPLETE**
 

@@ -12,6 +12,10 @@ Usage:
 --map bakes a non-ASCII glyph into an otherwise-unused slot, e.g.
 --last 127 --map 127:960 puts Greek pi (U+03C0) at byte 0x7F (DEL).
 
+--donor FILE names a second BDF consulted for --map codepoints the
+primary BDF lacks (e.g. Greek for Spleen 5x8, sourced from the public
+domain X11 fixed 5x8). It must share the primary's cell size.
+
 --extra FILE bakes hand-drawn glyphs (for symbols the BDF lacks, e.g.
 the angle sign or a slanted imaginary-unit i). The file holds one or
 more blocks:
@@ -141,6 +145,8 @@ def main():
                     help="source slot DEST from another codepoint's glyph")
     ap.add_argument("--extra", action="append", default=[], metavar="FILE",
                     help="hand-drawn glyph file (wins over --map for a slot)")
+    ap.add_argument("--donor", metavar="FILE",
+                    help="fallback BDF for --map codepoints the primary lacks")
     ap.add_argument("--hexfont", metavar="FILE",
                     help="GNU Unifont .hex to source --hexmap glyphs from")
     ap.add_argument("--hexmap", action="append", default=[], metavar="DEST:CODEPOINT",
@@ -161,6 +167,13 @@ def main():
     if (cell_w * cell_h) % 8 != 0:
         sys.exit(f"error: cell {cell_w}x{cell_h} is not byte-divisible")
     count = args.last - args.first + 1
+
+    donor_ascent = None
+    donor_glyphs = {}
+    if args.donor:
+        d_w, d_h, donor_ascent, donor_glyphs = parse_bdf(args.donor)
+        if (d_w, d_h) != (cell_w, cell_h):
+            sys.exit(f"error: --donor cell {d_w}x{d_h} != primary {cell_w}x{cell_h}")
 
     hexmap = {}
     hexglyphs = {}
@@ -201,9 +214,12 @@ def main():
             grid = hand[slot]
         elif slot in hexmap:
             grid = hexglyphs[hexmap[slot]]
+        elif cp in glyphs:
+            grid = render_cell(cell_w, cell_h, ascent, glyphs[cp])
+        elif cp in donor_glyphs:
+            grid = render_cell(cell_w, cell_h, donor_ascent, donor_glyphs[cp])
         else:
-            grid = (render_cell(cell_w, cell_h, ascent, glyphs[cp])
-                    if cp in glyphs else [[False] * cell_w for _ in range(cell_h)])
+            grid = [[False] * cell_w for _ in range(cell_h)]
         bits = [px for row in grid for px in row]
         for i in range(0, len(bits), 8):
             byte = 0
@@ -226,7 +242,8 @@ def main():
         elif slot in hexmap:
             label = f"U+{hexmap[slot]:04X} unifont"
         elif slot in remap:
-            label = f"U+{remap[slot]:04X}"
+            cp = remap[slot]
+            label = f"U+{cp:04X}" if cp in glyphs else f"U+{cp:04X} donor"
         elif chr(slot) == "\\":
             label = "backslash"
         elif chr(slot).isprintable():

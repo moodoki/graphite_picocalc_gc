@@ -7,9 +7,10 @@
 #   32..126  ASCII
 #   127 pi    130 sigma  131 Sigma  133 mu   -> --map from the BDF
 #   128 angle 129 theta  132 chi    134 i    -> hand-drawn (--extra)
-# The 5x8 small font is ASCII plus a hand-drawn pi at slot 127
-# (mathglyphs-5x8.txt) for the graph tick labels; the other math glyphs
-# stay 8x16-only and render blank in the small font.
+# The 5x8 small font is ASCII plus pi at slot 127 for the graph tick
+# labels, copied from the public-domain X11 fixed 5x8 (drivers/ucs-fixed/,
+# --donor) since the Spleen BDF has no Greek at this size; the other math
+# glyphs stay 8x16-only and render blank in the small font.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,8 +21,8 @@ python3 scripts/bdf_to_utft.py drivers/spleen/spleen-8x16.bdf spleen8x16 \
     --extra scripts/mathglyphs-8x16.txt > src/gfx/fonts/spleen8x16.h
 
 python3 scripts/bdf_to_utft.py drivers/spleen/spleen-5x8.bdf spleen5x8 \
-    --first 32 --last 127 \
-    --extra scripts/mathglyphs-5x8.txt > src/gfx/fonts/spleen5x8.h
+    --first 32 --last 127 --map 127:960 \
+    --donor drivers/ucs-fixed/5x8.bdf > src/gfx/fonts/spleen5x8.h
 
 # Match the committed style (the tool emits one long line per glyph;
 # clang-format rewraps and aligns the trailing comments).
