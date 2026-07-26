@@ -79,6 +79,17 @@ a pass over it:
 - This step is **not** needed for a plain sub-phase or session wrap-up — only
   when a phase itself just closed.
 
+## Validating markdown (always, after doc edits)
+
+CI gates docs on `python3 scripts/validate_md.py docs/ AGENTS.md README.md`
+(the exact invocation in `.github/workflows/build.yml`). Run it after
+writing your doc edits and fix anything it reports — in files you just
+touched or pre-existing — before committing. The usual offender is a bare
+unicode math symbol (π, θ, λ, ×, ≤, √, …) in prose: the house style is to
+wrap it in backticks (`` `π` ``), not to reword. Also keep `$...$` math
+and inline code spans on one line — the validator checks per line, and a
+span split across lines makes its neighbors flag too.
+
 ## Commit messages
 
 Follow AGENTS.md convention: imperative mood, prefixed by subsystem, e.g. `feat: Phase 3D — inference, test screen (D27)`, `fix: storage health retry-forever`, `docs: update phase 3 plan`. Look at `git log --oneline -15` for the exact flavor in use (this repo favors terse tags like `feat:`/`fix:`/`docs:` plus phase/decision codes). Body (if needed): what changed and why, not a line-by-line diff narration.

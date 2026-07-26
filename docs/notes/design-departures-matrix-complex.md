@@ -259,8 +259,9 @@ What it actually touches, concretely, against the current code:
   the *number* of slots that can hold array data.
 - **Dispatch rewrite**: not an extension of the existing token-shape
   cascade — a different model. Every operator needs to become
-  type-polymorphic at runtime (real×real, real×complex, complex×matrix,
-  matrix×matrix, list×list elementwise, and the invalid combinations
+  type-polymorphic at runtime (`real×real`, `real×complex`,
+  `complex×matrix`, `matrix×matrix`, `list×list` elementwise, and the
+  invalid combinations
   that must error cleanly) instead of routing by which mini-evaluator's
   trigger token appeared.
 - **Hot-path guardrail**: `evaluate_real()` (graphing/tables/stats) must

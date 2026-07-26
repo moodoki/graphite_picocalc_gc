@@ -675,8 +675,8 @@ to Phase 5 or left as a standalone wishlist item.
   new eigenvectors task (idea G) is real-input-only for the same reason.
 - **Vector operations** (design-departures idea E, vector-ops half —
   pulled forward into 4D 2026-07-24, see decisions.md D36): `dot(v1,
-  v2)`, `cross(v1, v2)` (3-space) and `norm(v)` for a $1\times n$/$n\times
-  1$ `Array`, plus `norm([A])` as the matrix Frobenius norm (a direct
+  v2)`, `cross(v1, v2)` (3-space) and `norm(v)` for a $1\times n$ or
+  $n\times 1$ `Array`, plus `norm([A])` as the matrix Frobenius norm (a direct
   extension — same sum-of-squares computation, no new algorithm). New
   `matexpr` functions only; no storage-model change. The list↔matrix
   bridge half of the same departure idea already shipped as 4D.12 above.

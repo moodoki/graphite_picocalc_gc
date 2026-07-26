@@ -16,7 +16,7 @@ the fact.
 - **fnInt shading following curve color**: fold into 4D.
 - **4C "Non-real result" phrasing** (REAL-mode domain errors): clear, leave
   it as-is.
-- **Font/glyph** (√ inline-only/no vinculum; shared Unifont-derived i/∠
+- **Font/glyph** (`√` inline-only/no vinculum; shared Unifont-derived i/∠
   glyphs vs. Terminus): both look fine.
 - **F3 MODE vs ZOOM slot** (D20 KIV): didn't test this session.
 - **D16 trace-sync option b** (table-step sync in split view): current

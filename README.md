@@ -9,7 +9,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > CALC menu, complex numbers) are also hardware-verified on both boards;
 > sub-phase 4D (GC completeness) is **code-complete** — all nine D38
 > batches (complex variables/lists/matrices, sequence graphing, zoom and
-> shading, list↔matrix/constants/units glue, named lists, ENG/`>frac`/π-tick
+> shading, list↔matrix/constants/units glue, named lists, ENG/`>frac`/`π`-tick
 > display polish, eigenvectors, auto-power-down + brightness) shipped and
 > flashed; hands-on device evals are in progress. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current

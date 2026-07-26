@@ -71,12 +71,12 @@ lines if true alpha isn't feasible on this display.
 
 ## 4C — Complex numbers
 
-- MODE "Number" row cycling REAL/a+bi/r∠θ and persisting: works as
+- MODE "Number" row cycling REAL/a+bi/`r∠θ` and persisting: works as
   expected.
 - REAL mode "Non-real result" wording (`3+2i`, `sqrt(-4)`, `(1+i)^2`, etc.)
   and a+bi mode arithmetic (`sqrt(-4)`->2i, `(1+i)^2`->2i, `e^(i*pi)`->-1,
   `abs(3+4i)`->5, conj/real/imag): works as expected.
-- Store rules (`5->a` works, `2i->a` errors) and r∠θ polar display with the
+- Store rules (`5->a` works, `2i->a` errors) and `r∠θ` polar display with the
   real ∠ glyph: works as expected.
 - `eigenvals([A])` on a rotation-like 2x2 (`[[0,-1][1,0]]`) showing
   `{i,-i}` as text: works, **and this happens even in REAL mode** — user
