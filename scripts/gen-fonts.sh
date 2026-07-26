@@ -9,7 +9,8 @@
 #   128 angle 129 theta  132 chi    134 i    -> hand-drawn (--extra)
 # The 5x8 small font is ASCII plus pi at slot 127 for the graph tick
 # labels, copied from the public-domain X11 fixed 5x8 (drivers/ucs-fixed/,
-# --donor) since the Spleen BDF has no Greek at this size; the other math
+# --donor) since the Spleen BDF has no Greek at this size and Unifont
+# (the 8x16 donor) has no glyphs narrower than 8px; the other math
 # glyphs stay 8x16-only and render blank in the small font.
 
 set -euo pipefail

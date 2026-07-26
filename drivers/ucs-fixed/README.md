@@ -10,6 +10,11 @@ BDF has no Greek at this size, so `scripts/gen-fonts.sh` maps slot 127
 (π, U+03C0) from this font via `bdf_to_utft.py --donor`. Both fonts share
 the same cell metrics (5x8, ascent 7), so the glyph bakes in unshifted.
 
+GNU Unifont — the donor for the 8x16 test-drive fonts' math slots — can't
+serve here: its glyphs are 8 or 16 pixels wide, and the `--hexmap` path
+only fits 8-wide cells, so nothing from it fits a 5-wide cell. Hence a
+second, genuinely tiny donor font for the small font.
+
 Vendored (unlike the fetched test-drive 8x16 fonts) because the small
 font ships in every build and the default-font regen should stay offline,
 matching `drivers/spleen/`.
