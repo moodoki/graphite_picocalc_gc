@@ -8,7 +8,10 @@ bugs, not yet fixed: SEQ-mode trace (F4) doesn't snap to exact n/u(n) values
 (shows float noise instead of the exact integers the table shows), and the
 sequence editor's color swatch tracks recursive-vs-explicit form rather than
 the assigned plot color (recursive always red, explicit always white — the
-graph itself still plots correctly). Also re-confirmed the `π` tick-label fix
+graph itself still plots correctly). A third bug was found in passing on
+Batch 5's `MatAns`: it does not survive a power cycle, unlike named matrix
+variables (`[A]` etc., confirmed persistent under Batch 2). Also
+re-confirmed the `π` tick-label fix
 (2026-07-26) renders correctly. Two UI-friction feature requests logged, no
 fix yet: cap displayed decimal digits on matrix results; multi-character
 constant names are hard to read in the constants picker (kiv). **All nine
@@ -62,12 +65,13 @@ reflashed, and developer-confirmed** the same day. Full detail:
      evals passing once the above two items are also resolved, or
      sooner if the developer wants that split into two steps).
    - Then **Phase 5 (CAS)** per D32/D33.
-   - **Two follow-up bugs from the 2026-07-27 eval, not yet
-     root-caused or fixed** (non-blocking, cosmetic): SEQ-mode trace
+   - **Three follow-up bugs from the 2026-07-27 eval, not yet
+     root-caused or fixed** (non-blocking): SEQ-mode trace
      (F4) doesn't snap to exact n/u(n) values (float noise instead of
      the table's exact integers); the sequence editor's color swatch
      tracks recursive-vs-explicit form instead of the assigned plot
-     color (graph itself is correct either way).
+     color (graph itself is correct either way); `MatAns` does not
+     survive a power cycle (unlike named matrix variables `[A]` etc.).
    - **Two UI-friction feature requests, no fix proposed yet**: matrix
      results with many decimal places are hard to read (consider
      capping displayed digits); multi-character constant names are
@@ -145,9 +149,9 @@ is actually scheduled.
   any key wakes it (the wake key is swallowed). Phases 2-3 and 4A-4C
   are HW-verified on this board; **all nine 4D Batch 1-9 checklists are
   now cleared** (Batch 1 + 5-9 on 2026-07-26, Batches 2-4 on 2026-07-27
-  — see worklog table). Two non-blocking findings from the 2026-07-27
-  pass (SEQ trace snap, SEQ color swatch) are carried in "The next job"
-  above. All five font headers were regenerated with glyph slot 141 in
+  — see worklog table). Three non-blocking findings from the 2026-07-27
+  pass (SEQ trace snap, SEQ color swatch, `MatAns` not persisting) are
+  carried in "The next job" above. All five font headers were regenerated with glyph slot 141 in
   Batch 7 — the non-default font builds (`build/pico2-jm|io|uni|term`)
   remain stale as before. The Pico 2 is now NINE builds behind.
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**

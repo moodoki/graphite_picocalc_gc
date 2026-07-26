@@ -38,6 +38,9 @@ investigated or fixed — logged verbatim for a future session to triage.
    white — regardless of what plot color is actually assigned, and
    regardless of the fact that the graph itself plots in the correct
    color either way.
+3. **`MatAns` does not survive a power cycle.** Unlike named matrix
+   variables (`[A]`, etc., confirmed persistent under Batch 2), the
+   last-computed matrix answer variable is lost on power-cycle.
 
 ## Feature requests / UI friction
 
