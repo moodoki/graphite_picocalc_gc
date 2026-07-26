@@ -202,10 +202,17 @@ else()
 endif()
 message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 
+# Current code-complete phase, shown next to the build id on the diag
+# screen. Not derivable from git — bump it here when a phase/sub-phase
+# reaches code-complete (the session-wrapup agent's README status pass
+# covers this).
+set(PICOCALC_PHASE "4D")
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
+    PICOCALC_PHASE="${PICOCALC_PHASE}"
     PSRAM_MUTEX=1
     PSRAM_ASYNC=0
     PSRAM_PIN_CS=20

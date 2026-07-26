@@ -55,6 +55,11 @@ every session needs this, only ones that actually moved a status. If one did:
   feature set itself changed, just the status framing.
 - If in doubt whether a change counts as a "status change" worth a README
   edit, ask the caller rather than skipping it silently or over-editing.
+- When a phase or sub-phase reaches **code-complete**, also bump
+  `set(PICOCALC_PHASE "...")` in `CMakeLists.txt` (next to the build-id
+  block) — it feeds the diag screen's "Phase X [hash]" line and drifts
+  silently if forgotten. This is a build-config edit, not `src/`, so it's
+  within your remit.
 
 ## Updating docs/notes/ti-parity.md (only at the end of a phase)
 

@@ -34,6 +34,11 @@
 #ifndef PICOCALC_BUILD_ID
 #define PICOCALC_BUILD_ID "unknown"
 #endif
+// Current code-complete phase, also from CMake (single source of truth
+// next to the build-id block).
+#ifndef PICOCALC_PHASE
+#define PICOCALC_PHASE "?"
+#endif
 
 namespace {
 
@@ -221,7 +226,7 @@ public:
         // Phase + build id, right-aligned on the title line (git short
         // hash, "-dev" when the tree is dirty).
         char line[48];
-        std::snprintf(line, sizeof(line), "Phase 4C [%s]", PICOCALC_BUILD_ID);
+        std::snprintf(line, sizeof(line), "Phase %s [%s]", PICOCALC_PHASE, PICOCALC_BUILD_ID);
         font.draw_string(fb, platform::kScreenW - 8 - font.text_width(line), y, line, kGrayLine,
                          kBlack);
         y += lh * 2;

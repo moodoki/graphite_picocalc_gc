@@ -296,6 +296,15 @@ Still to verify on hardware:
 
 ---
 
+## 2026-07-26 — eval fix: diag-screen phase label was stale ("Phase 4C")
+
+Second eval observation: the diag screen still said "Phase 4C". The phase
+can't be derived from git like the hash/dev suffix, so it's now a single
+source of truth next to the build-id block: `set(PICOCALC_PHASE "4D")` in
+CMakeLists.txt, injected as a define and printed as "Phase %s [%s]" in
+main.cpp. The session-wrapup agent's README status pass now also bumps it
+when a phase/sub-phase goes code-complete, so it shouldn't drift again.
+
 ## 2026-07-26 — eval fix: π tick labels were blank (small font had no π glyph)
 
 First Batch 7 eval observation: ZTrig tick labels showed `/2` instead of
