@@ -64,6 +64,13 @@ reflashed, and developer-confirmed** the same day. Full detail:
      still say "code-complete, evals pending" — flip to reflect the
      evals passing once the above two items are also resolved, or
      sooner if the developer wants that split into two steps).
+   - **Before Phase 5/6: a code-review + size-optimization pass.** SRAM
+     headroom has been shrinking each phase (Pico 1 bss now 222,520
+     bytes, ~48 KB headroom, down from ~57 KB pre-4D) and Phase 5 (CAS)
+     and Phase 6 (app framework + MicroPython) will both add
+     significant static footprint — worth a dedicated pass to review
+     for dead weight / bloat and trim before piling on more, rather than
+     finding out mid-Phase-5 that the budget is gone.
    - Then **Phase 5 (CAS)** per D32/D33.
    - **Three follow-up bugs from the 2026-07-27 eval, not yet
      root-caused or fixed** (non-blocking): SEQ-mode trace
