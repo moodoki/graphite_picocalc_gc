@@ -3,9 +3,7 @@
 Raw feedback from a Pico 2 hardware session, gathered by interview. The board
 came into this session 9 builds behind (still Session 19); reflashed to
 current HEAD (`dadc7cf`) at the start. Not yet investigated or fixed — logged
-verbatim for a future session to triage. Interview was left partway through;
-several checklist items (display-pipeline visual artifacts, MatAns repro,
-APD dim/wake, general open-ended pass) were not reached this session.
+verbatim for a future session to triage.
 
 ## First boot after reflash
 
@@ -37,6 +35,22 @@ the earlier Pico 1 D10 A/B testing is ~146 ms; nothing below cleared it.
 
 No compute-bound stall (i.e. nothing approaching or exceeding the 146 ms
 push floor) was produced in these attempts on the Pico 2.
+
+## Display pipeline and other checks
+
+- **Display pipeline: clean, no artifacts.** No tearing, flicker, or visible
+  full-frame redraw stutter noticed during normal screen updates (menu
+  navigation, editing, scrolling).
+- **APD (auto power-down, 5 min idle dim) works as expected** on the Pico 2 —
+  screen dimmed after idle, a keypress woke it correctly.
+- **`MatAns` power-cycle discrepancy — Pico 2 vs. Pico 1.** On Pico 1
+  (2026-07-27), `MatAns` did not survive a power cycle (see
+  `testdrive-2026-07-27-observations.md`). On this Pico 2 session, `MatAns`
+  **did** persist across a power cycle on the identical build — no code
+  changed between the two sessions (git history shows only docs commits
+  between the bug being logged and this session). Logged as an unresolved
+  board-to-board discrepancy, not diagnosed; a plausible but unconfirmed
+  factor is PSRAM/SD timing differences between the two boards.
 
 ## Feature requests / UI friction
 
