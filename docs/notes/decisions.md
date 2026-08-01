@@ -18,6 +18,46 @@ Format:
 
 ---
 
+## D39: MatAns persists across a power cycle — reverses the D38/"by-design" stance
+
+**Date**: 2026-08-02
+**Status**: Accepted; implemented and HW-verified same day (Pico 2, `e5f2a10-dev`)
+**Context**: Earlier the same day (`c158139`), MatAns not surviving a power
+cycle was reclassified from "bug" to "by-design" — `mat_ans()` was a
+transient global (`g_mresult`, `mat_expr.cpp:27`) never written to SD, only
+the named `[A]..[J]` matrices persisted via `matrices_persist.cpp`. The
+developer then decided that stance was wrong: MatAns should persist like the
+named matrices do, for the same reason a scalar `ans` and the named
+matrices already do — the surprise is in it *not* surviving, not in it
+surviving.
+**Decision**: MatAns now persists to its own file, `/picocalc/matans.dat`,
+using the same PCM2 header/element format as `[A]..[J]`. The single-matrix
+save/load logic in `matrices_persist.cpp` was refactored from
+index-specific `save_matrix`/`load_matrix` into path-based
+`save_matrix_file`/`load_matrix_file` (declared in `matrix.hpp`), so
+`MatrixStore` and MatAns share one implementation instead of duplicating
+the file format. `math::matexpr::save_ans`/`load_ans` (declared in
+`mat_expr.hpp`, defined in the firmware-only `matrices_persist.cpp` so the
+host build stays storage-free) wrap that shared code: `save_ans` is called
+from `HomeScreen::evaluate_input` after any matrix-result commit;
+`load_ans` runs at boot in `main.cpp` alongside the named-matrix load, with
+the same late-init retry for the D14 cold-boot PSRAM/SD rail-settle window.
+A `g_ans_loaded` latch (mirroring `MatrixStore::loaded_`) stops a delayed
+cold-boot retry from clobbering an in-session result.
+**Rationale**: Parity with `[A]..[J]` and scalar `ans` — a calculator user
+has no reason to expect the *last* matrix result to behave differently from
+every other stored value across a reboot. Reusing the existing single-file
+PCM2 save/load code (rather than writing a bespoke MatAns format) keeps the
+persistence surface uniform and the diff small.
+**Tradeoffs**: One more file on the SD card
+(`/picocalc/matans.dat`); negligible SD/PSRAM cost, same shape as the
+existing `matrixN.dat` files. No format/magic bump — old cards simply have
+no `matans.dat` until the first matrix-result commit under this firmware,
+so there's no reset transition to call out.
+**Revisit when**: never expected — this closes the question raised by the
+2026-07-27/2026-08-02 MatAns observations for good, absent a future
+persistence-format redesign.
+
 ## D38: 4D implementation decisions — open questions resolved, batching fixed, two tasks closed as already-shipped
 
 **Date**: 2026-07-26

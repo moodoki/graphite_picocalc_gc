@@ -14,6 +14,7 @@
 #include <cstring>
 
 #include "platform/storage.hpp"
+#include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 
 namespace math {
@@ -42,12 +43,12 @@ void path_for(int index, char* buf, size_t cap) {
     std::snprintf(buf, cap, "/picocalc/matrix%d.dat", index + 1);
 }
 
-bool save_matrix(platform::Storage& storage, const Array& m, int index) {
+}  // namespace
+
+bool save_matrix_file(platform::Storage& storage, const Array& m, const char* path) {
     if (!storage.mounted()) {
         return false;
     }
-    char path[24];
-    path_for(index, path, sizeof(path));
     Header h = {};
     std::memcpy(h.magic, kMagic, sizeof(kMagic));
     h.dtype = static_cast<uint8_t>(m.dtype());
@@ -83,12 +84,10 @@ bool save_matrix(platform::Storage& storage, const Array& m, int index) {
 // Mirrors lists_persist.cpp's load_list() contract: true if this
 // matrix is done (loaded, or intentionally left empty), false only
 // when it needs the PSRAM tier and PSRAM isn't up yet (D14).
-bool load_matrix(platform::Storage& storage, Array& m, int index) {
+bool load_matrix_file(platform::Storage& storage, Array& m, const char* path) {
     if (!storage.mounted()) {
         return false;
     }
-    char path[24];
-    path_for(index, path, sizeof(path));
     if (!storage.file_exists(path)) {
         return true;  // Nothing saved yet — loaded state is "empty"
     }
@@ -146,10 +145,10 @@ bool load_matrix(platform::Storage& storage, Array& m, int index) {
     return true;
 }
 
-}  // namespace
-
 bool MatrixStore::save(platform::Storage& storage, int index) const {
-    return save_matrix(storage, matrices_[index], index);
+    char path[24];
+    path_for(index, path, sizeof(path));
+    return save_matrix_file(storage, matrices_[index], path);
 }
 
 bool MatrixStore::load(platform::Storage& storage) {
@@ -158,7 +157,9 @@ bool MatrixStore::load(platform::Storage& storage) {
         if (loaded_[i]) {
             continue;  // Already loaded — don't clobber an in-session edit
         }
-        if (load_matrix(storage, matrices_[i], i)) {
+        char path[24];
+        path_for(i, path, sizeof(path));
+        if (load_matrix_file(storage, matrices_[i], path)) {
             loaded_[i] = true;
         } else {
             all_done = false;
@@ -166,5 +167,42 @@ bool MatrixStore::load(platform::Storage& storage) {
     }
     return all_done;
 }
+
+namespace matexpr {
+
+// MatAns lives in its own file, mirroring the one-file-per-matrix
+// scheme; it uses the same PCM2 header/element format as [A]..[J] so
+// the shared save/load helpers apply unchanged.
+namespace {
+constexpr char kAnsPath[] = "/picocalc/matans.dat";
+// Load latch, same role as MatrixStore::loaded_: once a value exists
+// (restored at boot, or a session result committed via save_ans), a
+// later cold-boot load retry must not clobber it.
+bool g_ans_loaded = false;
+}  // namespace
+
+bool save_ans(platform::Storage& storage) {
+    if (mat_ans().size() == 0) {
+        return true;  // Nothing computed yet — no file to write
+    }
+    // A session result now exists; even if the write below fails (SD
+    // down), the in-RAM MatAns is authoritative for the rest of the
+    // session, so gate out any pending boot-load.
+    g_ans_loaded = true;
+    return save_matrix_file(storage, mat_ans(), kAnsPath);
+}
+
+bool load_ans(platform::Storage& storage) {
+    if (g_ans_loaded) {
+        return true;  // Already restored, or a session result supersedes it
+    }
+    if (load_matrix_file(storage, mat_ans_mutable(), kAnsPath)) {
+        g_ans_loaded = true;
+        return true;
+    }
+    return false;  // Needs PSRAM not yet up — let late-init retry
+}
+
+}  // namespace matexpr
 
 }  // namespace math

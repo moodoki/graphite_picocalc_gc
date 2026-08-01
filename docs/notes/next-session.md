@@ -1,7 +1,22 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **bugfix session, source changes, HW-verified
-on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
+**Last session:** 2026-08-02 — **feature follow-on, source changes,
+HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
+persists across a power cycle (**D39**): reverses the by-design-transient
+stance the bugfix session below landed the same day. Save/load reuses the
+`[A]..[J]` PCM2 file format via new path-based `save_matrix_file`/
+`load_matrix_file` helpers (`matrices_persist.cpp`/`matrix.hpp`); MatAns
+gets its own `/picocalc/matans.dat` written on every matrix-result commit
+(`home_screen.cpp`) and restored at boot (`main.cpp`, same D14 late-init
+retry contract as the named matrices). Host suite green (`test_matrix`
+unchanged at 369 — no new host coverage, this path is firmware-only, same
+as `MatrixStore`'s own persistence); both boards link clean, Pico 1 bss
+unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
+detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
+`decisions.md` D39.
+
+**Previous session (same day):** 2026-08-02 — **bugfix session, source
+changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
 showing float noise instead of the table's exact integers) — covers both
@@ -16,13 +31,15 @@ failing the plain-engine compile check every other editor uses. Also
 corrected three stale claims left in this file by earlier sessions: the
 home-screen `MatAns` token and "fnInt shading follows curve color" were
 each listed as open gaps but actually shipped as 4D.14/4D.11; `MatAns` not
-surviving a power cycle (plus its Pico 2 discrepancy, see "Previous
-session" below) is by-design, not a bug — `mat_ans()` is a transient
-global (`g_mresult`, `mat_expr.cpp:27`) never written to SD. 12 new host
-checks (`test_seq` now 63); both boards rebuilt clean; `clang-format`
-clean. Full detail: `worklog.md`'s 2026-08-02 bugfix entry.
+surviving a power cycle (plus its Pico 2 discrepancy, see "Two sessions
+ago" below) was called by-design at the time — `mat_ans()` was a transient
+global (`g_mresult`, `mat_expr.cpp:27`) never written to SD. **That call
+was reversed later the same day — see "Last session" above (D39): MatAns
+now persists.** 12 new host checks (`test_seq` now 63); both boards
+rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
+2026-08-02 bugfix entry.
 
-**Previous session (same day):** 2026-08-02 — **Pico 2 hardware session, no
+**Two sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
 source changes** (one doc-only wishlist addition). Reflashed the Pico 2
 from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
 and ran a hardware-observation interview. First boot showed the expected
@@ -33,23 +50,25 @@ nested trig calls = 28.1 ms; 1 function/20 nested trig calls = 33.7 ms —
 notably sub-linear with nesting depth, unexplained) all stayed well under
 the ~146 ms push-budget floor, so no compute-bound stall was produced on
 this board. Display pipeline showed no tearing/flicker/stutter; APD 5-min
-dim/wake worked as expected. **One notable discrepancy** (since resolved,
-see the entry above): `MatAns` *persisted* across a power cycle on the
+dim/wake worked as expected. **One notable discrepancy** (root-caused two
+entries above, then the underlying by-design stance itself reversed in
+"Last session" — D39): `MatAns` *persisted* across a power cycle on the
 Pico 2 this session, contradicting the Pico 1 finding from 2026-07-27 —
 same code on both boards at the time, so it looked like an open
 board-to-board discrepancy until root-caused as warm-reset RAM retention
-of a transient global, not a source bug. Also added "no copy/paste in
+of a transient global, not a source bug (and MatAns persistence is now the
+intended behavior on both boards regardless). Also added "no copy/paste in
 expression editors" to `wishlist.md`. This addressed "The next job" #3
 (Pico 2 perf spot-check) informally. Full detail:
 `testdrive-2026-08-02-observations.md`.
 
-**Two sessions ago:** 2026-07-27 — **on-device eval only, no code changes.**
-Hands-on test-drive on the Pico 1 (current Phase 4D build) covered the last
-three open HW-PENDING rows — Batch 2 (complex matrices), Batch 3 (sequence
-graphing), Batch 4 (zoom + shading) — all PASS. Batch 3 found two minor
-bugs (the SEQ trace/color-swatch bugs fixed above) and a third was found in
-passing on Batch 5's `MatAns` (also resolved above, by-design). Also
-re-confirmed the `π` tick-label fix
+**Three sessions ago:** 2026-07-27 — **on-device eval only, no code
+changes.** Hands-on test-drive on the Pico 1 (current Phase 4D build)
+covered the last three open HW-PENDING rows — Batch 2 (complex matrices),
+Batch 3 (sequence graphing), Batch 4 (zoom + shading) — all PASS. Batch 3
+found two minor bugs (the SEQ trace/color-swatch bugs fixed two entries
+above) and a third was found in passing on Batch 5's `MatAns` (now fixed —
+see "Last session" above, D39). Also re-confirmed the `π` tick-label fix
 (2026-07-26) renders correctly. Two UI-friction feature requests logged, no
 fix yet: cap displayed decimal digits on matrix results; multi-character
 constant names are hard to read in the constants picker (kiv). **All nine
@@ -82,9 +101,8 @@ detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
      finding out mid-Phase-5 that the budget is gone. Research starting
      point: `size-optimization-ideas.md`.
    - Then **Phase 5 (CAS)** per D32/D33.
-   - **Three follow-up bugs from the 2026-07-27 eval — two now FIXED
-     and HW-VERIFIED (2026-08-02, Pico 2, `e5f2a10-dev`), one is
-     by-design** (all non-blocking):
+   - **Three follow-up items from the 2026-07-27 eval — all now FIXED
+     and HW-VERIFIED (2026-08-02, Pico 2)** (all non-blocking):
      - **SEQ-mode trace (F4) float noise — FIXED + HW-verified.** The
        readout read x/y back from the pixel-quantized cache; the trace
        now reads exact values straight from `seqexpr::value`
@@ -101,14 +119,15 @@ detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
        symptom. Added a stateless `seqexpr::compiles()` (lag-rewrite +
        compile, no iterator side effects) and a
        `SlotEditorScreen::field_valid()` hook the seq editor overrides.
-     - **`MatAns` doesn't survive a power cycle — BY DESIGN, not a bug.**
-       `mat_ans()` is a transient global result buffer (`g_mresult`,
-       `mat_expr.cpp:27`), never written to SD (only named `[A]..[J]` are,
-       via `matrices_persist.cpp`). So empty-after-boot on the Pico 1 is
-       correct. The Pico 2 "persisted" observation (2026-08-02) is almost
-       certainly warm-reset RAM retention of the un-cleared buffer, not a
-       source difference. If we ever *want* MatAns to persist, that's a
-       feature (add `g_mresult` to persistence), not a fix.
+     - **`MatAns` doesn't survive a power cycle — FIXED + HW-verified
+       (D39).** Briefly called by-design earlier the same day (`mat_ans()`
+       was a transient global, `g_mresult`, `mat_expr.cpp:27`, never
+       written to SD) — the developer decided MatAns should persist like
+       the named `[A]..[J]` matrices instead. Now saved/restored via
+       `math::matexpr::save_ans`/`load_ans` to its own
+       `/picocalc/matans.dat` (same PCM2 format, shared `save_matrix_file`/
+       `load_matrix_file` helpers in `matrices_persist.cpp`); confirmed
+       surviving a physical power-off/on on the Pico 2.
    - **Two UI-friction feature requests, no fix proposed yet**: matrix
      results with many decimal places are hard to read (consider
      capping displayed digits); multi-character constant names are
@@ -173,19 +192,20 @@ is actually scheduled.
   4A-4C pass for 16/17/18); see `worklog.md`'s 2026-07-22 entries. The
   Pico 2 perf re-baseline ("The next job" #3) is now done informally as
   of 2026-08-02 — see the top of this file and
-  `testdrive-2026-08-02-observations.md`. **New open item from that
-  session**: `MatAns` persisted across a power cycle on the Pico 2,
-  contradicting the Pico 1 finding (2026-07-27) on identical code —
-  **resolved 2026-08-02 as by-design + warm-reset RAM retention, not a
-  bug** (see "The next job" #1: `mat_ans()` is a transient global never
-  written to SD). Session 15's storage-health row
+  `testdrive-2026-08-02-observations.md`. **Item from that session, now
+  resolved**: `MatAns` persisted across a power cycle on the Pico 2,
+  contradicting the Pico 1 finding (2026-07-27) on identical code — first
+  root-caused as warm-reset RAM retention of a transient global (not a
+  source bug), then later the same day the underlying by-design-transient
+  stance itself was reversed: **MatAns now persists on both boards by
+  design (D39)**, so the discrepancy question is moot going forward — see
+  "The next job" #1. Session 15's storage-health row
   (hot-plug/retry-forever, Y=-editor truncation) is fully closed —
   confirmed on both boards. **Session 10 round 2 is also closed
   (2026-07-22)**: `L` toggle surviving a reboot, `rand()` showing a
   sensible varying value, ZTrig short tick labels (`1.571`-style), and `F`
   ZoomFit auto-fit all confirmed on the Pico 1. The HW-PENDING table is
-  now clear except the still-informal Session 19 font sweep and the new
-  MatAns discrepancy above.
+  now clear except the still-informal Session 19 font sweep.
 - **The Pico 1 now carries ALL of Phase 4D (Batches 1-9, 2026-07-26)**
   on top of the 2026-07-25 work and the D35 state. Flashed and
   boot-verified over serial after every batch (temp + psram-bulk
@@ -199,8 +219,8 @@ is actually scheduled.
   are HW-verified on this board; **all nine 4D Batch 1-9 checklists are
   now cleared** (Batch 1 + 5-9 on 2026-07-26, Batches 2-4 on 2026-07-27
   — see worklog table). Three non-blocking findings from the 2026-07-27
-  pass (SEQ trace snap, SEQ color swatch, `MatAns` not persisting) are
-  carried in "The next job" above. All five font headers were regenerated with glyph slot 141 in
+  pass (SEQ trace snap, SEQ color swatch, `MatAns` not persisting) were
+  all fixed and HW-verified 2026-08-02 — see "The next job" #1. All five font headers were regenerated with glyph slot 141 in
   Batch 7 — the non-default font builds (`build/pico2-jm|io|uni|term`)
   remain stale as before (the default `build/pico2` Terminus build is
   current as of the 2026-08-02 reflash, see above).

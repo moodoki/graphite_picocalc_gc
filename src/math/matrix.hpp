@@ -134,4 +134,13 @@ private:
 // Singleton accessor (project convention).
 MatrixStore& matrices();
 
+// Single-matrix file persistence (PCM2 header + raw row-major elements),
+// shared by MatrixStore and by MatAns (mat_expr). save writes `m` to
+// `path`; load reads `path` into `m`. load returns false only when the
+// value needs the PSRAM tier and PSRAM isn't up yet (cold boot, D14) —
+// same all-or-nothing contract as MatrixStore::load; a missing or
+// corrupt file counts as "done" and leaves `m` empty.
+bool save_matrix_file(platform::Storage& storage, const Array& m, const char* path);
+bool load_matrix_file(platform::Storage& storage, Array& m, const char* path);
+
 }  // namespace math

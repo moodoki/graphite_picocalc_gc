@@ -1291,6 +1291,10 @@ const Array& mat_ans() {
     return g_mresult;
 }
 
+Array& mat_ans_mutable() {
+    return g_mresult;
+}
+
 void format_matrix(const Array& m, char* buf, size_t buf_len) {
     if (buf_len < 12) {
         if (buf_len > 0) {

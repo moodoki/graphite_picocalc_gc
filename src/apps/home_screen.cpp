@@ -323,6 +323,11 @@ void HomeScreen::evaluate_input() {
         if (!error) {
             persist_history_line(input_.text(), result);
             save_variables();
+            if (mres.kind == math::matexpr::Kind::kMatrix) {
+                // MatAns changed — persist it so it survives a reboot
+                // like the named matrices do.
+                math::matexpr::save_ans(platform::storage());
+            }
             if (mres.matrices_modified) {
                 math::matrices().save(platform::storage(), mres.stored_matrix);
             }

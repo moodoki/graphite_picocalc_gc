@@ -6,6 +6,10 @@
 #include "math/array.hpp"
 #include "math/engine.hpp"
 
+namespace platform {
+class Storage;
+}
+
 // Home-screen matrix expressions (task 4A.7, phase4-spec §3.3; TI-style
 // [A]-[J] syntax by decision 2026-07-20). Matrices cannot flow through
 // tinyexpr, and unlike lists their operators are not element-wise
@@ -65,6 +69,20 @@ Result evaluate(const char* input);
 // The last matrix result ("MatAns") — empty until a matrix expression
 // evaluates. The matrix editor shows it as a read-only slot.
 const Array& mat_ans();
+// Non-const MatAns access — for the persistence TU (matrices_persist.cpp)
+// to restore it at boot. Application code uses mat_ans().
+Array& mat_ans_mutable();
+
+// MatAns persistence (/picocalc/matans.dat), so it survives a power
+// cycle like the named matrices [A]..[J] do. Defined in the firmware-only
+// matrices_persist.cpp (like the [A]..[J] persistence) so the host build
+// stays storage-free. save_ans writes the current MatAns (call after a
+// matrix result commits); load_ans restores it at boot. load_ans has the
+// same all-or-nothing contract as MatrixStore::load — false while it
+// still needs PSRAM (cold boot, D14), so the late-init loop retries — and
+// never clobbers an in-session result once one exists.
+bool save_ans(platform::Storage& storage);
+bool load_ans(platform::Storage& storage);
 
 // "[[1,2][3,4]]" (format_number per element); "...]]" when truncated.
 void format_matrix(const Array& m, char* buf, size_t buf_len);
