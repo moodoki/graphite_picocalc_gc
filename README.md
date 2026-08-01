@@ -5,13 +5,16 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > **Status**: Phases 0–3 complete and hardware-verified on both Pico 1 and
 > Pico 2 (parametric/polar modes, tables, split-screen, built-in help,
 > unified persistence; statistics — lists, regression, distributions,
-> inference, stat plots). Phase 4 sub-phases 4A–4C (matrices, graph-analysis
-> CALC menu, complex numbers) are also hardware-verified on both boards;
-> sub-phase 4D (GC completeness) is **code-complete** — all nine D38
-> batches (complex variables/lists/matrices, sequence graphing, zoom and
-> shading, list↔matrix/constants/units glue, named lists, ENG/`>frac`/`π`-tick
-> display polish, eigenvectors, auto-power-down + brightness) shipped and
-> flashed; hands-on device evals are in progress. See
+> inference, stat plots). **Phase 4 (sub-phases 4A–4D) is now complete and
+> hardware-verified** on both boards: matrices, graph-analysis CALC menu,
+> complex numbers (4A–4C), plus GC completeness (4D) — complex
+> variables/lists/matrices, sequence graphing, zoom and shading, list↔matrix/
+> constants/units glue, named lists, ENG/`>frac`/`π`-tick display polish,
+> eigenvectors, and auto-power-down + brightness. All nine 4D batches passed
+> their on-device evals on the Pico 1; the Pico 2 leg is closed as a
+> formality (board-independent logic, same precedent as earlier phases).
+> **Phase 4's completion is the project's pre-release milestone** — a
+> feature-complete TI-83/84+-class graphing calculator. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -44,23 +47,25 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   inference suite (hypothesis tests, confidence intervals, ANOVA);
   statistical plots (histogram, box plot, scatter) overlaid on the graphing
   engine.
-- **Phase 4 — the pre-release milestone (sub-phases 4A–4C complete,
-  HW-verified on both boards; 4D code-complete, evals pending)**: 10 matrix variables
-  (`[A]`–`[J]`) with arithmetic, determinant, inverse, transpose,
-  row-echelon form, eigenvalues, and a numeric equation solver (4A); a
-  TI-84-style **CALC menu** on the graph screen — value, zero, min/max,
-  intersect, `dy/dx`, numeric integral — across function/parametric/polar
-  modes (4B); **complex numbers** with `a+bi`/polar (`r∠θ`) display modes,
-  complex-aware arithmetic and elementary functions, and complex matrix
-  eigenvalue spectra (4C). A swappable 8x16 font system with real math glyphs
+- **Phase 4 — the pre-release milestone (complete, HW-verified on both
+  boards)**: 10 matrix variables (`[A]`–`[J]`) with arithmetic, determinant,
+  inverse, transpose, row-echelon form, eigenvalues, eigenvectors, and a
+  numeric equation solver (4A + 4D.23); a TI-84-style **CALC menu** on the
+  graph screen — value, zero, min/max, intersect, `dy/dx`, numeric integral
+  — across function/parametric/polar modes (4B); **complex numbers** with
+  `a+bi`/polar (`r∠θ`) display modes, complex-aware arithmetic and
+  elementary functions, complex-valued variables/lists/matrices with full
+  complex linear algebra, and complex matrix eigenvalue spectra (4C + 4D).
+  A swappable 8x16 font system with real math glyphs
   (`π θ σ Σ μ λ ≠ √ ∠ ⇒ …`) ships alongside this work. Sub-phase **4D (GC
   completeness)** closes out the remaining TI-83/84+ parity gaps — sequence
-  graphing, fuller zoom/shading, list↔matrix conversion, scientific
-  constants, unit conversions, home-screen matrix literals, complex-valued
-  variable storage, and device polish (auto power-off, brightness
-  persistence) — making Phase 4's completion the point at which the
-  calculator is feature-complete as a graphing calculator, independent of
-  CAS or programmability. See
+  graphing, fuller zoom/shading (ZBox/ZDecimal/ZSquare, curve/band
+  shading), list↔matrix conversion, scientific constants, unit conversions,
+  home-screen matrix literals, complex-valued variable/list/matrix storage,
+  named lists, and device polish (auto power-off, brightness persistence) —
+  making Phase 4's completion the point at which the calculator is
+  feature-complete as a graphing calculator, independent of CAS or
+  programmability. See
   [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md).
 - **Phase 5 (planned)**: symbolic math (CAS) — simplify, expand, factor,
   differentiate, solve (complex-aware), a bounded form of symbolic
@@ -228,7 +233,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/phases/phase1-spec.md](docs/phases/phase1-spec.md)** / **[phase1-plan.md](docs/phases/phase1-plan.md)** — Phase 1 design contract + plan (complete; retro in [docs/notes/phase1-retro.md](docs/notes/phase1-retro.md))
 - **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (complete; retro in [docs/notes/phase2-retro.md](docs/notes/phase2-retro.md))
 - **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics; code-complete)
-- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; 4A–4C HW-verified, 4D code-complete)
+- **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; complete, HW-verified on both boards)
 - **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; specced, not started)
 - **[docs/phases/phase6-spec.md](docs/phases/phase6-spec.md)** — Phase 6 design contract (non-calculator functions: app framework, MicroPython; specced, not started)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
@@ -256,7 +261,7 @@ Background research:
 | 2: Graph modes + table + split + help | **Complete** | HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase2-retro.md; Pico 1 pass via task 3D.14) |
 | 3: Statistics | **Complete** | Lists, regression, distributions, inference, stat plots; HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase3-retro.md; Pico 1 pass via task 3D.14) |
 | 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
-| 4D: GC completeness (pre-release milestone) | **Code-complete** | All 9 D38 batches shipped 2026-07-26; on-device evals pending (worklog HW-PENDING table); docs/phases/phase4-spec.md §7 |
+| 4D: GC completeness (pre-release milestone) | **Complete** | All 9 D38 batches shipped 2026-07-26, HW-verified on Pico 1 2026-07-26/27; Pico 2 leg closed as a formality; docs/phases/phase4-spec.md §7, decisions.md D40 |
 | 5: CAS (symbolic math) | Specced, not started | docs/phases/phase5-spec.md (D32) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 

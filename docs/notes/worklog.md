@@ -296,6 +296,48 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-02 — Phase 4D CLOSED: F sequencing + idea H disposition, ti-parity/README flip (D40)
+
+Docs-only session, no source changes. Resolved the three-item Phase 4D
+close checklist carried in `next-session.md`:
+
+1. **F-evaluator follow-on check (D37): trigger fired.** Idea B (complex
+   variables/Ans, 4D.15), C (complex lists, 4D.24), D (complex matrices,
+   4D.25), E (vector ops, 4D.22 + the list↔matrix bridge 4D.12), and G
+   (eigenvectors, 4D.23) have all shipped and are HW-verified within Phase
+   4D. F itself remains committed per D37, but its sequencing is now
+   decided (**D40**): F happens **after** Phase 5 (CAS) — pre-Phase-5
+   code-review/size-optimization pass → Phase 5 (CAS) → F.
+2. **Idea H (polymorphic variables): deferred again (D40).** TI's three
+   separate namespaces (`A`-`Z` scalars, `[A]`-`[J]` matrices,
+   `l1`-`l6`/named lists) stay as-is; H remains unscheduled, revisit only
+   if real usage demands it, re-checkpointing after F.
+3. **`ti-parity.md` and `README.md` flipped to reflect Phase 4D as shipped
+   and HW-verified.** All nine 4D batches are HW-verified on the Pico 1
+   (2026-07-26/27); the Pico 2 leg is closed as a formality (board-
+   independent logic, same precedent as the earlier Phase 3/4A-4C rows).
+   Flipped the rows previously marked "🟡 planned: Phase 4D" (scientific
+   constants 4D.17, unit conversions 4D.18, `▶Frac` 4D.2, sequence graphing
+   4D.6-8, list↔matrix conversion 4D.12, home-screen matrix literals
+   4D.14, complex-valued variables 4D.15) plus several additional stale
+   rows found during the sweep: ENG display mode (4D.1), zoom
+   ZBox/ZDecimal/ZSquare (4D.9-10), curve/band shading (4D.11), named
+   lists (4D.13), complex-valued lists (4D.24), complex-valued matrices
+   (4D.25), matrix eigenvectors (4D.23), and the xyLine/normal-probability
+   stat plots row (already shipped pre-4D per D38's zero-work 4D.16
+   closure, but the ti-parity row itself hadn't been updated until now).
+   README's Status blurb, the Phase 4 Features bullet, and the
+   Project-status table row all now describe 4D as complete and
+   HW-verified rather than "code-complete, evals pending".
+
+**Phase 4D is now CLOSED.** The forward path: (1) a pre-Phase-5 code-review
++ size-optimization pass (`size-optimization-ideas.md`), (2) Phase 5 (CAS)
+per D32/D33, (3) F (unified evaluator) after CAS, (4) idea H
+revisit-after-F. Full detail: `decisions.md` D40 (cross-refs D37,
+`design-departures-matrix-complex.md` §H).
+
+---
+
 ## 2026-08-02 — D10 leg A: dual-core display pipeline extended to the Pico 2, HW-verified
 
 Closes the non-blocking D10 follow-up item "extend the display pipeline to

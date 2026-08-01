@@ -1,6 +1,23 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Last session:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+the three-item Phase 4D close checklist carried below: the **F-evaluator
+follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
+lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
+(eigenvectors, 4D.23) have all shipped and are HW-verified within 4D — and F's
+**sequencing is now decided (D40): after Phase 5 (CAS)**, not immediately
+following 4D (order: pre-Phase-5 code-review/size-optimization pass → Phase 5
+CAS → F). **Idea H (polymorphic variables) deferred again**, stays
+unscheduled — TI's three namespaces (`A`-`Z` scalars, `[A]`-`[J]` matrices,
+`l1`-`l6`/named lists) stay as-is; revisit only if real usage demands it,
+re-checkpoint after F. `ti-parity.md` and `README.md` flipped to reflect
+Phase 4 (4A-4D) as complete and hardware-verified rather than "code-complete,
+evals pending" — see "The next job" below for the new forward path. No
+source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
+CLOSED" entry, `decisions.md` D40 (cross-refs D37,
+`design-departures-matrix-complex.md` §H).
+
+**Previous session:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -20,7 +37,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Previous session:** 2026-08-02 — **feature follow-on, source changes,
+**Two sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -35,7 +52,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Two sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Three sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -59,7 +76,7 @@ now persists.** 12 new host checks (`test_seq` now 63); both boards
 rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
 2026-08-02 bugfix entry.
 
-**Three sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
+**Four sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
 source changes** (one doc-only wishlist addition). Reflashed the Pico 2
 from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
 and ran a hardware-observation interview. First boot showed the expected
@@ -82,7 +99,7 @@ expression editors" to `wishlist.md`. This addressed "The next job" #3
 (Pico 2 perf spot-check) informally. Full detail:
 `testdrive-2026-08-02-observations.md`.
 
-**Four sessions ago:** 2026-07-27 — **on-device eval only, no code
+**Five sessions ago:** 2026-07-27 — **on-device eval only, no code
 changes.** Hands-on test-drive on the Pico 1 (current Phase 4D build)
 covered the last three open HW-PENDING rows — Batch 2 (complex matrices),
 Batch 3 (sequence graphing), Batch 4 (zoom + shading) — all PASS. Batch 3
@@ -94,25 +111,21 @@ fix yet: cap displayed decimal digits on matrix results; multi-character
 constant names are hard to read in the constants picker (kiv). **All nine
 D38 batches (Phase 4D) are now hardware-verified on the Pico 1** — see
 `worklog.md`'s 2026-07-27 entry and
-`testdrive-2026-07-27-observations.md` for the full report. Phase 4D itself
-is not yet declared closed — see "The next job" below for what's left. Full
-detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
-1 complex vars/lists): `worklog.md`'s 2026-07-26 entry, `decisions.md` D38.
+`testdrive-2026-07-27-observations.md` for the full report. **Phase 4D was
+declared CLOSED five sessions later (2026-08-02, D40) — see "Last session"
+above.** Full detail on the 2026-07-26 Phase 4D kickoff session (planning
+pass D38, Batch 1 complex vars/lists): `worklog.md`'s 2026-07-26 entry,
+`decisions.md` D38.
 
 ## The next job
 
-1. **Phase 4D is CODE-COMPLETE and its on-device eval backlog is now
-   CLEAR (all 9 D38 batches hardware-verified on the Pico 1 — Batch 1
-   and Batches 5-9 on 2026-07-26, Batches 2-4 on 2026-07-27).** What's
-   left before Phase 4D can be declared closed:
-   - Run the **F-evaluator follow-on check (D37)**.
-   - Revisit **idea H (polymorphic variables)** — stays undecided.
-   - Update **`ti-parity.md` and the README status table** (README
-     Status blurb + Features bullet + Project-status table row all
-     still say "code-complete, evals pending" — flip to reflect the
-     evals passing once the above two items are also resolved, or
-     sooner if the developer wants that split into two steps).
-   - **Before Phase 5/6: a code-review + size-optimization pass.** SRAM
+1. **Phase 4D is CLOSED (2026-08-02, D40).** All 9 D38 batches are
+   hardware-verified on the Pico 1 (Batch 1 and Batches 5-9 on 2026-07-26,
+   Batches 2-4 on 2026-07-27); the Pico 2 leg is closed as a formality
+   (board-independent logic). The three-item close checklist is resolved
+   — see "Last session" above for the F-evaluator-check/idea-H/ti-parity
+   dispositions. The forward path from here:
+   - **Next: a pre-Phase-5 code-review + size-optimization pass.** SRAM
      headroom has been shrinking each phase (Pico 1 bss now 222,520
      bytes, ~48 KB headroom, down from ~57 KB pre-4D) and Phase 5 (CAS)
      and Phase 6 (app framework + MicroPython) will both add
@@ -120,45 +133,26 @@ detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
      for dead weight / bloat and trim before piling on more, rather than
      finding out mid-Phase-5 that the budget is gone. Research starting
      point: `size-optimization-ideas.md`.
-   - Then **Phase 5 (CAS)** per D32/D33.
-   - **Three follow-up items from the 2026-07-27 eval — all now FIXED
-     and HW-VERIFIED (2026-08-02, Pico 2)** (all non-blocking):
-     - **SEQ-mode trace (F4) float noise — FIXED + HW-verified.** The
-       readout read x/y back from the pixel-quantized cache; the trace
-       now reads exact values straight from `seqexpr::value`
-       (`graph_screen.cpp` `draw_trace`). Covers **both** seq styles —
-       TIME `(n, u(n))` and WEB cobweb vertices `(u(k-1), u(k))` /
-       `(u(k), u(k))`. (First cut only did TIME; on-device the board was
-       in WEB style — which persists in GraphState/PCG5 across the format
-       resets — so the readout stayed noisy until the WEB branch was
-       added. Lesson: seq style is sticky, test both.)
-     - **SEQ editor recursive rows drawn red — FIXED + HW-verified.** The
-       editor validated row text with the plain engine, which can't
-       resolve `u(n-1)` self-refs, so every recurrence looked "broken"
-       (red) and explicit forms white — this was the "color swatch"
-       symptom. Added a stateless `seqexpr::compiles()` (lag-rewrite +
-       compile, no iterator side effects) and a
-       `SlotEditorScreen::field_valid()` hook the seq editor overrides.
-     - **`MatAns` doesn't survive a power cycle — FIXED + HW-verified
-       (D39).** Briefly called by-design earlier the same day (`mat_ans()`
-       was a transient global, `g_mresult`, `mat_expr.cpp:27`, never
-       written to SD) — the developer decided MatAns should persist like
-       the named `[A]..[J]` matrices instead. Now saved/restored via
-       `math::matexpr::save_ans`/`load_ans` to its own
-       `/picocalc/matans.dat` (same PCM2 format, shared `save_matrix_file`/
-       `load_matrix_file` helpers in `matrices_persist.cpp`); confirmed
-       surviving a physical power-off/on on the Pico 2.
+   - **Then Phase 5 (CAS)** per D32/D33.
+   - **Then F (the unified evaluator)**, per D37/D40 — deliberately
+     sequenced after Phase 5 rather than right after 4D, so a possible
+     4th (symbolic) evaluator from CAS is known before the unification
+     pass, and so the rewrite doesn't churn code CAS is about to build on.
+   - **Then revisit idea H (polymorphic variables)**, per D40 — stays
+     unscheduled, take up only if real usage demands it by that point.
+   - (Three non-blocking follow-up items from the 2026-07-27 eval — SEQ
+     trace float noise, SEQ editor color-swatch, `MatAns` power-cycle
+     persistence — were all fixed and HW-verified 2026-08-02; see
+     worklog's 2026-08-02 entries and `decisions.md` D39.)
    - **Two UI-friction feature requests, no fix proposed yet**: matrix
      results with many decimal places are hard to read (consider
      capping displayed digits); multi-character constant names are
      hard to read in the constants picker (kiv — design thought
      needed).
-   Task table: `phase4-spec.md` §8; decisions: `decisions.md` D37/D38 (the
-   idea A-G → task-ID map is in D37 and
+   Task table: `phase4-spec.md` §8; decisions: `decisions.md` D37/D38/D40
+   (the idea A-G → task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
-   idea H — polymorphic variables — stays undecided, revisit after 4D
-   ships, same checkpoint as F). **Phase 5 (CAS)** then **Phase 6
-   (app framework + MicroPython)** follow 4D per D32/D33.
+   idea H's full scope is design-departures §H).
 2. **D10 follow-ups** (originally from 2026-07-25, no phase home):
    - **Extend the display pipeline to Pico 2 — DONE + HW-VERIFIED
      2026-08-02 (leg A).** `start_display_service()` now launches the

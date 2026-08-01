@@ -18,6 +18,48 @@ Format:
 
 ---
 
+## D40: Phase 4D close — F sequenced after Phase 5 CAS, idea H deferred again
+
+**Date**: 2026-08-02
+**Status**: Accepted
+**Context**: Phase 4D's three-item close checklist (`next-session.md`) needed
+resolving: the F-evaluator follow-on check from D37, a revisit of idea H
+(polymorphic variables), and the ti-parity.md/README status flip. D37's F
+trigger ("2+ of B-E ship and duplication becomes visible") has now fired —
+idea B (complex variables/Ans, 4D.15), C (complex lists, 4D.24), D (complex
+matrices, 4D.25), E (vector ops, 4D.22 plus the list↔matrix bridge half
+4D.12), and G (eigenvectors, 4D.23) have all shipped and are HW-verified
+within Phase 4D (worklog's 2026-07-26/27 batch table).
+**Decision**:
+1. **F (unified evaluator): still committed, now explicitly sequenced after
+   Phase 5 (CAS).** The forward order is: pre-Phase-5 code-review + size-
+   optimization pass → Phase 5 (CAS, D32/D33) → F.
+2. **Idea H (polymorphic variables): deferred again, stays unscheduled.**
+   TI's three separate namespaces (`A`-`Z` scalars, `[A]`-`[J]` matrices,
+   `l1`-`l6`/named lists) remain as-is. H is revisited only if real usage
+   demands it, re-checkpointing after F rather than on any fixed date.
+**Rationale**: Rewriting the evaluator (F) immediately before CAS risks
+churning code that Phase 5 is about to build on top of; CAS may itself add
+a fourth evaluator (symbolic expressions) that F would then need to unify
+alongside the existing three, so doing F once CAS's shape is known avoids a
+second unification pass later. H is a ~100+ hr effort needing its own design
+pass (full scope: `design-departures-matrix-complex.md` §H) and Phase 5 CAS
+is the actual planned next milestone — better to spend the design-thinking
+budget there first.
+**Tradeoffs**: The evaluator duplication F would resolve (engine/
+complexexpr/matexpr/listexpr near-parallel logic) persists through all of
+Phase 5. Idea H's convenience (one polymorphic variable slot instead of
+three namespaces) stays unavailable; users must keep track of which
+namespace a value lives in.
+**Revisit when**: Phase 5 (CAS) ships — that's F's actual scheduling
+trigger now, and the point to check whether CAS added a fourth evaluator
+worth folding into the same F pass; H's own revisit trigger is unchanged
+from its original framing — real usage demand, checked again after F lands.
+**This closes Phase 4D's three-item checklist. Phase 4D is now declared
+CLOSED** — see worklog's 2026-08-02 "Phase 4D CLOSED" entry and the same-day
+`ti-parity.md`/README updates. Cross-references: D37 (F trigger + scoping),
+`design-departures-matrix-complex.md` §H (idea H's full scope).
+
 ## D39: MatAns persists across a power cycle — reverses the D38/"by-design" stance
 
 **Date**: 2026-08-02
