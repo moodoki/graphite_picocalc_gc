@@ -225,6 +225,32 @@ void refresh() {
     g_primed = false;
 }
 
+bool compiles(const char* expr) {
+    if (expr == nullptr || expr[0] == 0) {
+        return true;  // Empty row: not flagged
+    }
+    if (std::strlen(expr) >= kMaxSrc) {
+        return false;
+    }
+    SeqState scratch;  // rewrite records refs here; thrown away
+    char rewritten[kMaxSrc];
+    if (!rewrite_lags(expr, rewritten, sizeof(rewritten), scratch)) {
+        return false;
+    }
+    Engine::ExtraVar extras[kSeqCount * 2];
+    int ne = 0;
+    for (int t = 0; t < kSeqCount; ++t) {
+        extras[ne++] = {kLagNames[t][0], &g_lag[t][0]};
+        extras[ne++] = {kLagNames[t][1], &g_lag[t][1]};
+    }
+    void* h = engine().compile_with(rewritten, extras, ne, kNSlot);
+    if (h == nullptr) {
+        return false;
+    }
+    engine().free_compiled(h);
+    return true;
+}
+
 bool defined(int s) {
     return s >= 0 && s < kSeqCount && g_seq[s].handle != nullptr;
 }

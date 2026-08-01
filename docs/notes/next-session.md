@@ -1,37 +1,54 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **Pico 2 hardware session, no source changes**
-(one doc-only wishlist addition). Reflashed the Pico 2 from the stale
-Session 19 build (9 builds behind) to current HEAD (`dadc7cf`) and ran a
-hardware-observation interview. First boot showed the expected one-time
-data reset under the PCV1/PCL2/PCM2 format bumps; general UI perf feel was
-reported snappy; three `graph recompute:` serial-instrumented stress
-probes (7 functions + 8001-pt scatter = 50.8 ms; 1 function/10 nested trig
-calls = 28.1 ms; 1 function/20 nested trig calls = 33.7 ms — notably
-sub-linear with nesting depth, unexplained) all stayed well under the
-~146 ms push-budget floor, so no compute-bound stall was produced on this
-board. Display pipeline showed no tearing/flicker/stutter; APD 5-min
-dim/wake worked as expected. **One notable discrepancy**: `MatAns`
-*persisted* across a power cycle on the Pico 2 this session, contradicting
-the Pico 1 finding from 2026-07-27 — same code on both boards (no commits
-landed between the bug being logged and this session), so this is an open,
-unexplained board-to-board discrepancy, not a build difference. Also added
-"no copy/paste in expression editors" to `wishlist.md`. This addresses
-"The next job" #3 (Pico 2 perf spot-check) informally. Full detail:
+**Last session:** 2026-08-02 — **bugfix session, source changes, HW-verified
+on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
+2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
+`math::seqexpr::value()` instead of the pixel-quantized point cache (was
+showing float noise instead of the table's exact integers) — covers both
+TIME and WEB seq plot styles (the first cut only handled TIME; the test
+board turned out to be in WEB style, which is sticky across reboots via
+GraphState/PCG5 — test both styles on seq work going forward). And the
+sequence editor no longer draws every recursive row red: added a stateless
+`math::seqexpr::compiles()` (lag-rewrite + compile, no iterator side
+effects) plus a `SlotEditorScreen::field_valid()` hook the seq editor
+overrides, so `u(n-1)`-style self-references validate correctly instead of
+failing the plain-engine compile check every other editor uses. Also
+corrected three stale claims left in this file by earlier sessions: the
+home-screen `MatAns` token and "fnInt shading follows curve color" were
+each listed as open gaps but actually shipped as 4D.14/4D.11; `MatAns` not
+surviving a power cycle (plus its Pico 2 discrepancy, see "Previous
+session" below) is by-design, not a bug — `mat_ans()` is a transient
+global (`g_mresult`, `mat_expr.cpp:27`) never written to SD. 12 new host
+checks (`test_seq` now 63); both boards rebuilt clean; `clang-format`
+clean. Full detail: `worklog.md`'s 2026-08-02 bugfix entry.
+
+**Previous session (same day):** 2026-08-02 — **Pico 2 hardware session, no
+source changes** (one doc-only wishlist addition). Reflashed the Pico 2
+from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
+and ran a hardware-observation interview. First boot showed the expected
+one-time data reset under the PCV1/PCL2/PCM2 format bumps; general UI perf
+feel was reported snappy; three `graph recompute:` serial-instrumented
+stress probes (7 functions + 8001-pt scatter = 50.8 ms; 1 function/10
+nested trig calls = 28.1 ms; 1 function/20 nested trig calls = 33.7 ms —
+notably sub-linear with nesting depth, unexplained) all stayed well under
+the ~146 ms push-budget floor, so no compute-bound stall was produced on
+this board. Display pipeline showed no tearing/flicker/stutter; APD 5-min
+dim/wake worked as expected. **One notable discrepancy** (since resolved,
+see the entry above): `MatAns` *persisted* across a power cycle on the
+Pico 2 this session, contradicting the Pico 1 finding from 2026-07-27 —
+same code on both boards at the time, so it looked like an open
+board-to-board discrepancy until root-caused as warm-reset RAM retention
+of a transient global, not a source bug. Also added "no copy/paste in
+expression editors" to `wishlist.md`. This addressed "The next job" #3
+(Pico 2 perf spot-check) informally. Full detail:
 `testdrive-2026-08-02-observations.md`.
 
-**Previous session:** 2026-07-27 — **on-device eval only, no code changes.**
+**Two sessions ago:** 2026-07-27 — **on-device eval only, no code changes.**
 Hands-on test-drive on the Pico 1 (current Phase 4D build) covered the last
 three open HW-PENDING rows — Batch 2 (complex matrices), Batch 3 (sequence
-graphing), Batch 4 (zoom + shading) — all PASS. Batch 3 found two new minor
-bugs, not yet fixed: SEQ-mode trace (F4) doesn't snap to exact n/u(n) values
-(shows float noise instead of the exact integers the table shows), and the
-sequence editor's color swatch tracks recursive-vs-explicit form rather than
-the assigned plot color (recursive always red, explicit always white — the
-graph itself still plots correctly). A third bug was found in passing on
-Batch 5's `MatAns`: it does not survive a power cycle, unlike named matrix
-variables (`[A]` etc., confirmed persistent under Batch 2) — see the
-2026-08-02 entry above for a Pico 2 discrepancy on this same bug. Also
+graphing), Batch 4 (zoom + shading) — all PASS. Batch 3 found two minor
+bugs (the SEQ trace/color-swatch bugs fixed above) and a third was found in
+passing on Batch 5's `MatAns` (also resolved above, by-design). Also
 re-confirmed the `π` tick-label fix
 (2026-07-26) renders correctly. Two UI-friction feature requests logged, no
 fix yet: cap displayed decimal digits on matrix results; multi-character
@@ -65,16 +82,33 @@ detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
      finding out mid-Phase-5 that the budget is gone. Research starting
      point: `size-optimization-ideas.md`.
    - Then **Phase 5 (CAS)** per D32/D33.
-   - **Three follow-up bugs from the 2026-07-27 eval, not yet
-     root-caused or fixed** (non-blocking): SEQ-mode trace
-     (F4) doesn't snap to exact n/u(n) values (float noise instead of
-     the table's exact integers); the sequence editor's color swatch
-     tracks recursive-vs-explicit form instead of the assigned plot
-     color (graph itself is correct either way); `MatAns` does not
-     survive a power cycle on the Pico 1 (unlike named matrix variables
-     `[A]` etc.) — **but on 2026-08-02 it persisted correctly on the
-     Pico 2 running identical code**, an open, unexplained
-     board-to-board discrepancy, not yet investigated.
+   - **Three follow-up bugs from the 2026-07-27 eval — two now FIXED
+     and HW-VERIFIED (2026-08-02, Pico 2, `e5f2a10-dev`), one is
+     by-design** (all non-blocking):
+     - **SEQ-mode trace (F4) float noise — FIXED + HW-verified.** The
+       readout read x/y back from the pixel-quantized cache; the trace
+       now reads exact values straight from `seqexpr::value`
+       (`graph_screen.cpp` `draw_trace`). Covers **both** seq styles —
+       TIME `(n, u(n))` and WEB cobweb vertices `(u(k-1), u(k))` /
+       `(u(k), u(k))`. (First cut only did TIME; on-device the board was
+       in WEB style — which persists in GraphState/PCG5 across the format
+       resets — so the readout stayed noisy until the WEB branch was
+       added. Lesson: seq style is sticky, test both.)
+     - **SEQ editor recursive rows drawn red — FIXED + HW-verified.** The
+       editor validated row text with the plain engine, which can't
+       resolve `u(n-1)` self-refs, so every recurrence looked "broken"
+       (red) and explicit forms white — this was the "color swatch"
+       symptom. Added a stateless `seqexpr::compiles()` (lag-rewrite +
+       compile, no iterator side effects) and a
+       `SlotEditorScreen::field_valid()` hook the seq editor overrides.
+     - **`MatAns` doesn't survive a power cycle — BY DESIGN, not a bug.**
+       `mat_ans()` is a transient global result buffer (`g_mresult`,
+       `mat_expr.cpp:27`), never written to SD (only named `[A]..[J]` are,
+       via `matrices_persist.cpp`). So empty-after-boot on the Pico 1 is
+       correct. The Pico 2 "persisted" observation (2026-08-02) is almost
+       certainly warm-reset RAM retention of the un-cleared buffer, not a
+       source difference. If we ever *want* MatAns to persist, that's a
+       feature (add `g_mresult` to persistence), not a fix.
    - **Two UI-friction feature requests, no fix proposed yet**: matrix
      results with many decimal places are hard to read (consider
      capping displayed digits); multi-character constant names are
@@ -141,8 +175,10 @@ is actually scheduled.
   of 2026-08-02 — see the top of this file and
   `testdrive-2026-08-02-observations.md`. **New open item from that
   session**: `MatAns` persisted across a power cycle on the Pico 2,
-  contradicting the Pico 1 finding (2026-07-27) on identical code — open,
-  unexplained board-to-board discrepancy. Session 15's storage-health row
+  contradicting the Pico 1 finding (2026-07-27) on identical code —
+  **resolved 2026-08-02 as by-design + warm-reset RAM retention, not a
+  bug** (see "The next job" #1: `mat_ans()` is a transient global never
+  written to SD). Session 15's storage-health row
   (hot-plug/retry-forever, Y=-editor truncation) is fully closed —
   confirmed on both boards. **Session 10 round 2 is also closed
   (2026-07-22)**: `L` toggle surviving a reboot, `rand()` showing a
@@ -288,9 +324,12 @@ observed across either pass.
   lists feel sluggish to enter") one-file-per-list/matrix SD persistence —
   all flashed and developer-confirmed on the Pico 1, see `worklog.md`'s
   fourth 2026-07-22 entry and `decisions.md` D35. Two more from the
-  Phase 4A-4C pass, both still open: no home-screen `MatAns` token
-  (editor-only, UX gap vs. scalar `ans`); fnInt shading should follow curve
-  color (feature request). All logged in
+  Phase 4A-4C pass, **both since shipped in Phase 4D** (this list was
+  written 2026-07-22, before 4D landed them): the home-screen `MatAns`
+  token arrived as **4D.14** (`matans` is a real expression token now —
+  `mat_expr.cpp:591`, `decisions.md` D-line 60), and **fnInt shading now
+  follows the curve color** — darkened palette per slot, `4D.11`
+  (`graph_screen.cpp:1146`, "was a fixed blue"). All originally logged in
   `session3D14-pico1-observations-verbatim.md`,
   `phase4abc-pico1-observations-verbatim.md`, and `phase3-retro.md`.
 - Backlog: D14 rail settle ([next-bench-session.md](next-bench-session.md) —

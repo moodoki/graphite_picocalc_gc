@@ -288,13 +288,91 @@ Still to verify on hardware:
 | 4D Batch 8 — matrix eigenvectors (4D.23; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial) | Home: `[[2,1][1,2]]->[A]` then `eigenvec([A])` → columns `[.707,.707]` and `[.707,-.707]` (order matches `eigenvals([A])` = {3,1}); `2*eigenvec([A])` composes; `eigenvec([A])->[B]` stores. Defective/repeated: `[[2,1][0,2]]` and `identity(2)` error "No unique eigenvector"; rotation `[[0,-1][1,0]]` errors "Complex eigenvalues"; a complex-valued `[A]` errors "Non-real matrix". Help FUNC tab shows the eigenvec row. Regression: eigenvals/eig unchanged |
 | 4D Batch 7 — display & formatting (4D.1-5; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial) | MODE > Display now cycles FLOAT/FIX/SCI/**ENG**: in ENG, 12345 shows `12.345e3`, 0.005 shows `5e-3`, exponents always multiples of 3. Home: `0.75>frac` → `3/4`, `1/3+1/6>frac` → `1/2`, `ans>frac`, negative and integer cases; irrational values (e.g. `sqrt(2)>frac`) fall back to decimal; `>dec` evaluates plain. Graph: ZTrig ('T') then 'L' labels — x ticks read `π/2`, `π`, `3π/2`, `2π` with the real `π` glyph (y ticks stay numeric); non-`π` windows unchanged — **first eval found the `π` blank (small font lacked slot 127); fixed + reflashed same day, re-check on the current build**. Stats 1-Var results show true subscripts `Sₓ`/`σₓ` (2-Var keeps Sx/Sy pairs plain — no subscript-y glyph exists); check the subscript-x glyph shape in situ (all five fonts regenerated with slot 141). Pretty print: `1/2+3` — the fraction bar now centers on the text midline instead of hanging the stack low; check `1/sqrt(2)`, `x^2/2` still stack correctly. Regression: FLOAT/FIX/SCI displays, existing pretty-print layouts, stats output otherwise unchanged |
 | 4D Batch 6 — named lists (4D.13; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial) | Home: `{1,2,3}->costs` creates a named list (2-5 chars, letter-first; reserved/function/constant names and `l7`-style rejected); `costs`, `costs*2`, `l1+costs`, `sum(costs)`, `dot(costs,qty)`, `sort_asc(costs)` (in place), `costs->l2` all work; result suffix shows the name with the store glyph; 21st list errors "Too many named lists". Editor (`lists`): LEFT/RIGHT scrolls past l6 into named columns (header shows `costs:3`); cell entry/append/delete/sort/F8 work there; **Alt+N** prompts for a new list name (jumps to its column), **Alt+R** renames (named only; l1-l6 refuse), **Alt+X** deletes (column disappears, file removed). Stats: List/X/Y/Freq rows cycle past l6 into named lists, result header shows the name. Plot config: X/Y list rows cycle named lists too; a scatter over named lists draws; deleting a named list a plot references leaves that plot silently empty. Persistence: named lists + directory survive a power cycle (`listdir.dat` + `nlist<idx>.dat`); complex named lists work (PSRAM tier). **Sort-persistence fix**: home-screen `sort_asc(l1)` (no store) now persists across a reboot — pre-4D.13 it silently didn't (D35 gap) and could write a bogus file from an out-of-bounds read. Regression: l1-l6 flows unchanged |
-| 4D Batch 5 — data & catalog glue (4D.12/14/17/18/22; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial). **2026-07-27: one bug found, not yet fixed — `MatAns` does not survive a power cycle** (unlike named matrix variables `[A]` etc., confirmed persistent under Batch 2) | Home: `[[1,2][3,4]]` literal evaluates (and `det([[1,2][3,4]])`, `[[1,2][3,4]]->[E]`, ragged rows error); `matans` recalls the last matrix result (`2*matans`, `matans->[F]`); `list2mat(l1,l2)` packs columns (shorter list zero-pads) and `mat2list([A],l1,l2)` unpacks + persists the lists ("Done" text); `dot({1,2,3},{4,5,6})`=32, `cross` of 3-elem lists (storable), `norm({3,4})`=5, `norm([A])` Frobenius (complex too); `clight`, `navo`, `rgas` etc. evaluate as identifiers; typed `const` opens the constants picker — ENTER inserts the name into the input line; `convert(1,"mi","km")`≈1.609 with or without quotes, case-insensitive, composes inline (`2*convert(1,hr,min)`), temp conversions (`convert(100,c,f)`=212), cross-family errors "Units don't match". Help FUNC tab shows the new rows. Regression: existing matrix/list expressions, solve() inline, complex paths unaffected |
+| 4D Batch 5 — data & catalog glue (4D.12/14/17/18/22; flashed 2026-07-26, boot + temp/psram-bulk heartbeats verified over serial). **2026-07-27: one bug found — `MatAns` does not survive a power cycle** (unlike named matrix variables `[A]` etc., confirmed persistent under Batch 2). **Resolved 2026-08-02 as by-design, not a bug**: `mat_ans()` is a transient global (`g_mresult`, `mat_expr.cpp:27`) never written to SD; the Pico 2's contradictory "persisted" reading the same day was warm-reset RAM retention, not a source difference — see the 2026-08-02 worklog entry | Home: `[[1,2][3,4]]` literal evaluates (and `det([[1,2][3,4]])`, `[[1,2][3,4]]->[E]`, ragged rows error); `matans` recalls the last matrix result (`2*matans`, `matans->[F]`); `list2mat(l1,l2)` packs columns (shorter list zero-pads) and `mat2list([A],l1,l2)` unpacks + persists the lists ("Done" text); `dot({1,2,3},{4,5,6})`=32, `cross` of 3-elem lists (storable), `norm({3,4})`=5, `norm([A])` Frobenius (complex too); `clight`, `navo`, `rgas` etc. evaluate as identifiers; typed `const` opens the constants picker — ENTER inserts the name into the input line; `convert(1,"mi","km")`≈1.609 with or without quotes, case-insensitive, composes inline (`2*convert(1,hr,min)`), temp conversions (`convert(100,c,f)`=212), cross-family errors "Units don't match". Help FUNC tab shows the new rows. Regression: existing matrix/list expressions, solve() inline, complex paths unaffected |
 | 4D Batch 4 — zoom + shading (4D.9-11) — **CLEARED 2026-07-27** | ZDecimal, ZSquare, ZBox (crosshair/rubber-band/Alt-move/ESC-cancel), per-function shade toggle (none/above/below) with persistence, two-curve `H` band shading, and fnInt shaded-region color all verified on the Pico 1 — no findings. Full checklist as originally logged: Graph keys: 'D' ZDecimal (trace x lands on clean 0.1 steps, origin-centered), 'Q' ZSquare (a drawn circle looks round after it), 'B' ZBox (crosshair, ENTER first corner, rubber-band rect, ENTER zooms into the box; Alt+arrows move 10 px; ESC cancels; double-ENTER on the same spot does nothing). Y= editor: 'S' on a slot cycles shade none→above→below ('^'/'v' marker beside the checkbox, persists across reboot via PCG6 shade_mode); graph shades above/below the curve in the slot's own color, dimmed, curve on top. 'H' on the graph (function mode): pick lower curve (UP/DOWN, candidate draws thick), ENTER, pick upper, ENTER → band between the curves shades; 'H' again clears. fnInt (F6 CALC) shaded region now follows the curve's palette color darkened instead of fixed blue (2026-07-22 feature request). Split-pane: ZBox/shades render inside the pane. Regression: existing zoom keys (S/T/F/Z/-/=), trace, CALC ops unaffected; PARAM/POLAR/SEQ unaffected by shading keys |
 | 4D Batch 3 — sequence graphing (4D.6-8) — **CLEARED 2026-07-27, two minor bugs found (not blocking, not yet fixed)** | Verified on the Pico 1: MODE cycling, basic ramp, Fibonacci table, cross-referenced sequences, window/ZoomFit, WEB-mode cobweb convergence, bad-form error cases, F6 CALC no-op — all passed. Two findings: (1) SEQ-mode trace (F4) doesn't snap to exact n/u(n) values — shows float noise instead of the exact integers the table shows for the same points; (2) the sequence color swatch in the editor list tracks recursive-vs-explicit form, not the assigned plot color — recursive definitions (reference u(n-1)/u(n-2)) always show red, explicit ones (computed directly from n) always show white, regardless of the actually-assigned color (the graph itself still plots in the correct color). See `testdrive-2026-07-27-observations.md` for the raw report. Full checklist as originally logged: **First boot: PCG6 one-time graph-state reset** (window/mode/plots to defaults, then persistence resumes). MODE > Graph mode now cycles FUNC/PARAM/POLAR/SEQ; new "Seq plot" row (TIME/WEB). F1 in SEQ mode opens the sequence editor: enter `u(n)=u(n-1)+1`, seed `u(nMin)=1`, check enable → F5 graph plots the ramp; trace (F4) reads `u  n=… x=… y=…` and steps by PlotStep. Fibonacci: `u(n)=u(n-1)+u(n-2)` with seed `{1,1}` → 1,1,2,3,5,8… in the table (F5 TBL, integer n column; non-integer TblStart rows show NaN by design). Cross-ref: `v(n)=2*u(n-1)`. Window (F2) shows nMin/nMax/PlotStart/PlotStep + X/Y (10 rows). ZoomFit ('F') fits the time series. WEB mode: `u(n)=0.5*u(n-1)+2`, seed 1 → map line + y=x diagonal + cobweb stair converging to 4; non-eligible seqs (cross-ref/lag-2/explicit-n) don't draw in WEB. F6 CALC is a no-op in SEQ mode (v1). Bad forms error out (slot inactive): `u(n)` circular, `u(n-3)`, `u(3)`. Regression: FUNC/PARAM/POLAR plotting, trace, table, split, stat plots unaffected; persistence of all modes' slots across a power cycle (post-PCG6-reset) |
 | 4D Batch 2 — complex matrices (4D.25) — **CLEARED 2026-07-27** | Editor a+bi/polar migration, REAL-mode "Non-real result" guard, `det`/`rref`/`ref`/`[A]^-1`/`rank`/`transpose`/`augment`/`[A]^2`, scalar `i*[B]` multiplication, mixed-matrix add, element read, complex scalar store, and power-cycle persistence all verified on the Pico 1 — no findings (one result that looked wrong mid-session turned out to be a data-entry mistake, not a bug). Full checklist as originally logged: Editor: type `1+i` into a real matrix cell in a+bi mode → whole matrix migrates to the complex tier, cells show short complex forms, entry line shows the full form; polar mode shows `r∠θ` cells; REAL mode entry of `2i` errors "Non-real result"; F8 clear reverts the matrix to real. Home: `det([A])` on a complex `[A]` (e.g. `[[1+i,2][3,4-i]]` → `-1+3i`), `[A]^-1` then `[A]*Ans`-style check by hand, `rref`/`ref`/`rank`/`transpose`/`augment`/`[A]^2`, `i*[B]` and `2i*[B]` on a real `[B]`, mixed `[A]+[B]`, element read `[A](1,1)`, complex scalar store `det([A])->z`. REAL mode: any expression touching a complex matrix errors "Non-real result". `eigenvals([A])` on a complex matrix errors "Non-real matrix". Persistence: complex matrix survives a power cycle (PCM2 header unchanged, 16 B/elem payload); old firmware would skip it as corrupt. Regression: real-matrix arithmetic/editor/persistence unchanged; big real matrix ops still fine |
 | Session 19 — font system + real math glyphs, `eig` alias, list UX (D31; flashed 2026-07-21, **Terminus** default build, boots healthy, PSRAM/storage/battery telemetry clean) | This session's own on-device font comparison across all five builds is already done (D31: Terminus picked as the shipped default; Unifont good with the 2px lift; Spleen best if a thicker font is wanted; JuliaMono worst, Iosevka a bit unbalanced) — remaining is a **glyph-correctness sweep on the Terminus build in situ**: home-screen complex results (`3+2i`, polar `2∠60`, store `⇒`), MODE Number row (`a+bi`/`r∠θ`), pretty-printed expressions (`π`, `θ`, inline `√(x)`, `3+2i` via the plain-text fallback), stats `σx`/`σy`/`Σx`/`Σx²`/`Σy`/`Σy²`/`Σxy`/`r²`, inference `≠`/`μ`/`σ`, distribution `μ`/`λ`, graph-trace + table polar label `θ`, and `…` truncation in list/matrix/complex history + slot editor. Also: `eig` as a drop-in alias for `eigenvals([A])` (whole-expression only, same as `eigenvals`/`dim`); list history LEFT/RIGHT horizontal scroll on the newest result when the input line is empty, using the new compact (4-sig-fig) number format so more list elements fit per screen. Regression: existing REAL-mode home eval, matrices, lists, stats, dist, infer, graph analysis, table all unaffected. **Informally spot-checked 2026-07-22** during the Phase 4A-4C Pico 1 pass — complex/MODE-row/pretty-print/stats glyphs incidentally seen and reported looking correct — but not a dedicated sweep against this row's own full list (still worth doing properly if time allows) |
 
 ---
+
+## 2026-08-02 — bugfix session: SEQ trace float noise + SEQ editor recursive-row color, both HW-verified; stale-doc corrections
+
+Fixed the two minor bugs found during the 2026-07-27 eval (SEQ-mode trace,
+sequence editor color swatch), flashed to the Pico 2, and confirmed both
+fixed on-device (build `e5f2a10-dev`). Also corrected three stale claims in
+`next-session.md` left over from earlier sessions (below). No decision
+number consumed — these are bug fixes inside the already-code-complete
+Phase 4D, not new design calls.
+
+**Fix 1 — SEQ-mode trace (F4) float noise.** The trace readout
+(`GraphScreen::draw_trace`, `src/apps/graph_screen.cpp`) read x/y back from
+the pixel-quantized point cache, so sequence values showed float noise
+(e.g. `4.9999997`) instead of the exact integers the table (F5) shows for
+the same points. Fix: read exact values straight from
+`math::seqexpr::value()` instead, with a NaN guard that falls back to the
+cached readout if the evaluator isn't primed. Covers **both** seq plot
+styles: TIME (`(n, u(n))`) and WEB cobweb vertices (`(u(k-1), u(k))` /
+`(u(k), u(k))` — two cache points per step `k`). Notable in-session
+discovery: the first cut only handled TIME and looked done on a quick
+desk-check, but the actual test board's seq plot style was WEB — which
+persists in `GraphState`/PCG5 across the format-version resets that have
+happened since, so it silently carried over from whatever it was last set
+to. The readout stayed noisy on-device until the WEB branch was added.
+Lesson for future seq work: plot style is sticky across sessions/reboots —
+test both styles explicitly, don't assume the default.
+
+**Fix 2 — SEQ editor drew every recursive row red.** `SlotEditorScreen`
+(`src/apps/slot_editor.{hpp,cpp}`) validated row text by compiling it
+against the plain engine to decide white-vs-red; the plain engine can't
+resolve `u(n-1)`-style self-references, so *every* recurrence rendered red
+("broken") and only explicit forms (computed directly from `n`, no
+self-ref) showed white — this was the "color swatch tracks
+recursive-vs-explicit form" symptom from the 2026-07-27 eval notes; the
+graph itself always plotted correctly regardless of the swatch color. Fix:
+added a stateless `math::seqexpr::compiles(const char*)`
+(`src/math/seq_expr.{hpp,cpp}`) that runs the same lag-rewrite + engine
+compile `begin()` does, but with **no** iterator/compile-state side
+effects (compiles into a scratch `SeqState`, frees the handle immediately)
+— so the editor can validate a row without disturbing a live sweep. Added
+a `SlotEditorScreen::field_valid(int, const char*)` virtual hook (default:
+plain-engine compile, i.e. unchanged behavior for Y=/param/polar editors)
+and had `render()` call it instead of the old free function directly.
+`SeqEditorScreen` (`src/apps/seq_editor.{hpp,cpp}`) overrides the hook to
+call `seqexpr::compiles` for the `u/v/w(n)=` expression rows; the
+`nMin`/seed rows (re-formatted numerics, not expressions) are always
+valid.
+
+**Stale-doc corrections** (already applied to `next-session.md`; recorded
+here for the record, not new findings this session): the home-screen
+`MatAns` token was listed in an old watch-item as an open Pico 1 gap, but
+actually shipped as **4D.14** (`matans` expression token,
+`mat_expr.cpp:591`) — corrected in both `next-session.md` and the "Open
+design threads" backlog paragraph above. "fnInt shading should follow
+curve color" was similarly listed as an open feature request but shipped
+as **4D.11** (`function_color_dim(s.slot)`, `graph_screen.cpp:1146`). The
+`MatAns` "doesn't survive a power cycle" bug (2026-07-27) and its Pico 2
+board-to-board discrepancy (2026-08-02) are reclassified as **by-design**:
+`mat_ans()` is a transient global (`g_mresult`, `mat_expr.cpp:27`) never
+written to SD, so the Pico 1's empty-after-boot reading is correct and the
+Pico 2's "persisted" reading was warm-reset RAM retention, not a source
+bug — see the HW-PENDING table's Batch 5 row above, now amended to match.
+
+**Tests**: 12 new checks in `tests/host/test_seq.cpp`
+(`test_compiles_validator`) — recursive/lag/cross-ref forms valid, circular
+(`u(n)`), malformed lag (`u(n-3)`), unknown-function, and garbage forms
+invalid, empty text valid, and confirmation the stateless check doesn't
+disturb a live compiled sweep. Full host suite green, `test_seq` now **63
+checks** (was 51); no other suite's count changed.
+
+**Build**: both `build/pico` and `build/pico2` rebuilt clean;
+`clang-format` clean (no reformatting needed). Pico 1 bss unchanged at
+222,520 bytes — no new static state (the validator is a stack-only scratch
+compile).
+
+Files touched: `src/apps/graph_screen.cpp`, `src/math/seq_expr.{hpp,cpp}`,
+`src/apps/slot_editor.{hpp,cpp}`, `src/apps/seq_editor.{hpp,cpp}`,
+`tests/host/test_seq.cpp`.
 
 ## 2026-07-27 — on-device eval: 4D Batches 2-4 all PASS — Phase 4D on-device eval backlog now clear
 

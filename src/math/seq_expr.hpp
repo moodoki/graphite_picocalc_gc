@@ -44,6 +44,14 @@ bool begin(const SeqDef& def);
 // home-screen variables are always picked up for a full replot).
 void refresh();
 
+// True if `expr` is a syntactically valid sequence definition — the
+// same lag-rewrite + engine compile begin() performs, but stateless (no
+// iterator/compile-state side effects). Empty text is "valid". Lets the
+// editor color an invalid row red without a graph recompute first;
+// recursive refs like u(n-1) don't compile in the plain engine, so the
+// editor's generic compile check would wrongly flag every recurrence.
+bool compiles(const char* expr);
+
 bool defined(int s);    // Compiled successfully (expr present + valid)
 bool uses_lag2(int s);  // References any (n-2) lag (seed2 is consumed)
 // Web-plot eligibility (4D.7): references ONLY its own (n-1) lag —

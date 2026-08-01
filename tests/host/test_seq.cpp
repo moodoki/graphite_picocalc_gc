@@ -158,6 +158,27 @@ void test_recompile_only_on_change() {
     check_val(value(0, 3), 13, "u(3) with new seed");
 }
 
+// The editor's row-color check: recursive/lag/cross forms are valid
+// (the plain engine would reject them); malformed lag forms and garbage
+// are not. Empty text is "valid" (an empty row isn't flagged red).
+void test_compiles_validator() {
+    using namespace math::seqexpr;
+    check(compiles(""), "empty valid");
+    check(compiles("u(n-1)+1"), "recurrence valid");
+    check(compiles("u(n-1)+u(n-2)"), "lag2 valid");
+    check(compiles("2*n^2-1"), "explicit valid");
+    check(compiles("v(n-1)+w(n-1)"), "cross-ref valid");
+    check(!compiles("u(n)"), "circular u(n) invalid");
+    check(!compiles("u(n-3)"), "u(n-3) invalid");
+    check(!compiles("nosuchfn(2)"), "unknown fn invalid");
+    check(!compiles("2*+"), "garbage invalid");
+    // The stateless check must not disturb a live compiled sweep.
+    check(begin(def3("u(n-1)+1", "", "", 1)), "sweep compile");
+    check_val(value(0, 50), 50, "u(50) before validator");
+    (void)compiles("w(n-1)*3");
+    check_val(value(0, 51), 51, "u(51) unaffected by validator");
+}
+
 }  // namespace
 
 int main() {
@@ -168,6 +189,7 @@ int main() {
     test_cross_reference();
     test_three_sequences();
     test_bad_forms();
+    test_compiles_validator();
     test_engine_vars_in_expr();
     test_nmin_and_cap();
     test_recompile_only_on_change();

@@ -39,6 +39,11 @@ protected:
     virtual void clear_field(int i) = 0;   // F3 (handles persistence)
     virtual bool field_checked(int i) const = 0;
     virtual bool field_has_checkbox(int /*i*/) const { return true; }
+    // Whether field i's text is a valid expression (drawn white; invalid
+    // → red). Default: compiles under the plain engine. The sequence
+    // editor overrides this — recursive refs like u(n-1) are valid
+    // sequence definitions the plain engine rejects.
+    virtual bool field_valid(int i, const char* text) const;
     // Label column width in characters (expr text starts after it).
     virtual int label_width_chars() const { return 4; }
     // Called after a commit; may move selection / re-enter editing

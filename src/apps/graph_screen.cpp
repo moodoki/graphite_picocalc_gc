@@ -1049,6 +1049,35 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         const double nan = std::numeric_limits<double>::quiet_NaN();
         math::format_number(py == kOffscreen ? nan : vp.data_x(px), xb, sizeof(xb));
         math::format_number(py == kOffscreen ? nan : vp.data_y(py), yb, sizeof(yb));
+        // Seq trace: read exact values straight from the evaluator. The
+        // cached point is pixel-quantized, so the data_x/data_y
+        // round-trip otherwise prints float noise instead of the exact
+        // values the table shows (HW 2026-07-27).
+        if (seq && py != kOffscreen) {
+            const math::calc_t saved_n = math::engine().vars()['n'];
+            if (st.seq_style == 1) {
+                // Web: cobweb vertices are u-values, emitted two per
+                // step k (recompute_seq): even index i = (u(k-1), u(k)),
+                // odd = (u(k), u(k)), with k = nMin + i/2 + 1.
+                const long n0 = std::lround(st.n_min);
+                const long m = i / 2;
+                const double uk1 = math::seqexpr::value(p, n0 + m);     // u(k-1)
+                const double uk = math::seqexpr::value(p, n0 + m + 1);  // u(k)
+                if (std::isfinite(uk1) && std::isfinite(uk)) {
+                    math::format_number((i % 2 == 0) ? uk1 : uk, xb, sizeof(xb));
+                    math::format_number(uk, yb, sizeof(yb));
+                }
+            } else {
+                // Time series: the point is exactly (n, u(n)).
+                const long n = std::lround(param);
+                const double uv = math::seqexpr::value(p, n);
+                if (std::isfinite(uv)) {
+                    math::format_number(static_cast<double>(n), xb, sizeof(xb));
+                    math::format_number(uv, yb, sizeof(yb));
+                }
+            }
+            math::engine().vars()['n'] = saved_n;
+        }
         if (seq) {
             std::snprintf(line, sizeof(line), "%c  n=%s x=%s y=%s", static_cast<char>('u' + p), tb,
                           xb, yb);

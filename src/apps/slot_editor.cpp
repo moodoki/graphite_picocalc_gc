@@ -34,6 +34,10 @@ bool field_compiles(const char* text) {
 }
 }  // namespace
 
+bool SlotEditorScreen::field_valid(int /*i*/, const char* text) const {
+    return field_compiles(text);
+}
+
 void SlotEditorScreen::on_activate() {
     editing_ = false;
 }
@@ -163,7 +167,7 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
             input_.render(fb, expr_x, y, platform::kScreenW - expr_x - 20, font, true);
         } else {
             const char* text = field_text(i);
-            const platform::Color color = field_compiles(text) ? kWhite : kRed;
+            const platform::Color color = field_valid(i, text) ? kWhite : kRed;
             // Truncate to the space left of the enable checkbox — long
             // expressions (stored regression models) ran beneath it
             // (HW 2026-07-19).

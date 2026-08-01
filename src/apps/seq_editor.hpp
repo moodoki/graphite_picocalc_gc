@@ -31,6 +31,7 @@ protected:
     void toggle_field(int i) override;
     void clear_field(int i) override;
     bool field_checked(int i) const override;
+    bool field_valid(int i, const char* text) const override;
     bool field_has_checkbox(int i) const override;
     int label_width_chars() const override;
 };

@@ -8,6 +8,7 @@
 
 #include "math/engine.hpp"
 #include "math/format.hpp"
+#include "math/seq_expr.hpp"
 #include "apps/graph_model.hpp"
 #include "graph/graph_state.hpp"
 
@@ -171,6 +172,17 @@ void SeqEditorScreen::clear_field(int i) {
 
 bool SeqEditorScreen::field_checked(int i) const {
     return is_expr_field(i) && funcs().enabled[seq_of(i)];
+}
+
+bool SeqEditorScreen::field_valid(int i, const char* text) const {
+    // nMin + seed rows are re-formatted numerics — always valid. Only
+    // the u/v/w(n)= expression rows need the sequence-aware check, so a
+    // recurrence like u(n-1)+1 isn't wrongly flagged red by the plain
+    // engine (HW 2026-07-27).
+    if (i == kFieldNMin || !is_expr_field(i)) {
+        return true;
+    }
+    return math::seqexpr::compiles(text);
 }
 
 bool SeqEditorScreen::field_has_checkbox(int i) const {
