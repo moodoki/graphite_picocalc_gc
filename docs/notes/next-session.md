@@ -1,6 +1,26 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **feature follow-on, source changes,
+**Last session:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
+pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
+full-framebuffer path, closing the "extend to Pico 2" half of the D10
+follow-up item below. `start_display_service()` launches the core-1
+service on both boards now (was Pico-1-only); the Pico 2's `render_frame`
+hands its band push to core 1 asynchronously via the existing
+`submit`/`drain_acks` machinery instead of blocking core 0 with a
+synchronous `push_rect` (single `frame_buf`, so each frame's `drain_acks`
+waits out the previous push before reusing it; a synchronous fallback
+covers the pre-service boot window). This exercised the RP2350 XIP/USB
+wedge risk the 2026-07-25 Pico 1 RAM-residency fix had never been tested
+against on this chip — flashed clean, sustained boot with USB enumerated
+throughout, no wedge/fault/drop; developer interactive pass (rapid nav,
+fast typing, graph pan/zoom under key-repeat) came back clean. Both boards
+build clean, full host suite green (multicore TU isn't in the host build).
+D10 **leg B** (compute-parallelize `recompute_function`) is the one
+remaining open D10 item — see "The next job" #2. Full detail: worklog's
+2026-08-02 "D10 leg A" entry, `decisions.md` D10.
+
+**Previous session:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -15,7 +35,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Previous session (same day):** 2026-08-02 — **bugfix session, source
+**Two sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -39,7 +59,7 @@ now persists.** 12 new host checks (`test_seq` now 63); both boards
 rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
 2026-08-02 bugfix entry.
 
-**Two sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
+**Three sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
 source changes** (one doc-only wishlist addition). Reflashed the Pico 2
 from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
 and ran a hardware-observation interview. First boot showed the expected
@@ -62,7 +82,7 @@ expression editors" to `wishlist.md`. This addressed "The next job" #3
 (Pico 2 perf spot-check) informally. Full detail:
 `testdrive-2026-08-02-observations.md`.
 
-**Three sessions ago:** 2026-07-27 — **on-device eval only, no code
+**Four sessions ago:** 2026-07-27 — **on-device eval only, no code
 changes.** Hands-on test-drive on the Pico 1 (current Phase 4D build)
 covered the last three open HW-PENDING rows — Batch 2 (complex matrices),
 Batch 3 (sequence graphing), Batch 4 (zoom + shading) — all PASS. Batch 3
@@ -139,15 +159,18 @@ detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
    idea H — polymorphic variables — stays undecided, revisit after 4D
    ships, same checkpoint as F). **Phase 5 (CAS)** then **Phase 6
    (app framework + MicroPython)** follow 4D per D32/D33.
-2. **D10 follow-ups, non-blocking** (both from 2026-07-25, no phase home):
-   - **Extend the display pipeline to Pico 2** — its full-framebuffer push
-     is still synchronous on core 0 (not yet changed). A 2026-08-02
-     informal visual check on the RP2350 under the current sync-on-core-0
-     path found no tearing/flicker/stutter during normal screen updates —
-     but that isn't the core-1 offload itself, which remains undone: route
-     the full-frame push through core 1 and re-verify the RAM-residency
-     fix on the RP2350 when picked up.
-   - **Compute parallelization candidate**: the pipeline gives ~0 benefit
+2. **D10 follow-ups** (originally from 2026-07-25, no phase home):
+   - **Extend the display pipeline to Pico 2 — DONE + HW-VERIFIED
+     2026-08-02 (leg A).** `start_display_service()` now launches the
+     core-1 service on both boards; the Pico 2 full-framebuffer push
+     routes through core 1 asynchronously (`submit`/`drain_acks`) instead
+     of blocking core 0. The RAM-residency fix's XIP/USB wedge risk was
+     re-verified on the RP2350 (sustained boot, USB enumerated, no
+     wedge/fault/drop) and a developer interactive pass (rapid nav, fast
+     typing, graph pan/zoom under key-repeat) came back clean — no
+     tearing, no corruption, no freeze. See `decisions.md` D10, worklog's
+     2026-08-02 "D10 leg A" entry.
+   - **Compute parallelization candidate (leg B), still open**: the pipeline gives ~0 benefit
      on compute-bound screens (render > ~146 ms push budget; a heavy graph
      redraw measured 1.17 s on the Pico 1). Those want
      `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`)
@@ -177,6 +200,14 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
+- **Firmware on the Pico 2 was reflashed again same-day (2026-08-02) with
+  the D10 leg A change** (`1a45763-dev`) — the display pipeline now
+  offloads the Pico 2's full-frame push to core 1 (previously
+  synchronous on core 0, see the bullet below which now describes a
+  superseded state for that one item — "The next job" #2 and
+  `decisions.md` D10 have the current picture). HW-verified: sustained
+  boot with USB enumerated, no wedge/fault/drop, and a clean interactive
+  pass (rapid nav, fast typing, graph pan/zoom under key-repeat).
 - **Firmware on the Pico 2 was reflashed to current HEAD on 2026-08-02**
   (`dadc7cf`; was 9 builds behind, still Session 19's font/glyph build)
   — it now carries the same code as the Pico 1: the D35 perf fixes, the

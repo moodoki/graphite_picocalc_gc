@@ -296,6 +296,57 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-02 — D10 leg A: dual-core display pipeline extended to the Pico 2, HW-verified
+
+Closes the non-blocking D10 follow-up item "extend the display pipeline to
+Pico 2" (open since the 2026-07-25 D10 root-cause/fix session). Only
+`src/gfx/framebuffer.cpp` touched.
+
+**What changed**: `start_display_service()` now launches the core-1
+display service on both boards — was gated Pico-1-only via
+`if constexpr (!config::kUseFullFramebuffer)`; the existing
+`service_running` latch still prevents a double launch. The Pico 2
+full-framebuffer path in `render_frame()` now hands its band push to core
+1 **asynchronously** through the existing `submit`/`drain_acks` machinery
+instead of a blocking synchronous `push_rect` on core 0. `frame_buf` is a
+single buffer, so each frame calls `drain_acks()` first to wait for the
+previous frame's push to finish before reusing it; a synchronous
+`push_rect` fallback remains for the pre-service boot window
+(`service_running == false`). No new static state (bss unchanged);
+`push_rect_dma` already chunks internally (4 scanlines/staging buffer), so
+a full 320x320 band needs no large allocation, and core 1 was otherwise
+idle on both boards.
+
+**Why**: on the Pico 2 the ~146 ms full-frame SPI push was blocking core
+0; routing it to core 1 lets core 0 return to the event loop, so input
+polling and the *next* frame's compute overlap the push — the same win
+the Pico 1 strip pipeline already had, plus the Pico 1 pipeline can't hide
+a full-frame compute-bound redraw the way this can when compute overlaps
+the previous push.
+
+**HW verification (RP2350, on top of `e5f2a10-dev`)**: the D10 root cause
+this leg carried over from the Pico 1 fix — core 1 hard-faulting from XIP
+while core 0's USB stack is active (chip wedge, USB drop) — had never
+been exercised on the RP2350 before this session. Flashed and confirmed
+sustained boot with USB enumerated the whole window, steady core-0
+heartbeats, and `graph recompute:`-triggered core-1 pushes with no
+wedge/fault/USB-drop. Developer then did an interactive pass — rapid
+screen navigation, fast typing, graph pan/zoom under key-repeat — and
+reported it clean: no tearing, no corruption, no freeze.
+
+**Tests / build**: both `build/pico` and `build/pico2` build clean; full
+host test suite green (`./scripts/host-tests.sh`, 12 suites, 0 failures —
+the multicore TU isn't in the host build, so host-side behavior is
+unchanged). `scripts/lint.sh`/`scripts/format.sh` clean.
+
+**Known limitation, explicitly deferred**: D10 leg B — parallelizing
+`GraphScreen::recompute_function` onto a second engine/vars context for
+compute-bound screens (render > ~146 ms push budget) — remains open; this
+session only addressed the push-offload leg (A). See `decisions.md` D10
+for the updated leg A/B breakdown.
+
+Files touched: `src/gfx/framebuffer.cpp`.
+
 ## 2026-08-02 — feature follow-on: MatAns now persists across a power cycle (D39), HW-verified
 
 Same-day follow-on to the bugfix session below. That session's stale-doc

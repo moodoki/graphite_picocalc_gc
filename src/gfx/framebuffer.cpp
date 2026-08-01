@@ -70,11 +70,13 @@ void display_service_main() {
 }
 
 void start_display_service() {
-    if constexpr (!config::kUseFullFramebuffer) {
-        if (!service_running) {
-            multicore_launch_core1(display_service_main);
-            service_running = true;
-        }
+    // Launched on both boards now (D10 leg A, 2026-08-02): the strip
+    // pipeline (Pico 1) and the async full-frame push (Pico 2) both hand
+    // their DMA to this core-1 service. The service_running latch makes a
+    // second call a no-op.
+    if (!service_running) {
+        multicore_launch_core1(display_service_main);
+        service_running = true;
     }
 }
 
@@ -90,12 +92,28 @@ void Framebuffer::render_frame(RenderFn render, void* ctx, int dirty_y0, int dir
         // One buffer-sized "strip": the band renders at the top of
         // frame_buf (row() offsets by clip_y0_), so the buffer is
         // scratch, not a persistent frame image.
+        //
+        // D10 leg A: with the core-1 service up, hand the band's push to
+        // core 1 (async) so core 0 returns to the event loop — the SPI
+        // wire time (~146 ms full-frame) then overlaps input polling and
+        // the next frame's compute instead of blocking core 0. frame_buf
+        // is a single buffer, so drain the previous frame's push before
+        // reusing it. Falls back to a synchronous push before the service
+        // launches (boot splash, defensive).
+        if (service_running) {
+            drain_acks();  // previous async push done → frame_buf free to reuse
+        }
         buf_ = frame_buf;
         clip_y0_ = dirty_y0;
         clip_y1_ = dirty_y1;
         render(*this, ctx);
-        platform::display().push_rect(0, dirty_y0, platform::kScreenW, dirty_y1 - dirty_y0,
-                                      frame_buf);
+        if (service_running) {
+            jobs[0] = {frame_buf, 0, dirty_y0, platform::kScreenW, dirty_y1 - dirty_y0};
+            submit(&jobs[0]);
+        } else {
+            platform::display().push_rect(0, dirty_y0, platform::kScreenW, dirty_y1 - dirty_y0,
+                                          frame_buf);
+        }
 #endif
         return;
     }
