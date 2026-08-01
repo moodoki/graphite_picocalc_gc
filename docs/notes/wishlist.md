@@ -10,6 +10,10 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Copy/paste in expression editors** (raised 2026-08-02, Pico 2 testdrive):
+  no way to copy text between fields — e.g. duplicating one Y= expression
+  into another slot means retyping it in full on the physical keypad. No
+  design work done; unscoped.
 - **3D plotting (surface graphs, $z = f(x,y)$)** (raised 2026-07-21): not
   on TI-83/84+ at all — this is TI-Nspire CX II CAS territory (rotatable
   wireframe/surface plots), similar in kind to CAS itself: a capability
