@@ -1,6 +1,26 @@
 # Start here — next session
 
-**Last session:** 2026-07-27 — **on-device eval only, no code changes.**
+**Last session:** 2026-08-02 — **Pico 2 hardware session, no source changes**
+(one doc-only wishlist addition). Reflashed the Pico 2 from the stale
+Session 19 build (9 builds behind) to current HEAD (`dadc7cf`) and ran a
+hardware-observation interview. First boot showed the expected one-time
+data reset under the PCV1/PCL2/PCM2 format bumps; general UI perf feel was
+reported snappy; three `graph recompute:` serial-instrumented stress
+probes (7 functions + 8001-pt scatter = 50.8 ms; 1 function/10 nested trig
+calls = 28.1 ms; 1 function/20 nested trig calls = 33.7 ms — notably
+sub-linear with nesting depth, unexplained) all stayed well under the
+~146 ms push-budget floor, so no compute-bound stall was produced on this
+board. Display pipeline showed no tearing/flicker/stutter; APD 5-min
+dim/wake worked as expected. **One notable discrepancy**: `MatAns`
+*persisted* across a power cycle on the Pico 2 this session, contradicting
+the Pico 1 finding from 2026-07-27 — same code on both boards (no commits
+landed between the bug being logged and this session), so this is an open,
+unexplained board-to-board discrepancy, not a build difference. Also added
+"no copy/paste in expression editors" to `wishlist.md`. This addresses
+"The next job" #3 (Pico 2 perf spot-check) informally. Full detail:
+`testdrive-2026-08-02-observations.md`.
+
+**Previous session:** 2026-07-27 — **on-device eval only, no code changes.**
 Hands-on test-drive on the Pico 1 (current Phase 4D build) covered the last
 three open HW-PENDING rows — Batch 2 (complex matrices), Batch 3 (sequence
 graphing), Batch 4 (zoom + shading) — all PASS. Batch 3 found two new minor
@@ -10,7 +30,8 @@ sequence editor's color swatch tracks recursive-vs-explicit form rather than
 the assigned plot color (recursive always red, explicit always white — the
 graph itself still plots correctly). A third bug was found in passing on
 Batch 5's `MatAns`: it does not survive a power cycle, unlike named matrix
-variables (`[A]` etc., confirmed persistent under Batch 2). Also
+variables (`[A]` etc., confirmed persistent under Batch 2) — see the
+2026-08-02 entry above for a Pico 2 discrepancy on this same bug. Also
 re-confirmed the `π` tick-label fix
 (2026-07-26) renders correctly. Two UI-friction feature requests logged, no
 fix yet: cap displayed decimal digits on matrix results; multi-character
@@ -18,38 +39,9 @@ constant names are hard to read in the constants picker (kiv). **All nine
 D38 batches (Phase 4D) are now hardware-verified on the Pico 1** — see
 `worklog.md`'s 2026-07-27 entry and
 `testdrive-2026-07-27-observations.md` for the full report. Phase 4D itself
-is not yet declared closed — see "The next job" below for what's left.
-
-**Previous session:** 2026-07-26 — **Phase 4D started.** Two blocks: **(1)** a
-full 4D planning pass, every open question resolved — recorded as
-**`decisions.md` D38** (4D.16 found already shipped in 3D/D27, closed
-zero-work; 4D.21 closed; P4-10 = named user lists full integration; P4-12 =
-full u/v/w + cross-reference; P4-13 = rref-nullspace; units = typed
-`convert()` only; APD = soft-sleep v1 + `settings.dat`; two scope adds —
-`MatAns` → 4D.14, fnInt shading in curve color → 4D.11; **sequencing =
-risk-first batches**; `phase4-spec.md` §7.3/§8/§11 updated, 4D subtotal
-~165 h / Phase 4 ~300 h). **(2) Batch 1 implemented and code-complete:
-4D.15 complex Variables/Ans + 4D.24 complex lists** — parallel `imag[]` on
-`Variables`, real-only consumers error (never truncate, P4-11/D37), a
-`sweep_slot` compile exclusion so a stale complex `x` can't block graphing,
-`2i->a` now stores (**variables.dat bumped to PCV1** → one-time variables
-reset), `Dtype::kComplex` PSRAM-only arrays (5000-elem cap), complex brace
-literals + narrow vector lift (`+`/`−`/scalar `*`,`/`), standalone
-`sum`/`mean`, list-editor complex entry/display with in-place real→complex
-migration, stats/plots erroring or skipping per D37 scope (lists stay
-PCL2 — the dtype byte was already there). Host suite 12/12 binaries,
-**1305 checks** (test_lists 134→196, test_complex_expr 44→74). Also fixed
-two pre-existing lint failures from 2026-07-25 (framebuffer int-to-ptr
-NOLINT, main.cpp dead store). Flashed to the **Pico 1** and boot-verified
-(bss 213,332, ~57 KB headroom). **Same day, third block: the Batch 1
-hands-on eval PASSED on the Pico 1** (full checklist — complex vars,
-lists, editor, PCV1 reset + persistence, graph sanity). One finding —
-weird complex display in the list editor under polar mode (complex
-elements fell back to a+bi, real-valued ones showed `r∠0`) — was
-root-caused (a missing `is_real()` short-circuit in `format_complex`'s
-polar branch + a rect-hardcoded 11-char cell fallback), **fixed,
-reflashed, and developer-confirmed** the same day. Full detail:
-`worklog.md` 2026-07-26 entry + addendum, `decisions.md` D38.
+is not yet declared closed — see "The next job" below for what's left. Full
+detail on the 2026-07-26 Phase 4D kickoff session (planning pass D38, Batch
+1 complex vars/lists): `worklog.md`'s 2026-07-26 entry, `decisions.md` D38.
 
 ## The next job
 
@@ -79,7 +71,10 @@ reflashed, and developer-confirmed** the same day. Full detail:
      the table's exact integers); the sequence editor's color swatch
      tracks recursive-vs-explicit form instead of the assigned plot
      color (graph itself is correct either way); `MatAns` does not
-     survive a power cycle (unlike named matrix variables `[A]` etc.).
+     survive a power cycle on the Pico 1 (unlike named matrix variables
+     `[A]` etc.) — **but on 2026-08-02 it persisted correctly on the
+     Pico 2 running identical code**, an open, unexplained
+     board-to-board discrepancy, not yet investigated.
    - **Two UI-friction feature requests, no fix proposed yet**: matrix
      results with many decimal places are hard to read (consider
      capping displayed digits); multi-character constant names are
@@ -93,20 +88,29 @@ reflashed, and developer-confirmed** the same day. Full detail:
    (app framework + MicroPython)** follow 4D per D32/D33.
 2. **D10 follow-ups, non-blocking** (both from 2026-07-25, no phase home):
    - **Extend the display pipeline to Pico 2** — its full-framebuffer push
-     is still synchronous on core 0 (RP2350 board wasn't in hand). When it
-     is: route the full-frame push through core 1 and re-verify the
-     RAM-residency fix on the RP2350.
+     is still synchronous on core 0 (not yet changed). A 2026-08-02
+     informal visual check on the RP2350 under the current sync-on-core-0
+     path found no tearing/flicker/stutter during normal screen updates —
+     but that isn't the core-1 offload itself, which remains undone: route
+     the full-frame push through core 1 and re-verify the RAM-residency
+     fix on the RP2350 when picked up.
    - **Compute parallelization candidate**: the pipeline gives ~0 benefit
      on compute-bound screens (render > ~146 ms push budget; a heavy graph
-     redraw measured 1.17 s). Those want `GraphScreen::recompute_function`
-     (`src/apps/graph_screen.cpp:313`) parallelized — needs a second
-     engine/vars context (shared `X` mutation), not just a spawned task.
-3. **Low-priority, not blocking**: Pico 2 perf feel for Phase 3/4 features
-   has never been re-measured against current code (only the pre-Phase-3
-   2.25 baseline exists). The D35 fixes are board-generic so the Pico 2
-   should already benefit, but that's unverified — it's now **two builds
-   behind** (still on the Session 19 build; lacks D35, the D10 pipeline,
-   and 4D Batch 1). Worth a reflash + spot-check next time it's in hand.
+     redraw measured 1.17 s on the Pico 1). Those want
+     `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`)
+     parallelized — needs a second engine/vars context (shared `X`
+     mutation), not just a spawned task. 2026-08-02 Pico 2 stress probes
+     (up to 20 nested trig calls, 33.7 ms) didn't reach this regime either
+     — see `testdrive-2026-08-02-observations.md` for a nesting-depth
+     scaling anomaly worth another look if this is picked up.
+3. **Pico 2 perf spot-check: done informally, 2026-08-02.** Reflashed to
+   current HEAD; general UI felt snappy, and `graph recompute:` stress
+   probes (up to 33.7 ms) stayed well under the 146 ms push-budget floor —
+   no compute-bound stall observed. This was an interview-driven spot
+   check, not a rigorous side-by-side comparison against the pre-Phase-3
+   2.25 baseline — a systematic re-measurement remains optional/
+   low-priority if ever wanted. Full detail:
+   `testdrive-2026-08-02-observations.md`.
 
 Mind the §8 strip-safety rule (idempotent `render()`) for any new
 screens touched during the on-device passes.
@@ -120,31 +124,32 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **Firmware on the Pico 2 is still Session 19's font/glyph build**
-  (Terminus default, `-DPICOCALC_FONT=terminus`; flashed 2026-07-21,
-  boots healthy, telemetry clean over serial) — it was **not reflashed
-  this session** either, so it has neither the D35 perf fixes, nor the
-  2026-07-25 work (`!` factorial fix, D10 pipeline, die temp/build id),
-  nor 4D Batch 1 (complex variables/lists, PCV1) that are now on the
-  Pico 1; it's several builds behind. Its build layers on top
-  of Sessions 11/12/15/16/17/18 (3A lists, 3B stats, 3D inference/plots,
-  4A matrices/solver, 4B CALC menu, 4C complex numbers). **All of their
-  hands-on on-device evals are now closed as a formality (2026-07-22)** —
+- **Firmware on the Pico 2 was reflashed to current HEAD on 2026-08-02**
+  (`dadc7cf`; was 9 builds behind, still Session 19's font/glyph build)
+  — it now carries the same code as the Pico 1: the D35 perf fixes, the
+  2026-07-25 work (`!` factorial fix, D10 display pipeline — core-0-sync
+  path only, see "The next job" #2, die temp/build id), and all of Phase
+  4D (Batches 1-9). First boot showed the expected one-time reset under
+  the PCV1/PCL2/PCM2 format bumps. Its build still layers on top of
+  Sessions 11/12/15/16/17/18 (3A lists, 3B stats, 3D inference/plots, 4A
+  matrices/solver, 4B CALC menu, 4C complex numbers). **All of their
+  hands-on on-device evals remain closed as a formality (2026-07-22)** —
   board-independent logic, and the harder rendering case (Pico 1) passed
   the identical checklists the same day (3D.14 for 11/12/15, the Phase
-  4A-4C pass for 16/17/18); see `worklog.md`'s 2026-07-22 entries.
-  What's genuinely still open, Pico-2-specific (not closeable by this
-  reasoning): its own perf re-baseline for Phase 3/4 features, now also
-  covering whether the D35 fixes help there too once it's reflashed (see
-  "The next job" #3) — **deliberately deferred**, not part of this
-  session's scope. Session 15's storage-health row (hot-plug/retry-forever,
-  Y=-editor truncation) is now fully closed — confirmed on both boards.
-  **Session 10 round 2 is now also closed (2026-07-22)**: `L` toggle
-  surviving a reboot, `rand()` showing a sensible varying value, ZTrig
-  short tick labels (`1.571`-style), and `F` ZoomFit auto-fit all
-  confirmed on the Pico 1. The HW-PENDING table is now clear except the
-  deferred Pico 2 perf re-baseline and the still-informal Session 19 font
-  sweep.
+  4A-4C pass for 16/17/18); see `worklog.md`'s 2026-07-22 entries. The
+  Pico 2 perf re-baseline ("The next job" #3) is now done informally as
+  of 2026-08-02 — see the top of this file and
+  `testdrive-2026-08-02-observations.md`. **New open item from that
+  session**: `MatAns` persisted across a power cycle on the Pico 2,
+  contradicting the Pico 1 finding (2026-07-27) on identical code — open,
+  unexplained board-to-board discrepancy. Session 15's storage-health row
+  (hot-plug/retry-forever, Y=-editor truncation) is fully closed —
+  confirmed on both boards. **Session 10 round 2 is also closed
+  (2026-07-22)**: `L` toggle surviving a reboot, `rand()` showing a
+  sensible varying value, ZTrig short tick labels (`1.571`-style), and `F`
+  ZoomFit auto-fit all confirmed on the Pico 1. The HW-PENDING table is
+  now clear except the still-informal Session 19 font sweep and the new
+  MatAns discrepancy above.
 - **The Pico 1 now carries ALL of Phase 4D (Batches 1-9, 2026-07-26)**
   on top of the 2026-07-25 work and the D35 state. Flashed and
   boot-verified over serial after every batch (temp + psram-bulk
@@ -161,7 +166,8 @@ is actually scheduled.
   pass (SEQ trace snap, SEQ color swatch, `MatAns` not persisting) are
   carried in "The next job" above. All five font headers were regenerated with glyph slot 141 in
   Batch 7 — the non-default font builds (`build/pico2-jm|io|uni|term`)
-  remain stale as before. The Pico 2 is now NINE builds behind.
+  remain stale as before (the default `build/pico2` Terminus build is
+  current as of the 2026-08-02 reflash, see above).
 - **Persistence change 2026-07-26: `variables.dat` bumped to magic PCV1**
   (header + vars + imag parts). The old raw 224-byte file is ignored →
   **expected one-time variables reset on first boot** under this firmware
