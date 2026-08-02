@@ -205,6 +205,16 @@ detail.
      `CMakeLists.txt`, do the phase-close docs pass (ti-parity.md gets its
      CAS-section sweep at this point, README status flip), and open the
      `phase-5` → `main` PR.
+   - **BUG to investigate (flagged 2026-08-02, unconfirmed):** a suspected
+     home-screen **input/output persistence bug** — history entries (the
+     `expr`/`result` pair) may not be round-tripping correctly to/from
+     `history.txt`. Noticed during Stage 3 device testing but not yet
+     characterized. Prime suspects are this session's home-screen churn:
+     `push_entry`/`Entry` changed `bool error` → `ResultKind`, `load_state`
+     now pushes reloaded lines as `kPlain`, and the CAS path calls
+     `persist_history_line` for symbolic results. Reproduce first (what
+     exactly is wrong — missing lines? wrong text? kind lost on reload?),
+     then check the load/save path in `src/apps/home_screen.cpp`.
    - The pre-Phase-5 SRAM levers noted before CAS started remain relevant
      background (all still deferred, none urgent — watch Pico 1 bss as
      Stage 4/5 lands): (a) MicroPython heap 48→40 KB if the ~12 KB spare
