@@ -28,6 +28,9 @@ constexpr Color kGrayLine = Color::from_rgb(200, 200, 200);
 // (kGrayLine reads near-white on the panel — 2026-07-11 test drive).
 constexpr Color kGridLine = Color::from_rgb(60, 60, 60);
 constexpr Color kCursor = Color::from_rgb(0, 120, 215);
+// CAS symbolic results on the home screen (Phase 5): a teal accent distinct
+// from plain white results, red errors, and the green prompt.
+constexpr Color kSymbolic = Color::from_rgb(0, 220, 200);
 }  // namespace colors
 
 // Low-level LCD transport. Pixel buffering and drawing primitives live in

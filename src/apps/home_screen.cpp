@@ -7,6 +7,8 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/cas/cas_eval.hpp"
+#include "math/cas/serialize.hpp"
 #include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
@@ -78,14 +80,14 @@ int HomeScreen::visible_count() const {
     return since < static_cast<uint32_t>(history_count_) ? static_cast<int>(since) : history_count_;
 }
 
-void HomeScreen::push_entry(const char* expr, const char* result, bool error) {
+void HomeScreen::push_entry(const char* expr, const char* result, ResultKind kind) {
     ++entries_total_;
     Entry& e = history_[history_head_];
     std::strncpy(e.expr, expr, sizeof(e.expr) - 1);
     e.expr[sizeof(e.expr) - 1] = 0;
     std::strncpy(e.result, result, sizeof(e.result) - 1);
     e.result[sizeof(e.result) - 1] = 0;
-    e.error = error;
+    e.kind = kind;
     history_head_ = (history_head_ + 1) % kMaxHistory;
     if (history_count_ < kMaxHistory) {
         ++history_count_;
@@ -178,7 +180,7 @@ void HomeScreen::load_state() {
         char* sep = std::strchr(line, '\t');
         if (sep != nullptr) {
             *sep = 0;
-            push_entry(line, sep + 1, false);
+            push_entry(line, sep + 1, ResultKind::kPlain);
         }
         line = nl != nullptr ? nl + 1 : nullptr;
     }
@@ -212,6 +214,50 @@ void HomeScreen::evaluate_input() {
         return;
     }
 
+    // Inline CAS (Phase 5, 4D.21): recognize a single diff()/integ()/
+    // factor()/expand()/simplify()/solve() call and route it to the symbolic
+    // engine. evaluate_home returns kNone for everything else — including
+    // solve() carrying numeric bounds/guess, which the numeric solver below
+    // owns (P5-4 shape split) — so the existing paths are untouched. CAS is
+    // display-only: it never commits Ans, a store, or variables (P5-1/P5-2).
+    {
+        const bool allow_complex = math::number_mode() != math::NumberMode::kReal;
+        const math::cas::HomeResult cr = math::cas::evaluate_home(input_.text(), allow_complex);
+        if (cr.kind != math::cas::HomeKind::kNone) {
+            char result[128];
+            ResultKind rkind = ResultKind::kSymbolic;
+            if (cr.kind == math::cas::HomeKind::kError) {
+                std::snprintf(result, sizeof(result), "%s", cr.error);
+                rkind = ResultKind::kError;
+            } else if (cr.kind == math::cas::HomeKind::kSolutions) {
+                // "x = {s1, s2, ...}"
+                std::size_t w = 0;
+                w += static_cast<std::size_t>(
+                    std::snprintf(result + w, sizeof(result) - w, "%c = {", cr.var));
+                for (int i = 0; i < cr.count && w < sizeof(result) - 1; ++i) {
+                    if (i > 0 && w < sizeof(result) - 1) {
+                        result[w++] = ',';
+                    }
+                    w += math::cas::expr_to_string(cr.solutions[i], result + w, sizeof(result) - w);
+                }
+                if (w < sizeof(result) - 1) {
+                    result[w++] = '}';
+                }
+                result[w] = 0;
+            } else {  // kExpr
+                math::cas::expr_to_string(cr.result, result, sizeof(result));
+            }
+            push_entry(input_.text(), result, rkind);
+            if (rkind != ResultKind::kError) {
+                persist_history_line(input_.text(), result);
+            }
+            input_.clear();
+            hist_nav_ = -1;
+            pending_[0] = 0;
+            return;
+        }
+    }
+
     // Inline solve() calls become numeric literals first (Phase 4A),
     // so they compose inside any downstream path. History shows the
     // original input; evaluation continues on the substituted text.
@@ -220,7 +266,7 @@ void HomeScreen::evaluate_input() {
     if (math::solveexpr::contains_solve(expr)) {
         const char* serr = nullptr;
         if (!math::solveexpr::substitute(expr, sizeof(expr), &serr)) {
-            push_entry(input_.text(), serr, true);
+            push_entry(input_.text(), serr, ResultKind::kError);
             input_.clear();
             hist_nav_ = -1;
             pending_[0] = 0;
@@ -232,7 +278,7 @@ void HomeScreen::evaluate_input() {
     if (math::unitexpr::contains_convert(expr)) {
         const char* uerr = nullptr;
         if (!math::unitexpr::substitute(expr, sizeof(expr), &uerr)) {
-            push_entry(input_.text(), uerr, true);
+            push_entry(input_.text(), uerr, ResultKind::kError);
             input_.clear();
             hist_nav_ = -1;
             pending_[0] = 0;
@@ -305,7 +351,7 @@ void HomeScreen::evaluate_input() {
                 std::snprintf(result, sizeof(result), "%s", text);
             }
         }
-        push_entry(input_.text(), result, error);
+        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
             persist_history_line(input_.text(), result);
             save_variables();
@@ -361,7 +407,7 @@ void HomeScreen::evaluate_input() {
                 std::snprintf(result, sizeof(result), "%s", text);
             }
         }
-        push_entry(input_.text(), result, error);
+        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
             persist_history_line(input_.text(), result);
             save_variables();
@@ -400,7 +446,7 @@ void HomeScreen::evaluate_input() {
         } else if (!math::frac::format_fraction(res.value, 10000, result, sizeof(result))) {
             math::format_number(res.value, result, sizeof(result));
         }
-        push_entry(input_.text(), result, error);
+        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
             persist_history_line(input_.text(), result);
             save_variables();
@@ -473,7 +519,7 @@ void HomeScreen::evaluate_input() {
         }
     }
 
-    push_entry(input_.text(), result, error);
+    push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
     if (!error) {
         persist_history_line(input_.text(), result);
         save_variables();
@@ -721,8 +767,8 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     ui::draw_status_bar(fb, "HOME");
 
     // History: newest at the bottom. Expressions render as 2D typeset
-    // math (task 3.6); results stay as plain right-aligned text (a
-    // number or error string is already display-ready).
+    // math (task 3.6); numeric/error results stay as plain text, while CAS
+    // symbolic results are typeset in the accent color (Phase 5, 4D.21).
     const render::Metrics metrics{font.width(), font.height()};
     const int visible = visible_count();  // cls hides older entries
     int y = kInputY - 4;
@@ -731,21 +777,39 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         if (e == nullptr) {
             break;
         }
-        // Expression layout first: the entry's full height must be
-        // known *before* drawing, or a tall pretty-printed expression
-        // ends up rendered across the status bar (HW 2026-07-18).
+        const bool symbolic = e->kind == ResultKind::kSymbolic;
+        const platform::Color rcolor = e->kind == ResultKind::kError ? kRed
+                                       : symbolic                    ? kSymbolic
+                                                                     : kWhite;
+
+        // Expression layout first: the entry's full height must be known
+        // *before* drawing, or a tall pretty-printed entry ends up rendered
+        // across the status bar (HW 2026-07-18).
         render::LayoutNode const* root = render::build_layout(e->expr, metrics);
         const int eh = root != nullptr ? root->height : lh;
-        if (y - lh - (eh + 2) < kStatusH) {
+
+        // Result height. A symbolic result is typeset (its own height);
+        // building that layout resets the shared pool, so the expression
+        // tree above is rebuilt before it is rendered.
+        int rh = lh;
+        if (symbolic) {
+            const char* rtext = n == 0 ? result_full_ : e->result;
+            render::LayoutNode const* rroot = render::build_layout(rtext, metrics);
+            rh = rroot != nullptr ? rroot->height : lh;
+            root = nullptr;  // invalidated by the reset in the build above
+        }
+        if (y - rh - (eh + 2) < kStatusH) {
             break;
         }
 
-        // Result line (plain text). The newest result can overflow the
-        // display; when it does, LEFT/RIGHT pan a left-anchored window
-        // across the full text (testdrive 2026-07-20). Everything else
-        // stays right-aligned and truncated.
-        y -= lh;
-        if (n == 0 && result_max_scroll() > 0) {
+        // Result line at the bottom of the entry block. Symbolic results
+        // typeset left-anchored; a long newest plain result pans under
+        // LEFT/RIGHT (testdrive 2026-07-20); everything else is right-aligned.
+        y -= rh;
+        if (symbolic) {
+            const char* rtext = n == 0 ? result_full_ : e->result;
+            render::render_node(render::build_layout(rtext, metrics), fb, 4, y, font, rcolor);
+        } else if (n == 0 && result_max_scroll() > 0) {
             const int win = (platform::kScreenW - 8) / font.width();
             int off = result_scroll_;
             const int maxs = result_max_scroll();
@@ -756,15 +820,18 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
                               : static_cast<int>(sizeof(window)) - 1;
             std::strncpy(window, result_full_ + off, static_cast<size_t>(w));
             window[w] = 0;
-            font.draw_string(fb, 4, y, window, e->error ? kRed : kWhite);
+            font.draw_string(fb, 4, y, window, rcolor);
         } else {
             const int rx = platform::kScreenW - font.text_width(e->result) - 4;
-            font.draw_string(fb, rx, y, e->result, e->error ? kRed : kWhite);
+            font.draw_string(fb, rx, y, e->result, rcolor);
         }
 
-        // Expression line(s), rendered immediately (the pool is reset
-        // on the next build).
+        // Expression line(s) above the result. A symbolic entry's result
+        // build reset the pool, so rebuild; otherwise `root` is still valid.
         y -= eh + 2;
+        if (root == nullptr) {
+            root = render::build_layout(e->expr, metrics);
+        }
         render::render_node(root, fb, 4, y, font, kGrayLine);
         y -= 2;
     }

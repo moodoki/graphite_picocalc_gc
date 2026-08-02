@@ -31,10 +31,14 @@ public:
 private:
     static constexpr int kMaxHistory = 50;
 
+    // Result-line rendering kind (Phase 5): plain numeric text, an error
+    // (red), or a CAS symbolic result (typeset in the accent color).
+    enum class ResultKind : uint8_t { kPlain, kError, kSymbolic };
+
     struct Entry {
         char expr[96];
         char result[48];  // Wide enough for a short list "{...}>l1"
-        bool error;
+        ResultKind kind;
     };
 
     Entry history_[kMaxHistory] = {};
@@ -73,7 +77,7 @@ private:
     bool handle_command(const char* cmd);
     int visible_count() const;
     int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_
-    void push_entry(const char* expr, const char* result, bool error);
+    void push_entry(const char* expr, const char* result, ResultKind kind);
     void persist_history_line(const char* expr, const char* result);
     void save_variables();
     void load_variables();
