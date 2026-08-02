@@ -8,9 +8,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if ! command -v clang-format &>/dev/null; then
-  echo "ERROR: clang-format not found in PATH." >&2
-  echo "Install with: brew install llvm && brew link --force llvm" >&2
+# Prefer the pinned clang-format from the dev .venv (requirements-dev.txt) so
+# formatting matches CI byte-for-byte regardless of the system/Homebrew version.
+if [[ -x .venv/bin/clang-format ]]; then
+  CLANG_FORMAT=.venv/bin/clang-format
+else
+  CLANG_FORMAT=clang-format
+fi
+
+if ! command -v "$CLANG_FORMAT" &>/dev/null; then
+  echo "ERROR: clang-format not found (tried .venv and PATH)." >&2
+  echo "Install with: .venv/bin/pip install -r requirements-dev.txt" >&2
   exit 1
 fi
 
@@ -26,6 +34,6 @@ if [[ -z "$FILES" ]]; then
 fi
 
 echo "Formatting $(echo "$FILES" | wc -l | tr -d ' ') files..."
-echo "$FILES" | xargs clang-format -i
+echo "$FILES" | xargs "$CLANG_FORMAT" -i
 
 echo "Done."
