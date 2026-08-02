@@ -727,6 +727,32 @@ void test_format_matrix() {
     matexpr::format_matrix_frac(fr, buf, sizeof(buf));
     check(std::strcmp(buf, "[[1/2,1/4][3/4,1/5]]") == 0, "format_matrix_frac");
 
+    // Near-zero cleanup: roundoff cells (2.22e-16 vs a max of 1) snap to a
+    // clean "0" — so [A]^-1*[A] prints an exact identity, not scientific
+    // noise. Relative to the matrix's own scale.
+    Array chop;
+    const double cz[4] = {1, 2.220446049250313e-16, 0, 1};
+    check(fill(chop, 2, 2, cz), "chop fill");
+    matexpr::format_matrix(chop, buf, sizeof(buf));
+    check(std::strcmp(buf, "[[1,0][0,1]]") == 0, "near-zero real cell snaps to 0");
+
+    // A genuinely tiny-magnitude matrix is preserved (its own max sets the
+    // threshold, so nothing is 12 orders below it).
+    Array tiny;
+    const double tv[4] = {1e-15, 2e-15, 3e-15, 4e-15};
+    check(fill(tiny, 2, 2, tv), "tiny fill");
+    matexpr::format_matrix(tiny, buf, sizeof(buf));
+    check(std::strstr(buf, "1e-15") != nullptr && std::strcmp(buf, "[[0,0][0,0]]") != 0,
+          "tiny-magnitude matrix not chopped");
+
+    // Complex: a roundoff-magnitude cell snaps to 0 too (|z| relative).
+    Array cchop;
+    const Complex ccz[4] = {Complex(1, 0), Complex(2.22e-16, -4.44e-16), Complex(0, 0),
+                            Complex(1, 0)};
+    check(cfill(cchop, 2, 2, ccz), "cchop fill");
+    matexpr::format_matrix(cchop, buf, sizeof(buf));
+    check(std::strcmp(buf, "[[1,0][0,1]]") == 0, "near-zero complex cell snaps to 0");
+
     Array big;
     const char* err = nullptr;
     check(matops::identity(10, big, &err), "identity(10)");

@@ -1327,11 +1327,32 @@ void format_matrix_impl(const Array& m, char* buf, size_t buf_len, RealCellFmt r
     const int cols = m.dim(1);
     bool truncated = false;
     const bool cplx = m.dtype() == Dtype::kComplex;
+
+    // Near-zero cleanup: find the largest cell magnitude, then display any
+    // cell more than ~12 orders smaller as a clean "0". This snaps the
+    // floating-point roundoff that shows up in e.g. [A]^-1*[A] (off-diagonal
+    // 2.22e-16) to an exact identity instead of scientific noise. Relative
+    // to the matrix's own scale, so a genuinely tiny-magnitude matrix is
+    // preserved (its own max sets the threshold). A cell exactly 0 already
+    // prints "0"; this just extends that to sub-tolerance roundoff.
+    calc_t maxmag = 0;
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < cols; ++c) {
+            const calc_t mag = cplx ? m.cget(r, c).modulus() : std::fabs(m.get(r, c));
+            maxmag = mag > maxmag ? mag : maxmag;
+        }
+    }
+    const calc_t zero_tol = maxmag * 1e-12;
+
     for (int r = 0; r < rows && !truncated; ++r) {
         buf[pos++] = '[';
         for (int c = 0; c < cols; ++c) {
             char num[48];
-            if (cplx) {
+            const calc_t mag = cplx ? m.cget(r, c).modulus() : std::fabs(m.get(r, c));
+            if (maxmag > 0 && mag <= zero_tol) {
+                num[0] = '0';
+                num[1] = 0;
+            } else if (cplx) {
                 cplx_fmt(m.cget(r, c), number_mode(), num, sizeof(num));
             } else {
                 real_fmt(m.get(r, c), num, sizeof(num));
