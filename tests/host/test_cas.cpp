@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "math/cas/cas_eval.hpp"
 #include "math/cas/derivative.hpp"
 #include "math/cas/expand.hpp"
 #include "math/cas/expr.hpp"
@@ -680,6 +681,93 @@ void test_derivative() {
     }
 }
 
+// ---- Stage 3a: inline CAS home-screen routing (evaluate_home, 4D.21) ----
+
+using math::cas::evaluate_home;
+using math::cas::HomeKind;
+using math::cas::HomeResult;
+
+// A recognized CAS call yields a single-expression result matching `expected`
+// by value at several sample points.
+void check_home_value(const char* input, const char* expected, char var) {
+    const HomeResult r = evaluate_home(input, true);
+    ++g_checks;
+    if (r.kind != HomeKind::kExpr || r.result == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: evaluate_home(\"%s\") not an expr (kind=%d)\n", input,
+                    static_cast<int>(r.kind));
+        return;
+    }
+    // `expected` parses in the same pool region after evaluate_home ran, so
+    // clone the result first, then parse the reference — both stay valid.
+    Expr* got = r.result;
+    Expr* want = parse_expr(expected, nullptr);
+    for (double x = 0.3; x <= 2.0; x += 0.7) {
+        ++g_checks;
+        if (std::fabs(eval(got, var, x) - eval(want, var, x)) > 1e-6) {
+            ++g_failures;
+            std::printf("FAIL: evaluate_home(\"%s\") != %s at x=%.1f\n", input, expected, x);
+            break;
+        }
+    }
+}
+
+void test_home_eval() {
+    // Not a CAS call -> kNone (falls through to the numeric paths).
+    check(evaluate_home("2+3", true).kind == HomeKind::kNone, "home: 2+3 -> none");
+    check(evaluate_home("sin(x)", true).kind == HomeKind::kNone, "home: sin(x) -> none");
+    check(evaluate_home("", true).kind == HomeKind::kNone, "home: empty -> none");
+
+    // The six ops route and compute.
+    check_home_value("simplify(2x + 3x)", "5x", 'x');
+    check_home_value("expand((x+1)^2)", "x^2 + 2x + 1", 'x');
+    check_home_value("factor(x^2 - 4)", "x^2 - 4", 'x');          // value-equivalent
+    check_home_value("diff(x^3)", "3x^2", 'x');                   // default var x
+    check_home_value("diff(x^3*sin(x), x)", "3x^2*sin(x) + x^3*cos(x)", 'x');
+    check_home_value("diff(x^4, x, 2)", "12x^2", 'x');            // 2nd derivative
+    check_home_value("integ(x^3)", "x^4/4", 'x');
+    check_home_value("factor(x^2 - 5x + 6)", "(x-2)*(x-3)", 'x');
+
+    // factor really factors (structure, not just value).
+    {
+        const HomeResult r = evaluate_home("factor(x^2 - 4)", true);
+        char buf[64];
+        math::cas::expr_to_string(r.result, buf, sizeof(buf));
+        check(std::strstr(buf, "x - 2") != nullptr && std::strstr(buf, "x + 2") != nullptr,
+              "home: factor(x^2-4) -> (x-2)(x+2)");
+    }
+
+    // Definite integral -> numeric value.
+    {
+        const HomeResult r = evaluate_home("integ(sin(x), x, 0, pi)", true);
+        check(r.kind == HomeKind::kExpr && r.result != nullptr &&
+                  std::fabs(eval(r.result, 'x', 0.0) - 2.0) < 1e-4,
+              "home: integ(sin x,0,pi) = 2");
+    }
+
+    // solve: real roots.
+    {
+        const HomeResult r = evaluate_home("solve(x^2 - 5x + 6 = 0, x)", true);
+        check(r.kind == HomeKind::kSolutions && r.count == 2, "home: solve x^2-5x+6 -> 2 roots");
+    }
+    // solve: complex roots gated by allow_complex.
+    {
+        const HomeResult rc = evaluate_home("solve(x^2 + 1 = 0, x)", true);
+        check(rc.kind == HomeKind::kSolutions && rc.count == 2 && rc.complex,
+              "home: solve x^2+1 (complex) -> 2 roots");
+        const HomeResult rr = evaluate_home("solve(x^2 + 1 = 0, x)", false);
+        check(rr.kind == HomeKind::kError, "home: solve x^2+1 (real) -> error");
+    }
+    // Shape split (P5-4): a numeric guess/bounds is the numeric solver's job.
+    check(evaluate_home("solve(x^2 - 2, x, 0, 2)", true).kind == HomeKind::kNone,
+          "home: solve with bounds -> none (numeric)");
+    check(evaluate_home("solve(cos(x) - x, x, 0.5)", true).kind == HomeKind::kNone,
+          "home: solve with guess -> none (numeric)");
+
+    // Malformed calls report an error, they don't fall through or crash.
+    check(evaluate_home("diff()", true).kind == HomeKind::kError, "home: diff() -> error");
+}
+
 }  // namespace
 
 int main() {
@@ -702,6 +790,7 @@ int main() {
     test_derivative();
     test_integrate();
     test_solve();
+    test_home_eval();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
