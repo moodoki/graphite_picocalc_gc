@@ -9,11 +9,13 @@
 #include "math/cas/expr.hpp"
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
+#include "math/cas/simplify.hpp"
 
 using math::cas::Expr;
 using math::cas::ExprType;
 using math::cas::g_cas_pool;
 using math::cas::parse_expr;
+using math::cas::simplify;
 
 namespace {
 
@@ -168,6 +170,128 @@ void test_errors_and_exhaustion() {
     check(Expr::num(1) != nullptr, "reset reclaims the pool");
 }
 
+// simplify(input) and simplify(expected) produce structurally equal trees.
+void check_simplifies(const char* input, const char* expected) {
+    g_cas_pool.reset();
+    Expr* a = parse_expr(input, nullptr);
+    Expr* b = parse_expr(expected, nullptr);
+    ++g_checks;
+    if (a == nullptr || b == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in check_simplifies(\"%s\",\"%s\")\n", input, expected);
+        return;
+    }
+    Expr* sa = simplify(a);
+    Expr* sb = simplify(b);
+    if (sa == nullptr || sb == nullptr || !sa->equals(sb)) {
+        ++g_failures;
+        char got[128] = "?";
+        char want[128] = "?";
+        if (sa != nullptr) {
+            math::cas::expr_to_string(sa, got, sizeof(got));
+        }
+        if (sb != nullptr) {
+            math::cas::expr_to_string(sb, want, sizeof(want));
+        }
+        std::printf("FAIL: simplify(\"%s\") = \"%s\", expected form of \"%s\" = \"%s\"\n", input,
+                    got, expected, want);
+    }
+}
+
+// simplify(input) is exactly the numeric literal `value`.
+void check_simplify_num(const char* input, double value) {
+    g_cas_pool.reset();
+    Expr* a = parse_expr(input, nullptr);
+    ++g_checks;
+    if (a == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in check_simplify_num(\"%s\")\n", input);
+        return;
+    }
+    Expr* s = simplify(a);
+    if (s == nullptr || !s->is_num() || s->num_val != value) {
+        ++g_failures;
+        std::printf("FAIL: simplify(\"%s\") not num %.12g\n", input, value);
+    }
+}
+
+void test_simplify_identity() {
+    check_simplifies("x + 0", "x");
+    check_simplifies("0 + x", "x");
+    check_simplifies("x*1", "x");
+    check_simplifies("1*x", "x");
+    check_simplify_num("x*0", 0.0);
+    check_simplify_num("x^0", 1.0);
+    check_simplifies("x^1", "x");
+    check_simplifies("-(-x)", "x");
+    check_simplify_num("0^5", 0.0);
+    check_simplify_num("1^x", 1.0);
+}
+
+void test_simplify_constfold() {
+    check_simplify_num("2 + 3", 5.0);
+    check_simplify_num("4*5", 20.0);
+    check_simplify_num("2^10", 1024.0);
+    check_simplify_num("2 - 2", 0.0);
+    check_simplify_num("10/2", 5.0);
+    check_simplify_num("sin(0)", 0.0);
+    check_simplify_num("cos(0)", 1.0);
+    check_simplify_num("ln(1)", 0.0);
+    check_simplify_num("sqrt(0)", 0.0);
+    check_simplify_num("sqrt(1)", 1.0);
+    check_simplify_num("abs(-3)", 3.0);
+}
+
+void test_simplify_like_terms() {
+    check_simplifies("3x + 5x", "8x");
+    check_simplifies("x + x", "2x");
+    check_simplifies("2x + 3y + x", "3x + 3y");
+    check_simplify_num("x - x", 0.0);
+    check_simplifies("y + x + 1", "x + y + 1");
+}
+
+void test_simplify_like_factors() {
+    check_simplifies("x^2 * x^3", "x^5");
+    check_simplifies("x*x", "x^2");
+    check_simplifies("x*x*x", "x^3");
+    check_simplifies("2*x*3", "6x");
+}
+
+void test_simplify_imaginary() {
+    check_simplify_num("i*i", -1.0);
+    check_simplify_num("i^2", -1.0);
+    check_simplifies("i^3", "-i");
+    check_simplify_num("i^4", 1.0);
+    check_simplify_num("2*i*i", -2.0);
+    check_simplify_num("i*i*i*i", 1.0);
+}
+
+void test_simplify_fractions() {
+    check_simplify_num("x/x", 1.0);
+    check_simplifies("a/a", "1");
+    check_simplifies("2x/(4x^2)", "1/(2x)");
+    check_simplifies("6x^3/(2x)", "3x^2");
+}
+
+void test_simplify_commutativity() {
+    check_simplifies("x + y", "y + x");
+    check_simplifies("x*y", "y*x");
+    check_simplifies("3x + 5x", "5x + 3x");
+}
+
+void test_simplify_termination() {
+    // Risk-1 tricky expressions must terminate (no infinite rule cycling).
+    g_cas_pool.reset();
+    check(simplify(parse_expr("0^0", nullptr)) != nullptr, "0^0 terminates");
+    g_cas_pool.reset();
+    check(simplify(parse_expr("x/x", nullptr)) != nullptr, "x/x terminates");
+    g_cas_pool.reset();
+    Expr* big = simplify(parse_expr("(x+y)^20", nullptr));
+    check(big != nullptr && big->is_pow(), "(x+y)^20 stays a POW (not expanded)");
+    g_cas_pool.reset();
+    check(simplify(parse_expr("i^4", nullptr)) != nullptr, "i^4 terminates");
+}
+
 }  // namespace
 
 int main() {
@@ -177,6 +301,14 @@ int main() {
     test_implicit_mult();
     test_encodings();
     test_errors_and_exhaustion();
+    test_simplify_identity();
+    test_simplify_constfold();
+    test_simplify_like_terms();
+    test_simplify_like_factors();
+    test_simplify_imaginary();
+    test_simplify_fractions();
+    test_simplify_commutativity();
+    test_simplify_termination();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
