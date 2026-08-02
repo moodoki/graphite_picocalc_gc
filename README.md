@@ -14,7 +14,10 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > their on-device evals on the Pico 1; the Pico 2 leg is closed as a
 > formality (board-independent logic, same precedent as earlier phases).
 > **Phase 4's completion is the project's pre-release milestone** — a
-> feature-complete TI-83/84+-class graphing calculator. See
+> feature-complete TI-83/84+-class graphing calculator. **The first tagged
+> release, [v0.1.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.1.0),
+> is published** (prebuilt UF2s for both boards); CI (build, lint, docs
+> validation, release) is green on every job. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 

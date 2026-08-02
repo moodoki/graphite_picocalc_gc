@@ -305,6 +305,46 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-02 — CI fix: red Lint/Validate-docs jobs, pinned clang-format, first release (v0.1.0)
+
+Infra/CI session, no firmware source changed, no decision number consumed.
+The GitHub Actions "Build" workflow (`.github/workflows/build.yml`) had been
+failing on every push in two of its four jobs — the pico/pico2 build jobs
+themselves always passed. Root-caused and fixed both, plus published the
+project's first tagged release. Landed via PR #1 (squash-merged to main,
+branch deleted); merge commit `e4b53ab`.
+
+- **Lint (clang-format) — pinned tool version.** CI installed Ubuntu apt's
+  `clang-format 18`; local dev uses Homebrew's `22`, so the two disagreed on
+  `src/math/seq_expr.cpp:115` and `:263` (no actual source reformatting
+  needed — style was already consistent with the local tool). Fix: pinned
+  **`clang-format==22.1.8`** in `requirements-dev.txt` (available on PyPI,
+  matches local exactly) and changed the CI Lint job to `pip install` that
+  pinned version, sourced from `requirements-dev.txt` via `grep` so there's
+  one place to bump it. Also changed `scripts/lint.sh` and
+  `scripts/format.sh` to prefer `.venv/bin/clang-format` when present, so
+  local and CI stay byte-for-byte identical even if Homebrew drifts ahead.
+- **Validate docs — loose unicode math.** `docs/notes/pre-phase5-review.md`
+  used `×` (U+00D7) outside math mode in 6 dimension multipliers;
+  `scripts/validate_md.py` rejects that (house style: wrap math symbols in
+  backticks or reword). Fixed by replacing those 6 `×` with ASCII `x`.
+- **Workflow modernization + release job (not a lint/docs fix, bundled in
+  the same PR):** bumped all actions to current majors (`checkout@v7`,
+  `setup-python@v7`, `cache@v6`, `upload-artifact@v7`,
+  `download-artifact@v8`), clearing the Node 20 deprecation warnings. Build
+  now stages board-named UF2s (`picocalc_graphcalc-pico.uf2`,
+  `-pico2.uf2`); a new `release` job (gated on `v*` tags, `needs: [build,
+  lint, validate-docs]`, `permissions: contents: write`) downloads both and
+  publishes a GitHub Release via `gh release create --generate-notes`.
+
+**Verification:** CI fully green on the PR and on the tag run — Build
+(pico), Build (pico2), Lint, and Validate docs all passing. **v0.1.0
+published** (first tagged release):
+<https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.1.0>, both
+UF2 assets attached (pico 826,880 bytes; pico2 788,480 bytes). This sits
+during the pre-Phase-5 window (Phase 4D closed; Phase 5 CAS is next) and
+doesn't change either phase's status.
+
 ## 2026-08-02 — Pre-Phase-5 review pass: shared scratch arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified
 
 Opened the pre-Phase-5 code-review/size-optimization pass (next-session.md

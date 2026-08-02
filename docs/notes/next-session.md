@@ -1,6 +1,24 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
+**Last session:** 2026-08-02 — **CI fix + first release, docs/infra only, no
+source changes.** The GitHub Actions "Build" workflow had two red jobs (the
+board build jobs themselves always passed): Lint disagreed with local
+clang-format because CI installed Ubuntu's apt `clang-format 18` against
+local's Homebrew `22` — fixed by pinning **`clang-format==22.1.8`** in
+`requirements-dev.txt` and having CI `pip install` that exact version (no
+source reformatting needed); Validate-docs failed on 6 loose `×` characters
+in `docs/notes/pre-phase5-review.md` — replaced with ASCII `x`. Also bumped
+all workflow actions to current majors (clears Node 20 deprecation
+warnings) and added a `release` job that publishes both boards' UF2s to a
+GitHub Release on `v*` tags. Landed via PR #1 (merge commit `e4b53ab`); CI
+is now fully green on every job. **v0.1.0 published** — the project's first
+tagged release:
+<https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.1.0>. No
+decision number consumed, no phase/sub-phase status change (Phase 4D stays
+closed, Phase 5 CAS is still next — see "The next job" below). Full detail:
+worklog's 2026-08-02 "CI fix" entry.
+
+**Previous session:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
 arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified on the Pico 2.**
 Opened the pre-Phase-5 code-review/size-optimization pass. A per-symbol SRAM
 audit (new `scripts/size-report.sh`) found ~40 KB tied up in per-module
@@ -25,7 +43,7 @@ design call). Full detail: `docs/notes/pre-phase5-review.md`, worklog's
 2026-08-02 "Pre-Phase-5 review pass" entry. Commits `1073f4f` (doc de-stale),
 `5f76851` (arena), `4edba81` (chop).
 
-**Previous session:** 2026-08-02 — **UI-friction polish, source changes,
+**Two sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
 HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
 UI-friction feature requests logged in the 2026-07-27 eval, plus two
 follow-ups raised during this session's on-device testing. Matrix results
@@ -45,7 +63,7 @@ suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
 4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
 polish" entry.
 
-**Two sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Three sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -62,7 +80,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Three sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Four sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -82,7 +100,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Four sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Five sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -97,7 +115,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Five sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Six sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -121,7 +139,7 @@ now persists.** 12 new host checks (`test_seq` now 63); both boards
 rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
 2026-08-02 bugfix entry.
 
-**Six sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
+**Seven sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
 source changes** (one doc-only wishlist addition). Reflashed the Pico 2
 from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
 and ran a hardware-observation interview. First boot showed the expected
