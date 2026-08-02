@@ -7,6 +7,7 @@
 
 #include "math/complex_expr.hpp"
 #include "math/format.hpp"
+#include "math/frac.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
 #include "math/matrix.hpp"
@@ -1295,7 +1296,25 @@ Array& mat_ans_mutable() {
     return g_mresult;
 }
 
-void format_matrix(const Array& m, char* buf, size_t buf_len) {
+namespace {
+
+using RealCellFmt = int (*)(calc_t, char*, size_t);
+using CplxCellFmt = int (*)(const Complex&, NumberMode, char*, size_t);
+
+// Fraction cell for >Frac (4D.2, extended to matrices): p/q when a tight
+// fraction exists (den <= 10000), else the compact decimal fallback.
+int cell_fraction(calc_t v, char* buf, size_t cap) {
+    if (frac::format_fraction(v, 10000, buf, cap)) {
+        return static_cast<int>(std::strlen(buf));
+    }
+    return format_number_compact(v, buf, cap);
+}
+
+// Shared body: renders "[[a,b][c,d]]" with per-cell formatters, so the
+// plain and >Frac variants differ only in how real cells stringify.
+// (Complex cells never convert to fractions — they keep the compact form.)
+void format_matrix_impl(const Array& m, char* buf, size_t buf_len, RealCellFmt real_fmt,
+                        CplxCellFmt cplx_fmt) {
     if (buf_len < 12) {
         if (buf_len > 0) {
             buf[0] = 0;
@@ -1313,9 +1332,9 @@ void format_matrix(const Array& m, char* buf, size_t buf_len) {
         for (int c = 0; c < cols; ++c) {
             char num[48];
             if (cplx) {
-                format_complex(m.cget(r, c), number_mode(), num, sizeof(num));
+                cplx_fmt(m.cget(r, c), number_mode(), num, sizeof(num));
             } else {
-                format_number(m.get(r, c), num, sizeof(num));
+                real_fmt(m.get(r, c), num, sizeof(num));
             }
             const size_t need = std::strlen(num) + (c > 0 ? 1 : 0);
             // Room for the number plus "...]]" + NUL in the worst case
@@ -1334,6 +1353,16 @@ void format_matrix(const Array& m, char* buf, size_t buf_len) {
     }
     buf[pos++] = ']';
     buf[pos] = 0;
+}
+
+}  // namespace
+
+void format_matrix(const Array& m, char* buf, size_t buf_len) {
+    format_matrix_impl(m, buf, buf_len, format_number_compact, format_complex_compact);
+}
+
+void format_matrix_frac(const Array& m, char* buf, size_t buf_len) {
+    format_matrix_impl(m, buf, buf_len, cell_fraction, format_complex_compact);
 }
 
 }  // namespace math::matexpr

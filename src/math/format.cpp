@@ -167,14 +167,22 @@ int format_number_compact(calc_t x, char* buf, size_t buf_len) {
     return strip_zeros(buf);
 }
 
-int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len) {
+namespace {
+
+// Shared body for format_complex / format_complex_compact — identical
+// layout, differing only in the per-component number formatter (full
+// %.10g vs. compact %.4g).
+using ComponentFormatter = int (*)(calc_t, char*, size_t);
+
+int format_complex_impl(const Complex& z, NumberMode mode, char* buf, size_t buf_len,
+                        ComponentFormatter fmt) {
     if (buf_len == 0) {
         return 0;
     }
     // A real value displays as a plain number in every mode — polar
     // included ("5", never "5<0"; list-editor observation 2026-07-26).
     if (z.is_real()) {
-        return format_number(z.re, buf, buf_len);
+        return fmt(z.re, buf, buf_len);
     }
     if (mode == NumberMode::kPolar) {
         calc_t theta = z.argument();
@@ -183,22 +191,32 @@ int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len)
         }
         char rbuf[24];
         char tbuf[24];
-        format_number(z.modulus(), rbuf, sizeof(rbuf));
-        format_number(theta, tbuf, sizeof(tbuf));
+        fmt(z.modulus(), rbuf, sizeof(rbuf));
+        fmt(theta, tbuf, sizeof(tbuf));
         return std::snprintf(buf, buf_len, "%s%c%s", rbuf, kAngleGlyph, tbuf);
     }
 
     char imag[24] = {};
     if (std::fabs(z.im) != 1.0) {
-        format_number(std::fabs(z.im), imag, sizeof(imag));
+        fmt(std::fabs(z.im), imag, sizeof(imag));
     }
     if (z.re == 0.0) {
         return std::snprintf(buf, buf_len, "%s%s%c", z.im < 0 ? "-" : "", imag, kImagUnitGlyph);
     }
     char rebuf[24];
-    format_number(z.re, rebuf, sizeof(rebuf));
+    fmt(z.re, rebuf, sizeof(rebuf));
     return std::snprintf(buf, buf_len, "%s %s %s%c", rebuf, z.im < 0 ? "-" : "+", imag,
                          kImagUnitGlyph);
+}
+
+}  // namespace
+
+int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len) {
+    return format_complex_impl(z, mode, buf, buf_len, format_number);
+}
+
+int format_complex_compact(const Complex& z, NumberMode mode, char* buf, size_t buf_len) {
+    return format_complex_impl(z, mode, buf, buf_len, format_number_compact);
 }
 
 }  // namespace math

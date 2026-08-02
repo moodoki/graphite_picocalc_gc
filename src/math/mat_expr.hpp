@@ -84,7 +84,12 @@ Array& mat_ans_mutable();
 bool save_ans(platform::Storage& storage);
 bool load_ans(platform::Storage& storage);
 
-// "[[1,2][3,4]]" (format_number per element); "...]]" when truncated.
+// "[[1,2][3,4]]" (compact form per element); "...]]" when truncated.
 void format_matrix(const Array& m, char* buf, size_t buf_len);
+
+// Same layout as format_matrix, but real cells render as fractions p/q
+// (>Frac, 4D.2) when a tight fraction exists, else the compact decimal.
+// Complex cells keep the compact rectangular/polar form.
+void format_matrix_frac(const Array& m, char* buf, size_t buf_len);
 
 }  // namespace math::matexpr

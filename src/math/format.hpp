@@ -55,4 +55,10 @@ constexpr char kEllipsisGlyph = '\x8a';  // horizontal ellipsis (U+2026), for tr
 // format_number, so it honors the active FIX/SCI/FLOAT display mode.
 int format_complex(const Complex& z, NumberMode mode, char* buf, size_t buf_len);
 
+// Compact variant of format_complex: each component uses
+// format_number_compact (4 sig figs for ordinary fractional values)
+// instead of format_number. Same layout and glyphs otherwise. Used for
+// dense contexts like inline matrix results.
+int format_complex_compact(const Complex& z, NumberMode mode, char* buf, size_t buf_len);
+
 }  // namespace math

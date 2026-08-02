@@ -62,6 +62,17 @@ void check_fmt(double x, const char* expected) {
     }
 }
 
+void check_compact(double x, const char* expected) {
+    ++g_checks;
+    char buf[40];
+    math::format_number_compact(x, buf, sizeof(buf));
+    if (std::strcmp(buf, expected) != 0) {
+        std::printf("FAIL: format_compact(%.12g) -> '%s' (expected '%s')\n", x,
+                    buf, expected);
+        ++g_failures;
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -202,6 +213,18 @@ int main() {
     check_fmt(-INFINITY, "-Inf");
     check_fmt(0, "0");
     check_fmt(0.70710678118654752, "0.7071067812");
+
+    // ---- format_number_compact (4 sig figs for fractional floats;
+    // integers / sci-range / FIX-SCI defer to format_number) ----
+    check_compact(1.0 / 3.0, "0.3333");
+    check_compact(0.70710678118654752, "0.7071");
+    check_compact(2.5, "2.5");
+    check_compact(5, "5");          // integer: unchanged
+    check_compact(-17, "-17");      // integer: unchanged
+    check_compact(1e10, "1e10");    // sci range: unchanged
+    check_compact(1.5e-7, "1.5e-7");
+    // Fractional-but-large defers to %.4g (raw exponent, not normalized).
+    check_compact(123456789.5, "1.235e+08");
 
     // ---- 5.3 display modes (FIX / SCI) ----
     math::set_display_mode(math::DisplayMode::kFix);

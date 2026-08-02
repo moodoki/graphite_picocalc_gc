@@ -240,36 +240,18 @@ void HomeScreen::evaluate_input() {
         }
     }
 
-    // ">frac" / ">dec" display suffixes (4D.2, TI's Ans>Frac): strip
-    // the suffix; >frac evaluates the scalar and shows it as p/q.
+    // ">frac" / ">dec" display suffixes (4D.2, TI's Ans>Frac): strip the
+    // suffix now and set to_frac; the result is reformatted as fractions
+    // further down, per result kind (scalar in the scalar path, matrix in
+    // the matrix path). >dec is the default display.
+    bool to_frac = false;
     {
         const size_t elen = std::strlen(expr);
-        bool to_frac = false;
         if (elen > 5 && std::strcmp(expr + elen - 5, ">frac") == 0) {
             expr[elen - 5] = 0;
             to_frac = true;
         } else if (elen > 4 && std::strcmp(expr + elen - 4, ">dec") == 0) {
             expr[elen - 4] = 0;  // Decimal is the default display
-        }
-        if (to_frac) {
-            char result[128];
-            const auto res = math::engine().evaluate(expr);
-            const bool error = !res.ok;
-            if (error) {
-                std::snprintf(result, sizeof(result), "%s", res.error);
-            } else if (!math::frac::format_fraction(res.value, 10000, result, sizeof(result))) {
-                // No tight fraction with den <= 10000: decimal fallback.
-                math::format_number(res.value, result, sizeof(result));
-            }
-            push_entry(input_.text(), result, error);
-            if (!error) {
-                persist_history_line(input_.text(), result);
-                save_variables();
-            }
-            input_.clear();
-            hist_nav_ = -1;
-            pending_[0] = 0;
-            return;
         }
     }
 
@@ -311,7 +293,11 @@ void HomeScreen::evaluate_input() {
             std::snprintf(result, sizeof(result), "%s", mres.text);
         } else {
             char text[120];
-            math::matexpr::format_matrix(*mres.matrix, text, sizeof(text));
+            if (to_frac) {
+                math::matexpr::format_matrix_frac(*mres.matrix, text, sizeof(text));
+            } else {
+                math::matexpr::format_matrix(*mres.matrix, text, sizeof(text));
+            }
             if (mres.stored_matrix >= 0) {
                 std::snprintf(result, sizeof(result), "%s%c[%c]", text, gfx::kGlyphStore,
                               static_cast<char>('A' + mres.stored_matrix));
@@ -394,6 +380,30 @@ void HomeScreen::evaluate_input() {
                     math::named_lists().save(platform::storage(), r - math::kNamedRefBase);
                 }
             }
+        }
+        input_.clear();
+        hist_nav_ = -1;
+        pending_[0] = 0;
+        return;
+    }
+
+    // Scalar >frac (4D.2): reached only when the expr wasn't matrix or
+    // list syntax. Evaluate on the real engine and show the result as
+    // p/q, falling back to decimal when no tight fraction (den <= 10000)
+    // exists.
+    if (to_frac) {
+        char result[128];
+        const auto res = math::engine().evaluate(expr);
+        const bool error = !res.ok;
+        if (error) {
+            std::snprintf(result, sizeof(result), "%s", res.error);
+        } else if (!math::frac::format_fraction(res.value, 10000, result, sizeof(result))) {
+            math::format_number(res.value, result, sizeof(result));
+        }
+        push_entry(input_.text(), result, error);
+        if (!error) {
+            persist_history_line(input_.text(), result);
+            save_variables();
         }
         input_.clear();
         hist_nav_ = -1;

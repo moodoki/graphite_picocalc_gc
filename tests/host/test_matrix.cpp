@@ -712,6 +712,21 @@ void test_format_matrix() {
     matexpr::format_matrix(m, buf, sizeof(buf));
     check(std::strcmp(buf, "[[1,2.5][-3,4]]") == 0, "format small matrix");
 
+    // Cells use the compact formatter: irrational entries cap at 4 sig
+    // figs instead of the full 10 (2026-07-27 testdrive readability).
+    Array frac;
+    const double fv[4] = {1.0 / 3.0, 2.5, -3, 4};
+    check(fill(frac, 2, 2, fv), "compact fill");
+    matexpr::format_matrix(frac, buf, sizeof(buf));
+    check(std::strcmp(buf, "[[0.3333,2.5][-3,4]]") == 0, "format compact cell");
+
+    // format_matrix_frac (>Frac on matrices): real cells become p/q.
+    Array fr;
+    const double frv[4] = {0.5, 0.25, 0.75, 0.2};
+    check(fill(fr, 2, 2, frv), "frac fill");
+    matexpr::format_matrix_frac(fr, buf, sizeof(buf));
+    check(std::strcmp(buf, "[[1/2,1/4][3/4,1/5]]") == 0, "format_matrix_frac");
+
     Array big;
     const char* err = nullptr;
     check(matops::identity(10, big, &err), "identity(10)");
@@ -902,6 +917,15 @@ void test_complex_expr_layer() {
     char buf[96];
     matexpr::format_matrix(matrices().matrix(0), buf, sizeof(buf));
     check(std::strchr(buf, kImagUnitGlyph) != nullptr, "format_matrix complex glyph");
+
+    // Complex cells use the compact per-component formatter too: a
+    // fractional real/imag part caps at 4 sig figs, not the full 10.
+    Array cfrac;
+    const Complex cv[1] = {{1.0 / 3.0, 1.0 / 3.0}};
+    check(cfill(cfrac, 1, 1, cv), "compact complex fill");
+    matexpr::format_matrix(cfrac, buf, sizeof(buf));
+    check(std::strstr(buf, "0.3333") != nullptr && std::strstr(buf, "0.3333333") == nullptr,
+          "format_matrix compact complex cell");
 
     // eigenvals of a complex matrix errors (D37).
     check_mat_error("eigenvals([A])", "Non-real matrix", "eigenvals complex errors");

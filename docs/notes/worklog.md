@@ -296,6 +296,75 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-02 — UI-friction polish: matrix precision/`>Frac`, constants-picker relayout + description scroll, HW-verified
+
+Addressed the two UI-friction feature requests logged in the 2026-07-27 eval
+(matrix decimal precision, constants-picker readability) and two follow-ups
+raised during this session's on-device testing (`>Frac` on matrices, a
+constants-picker description-scroll gap left by the relayout). All four
+HW-verified on the Pico 2 (flashed `build/pico2` at each step; clean
+sustained boots, no faults). Both boards build clean; host suite green;
+`clang-format`/`clang-tidy` clean. **No decision number consumed** — these
+are UI polish inside the already-closed Phase 4D, not new design calls
+(tracked as "The next job" #1's two feature requests, not a phase item).
+
+**1. Matrix result precision (home-screen inline).** `format_matrix`
+(`src/math/mat_expr.cpp`) now formats cells with the compact formatter —
+real cells via `format_number_compact` (4 sig figs; integers/sci
+unchanged), complex cells via a new `format_complex_compact`
+(`src/math/format.cpp`/`.hpp`). `format_complex`/`format_complex_compact`
+share one `format_complex_impl` taking a per-component formatter, so the
+layout logic isn't duplicated. `[[1.4142135624,...]]` now shows
+`[[1.414,...]]`.
+
+**2. Constants picker readability (`src/apps/const_screen.cpp`).** The old
+two-column layout (value + right-aligned summary) overprinted for long
+values like `hbar`. Replaced with four fixed non-overlapping columns:
+symbol (green) | engine id (the ENTER-insert token) | short value |
+summary (truncated with `math::kEllipsisGlyph`). Added a local
+`format_value_short` (~5 sig figs incl. the sci range, e.g. `1.0546e-34` —
+`format_number_compact` wasn't usable here because it keeps full precision
+in the sci range, exactly where the picker's longest values live) and a
+`fit_text` truncate-to-width helper. Surfaced the previously-unused
+`symbol` field from `ConstDescriptor` (`math::catalog`).
+
+**3. Follow-up: `>Frac` now works on matrices.** In `src/apps/home_screen.cpp`
+the `>frac`/`>dec` suffix detection was hoisted into a `to_frac` flag so the
+matrix path formats cells as fractions via a new
+`math::matexpr::format_matrix_frac` (`mat_expr.cpp`/`.hpp`) when set; the
+scalar `>frac` handling was relocated after the list path (fires only when
+the expr wasn't matrix/list syntax). `format_matrix` was refactored into a
+shared `format_matrix_impl` taking per-cell formatters (compact vs.
+fraction). Real matrix cells become `p/q` (den `<= 10000`) with a
+compact-decimal fallback; complex cells keep the compact form. `mat_expr.cpp`
+now includes `math/frac.hpp`; `scripts/host-tests.sh` gained
+`src/math/frac.cpp` on the `test_matrix` link line.
+
+**4. Follow-up: constants picker left/right description scroll.** Added a
+`desc_scroll_` field (`const_screen.hpp`) so LEFT/RIGHT horizontally scroll
+the selected row's (truncated) summary; resets on up/down and
+`on_activate`. Right-scroll stops as soon as the remaining tail fits fully
+in the column (`font.text_width` vs. the column's pixel width — not "until
+the last char is left-aligned"). Hint bar updated to
+`ENTER:INSERT <>:DESC ESC:BACK`.
+
+**Tests**: host suite green — `test_math` now **230 checks** (added
+`format_number_compact` cases), `test_matrix` now **375 checks** (added
+compact real+complex cell checks and a `format_matrix_frac` check), 0
+failures across all 12 suites.
+
+**Build**: both boards build clean; Pico 1 bss **222,528 bytes** (was
+222,520 baseline — +8 from the `desc_scroll_` field, alignment included).
+`scripts/lint.sh` and `scripts/format.sh` both clean.
+
+Files touched: `src/math/format.cpp`, `src/math/format.hpp`,
+`src/math/mat_expr.cpp`, `src/math/mat_expr.hpp`,
+`src/apps/home_screen.cpp`, `src/apps/const_screen.cpp`,
+`src/apps/const_screen.hpp`, `scripts/host-tests.sh`,
+`tests/host/test_math.cpp`, `tests/host/test_matrix.cpp`.
+
+---
+
 ## 2026-08-02 — Phase 4D CLOSED: F sequencing + idea H disposition, ti-parity/README flip (D40)
 
 Docs-only session, no source changes. Resolved the three-item Phase 4D

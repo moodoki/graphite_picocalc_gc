@@ -1,6 +1,26 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Last session:** 2026-08-02 — **UI-friction polish, source changes,
+HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
+UI-friction feature requests logged in the 2026-07-27 eval, plus two
+follow-ups raised during this session's on-device testing. Matrix results
+now format cells with the compact number formatter (`format_matrix`, 4 sig
+figs; new `format_complex_compact` for complex cells) instead of full
+10-digit precision. The constants picker was relaid out into four fixed
+non-overlapping columns (symbol | engine id | short value | summary,
+truncated with an ellipsis) to fix overprinting on long values like
+`hbar`. Follow-up 1: `>Frac` now works on matrix results too (new
+`math::matexpr::format_matrix_frac`, real cells become `p/q`). Follow-up
+2: the constants-picker relayout needed LEFT/RIGHT description scroll
+(`desc_scroll_`) to keep long summaries fully readable after truncation.
+Host suite green (`test_math` 230, `test_matrix` 375, 0 failures across 12
+suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
+222,520, +8 from `desc_scroll_`); `lint.sh`/`format.sh` both clean.
+**No decision number consumed** — polish inside the already-closed Phase
+4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
+polish" entry.
+
+**Previous session:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -17,7 +37,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Previous session:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Two sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -37,7 +57,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Two sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Three sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -52,7 +72,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Three sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Four sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -76,7 +96,7 @@ now persists.** 12 new host checks (`test_seq` now 63); both boards
 rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
 2026-08-02 bugfix entry.
 
-**Four sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
+**Five sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
 source changes** (one doc-only wishlist addition). Reflashed the Pico 2
 from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
 and ran a hardware-observation interview. First boot showed the expected
@@ -99,23 +119,11 @@ expression editors" to `wishlist.md`. This addressed "The next job" #3
 (Pico 2 perf spot-check) informally. Full detail:
 `testdrive-2026-08-02-observations.md`.
 
-**Five sessions ago:** 2026-07-27 — **on-device eval only, no code
-changes.** Hands-on test-drive on the Pico 1 (current Phase 4D build)
-covered the last three open HW-PENDING rows — Batch 2 (complex matrices),
-Batch 3 (sequence graphing), Batch 4 (zoom + shading) — all PASS. Batch 3
-found two minor bugs (the SEQ trace/color-swatch bugs fixed two entries
-above) and a third was found in passing on Batch 5's `MatAns` (now fixed —
-see "Last session" above, D39). Also re-confirmed the `π` tick-label fix
-(2026-07-26) renders correctly. Two UI-friction feature requests logged, no
-fix yet: cap displayed decimal digits on matrix results; multi-character
-constant names are hard to read in the constants picker (kiv). **All nine
-D38 batches (Phase 4D) are now hardware-verified on the Pico 1** — see
-`worklog.md`'s 2026-07-27 entry and
-`testdrive-2026-07-27-observations.md` for the full report. **Phase 4D was
-declared CLOSED five sessions later (2026-08-02, D40) — see "Last session"
-above.** Full detail on the 2026-07-26 Phase 4D kickoff session (planning
-pass D38, Batch 1 complex vars/lists): `worklog.md`'s 2026-07-26 entry,
-`decisions.md` D38.
+The 2026-07-27 on-device eval (Batches 2-4 PASS, closing all nine D38
+batches on the Pico 1) and the 2026-07-26 Phase 4D kickoff session are
+further back than this rolling summary keeps — see `worklog.md`'s
+2026-07-27 and 2026-07-26 entries (`testdrive-2026-07-27-observations.md`,
+`decisions.md` D38) for full detail.
 
 ## The next job
 
@@ -126,7 +134,7 @@ pass D38, Batch 1 complex vars/lists): `worklog.md`'s 2026-07-26 entry,
    — see "Last session" above for the F-evaluator-check/idea-H/ti-parity
    dispositions. The forward path from here:
    - **Next: a pre-Phase-5 code-review + size-optimization pass.** SRAM
-     headroom has been shrinking each phase (Pico 1 bss now 222,520
+     headroom has been shrinking each phase (Pico 1 bss now 222,528
      bytes, ~48 KB headroom, down from ~57 KB pre-4D) and Phase 5 (CAS)
      and Phase 6 (app framework + MicroPython) will both add
      significant static footprint — worth a dedicated pass to review
@@ -144,11 +152,14 @@ pass D38, Batch 1 complex vars/lists): `worklog.md`'s 2026-07-26 entry,
      trace float noise, SEQ editor color-swatch, `MatAns` power-cycle
      persistence — were all fixed and HW-verified 2026-08-02; see
      worklog's 2026-08-02 entries and `decisions.md` D39.)
-   - **Two UI-friction feature requests, no fix proposed yet**: matrix
-     results with many decimal places are hard to read (consider
-     capping displayed digits); multi-character constant names are
-     hard to read in the constants picker (kiv — design thought
-     needed).
+   - **Two UI-friction feature requests from the 2026-07-27 eval — fixed
+     and HW-verified 2026-08-02**: matrix results now cap displayed
+     decimal digits (compact 4-sig-fig formatter, real and complex
+     cells); the constants picker was relaid into four non-overlapping
+     columns (symbol | engine id | short value | summary) and gained
+     LEFT/RIGHT description scroll. `>Frac` was also extended to work on
+     matrix results (a same-session follow-up, not from the original
+     eval). See worklog's 2026-08-02 "UI-friction polish" entry.
    Task table: `phase4-spec.md` §8; decisions: `decisions.md` D37/D38/D40
    (the idea A-G → task-ID map is in D37 and
    [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
@@ -194,6 +205,13 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
+- **Firmware on the Pico 2 was reflashed again same-day (2026-08-02) with
+  this session's UI-friction polish** (`0cfbe05-dev`) — compact matrix
+  cell formatting, matrix `>Frac`, and the constants-picker relayout +
+  description scroll. HW-verified: clean sustained boots at every step,
+  no faults; `>Frac` on matrices and the constants-picker scroll both
+  confirmed working as intended. No persistence format change, no
+  one-time reset. See "Last session" above.
 - **Firmware on the Pico 2 was reflashed again same-day (2026-08-02) with
   the D10 leg A change** (`1a45763-dev`) — the display pipeline now
   offloads the Pico 2's full-frame push to core 1 (previously
