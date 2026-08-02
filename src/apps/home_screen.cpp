@@ -1,5 +1,6 @@
 #include "apps/home_screen.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -817,7 +818,12 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         y -= rh;
         if (symbolic) {
             const char* rtext = n == 0 ? result_full_ : e->result;
-            render::render_node(render::build_layout(rtext, metrics), fb, 4, y, font, rcolor);
+            render::LayoutNode const* rr = render::build_layout(rtext, metrics);
+            const int rw = rr != nullptr ? rr->width : 0;
+            // Right-align like numeric results so a symbolic answer reads as a
+            // result, not another input line; left-anchor if it's too wide.
+            const int rx = std::max(platform::kScreenW - rw - 4, 4);
+            render::render_node(rr, fb, rx, y, font, rcolor);
         } else if (n == 0 && result_max_scroll() > 0) {
             const int win = (platform::kScreenW - 8) / font.width();
             int off = result_scroll_;

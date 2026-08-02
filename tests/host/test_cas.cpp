@@ -737,6 +737,22 @@ void test_home_eval() {
               "home: factor(x^2-4) -> (x-2)(x+2)");
     }
 
+    // Rational coefficients serialize as fractions, not decimals (so the
+    // layout builder typesets a real stacked fraction) — integ(x^3) = x^4/4.
+    {
+        const HomeResult r = evaluate_home("integ(x^3)", true);
+        char buf[64];
+        math::cas::expr_to_string(r.result, buf, sizeof(buf));
+        check(std::strcmp(buf, "x^4 / 4") == 0, "home: integ(x^3) serializes x^4 / 4");
+        check(std::strchr(buf, '.') == nullptr, "home: integ(x^3) has no decimal point");
+    }
+    {
+        const HomeResult r = evaluate_home("integ(x^2)", true);
+        char buf[64];
+        math::cas::expr_to_string(r.result, buf, sizeof(buf));
+        check(std::strcmp(buf, "x^3 / 3") == 0, "home: integ(x^2) serializes x^3 / 3");
+    }
+
     // Definite integral -> numeric value.
     {
         const HomeResult r = evaluate_home("integ(sin(x), x, 0, pi)", true);
