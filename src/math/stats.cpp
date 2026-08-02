@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "math/scratch.hpp"
+
 namespace math::stats {
 
 namespace {
@@ -12,11 +14,16 @@ namespace {
 constexpr int kChunk = 256;
 constexpr calc_t kPi = 3.14159265358979323846;
 
-// Streaming chunk buffers (single-core application code, no
-// reentrancy — same pattern as list_ops).
-calc_t g_bx[kChunk];
-calc_t g_by[kChunk];
-calc_t g_bf[kChunk];
+// Streaming chunk buffers overlay the shared compute region (scratch.hpp):
+// stats is mutually exclusive with list_expr/infer/matops, so it reuses
+// the same bytes. Single-core, no reentrancy within stats.
+calc_t (&g_bx)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::compute_region());
+calc_t (&g_by)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::compute_region() +
+                                                               sizeof(g_bx));
+calc_t (&g_bf)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::compute_region() +
+                                                               sizeof(g_bx) + sizeof(g_by));
+static_assert(3 * sizeof(calc_t) * kChunk <= scratch::kComputeBytes,
+              "stats scratch exceeds shared compute region");
 
 constexpr const char* kErrEmpty = "Empty list";
 constexpr const char* kErrComplex = "Non-real list";

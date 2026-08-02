@@ -5,6 +5,7 @@
 #include <limits>
 
 #include "math/engine.hpp"
+#include "math/scratch.hpp"
 
 namespace math::listops {
 
@@ -13,11 +14,21 @@ namespace {
 constexpr int kChunk = 256;
 constexpr int kMergeBuf = 128;
 
-// Streaming buffers (single-core application code, no reentrancy).
-calc_t g_buf[kChunk];
-calc_t g_in_a[kMergeBuf];
-calc_t g_in_b[kMergeBuf];
-calc_t g_out[kMergeBuf];
+// Streaming buffers overlay the shared listops region (scratch.hpp). This
+// region is DISJOINT from the compute region because list_expr calls
+// listops (sum/prod/seq/sort/cumsum/copy...), so a listops buffer can be
+// live while list_expr's own buffers are. Single-core, no reentrancy
+// within listops.
+calc_t (&g_buf)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::listops_region());
+calc_t (&g_in_a)[kMergeBuf] = *reinterpret_cast<calc_t (*)[kMergeBuf]>(scratch::listops_region() +
+                                                                       sizeof(g_buf));
+calc_t (&g_in_b)[kMergeBuf] = *reinterpret_cast<calc_t (*)[kMergeBuf]>(scratch::listops_region() +
+                                                                       sizeof(g_buf) +
+                                                                       sizeof(g_in_a));
+calc_t (&g_out)[kMergeBuf] = *reinterpret_cast<calc_t (*)[kMergeBuf]>(
+    scratch::listops_region() + sizeof(g_buf) + sizeof(g_in_a) + sizeof(g_in_b));
+static_assert(sizeof(g_buf) + 3 * sizeof(calc_t) * kMergeBuf <= scratch::kListopsBytes,
+              "listops scratch exceeds shared listops region");
 
 // Total order with NaNs last — std::sort on raw operator< is UB when
 // NaNs are present (seq() can produce them).

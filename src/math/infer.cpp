@@ -4,16 +4,23 @@
 #include <limits>
 
 #include "math/dist.hpp"
+#include "math/scratch.hpp"
 
 namespace math::stats {
 
 namespace {
 
 constexpr int kChunk = 256;
-// Streaming buffers (single-core application code, no reentrancy).
-calc_t g_buf_a[kChunk];
-calc_t g_buf_b[kChunk];
-calc_t g_row_sum[kChunk];  // chisq_test_2way per-chunk row sums
+// Streaming buffers overlay the shared compute region (scratch.hpp): infer
+// is mutually exclusive with stats/list_expr/matops (it deliberately does
+// not reuse stats::one_var), so it reuses the same bytes. Single-core.
+calc_t (&g_buf_a)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::compute_region());
+calc_t (&g_buf_b)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::compute_region() +
+                                                                  sizeof(g_buf_a));
+calc_t (&g_row_sum)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(  // chisq_test_2way row sums
+    scratch::compute_region() + sizeof(g_buf_a) + sizeof(g_buf_b));
+static_assert(3 * sizeof(calc_t) * kChunk <= scratch::kComputeBytes,
+              "infer scratch exceeds shared compute region");
 
 calc_t nan_v() {
     return std::numeric_limits<calc_t>::quiet_NaN();

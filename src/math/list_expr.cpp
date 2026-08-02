@@ -11,6 +11,7 @@
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
 #include "math/named_lists.hpp"
+#include "math/scratch.hpp"
 #include "math/stats.hpp"
 
 namespace math::listexpr {
@@ -26,10 +27,8 @@ Array g_result;
 Array g_temp[kMaxDepth];
 
 // Vector-lift state: l1..l6 bind to g_elem slots in the compiled
-// expression; chunks stream through g_lift.
+// expression; chunks stream through g_lift (see below).
 calc_t g_elem[ListStore::kCount];
-calc_t g_lift[ListStore::kCount][kChunk];
-calc_t g_outbuf[kChunk];
 const char* const kSlotNames[ListStore::kCount] = {"l1", "l2", "l3", "l4", "l5", "l6"};
 
 // Lift operands (D24): brace literals and wrapper calls inside a lifted
@@ -40,8 +39,23 @@ const char* const kSlotNames[ListStore::kCount] = {"l1", "l2", "l3", "l4", "l5",
 constexpr int kMaxOperands = 4;
 Array g_op[kMaxOperands];
 calc_t g_op_elem[kMaxOperands];
-calc_t g_op_lift[kMaxOperands][kChunk];
 const char* const kOpNames[kMaxOperands] = {"lopa", "lopb", "lopc", "lopd"};
+
+// The three chunk-lift buffers overlay the shared compute region
+// (scratch.hpp): list_expr owns the whole region during an evaluate(), so
+// its private 22.5 KB became shared bss. Layout, back to back:
+//   [0]      g_lift[6][256]    12288 B
+//   [12288]  g_op_lift[4][256]  8192 B
+//   [20480]  g_outbuf[256]      2048 B
+calc_t (&g_lift)[ListStore::kCount][kChunk] =
+    *reinterpret_cast<calc_t (*)[ListStore::kCount][kChunk]>(scratch::compute_region());
+calc_t (&g_op_lift)[kMaxOperands][kChunk] =
+    *reinterpret_cast<calc_t (*)[kMaxOperands][kChunk]>(scratch::compute_region() + sizeof(g_lift));
+calc_t (&g_outbuf)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::compute_region() +
+                                                                   sizeof(g_lift) +
+                                                                   sizeof(g_op_lift));
+static_assert(sizeof(g_lift) + sizeof(g_op_lift) + sizeof(g_outbuf) <= scratch::kComputeBytes,
+              "list_expr scratch exceeds shared compute region");
 
 bool ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';

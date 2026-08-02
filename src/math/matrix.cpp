@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <new>
+
+#include "math/scratch.hpp"
 
 namespace math::matops {
 
@@ -20,9 +23,19 @@ union RowBuf {
     // the union needs a user-provided one; start life as the real view.
     RowBuf() : d{} {}
 };
-RowBuf g_rowa;
-RowBuf g_rowb;
-RowBuf g_rowc;
+// The three row buffers overlay the shared compute region (scratch.hpp):
+// matops is mutually exclusive with list_expr/stats/infer, so it reuses the
+// same bytes. RowBuf has a non-trivial ctor (above), so placement-new into
+// the arena to start each object's lifetime properly (runs once at startup,
+// on already-zeroed bss). Never more than these three are live at once.
+RowBuf& make_rowbuf(std::size_t off) {
+    return *new (scratch::compute_region() + off) RowBuf();
+}
+RowBuf& g_rowa = make_rowbuf(0);
+RowBuf& g_rowb = make_rowbuf(sizeof(RowBuf));
+RowBuf& g_rowc = make_rowbuf(2 * sizeof(RowBuf));
+static_assert(3 * sizeof(RowBuf) <= scratch::kComputeBytes,
+              "matops row buffers exceed shared compute region");
 
 // Working copies for the elimination algorithms and power().
 Array g_mwork[2];
