@@ -25,7 +25,7 @@ Top bss consumers:
 
 | bytes | symbol | nature |
 |------:|--------|--------|
-| 57,516 | `math::array_store()::instance` | live storage — 28×2 KB slabs + overhead |
+| 57,516 | `math::array_store()::instance` | live storage — 28x2 KB slabs + overhead |
 | 20,480 | `gfx::…::strip_buf` | Pico-1 render strips — needed |
 | 12,936 | `apps::graph_screen()::instance` | GraphState + point caches |
 | 12,288 | `math::listexpr::…::g_lift` | **scratch** — `calc_t[6][256]` list lift |
@@ -36,9 +36,9 @@ Top bss consumers:
 | 7,692 | `apps::home_screen()::instance` | screen singleton |
 | 7,680 | `platform::…::staging` | display staging |
 | 3,584 | `math::stats::…::sinusoid_fit::acc` | **scratch** |
-| 3×3,200 | `math::matops::…::g_row{a,b,c}` | **scratch** — matrix row buffers |
-| 6×2,048 | `math::stats::…::g_{bx,by,bf,buf_a,buf_b,row_sum}` | **scratch** |
-| 2,048 ×N | `listops::g_buf`, `listexpr::g_outbuf`, `array/named g_chunk`, `graph::g_buf_{x,y}`, `ListEditor::delete_row::buf` | **scratch** |
+| 3x3,200 | `math::matops::…::g_row{a,b,c}` | **scratch** — matrix row buffers |
+| 6x2,048 | `math::stats::…::g_{bx,by,bf,buf_a,buf_b,row_sum}` | **scratch** |
+| 2,048 xN | `listops::g_buf`, `listexpr::g_outbuf`, `array/named g_chunk`, `graph::g_buf_{x,y}`, `ListEditor::delete_row::buf` | **scratch** |
 
 ## Headline finding — mutually-exclusive scratch buffers (~40 KB reclaimable)
 
@@ -47,7 +47,7 @@ tied up in per-module worst-case scratch buffers** — all the same
 256-element (`kChunk`) PSRAM-streaming chunk pattern, one private set per
 module: `list_expr` (~22.5 KB), `matrix`/`matops` (9.6 KB), `stats`
 (~15.9 KB incl. `sinusoid_fit::acc`), `listops` (2 KB), `array`/
-`named_lists` persistence (`g_chunk`, 2×2 KB), the home-history `tail`
+`named_lists` persistence (`g_chunk`, 2x2 KB), the home-history `tail`
 (8 KB), and `ListEditor::delete_row::buf` (2 KB).
 
 **These are temporally mutually exclusive** — verified, not assumed:
@@ -189,7 +189,7 @@ touches hot math paths — worth a flash + matrix/stats/list/infer spot-check).
    (P6-1) is the *required* choice on Pico 1 — a static-at-boot 56 KB would
    pin free SRAM at ~12 KB even during normal calculator work. Pico 2 is
    comfortable regardless (~144 KB free, 104 KB Python impact).
-6. **ArrayStore slab re-sizing — reserve lever, not needed now.** 28×2 KB =
+6. **ArrayStore slab re-sizing — reserve lever, not needed now.** 28x2 KB =
    57.3 KB of *live* storage; `slab_alloc()` hard-fails on exhaustion (no
    PSRAM fallback for small arrays), and the persistent baseline is already
    ~16 slabs (6 lists + 10 matrices, if all small/real) + eval temps, so the

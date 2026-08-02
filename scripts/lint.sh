@@ -16,11 +16,20 @@ if ! command -v clang-tidy &>/dev/null && [[ -x /opt/homebrew/opt/llvm/bin/clang
   PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 fi
 
+# Prefer the pinned clang-format from the dev .venv (requirements-dev.txt) so
+# formatting matches CI byte-for-byte regardless of the system/Homebrew version.
+if [[ -x .venv/bin/clang-format ]]; then
+  CLANG_FORMAT=.venv/bin/clang-format
+else
+  CLANG_FORMAT=clang-format
+fi
+
 EXIT=0
 
 # 1. clang-format check
-if ! command -v clang-format &>/dev/null; then
-  echo "ERROR: clang-format not found in PATH." >&2
+if ! command -v "$CLANG_FORMAT" &>/dev/null; then
+  echo "ERROR: clang-format not found (tried .venv and PATH)." >&2
+  echo "  Install with: .venv/bin/pip install -r requirements-dev.txt" >&2
   exit 1
 fi
 
@@ -33,8 +42,8 @@ FILES=$(find src -type f \( \
 if [[ -z "$FILES" ]]; then
   echo "No C/C++ source files found in src/. Skipping format check."
 else
-  echo "=== clang-format check ==="
-  if ! echo "$FILES" | xargs clang-format --dry-run --Werror; then
+  echo "=== clang-format check ($("$CLANG_FORMAT" --version)) ==="
+  if ! echo "$FILES" | xargs "$CLANG_FORMAT" --dry-run --Werror; then
     echo "ERROR: files are not formatted. Run ./scripts/format.sh." >&2
     EXIT=1
   else
