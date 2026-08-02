@@ -305,6 +305,123 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-02 — Phase 5 Stages 0–3: CAS engine + home-screen UI integration, HW-verified on the Pico 2
+
+Two sessions on the `phase-5` branch (not yet merged to `main`). The first
+built the full symbolic engine (Stages 0–2, host-only, no UI contact); the
+second wired it into the home screen and flashed/tested it on-device
+(Stage 3). Twelve commits total, `403c205`..`6c1c6c2`.
+
+**Stage 0 — Expr tree, pool, parser, serializer (4D.1–4D.3, `403c205`).**
+`src/math/cas/expr.{hpp,cpp}`: an `Expr` tree (NUM/VAR/ADD/MUL/POW/NEG/FUNC/
+EQ) over an `ExprPool` bump allocator (modeled on `render::pool.hpp`,
+`std::align`, reset-to-reclaim, `nullptr` on exhaustion). **D41**: the pool
+is an SRAM raw-pointer arena overlaying the shared scratch `kCompute` region
+(pre-Phase-5 review's arena) rather than the spec's sketched PSRAM plan —
+PSRAM is offset-addressed and unusable for a pointer-native rewrite tree.
+`src/math/cas/parser.{hpp,cpp}`: recursive-descent parser with CAS-mode
+implicit multiplication (`2x`, `xy`, `(x+1)(x-1)`), `i` reserved as a
+variable, `pi` as a nullary constant function. `src/math/cas/serialize.cpp`:
+`expr_to_string` with precedence parenthesization, round-trips structurally.
+`test_cas.cpp` new, 51 checks.
+
+**Stage 1 — simplify core (4D.5–4D.7, `e5bb2f8`).** The canonical-form
+simplifier every later pass depends on: bottom-up normalization in a
+fixed-point loop (hard 50-pass cap, spec §13 Risk 1). Identity/annihilation
++ constant folding, like-term/like-factor collection with canonical
+ordering and `i^2=-1`, fraction reduction (`2x/(4x^2)` → `1/(2x)`). Tests
+98.
+
+**Stage 2 — calculus & algebra (4D.8–4D.19, `b7c1b80`..`d7f80c0`, 5 commits).**
+- **2a diff** (`derivative.{hpp,cpp}`): sum/product/power/chain rules,
+  `differentiate_n` for higher orders; unknown functions return `nullptr`
+  ("can't differentiate"). Tests 114.
+- **2b expand**: binomial-theorem shortcut for two-term bases (the naive
+  iterative multiply exhausted the ~560-node pool at `(x+1)^5`); multi-term
+  bases fall back to iterative multiply-and-simplify. Tests 123.
+- **2c solve + poly helper**: `poly_coeffs()` (shared with factoring);
+  linear, quadratic (exact rational roots on a perfect-square discriminant,
+  symbolic `sqrt` otherwise, complex roots via symbolic `i` when
+  `allow_complex`), and inverse-function isolation with a small exact-value
+  table (`sin(x)=1/2` → `pi/6`). `allow_complex` is a parameter, not a read
+  of the global number mode, keeping the CAS engine decoupled from the UI.
+  Tests 133.
+- **2d factor**: rational-root theorem + synthetic division over degree
+  3–4, content/lowest-power extraction; irreducible inputs return the
+  expanded original. Tests 140.
+- **2e integrate**: table-based with linearity, linear substitution, and
+  one-level integration-by-parts (LIATE pick); `definite_integrate` uses
+  the symbolic antiderivative when found, else falls back to the Phase 4B
+  Gauss-Kronrod quadrature. Tests 153. (Also: portable `kPi` constant —
+  newlib/arm doesn't define `M_PI`.)
+
+**Stage 3 — UI integration (4D.4/4D.20/4D.21, `5984d2e`..`2eb0f16`, this
+session).**
+- **3a** (`cas_eval.{hpp,cpp}`): `math::cas::evaluate_home` recognizes a
+  single inline call — `simplify()`/`expand()`/`factor()`/`diff()`/
+  `integ()`/`solve()` — and dispatches to the Stage 0–2 engine; returns
+  `kNone` for everything else, including `solve()` carrying a numeric
+  guess/bounds (>=3 args), so `math::solveexpr` (D28) keeps owning the
+  numeric-solver shape (the P5-4 shape split). Tests 196.
+- **3b**: wired into `HomeScreen::evaluate_input` as the first dispatch.
+  CAS is display-only — no `Ans`/store/variable commit (P5-1/P5-2), same
+  precedent as complex/`MatAns`. `Entry` gained a `ResultKind`
+  (plain/error/symbolic) replacing the old bool error flag; symbolic
+  results typeset via `serialize` → `render::build_layout` (2D fractions/
+  superscripts/`√`/`π`) in an accent color. **D42**: reuses `build_layout` on
+  the serialized string instead of a dedicated `expr_to_layout`
+  tree-walker (spec 4D.4) — identical visual output, no duplicate layout
+  code; the one case a tree-walker could win (a big radical spanning its
+  argument) is explicitly KIV.
+- **3c** (`cas_menu.{hpp,cpp}`): a 6-row CAS menu (Simplify/Expand/Factor/
+  d/dx/Integral/Solve) on F6 (home-screen slot 6, previously empty) and the
+  typed `cas` command; selecting a row inserts the call opener into the
+  input line (same insert-back pattern as `const_screen`).
+
+**Device-testing fixes, same session (`08ebfff`, `6c1c6c2`).** Flashed to
+the Pico 2 and interactively tested; three issues found and fixed in place:
+1. Decimal coefficients were showing as `0.25*x^4` instead of exact
+   fractions — `serialize.cpp` now renders tight rational coefficients via
+   `math::frac` and splits `MUL` into numerator/denominator so
+   `integ(x^3)` prints `x^4 / 4`, typeset as a real stacked fraction by the
+   existing layout builder.
+2. Symbolic results now right-align like numeric results (were
+   left-anchored at x=4, reading as another input line).
+3. Accent color changed teal → warm amber (`255,190,40`) — teal read too
+   close to the gray input line.
+4. Sum terms now display highest-degree-first (TI convention: `expand
+   ((x+1)^3)` → `x^3 + 3x^2 + 3x + 1`, was ascending) — new
+   `term_degree`/`sum_term_less` in `simplify.cpp`; only the sum-term sort
+   changed, equals-based tests unaffected.
+5. Long results (plain or symbolic) that overflow the line now render as a
+   one-line pannable window (leading/trailing ellipses, LEFT/RIGHT scroll,
+   shared `draw_result_window` helper) instead of clipping/overflowing.
+
+Host tests: `test_cas` grew 153 → **199 checks**, 0 failures; full host
+suite green. Both boards build clean; `scripts/lint.sh`/`scripts/format.sh`
+clean. Pico 1 static RAM **201,096 bytes** (~67 KB headroom, essentially
+unchanged from the pre-Phase-5 arena baseline — the CAS pool overlays the
+shared scratch arena; the pool becoming reachable in Stage 3a only cost
++388 B). Flashed onto the Pico 2 (RP2350) and confirmed working
+interactively on-device: inline CAS ops, F6 menu, fraction display,
+descending sum order, amber accent, and scrollable long results all
+reported "looks good."
+
+Known limitations / deferred (per `phase5-spec.md` §11):
+- **Stage 4 — exact-form display (4D.23/4D.24) not started**: `sqrt(2)`
+  still shows as a decimal on the home screen, not `√2`.
+- **Stage 5 — hardening (4D.22) not started**: no stress/edge-case pass
+  yet, no pool-capacity abort guard (spec Risk 2, >80% capacity), Risk-1
+  cycle set only exercised at the unit-test level, not at scale. Pico 1
+  device flash/verification for this branch's CAS work is also still
+  pending (only the Pico 2 has been flashed and tested so far).
+- `PICOCALC_PHASE` in `CMakeLists.txt` stays `"4D"` — not bumped to `"5"`
+  yet; that's a Stage 5 close-out task.
+
+Decisions: D41 (ExprPool placement), D42 (result-rendering reuse) — both in
+`decisions.md`. No phase/sub-phase status flip in README/ti-parity this
+session (Phase 5 is in progress, not closed).
+
 ## 2026-08-02 — CI fix: red Lint/Validate-docs jobs, pinned clang-format, first release (v0.1.0)
 
 Infra/CI session, no firmware source changed, no decision number consumed.
