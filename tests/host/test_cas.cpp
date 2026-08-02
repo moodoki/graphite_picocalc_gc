@@ -10,6 +10,7 @@
 #include "math/cas/derivative.hpp"
 #include "math/cas/expand.hpp"
 #include "math/cas/expr.hpp"
+#include "math/cas/factor.hpp"
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
@@ -18,6 +19,7 @@
 using math::cas::differentiate;
 using math::cas::expand;
 using math::cas::Expr;
+using math::cas::factor;
 using math::cas::ExprType;
 using math::cas::g_cas_pool;
 using math::cas::parse_expr;
@@ -504,6 +506,48 @@ void check_solve_numeric(const char* eq, char var, int count) {
     }
 }
 
+// factor(input) equals expected structurally and is value-equal to input.
+void check_factor(const char* input, const char* expected) {
+    g_cas_pool.reset();
+    Expr* in = parse_expr(input, nullptr);
+    Expr* exp = parse_expr(expected, nullptr);
+    ++g_checks;
+    if (in == nullptr || exp == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in check_factor(\"%s\")\n", input);
+        return;
+    }
+    Expr* fac = factor(in, 'x');
+    Expr* exps = simplify(exp);
+    if (fac == nullptr || exps == nullptr || !fac->equals(exps)) {
+        ++g_failures;
+        char got[160] = "?";
+        if (fac != nullptr) {
+            math::cas::expr_to_string(fac, got, sizeof(got));
+        }
+        std::printf("FAIL: factor(\"%s\") = \"%s\", expected \"%s\"\n", input, got, expected);
+        return;
+    }
+    const double xs[] = {0.3, 1.3, 2.5};
+    for (double x : xs) {
+        if (std::fabs(eval(fac, 'x', x) - eval(in, 'x', x)) > 1e-6) {
+            ++g_failures;
+            std::printf("FAIL: factor(\"%s\") not value-equal at %g\n", input, x);
+            return;
+        }
+    }
+}
+
+void test_factor() {
+    check_factor("x^2 - 4", "(x-2)*(x+2)");
+    check_factor("x^2 - 1", "(x-1)*(x+1)");
+    check_factor("x^3 - 6x^2 + 11x - 6", "(x-1)*(x-2)*(x-3)");
+    check_factor("6x^3 + 4x^2", "2*x^2*(3x+2)");
+    check_factor("2x + 4", "2*(x+2)");
+    check_factor("x^4 - 5x^2 + 4", "(x-1)*(x+1)*(x-2)*(x+2)");
+    check_factor("x^2 + 1", "x^2 + 1");  // irreducible over the reals
+}
+
 void test_solve() {
     const char* lin[] = {"4"};
     check_solve_set("3x + 5 = 17", 'x', true, lin, 1);
@@ -587,6 +631,7 @@ int main() {
     test_simplify_commutativity();
     test_simplify_termination();
     test_expand();
+    test_factor();
     test_derivative();
     test_solve();
 
