@@ -77,6 +77,10 @@ private:
     bool handle_command(const char* cmd);
     int visible_count() const;
     int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_
+    // Draw the newest result_full_ as a horizontally-pannable one-line window
+    // with leading/trailing ellipses when clipped (LEFT/RIGHT pan it).
+    void draw_result_window(gfx::Framebuffer& fb, int y, const gfx::Font& font,
+                            platform::Color color) const;
     void push_entry(const char* expr, const char* result, ResultKind kind);
     void persist_history_line(const char* expr, const char* result);
     void save_variables();

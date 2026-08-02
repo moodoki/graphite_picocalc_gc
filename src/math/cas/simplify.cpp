@@ -95,13 +95,53 @@ void sort_exprs(Expr** arr, int n) {
     }
 }
 
-// Sort terms (rests[]) with their parallel coefficients by canonical order.
+// Total polynomial degree of a term's non-numeric "rest" (sum of variable/
+// power/func exponents), used to order sum terms highest-degree-first for
+// display (TI convention: x^3 + 3x^2 + 3x + 1).
+int term_degree(const Expr* e) {
+    switch (e->type) {
+        case ExprType::kNum:
+            return 0;
+        case ExprType::kVar:
+        case ExprType::kFunc:
+            return 1;
+        case ExprType::kPow: {
+            const Expr* exp = e->child->next;
+            if (exp->is_num() && is_integer(exp->num_val)) {
+                return static_cast<int>(exp->num_val);
+            }
+            return 1;
+        }
+        case ExprType::kMul: {
+            int d = 0;
+            for (const Expr* c = e->child; c != nullptr; c = c->next) {
+                d += term_degree(c);
+            }
+            return d;
+        }
+        default:
+            return 1;
+    }
+}
+
+// Sum-term order: descending total degree, then canonical order as the
+// stable tie-break within a degree.
+bool sum_term_less(const Expr* a, const Expr* b) {
+    const int da = term_degree(a);
+    const int db = term_degree(b);
+    if (da != db) {
+        return da > db;
+    }
+    return expr_less(a, b);
+}
+
+// Sort terms (rests[]) with their parallel coefficients for display order.
 void sort_exprs_with_coeffs(Expr** rests, double* coeffs, int n) {
     for (int i = 1; i < n; ++i) {
         Expr* key = rests[i];
         const double kc = coeffs[i];
         int j = i - 1;
-        while (j >= 0 && expr_less(key, rests[j])) {
+        while (j >= 0 && sum_term_less(key, rests[j])) {
             rests[j + 1] = rests[j];
             coeffs[j + 1] = coeffs[j];
             --j;

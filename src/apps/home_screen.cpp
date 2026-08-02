@@ -107,6 +107,28 @@ int HomeScreen::result_max_scroll() const {
     return len > win ? len - win : 0;
 }
 
+void HomeScreen::draw_result_window(gfx::Framebuffer& fb, int y, const gfx::Font& font,
+                                    platform::Color color) const {
+    const int win = (platform::kScreenW - 8) / font.width();
+    const int maxs = result_max_scroll();
+    const int off = result_scroll_ > maxs ? maxs : (result_scroll_ < 0 ? 0 : result_scroll_);
+    const int len = static_cast<int>(std::strlen(result_full_));
+    char window[64];
+    const int w =
+        win < static_cast<int>(sizeof(window)) - 1 ? win : static_cast<int>(sizeof(window)) - 1;
+    std::strncpy(window, result_full_ + off, static_cast<size_t>(w));
+    window[w] = 0;
+    // Ellipsis markers: leading when scrolled right, trailing when the text
+    // still runs past the window (so a truncated result is legibly scrollable).
+    if (off > 0 && w > 0) {
+        window[0] = math::kEllipsisGlyph;
+    }
+    if (off + w < len && w > 0) {
+        window[w - 1] = math::kEllipsisGlyph;
+    }
+    font.draw_string(fb, 4, y, window, color);
+}
+
 void HomeScreen::persist_history_line(const char* expr, const char* result) {
     auto& fs = platform::storage();
     if (!fs.mounted()) {
@@ -798,11 +820,17 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         render::LayoutNode const* root = render::build_layout(e->expr, metrics);
         const int eh = root != nullptr ? root->height : lh;
 
-        // Result height. A symbolic result is typeset (its own height);
-        // building that layout resets the shared pool, so the expression
-        // tree above is rebuilt before it is rendered.
+        // A long newest result (plain or symbolic) is shown as a one-line
+        // pannable window with ellipses (LEFT/RIGHT scroll) rather than a
+        // clipped/overflowing typeset form. Otherwise a symbolic result is
+        // typeset 2D; plain results are single text lines.
+        const bool pan = n == 0 && result_max_scroll() > 0;
+
+        // Result height. A typeset symbolic result has its own height; the pan
+        // window and plain text are one line. Building the result layout resets
+        // the shared pool, so the expression tree is rebuilt before rendering.
         int rh = lh;
-        if (symbolic) {
+        if (symbolic && !pan) {
             const char* rtext = n == 0 ? result_full_ : e->result;
             render::LayoutNode const* rroot = render::build_layout(rtext, metrics);
             rh = rroot != nullptr ? rroot->height : lh;
@@ -812,11 +840,11 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
             break;
         }
 
-        // Result line at the bottom of the entry block. Symbolic results
-        // typeset left-anchored; a long newest plain result pans under
-        // LEFT/RIGHT (testdrive 2026-07-20); everything else is right-aligned.
+        // Result line at the bottom of the entry block.
         y -= rh;
-        if (symbolic) {
+        if (pan) {
+            draw_result_window(fb, y, font, rcolor);
+        } else if (symbolic) {
             const char* rtext = n == 0 ? result_full_ : e->result;
             render::LayoutNode const* rr = render::build_layout(rtext, metrics);
             const int rw = rr != nullptr ? rr->width : 0;
@@ -824,18 +852,6 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
             // result, not another input line; left-anchor if it's too wide.
             const int rx = std::max(platform::kScreenW - rw - 4, 4);
             render::render_node(rr, fb, rx, y, font, rcolor);
-        } else if (n == 0 && result_max_scroll() > 0) {
-            const int win = (platform::kScreenW - 8) / font.width();
-            int off = result_scroll_;
-            const int maxs = result_max_scroll();
-            off = off > maxs ? maxs : (off < 0 ? 0 : off);
-            char window[64];
-            const int w = win < static_cast<int>(sizeof(window)) - 1
-                              ? win
-                              : static_cast<int>(sizeof(window)) - 1;
-            std::strncpy(window, result_full_ + off, static_cast<size_t>(w));
-            window[w] = 0;
-            font.draw_string(fb, 4, y, window, rcolor);
         } else {
             const int rx = platform::kScreenW - font.text_width(e->result) - 4;
             font.draw_string(fb, rx, y, e->result, rcolor);
