@@ -23,6 +23,7 @@
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/calc_menu.hpp"
+#include "apps/cas_menu.hpp"
 #include "apps/const_screen.hpp"
 #include "apps/dist_screen.hpp"
 #include "apps/files_screen.hpp"
@@ -609,6 +610,11 @@ bool HomeScreen::handle_command(const char* cmd) {
         ui::screen_manager().push(&const_screen());
         return true;
     }
+    // CAS operations menu (Phase 5); also on the F6 softkey.
+    if (std::strcmp(cmd, "cas") == 0) {
+        ui::screen_manager().push(&cas_menu());
+        return true;
+    }
     // Device settings: brightness/backlight/auto-power-down (4D.19-20).
     if (std::strcmp(cmd, "settings") == 0 || std::strcmp(cmd, "setup") == 0) {
         ui::screen_manager().push(&settings_screen());
@@ -748,6 +754,9 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kF5:
             ui::screen_manager().push(&graph_screen());
             return true;
+        case Key::kF6:  // CAS menu (Phase 5; F6 = Shift+F1 on the unit)
+            ui::screen_manager().push(&cas_menu());
+            return true;
         default:
             if (input_.on_key(ev)) {
                 invalidate_input();
@@ -863,7 +872,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         default:
             break;
     }
-    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", ""};
+    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", "CAS"};
     ui::draw_softkeys(fb, keys);
 }
 

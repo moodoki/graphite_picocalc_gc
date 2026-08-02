@@ -158,6 +158,7 @@ add_executable(picocalc_graphcalc
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/calc_menu.cpp
+    src/apps/cas_menu.cpp
     src/apps/matrix_editor.cpp
     src/apps/solver_screen.cpp
     src/apps/stats_screen.cpp

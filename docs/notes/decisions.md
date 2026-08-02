@@ -18,6 +18,40 @@ Format:
 
 ---
 
+## D42: Phase 5 CAS result rendering — reuse `render::build_layout` on the serialized string instead of a dedicated `expr_to_layout` tree-walker
+
+**Date**: 2026-08-02
+**Status**: Accepted (Phase 5 Stage 3, tasks 4D.4 / 4D.21)
+**Context**: Spec task 4D.4 called for `expr_to_layout` — a function that walks a
+CAS `Expr` tree directly into `render::LayoutNode` for 2D typeset display of
+symbolic results. The plan already hedged this ("or fold `expr_to_layout` into
+serialize"). The existing numeric layout builder, `render::build_layout`, is a
+recursive-descent typesetter over calculator-expression *strings* that already
+produces `kFraction`/`kSuperscript`/`kParen`/`kText` nodes with √/π glyph
+substitution and function-call shaping — everything a CAS-result renderer needs.
+**Decision**: CAS results are serialized to an infix string with
+`math::cas::expr_to_string` and rendered through `render::build_layout`; no
+separate `Expr`-tree layout walker is written. The home screen stores the
+serialized result in the history `Entry` (kind `kSymbolic`) and typesets it via
+`build_layout` in the accent color, reusing the same path already used for the
+input-expression line.
+**Rationale**: A tree-walker would duplicate all of build_layout's fraction/
+superscript/paren/precedence logic for *identical* visual output — the one case
+where a tree-walker could win (a big radical spanning its argument) is
+explicitly KIV (√ stays the inline `kSqrtGlyph`). Serialize→build_layout reuses
+a tested, in-firmware path, adds no duplicate layout code or test surface, and
+sidesteps the render pool's single-tree-at-a-time constraint (results are held
+as strings, not live trees, so they survive `pool_reset` between redraws). The
+Expr→string→Node round-trip cost is trivial at Enter-rate.
+**Tradeoffs**: Reloaded history results (from `history.txt`) come back as plain
+text (kind `kPlain`), not re-typeset in the accent color — acceptable, and it
+mirrors how complex/MatAns results already reload as plain strings. Results
+longer than the 48-char `Entry.result` truncate on the scrollback (the newest
+result keeps its full 128-char form for typesetting).
+**Revisit when**: A big-radical (√ spanning the radicand) or subscript node type
+is added to the layout back end, or expression-valued variables (idea F/H) need
+a live-tree renderer.
+
 ## D41: Phase 5 CAS ExprPool placement — SRAM raw-pointer arena over the shared scratch kCompute region (rejects the spec's PSRAM plan)
 
 **Date**: 2026-08-02
