@@ -8,12 +8,14 @@
 #include <cstring>
 
 #include "math/cas/derivative.hpp"
+#include "math/cas/expand.hpp"
 #include "math/cas/expr.hpp"
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
 
 using math::cas::differentiate;
+using math::cas::expand;
 using math::cas::Expr;
 using math::cas::ExprType;
 using math::cas::g_cas_pool;
@@ -380,6 +382,62 @@ void test_simplify_termination() {
     check(simplify(parse_expr("i^4", nullptr)) != nullptr, "i^4 terminates");
 }
 
+// expand(input) equals the (simplified) expected form structurally.
+void check_expand(const char* input, const char* expected) {
+    g_cas_pool.reset();
+    Expr* in = parse_expr(input, nullptr);
+    Expr* ex = parse_expr(expected, nullptr);
+    ++g_checks;
+    if (in == nullptr || ex == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in check_expand(\"%s\")\n", input);
+        return;
+    }
+    Expr* xd = expand(in);
+    Expr* exs = simplify(ex);
+    if (xd == nullptr || exs == nullptr || !xd->equals(exs)) {
+        ++g_failures;
+        char got[160] = "?";
+        if (xd != nullptr) {
+            math::cas::expr_to_string(xd, got, sizeof(got));
+        }
+        std::printf("FAIL: expand(\"%s\") = \"%s\", expected \"%s\"\n", input, got, expected);
+    }
+}
+
+// expand(input) is value-equivalent to the input at sample points.
+void check_expand_value(const char* input) {
+    g_cas_pool.reset();
+    Expr* in = parse_expr(input, nullptr);
+    ++g_checks;
+    if (in == nullptr) {
+        ++g_failures;
+        return;
+    }
+    Expr* xd = expand(in);
+    const double xs[] = {0.3, 0.7, 1.3, 2.1};
+    for (double x : xs) {
+        if (xd == nullptr || std::fabs(eval(xd, 'x', x) - eval(in, 'x', x)) > 1e-6) {
+            ++g_failures;
+            std::printf("FAIL: expand(\"%s\") not value-equal at %g\n", input, x);
+            return;
+        }
+    }
+}
+
+void test_expand() {
+    check_expand("(x+1)*(x-1)", "x^2 - 1");
+    check_expand("(x+1)^2", "x^2 + 2x + 1");
+    check_expand("(x+1)^3", "x^3 + 3x^2 + 3x + 1");
+    check_expand("2*(x+3)", "2x + 6");
+    check_expand("(x+2)*(x+3)", "x^2 + 5x + 6");
+    check_expand("x*(x+1)", "x^2 + x");
+    // Value-preserving on larger / mixed cases.
+    check_expand_value("(x+1)^10");
+    check_expand_value("(2x-3)^4");
+    check_expand_value("(x+1)*(x+2)*(x+3)");
+}
+
 void test_derivative() {
     check_deriv("x", 'x', "1");
     check_deriv("x^3", 'x', "3*x^2");
@@ -427,6 +485,7 @@ int main() {
     test_simplify_fractions();
     test_simplify_commutativity();
     test_simplify_termination();
+    test_expand();
     test_derivative();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
