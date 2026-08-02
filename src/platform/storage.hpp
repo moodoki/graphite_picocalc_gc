@@ -20,6 +20,9 @@ public:
     bool mounted() const { return mounted_; }
 
     bool file_exists(const char* path) const;
+    // File size in bytes, or -1 if missing/unopenable. Used to read the
+    // tail of an append-only log (history.txt) rather than its head.
+    long file_size(const char* path) const;
     // Returns bytes read, or -1 on error.
     int read_file(const char* path, uint8_t* buf, size_t max_len) const;
     // Read up to max_len bytes starting at byte `offset` — for files

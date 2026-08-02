@@ -82,7 +82,10 @@ private:
     void draw_result_window(gfx::Framebuffer& fb, int y, const gfx::Font& font,
                             platform::Color color) const;
     void push_entry(const char* expr, const char* result, ResultKind kind);
-    void persist_history_line(const char* expr, const char* result);
+    void persist_history_line(const char* expr, const char* result, ResultKind kind);
+    // Trim history.txt back to its tail once it grows past the cap, so the
+    // append-only log stays bounded and reboots keep restoring newest lines.
+    void compact_history();
     void save_variables();
     void load_variables();
 

@@ -305,6 +305,83 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-03 — bugfix: home-screen history persistence — symbolic kind lost on reload, plus two latent I/O bugs found and fixed
+
+Root-caused and fixed the "BUG to investigate" flagged at the end of the
+2026-08-02 Stage 3 session. On the `phase-5` branch.
+
+**Root cause (the flagged bug): symbolic CAS results lost their `ResultKind`
+on reboot.** `history.txt` stored only `expr<TAB>result`, and `load_state`
+hardcoded `ResultKind::kPlain` for every reloaded line. `kind` drives how a
+history entry *renders* (`kSymbolic` typesets 2D via `render::build_layout`
+in the amber accent color; `kPlain` is one flat white text line), so a CAS
+result like `x^4 / 4` or `2/3` displayed correctly as a typeset amber
+fraction when entered but reverted to flat white text after a reboot — a
+genuine Stage 3 regression (there were no symbolic results before Stage 3,
+so plain-on-reload was previously always correct). Ruled out two scarier
+theories first: the CAS serializer (`src/math/cas/serialize.cpp`) emits
+only tab-free ASCII, so no delimiter corruption is possible, and the
+late-init `load_state` retry (`main.cpp:431`) is guarded against
+double-loading by `state_loaded`.
+
+**Fix**: `history.txt` lines gained a third tab-separated column —
+`expr<TAB>result<TAB>S|P\n` — backward compatible (a legacy two-field line
+still reloads as `kPlain`). `persist_history_line` now takes a `ResultKind`
+parameter; all five `evaluate_input` call sites updated (the CAS path
+passes `rkind`, the four numeric paths pass `kPlain`). `load_state` parses
+the optional trailing kind column and restores `kSymbolic` when present.
+Also fixed a max-length boundary bug in the same function: `snprintf`'s
+return value can exceed the buffer size, and using it unclamped as the
+write length could drop the trailing newline on a long line — now clamped
+with `std::min`, buffer bumped 256 -> 288 bytes.
+
+**Two pre-existing latent I/O bugs found during the investigation (not
+Stage 3 regressions — both predate CAS):**
+- **Head read instead of tail.** `Storage::read_file` reads from offset 0,
+  despite `load_state`'s own comment saying "Load the tail." Once
+  `history.txt` grew past the 8 KB read window, a reboot restored the
+  *oldest* 50 entries instead of the newest. Added `long
+  Storage::file_size(const char*)` (via `f_stat`) to
+  `src/platform/storage.{hpp,cpp}`; `load_state` now seeks to `fsize -
+  8191` via the existing `read_file_range` and skips the partial first
+  line so a reboot keeps the newest lines.
+- **Unbounded growth.** `history.txt` was append-only and never trimmed
+  (only the `clrhist` command deleted it outright). Added
+  `HomeScreen::compact_history()`, called after every append: once the
+  file exceeds 24576 bytes (3x the 8 KB tail) it rewrites the file down to
+  its last 8 KB, line-aligned. Appends are human-paced, so the rare O(file)
+  rewrite is cheap.
+- Both paths now share one file-scope `g_hist_io[8192]` buffer (replacing
+  `load_state`'s old function-local `static tail[8192]`), so bss stays
+  flat.
+
+**Decision**: persist the kind and restore typeset display on reload
+(rather than not persisting symbolic results at all, or leaving them
+permanently plain after a reboot) — user-approved during the session. This
+directly satisfies **D4**'s own "Revisit when" clause ("History file size
+becomes a concern, or results need structured metadata" — both fired this
+session); D4 updated in place with a resolution note rather than opening a
+new decision number, matching the D9 precedent for in-place resolution.
+
+Files: `src/apps/home_screen.{hpp,cpp}`, `src/platform/storage.{hpp,cpp}`.
+
+Verification: both boards build clean; Pico 1 bss **201,096 bytes** — flat
+vs. the prior baseline (the shared buffer replaced the old static, no new
+statics added). `scripts/lint.sh`/`scripts/format.sh` clean. Full host
+suite green (15 suites, 0 failures; `test_cas` 199, unchanged — this path
+isn't in host coverage, same as other firmware-only persistence). A
+standalone host logic check of the round-trip (tail read + partial-line
+skip, kind-column parse, compaction line-alignment, legacy-format
+survival, missing-final-newline survival) ran 600 checks, 0 failures.
+
+Known limitations / deferred:
+- This is a firmware-only path (history persistence isn't exercised by the
+  host suite), so on-device confirmation that history now survives a
+  reboot correctly is still open — folds into Stage 5's Pico 1/Pico 2
+  flashing rather than a dedicated bench pass.
+- No decision number consumed (bugfix + latent-issue cleanup, not a new
+  design call) — D4 amended in place instead (see above).
+
 ## 2026-08-02 — Phase 5 Stages 0–3: CAS engine + home-screen UI integration, HW-verified on the Pico 2
 
 Two sessions on the `phase-5` branch (not yet merged to `main`). The first

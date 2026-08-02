@@ -1,6 +1,32 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
+**Last session:** 2026-08-03 — **Bugfix, source changes: home-screen
+history persistence.** Root-caused and fixed the suspected home-screen I/O
+persistence bug flagged at the end of the 2026-08-02 Stage 3 session:
+symbolic CAS results were losing their `ResultKind` on reload (always came
+back `kPlain` — plain white text instead of the typeset amber fraction),
+because `history.txt` only stored `expr<TAB>result` and `load_state`
+hardcoded `kPlain` for every reloaded line. Fixed by adding a third
+tab-separated kind column (`expr<TAB>result<TAB>S|P\n`, backward
+compatible with legacy two-field lines). While auditing the load/save path
+also found and fixed two pre-existing latent bugs (predate Phase 5): a
+head-vs-tail read bug (`load_state` read from file offset 0 despite its
+own comment claiming "tail," so a `history.txt` past 8 KB restored the
+*oldest* entries on reboot, not the newest — fixed with a new
+`Storage::file_size()` + a seek to the true tail) and unbounded file
+growth (no compaction ever existed — fixed with a new
+`HomeScreen::compact_history()`, trims to the last 8 KB once the file
+exceeds 24576 bytes). Both boards build clean; Pico 1 bss **201,096
+bytes**, flat (shared `g_hist_io` buffer replaces the old function-local
+static); `lint.sh`/`format.sh` clean; full host suite green (`test_cas`
+199 unchanged — firmware-only path); a standalone host logic check of the
+round-trip ran 600 checks, 0 failures. **D4 amended in place** (its own
+"Revisit when" clause fired) rather than a new decision number. On-device
+confirmation of history-survives-reboot is still open — folds into Stage
+5's Pico 1/Pico 2 flashing. Full detail: worklog's 2026-08-03 entry,
+`decisions.md` D4.
+
+**Previous session:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
 home-screen UI integration, source changes, HW-verified on the Pico 2.**
 On the `phase-5` branch (not yet merged to `main`). Two sessions: the CAS
 engine itself — expr tree/pool, parser, serializer, simplify, differentiate,
@@ -29,7 +55,7 @@ Decisions **D41**, **D42**. `PICOCALC_PHASE` stays `"4D"` (bumping to `"5"`
 is a Stage 5 close-out task, not yet reached). Full detail: worklog's
 2026-08-02 "Phase 5 Stages 0-3" entry.
 
-**Previous session:** 2026-08-02 — **CI fix + first release, docs/infra only, no
+**Two sessions ago:** 2026-08-02 — **CI fix + first release, docs/infra only, no
 source changes.** The GitHub Actions "Build" workflow had two red jobs (the
 board build jobs themselves always passed): Lint disagreed with local
 clang-format because CI installed Ubuntu's apt `clang-format 18` against
@@ -47,7 +73,7 @@ decision number consumed, no phase/sub-phase status change (Phase 4D stays
 closed, Phase 5 CAS is still next — see "The next job" below). Full detail:
 worklog's 2026-08-02 "CI fix" entry.
 
-**Two sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
+**Three sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
 arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified on the Pico 2.**
 Opened the pre-Phase-5 code-review/size-optimization pass. A per-symbol SRAM
 audit (new `scripts/size-report.sh`) found ~40 KB tied up in per-module
@@ -72,7 +98,7 @@ design call). Full detail: `docs/notes/pre-phase5-review.md`, worklog's
 2026-08-02 "Pre-Phase-5 review pass" entry. Commits `1073f4f` (doc de-stale),
 `5f76851` (arena), `4edba81` (chop).
 
-**Three sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
+**Four sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
 HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
 UI-friction feature requests logged in the 2026-07-27 eval, plus two
 follow-ups raised during this session's on-device testing. Matrix results
@@ -92,7 +118,7 @@ suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
 4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
 polish" entry.
 
-**Four sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Five sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -109,7 +135,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Five sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Six sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -129,7 +155,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Six sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Seven sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -144,7 +170,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Seven sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Eight sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -204,17 +230,19 @@ detail.
      Once Stage 5 closes: bump `PICOCALC_PHASE` `"4D"` → `"5"` in
      `CMakeLists.txt`, do the phase-close docs pass (ti-parity.md gets its
      CAS-section sweep at this point, README status flip), and open the
-     `phase-5` → `main` PR.
-   - **BUG to investigate (flagged 2026-08-02, unconfirmed):** a suspected
-     home-screen **input/output persistence bug** — history entries (the
-     `expr`/`result` pair) may not be round-tripping correctly to/from
-     `history.txt`. Noticed during Stage 3 device testing but not yet
-     characterized. Prime suspects are this session's home-screen churn:
-     `push_entry`/`Entry` changed `bool error` → `ResultKind`, `load_state`
-     now pushes reloaded lines as `kPlain`, and the CAS path calls
-     `persist_history_line` for symbolic results. Reproduce first (what
-     exactly is wrong — missing lines? wrong text? kind lost on reload?),
-     then check the load/save path in `src/apps/home_screen.cpp`.
+     `phase-5` → `main` PR. **Fold in on-device confirmation of the
+     2026-08-03 history-persistence fix** (below) while the Pico 1/Pico 2
+     are on the bench for this stage anyway — it's a firmware-only path,
+     not covered by the host suite.
+   - **BUG flagged 2026-08-02, RESOLVED 2026-08-03**: the suspected
+     home-screen history I/O persistence bug was root-caused (symbolic CAS
+     results lost their `ResultKind` on reload) and fixed, along with two
+     related latent bugs (head-vs-tail read, unbounded file growth) found
+     during the investigation. See "Last session" above, worklog's
+     2026-08-03 entry, and `decisions.md` D4 (amended in place). Still
+     open: on-device confirmation that history now survives a reboot
+     correctly (see the Stage 5 bullet above) — the fix is host-logic
+     verified (600 checks) but this path itself isn't in host coverage.
    - The pre-Phase-5 SRAM levers noted before CAS started remain relevant
      background (all still deferred, none urgent — watch Pico 1 bss as
      Stage 4/5 lands): (a) MicroPython heap 48→40 KB if the ~12 KB spare
@@ -271,6 +299,13 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
+- **2026-08-03's history-persistence fix has NOT been flashed to either
+  board yet** — built/linted/host-tested only (this is a firmware-only
+  path, no host UI to exercise it against real SD I/O). It's a persistence
+  *format* change (`history.txt` gained a third tab-separated kind
+  column) but is backward compatible — no one-time reset, old
+  two-field lines still parse as `kPlain`. Confirm on-device (both
+  boards) alongside the Stage 5 flash, see "The next job" #1.
 - **Firmware on the Pico 2 was reflashed on `phase-5` (2026-08-02) with
   Phase 5 Stages 0-3** — the CAS engine + home-screen UI integration
   (inline `diff()`/`integ()`/`factor()`/`expand()`/`simplify()`/`solve()`,

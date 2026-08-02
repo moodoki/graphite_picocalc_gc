@@ -48,6 +48,17 @@ namespace {
 constexpr const char* kHistoryPath = "/picocalc/history.txt";
 constexpr const char* kVarsPath = "/picocalc/variables.dat";
 
+// history.txt is an append-only log. Only its last kHistoryTailBytes are
+// ever loaded (the ring holds kMaxHistory=50 lines), so we (a) read from
+// the tail, not the head, and (b) compact the file back down to the tail
+// once it grows past kHistoryMaxBytes — otherwise it would grow without
+// bound and, once past the read window, reboots would restore stale old
+// lines instead of the newest. g_hist_io backs both paths (single-threaded
+// UI, never reentrant) so neither carries its own multi-KB static.
+constexpr size_t kHistoryTailBytes = 8192;
+constexpr long kHistoryMaxBytes = 24576;  // 3x tail: compaction stays rare
+char g_hist_io[kHistoryTailBytes];
+
 // Screen layout (spec section 4.4, sized for the interim 8x12 font).
 constexpr int kStatusH = 16;
 constexpr int kInputY = 268;
@@ -129,14 +140,54 @@ void HomeScreen::draw_result_window(gfx::Framebuffer& fb, int y, const gfx::Font
     font.draw_string(fb, 4, y, window, color);
 }
 
-void HomeScreen::persist_history_line(const char* expr, const char* result) {
+void HomeScreen::persist_history_line(const char* expr, const char* result, ResultKind kind) {
     auto& fs = platform::storage();
     if (!fs.mounted()) {
         return;
     }
-    char line[256];
-    const int n = std::snprintf(line, sizeof(line), "%s\t%s\n", expr, result);
-    fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
+    // "expr<TAB>result<TAB>kind\n". The trailing kind column (Phase 5) lets
+    // symbolic CAS results reload as symbolic rather than flat plain text; a
+    // legacy two-field line (no second tab) parses back as kPlain. expr and
+    // result are both ASCII and tab-free (the CAS serializer emits no tabs),
+    // so the tabs are unambiguous delimiters. Buffer is sized so the two
+    // 127-char fields plus separators never truncate the newline away.
+    const char kmark = kind == ResultKind::kSymbolic ? 'S' : 'P';
+    char line[288];
+    const int n = std::snprintf(line, sizeof(line), "%s\t%s\t%c\n", expr, result, kmark);
+    if (n < 0) {
+        return;
+    }
+    // Clamp to what actually landed in the buffer: snprintf returns the
+    // untruncated length, so a would-be-longer line must not over-read.
+    const size_t len = std::min(static_cast<size_t>(n), sizeof(line) - 1);
+    fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), len);
+    compact_history();
+}
+
+void HomeScreen::compact_history() {
+    auto& fs = platform::storage();
+    if (!fs.mounted()) {
+        return;
+    }
+    const long fsize = fs.file_size(kHistoryPath);
+    if (fsize <= kHistoryMaxBytes) {
+        return;  // still within bounds — no rewrite
+    }
+    // Read the last kHistoryTailBytes and rewrite the file with just that
+    // (line-aligned: drop the partial leading fragment). Appends are
+    // human-paced so this rare O(file) rewrite is cheap; kMaxBytes = 3x the
+    // tail keeps it to roughly one rewrite per two tail-buffers of writes.
+    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t offset = static_cast<size_t>(fsize) - cap;
+    const int n =
+        fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
+    if (n <= 0) {
+        return;
+    }
+    g_hist_io[n] = 0;
+    char* start = std::strchr(g_hist_io, '\n');
+    start = start != nullptr ? start + 1 : g_hist_io;
+    fs.write_file(kHistoryPath, reinterpret_cast<const uint8_t*>(start), std::strlen(start));
 }
 
 namespace {
@@ -187,15 +238,30 @@ void HomeScreen::load_state() {
     }
     load_variables();
 
-    // Load the tail of the history file (plaintext "expr\tresult" lines,
-    // decision D4). 8 KB tail is at least 50 full-size lines.
-    static char tail[8192];
-    const int n = fs.read_file(kHistoryPath, reinterpret_cast<uint8_t*>(tail), sizeof(tail) - 1);
+    // Load the tail of the history file (plaintext "expr\tresult[\tkind]"
+    // lines, decision D4; the kind column is Phase 5). The last
+    // kHistoryTailBytes hold at least 50 full-size lines — the whole ring.
+    // Reading the tail (not the head) is what keeps the newest entries
+    // visible once the log has grown past one buffer.
+    const long fsize = fs.file_size(kHistoryPath);
+    if (fsize <= 0) {
+        return;
+    }
+    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t offset = static_cast<size_t>(fsize) > cap ? static_cast<size_t>(fsize) - cap : 0;
+    const int n =
+        fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
     if (n <= 0) {
         return;
     }
-    tail[n] = 0;
-    char* line = tail;
+    g_hist_io[n] = 0;
+    char* line = g_hist_io;
+    // When we started mid-file, the first (partial) line is a fragment —
+    // skip past the first newline so parsing begins on a whole line.
+    if (offset > 0) {
+        char* first_nl = std::strchr(g_hist_io, '\n');
+        line = first_nl != nullptr ? first_nl + 1 : nullptr;
+    }
     while (line != nullptr && *line != 0) {
         char* nl = std::strchr(line, '\n');
         if (nl != nullptr) {
@@ -204,7 +270,18 @@ void HomeScreen::load_state() {
         char* sep = std::strchr(line, '\t');
         if (sep != nullptr) {
             *sep = 0;
-            push_entry(line, sep + 1, ResultKind::kPlain);
+            char* result = sep + 1;
+            // Optional trailing kind column (Phase 5): "result<TAB>S|P".
+            // A legacy line with no second tab reloads as kPlain.
+            ResultKind kind = ResultKind::kPlain;
+            char* ksep = std::strchr(result, '\t');
+            if (ksep != nullptr) {
+                *ksep = 0;
+                if (ksep[1] == 'S') {
+                    kind = ResultKind::kSymbolic;
+                }
+            }
+            push_entry(line, result, kind);
         }
         line = nl != nullptr ? nl + 1 : nullptr;
     }
@@ -273,7 +350,7 @@ void HomeScreen::evaluate_input() {
             }
             push_entry(input_.text(), result, rkind);
             if (rkind != ResultKind::kError) {
-                persist_history_line(input_.text(), result);
+                persist_history_line(input_.text(), result, rkind);
             }
             input_.clear();
             hist_nav_ = -1;
@@ -377,7 +454,7 @@ void HomeScreen::evaluate_input() {
         }
         push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
-            persist_history_line(input_.text(), result);
+            persist_history_line(input_.text(), result, ResultKind::kPlain);
             save_variables();
             if (mres.kind == math::matexpr::Kind::kMatrix) {
                 // MatAns changed — persist it so it survives a reboot
@@ -433,7 +510,7 @@ void HomeScreen::evaluate_input() {
         }
         push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
-            persist_history_line(input_.text(), result);
+            persist_history_line(input_.text(), result, ResultKind::kPlain);
             save_variables();
             if (lres.names_modified) {  // A named list was created (4D.13)
                 math::named_lists().save_index(platform::storage());
@@ -472,7 +549,7 @@ void HomeScreen::evaluate_input() {
         }
         push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
-            persist_history_line(input_.text(), result);
+            persist_history_line(input_.text(), result, ResultKind::kPlain);
             save_variables();
         }
         input_.clear();
@@ -545,7 +622,7 @@ void HomeScreen::evaluate_input() {
 
     push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
     if (!error) {
-        persist_history_line(input_.text(), result);
+        persist_history_line(input_.text(), result, ResultKind::kPlain);
         save_variables();
     }
     input_.clear();

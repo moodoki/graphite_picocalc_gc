@@ -972,12 +972,13 @@ plot both feel sluggish (not profiled). See `phase3-retro.md` and
 ## D4: History persisted as plaintext TSV
 
 **Date**: 2026-07-08
-**Status**: Accepted
+**Status**: Resolved 2026-08-03 (history-persistence bugfix session)
 **Context**: Open decision — history storage format: plaintext vs binary.
 **Decision**: Append `expr\tresult\n` lines to `/picocalc/history.txt`. On boot, read the last 8 KB and parse backwards into the ring buffer. Variables persist separately as a binary blob (`variables.dat`, 28 doubles).
 **Rationale**: Plaintext history is debuggable and hand-editable; parsing cost is trivial at 50 entries. Variables are fixed-size binary because they're not meant to be edited and round-trip exactly.
 **Tradeoffs**: History file grows unbounded (append-only) — a compaction pass is a future cleanup; 8 KB tail read caps what's loaded regardless.
 **Revisit when**: History file size becomes a concern, or results need structured metadata.
+**Resolution (2026-08-03)**: Both revisit triggers fired the same session. A Phase 5 regression (symbolic CAS results losing their `ResultKind` on reload — always came back `kPlain`) led to auditing the whole load/save path, which also turned up two latent pre-Phase-5 bugs: `load_state` read from the file *head* via `Storage::read_file`, not the tail its own comment claimed, so once `history.txt` outgrew the 8 KB window a reboot restored the oldest entries, not the newest; and the promised compaction pass had never been written, so the file really did grow unbounded. Fixed all three in one pass: a third tab-separated column (`expr\tresult\tS|P\n`, backward compatible) carries the kind; a new `Storage::file_size()` lets `load_state` seek to the true tail; and `HomeScreen::compact_history()` rewrites the file down to its last 8 KB once it exceeds 24576 bytes. See worklog's 2026-08-03 entry for full detail. The plaintext-TSV format itself is unchanged and still the right call — only the read offset, growth bound, and column count needed fixing.
 
 ## D6: RGB565 framebuffers, RGB666 on the wire
 
