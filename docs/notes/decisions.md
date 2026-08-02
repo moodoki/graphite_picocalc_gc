@@ -18,6 +18,52 @@ Format:
 
 ---
 
+## D41: Phase 5 CAS ExprPool placement — SRAM raw-pointer arena over the shared scratch kCompute region (rejects the spec's PSRAM plan)
+
+**Date**: 2026-08-02
+**Status**: Accepted (Phase 5 Stage 0, tasks 4D.1–4D.3)
+**Context**: `phase5-spec.md` §3 sketched the CAS node pool ("ExprPool") living in
+PSRAM on Pico 1 (64 KB) / SRAM on Pico 2 (128 KB), via `config::kCasPoolSize`,
+but §3 itself flagged "re-verify this pool's SRAM-vs-PSRAM placement against
+actual headroom before implementation starts." Stage 0 needed the concrete
+representation decided before building the tree/parser on top of it.
+**Decision**:
+1. **The pool is SRAM with raw `Expr*` child/next pointers** (`src/math/cas/expr.{hpp,cpp}`),
+   a bump allocator modeled on `render::pool.hpp` (`alloc()`/`reset()`, no
+   per-node free, bulk-reclaim per top-level op). `alloc()` uses `std::align`
+   over the region and returns `nullptr` when full (the spec §13 Risk-2
+   abort-above-capacity path).
+2. **PSRAM-backing is rejected.** `platform::Psram` is offset-addressed, not
+   memory-mapped (`src/platform/psram.hpp`) — access is `read()/write()` by
+   offset. A CAS engine traverses and rewrites nodes constantly; raw-pointer
+   trees can't live in PSRAM, and a read/write per node access would be
+   pathologically slow. The spec's PSRAM idea does not survive that constraint.
+3. **The pool overlays the shared math scratch kCompute region**
+   (`math::scratch::compute_region()`, `kComputeBytes = 22528`) rather than
+   allocating a dedicated buffer — **zero new bss**. kCompute's existing owners
+   (list_expr | stats | infer | matops) are never active during a home-screen
+   CAS op, so CAS borrows the whole region; `cas` is added to the owner
+   contract in `scratch.hpp`. A CAS op must not re-enter those owners while it
+   holds the arena (it doesn't in v1).
+4. **`config::kCasPoolSize` is retired** (was unused; superseded by the
+   kComputeBytes bound). ~22.5 KB / ~32 B per node ≈ ~700 nodes on device —
+   ample for the spec's acceptance sizes; pathological inputs hit the Risk-2
+   abort.
+**Rationale**: keeps Pico 1's ~68 KB SRAM headroom fully intact (the standing
+watch item) while giving the CAS a fast, pointer-native working set; reuses an
+already-proven arena rather than inventing a handle/index indirection just to
+reach PSRAM that would be far slower and more complex.
+**Tradeoffs**: the CAS working set is capped at ~22.5 KB (no PSRAM spill) — a
+very large symbolic expansion aborts rather than growing; the kCompute
+owner-guard remains convention-only (a debug guard is still the recommended
+follow-up from the pre-Phase-5 review). Deviates from the letter of
+phase5-spec §3, which is left as-is (per AGENTS.md: specs aren't edited casually;
+the as-built reconciliation lives here).
+**Revisit when**: a real CAS input overruns ~700 nodes on device (add PSRAM
+spill via a handle-based overflow tier, or grow the region); or the shared-arena
+coupling causes a re-entrancy bug (move CAS to its own region / add the debug
+owner-guard).
+
 ## D40: Phase 4D close — F sequenced after Phase 5 CAS, idea H deferred again
 
 **Date**: 2026-08-02

@@ -166,6 +166,14 @@ echo "== Compiling + linking test_seq =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_seq"
 
+echo "== Compiling + linking test_cas =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_cas.cpp \
+    src/math/cas/expr.cpp src/math/cas/parser.cpp src/math/cas/serialize.cpp \
+    src/math/scratch.cpp \
+    -o "$OUT/test_cas"
+
 echo "== Compiling + linking test_stats =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -209,6 +217,9 @@ echo "== Running test_units =="
 
 echo "== Running test_seq =="
 "$OUT/test_seq"
+
+echo "== Running test_cas =="
+"$OUT/test_cas"
 
 echo "== Running test_stats =="
 "$OUT/test_stats"

@@ -19,7 +19,8 @@ constexpr int kScreenHeight = 320;
 // Pico 2 has 520 KB SRAM and a hardware FPU.
 // Comfortable headroom — full SRAM framebuffer is fine.
 constexpr bool kUseFullFramebuffer = true;
-constexpr size_t kCasPoolSize = 128 * 1024;  // SRAM pool
+// (CAS ExprPool overlays the shared math scratch kCompute region — see
+// src/math/cas/expr.cpp and math::scratch — so no dedicated pool constant.)
 constexpr size_t kPythonHeapSize = 96 * 1024;
 constexpr int kOverclockHz = 0;  // No overclock
 constexpr bool kHasHardwareFpu = true;
@@ -27,7 +28,8 @@ constexpr bool kHasHardwareFpu = true;
 // Pico 1: tighter constraints, no FPU. Line-buffer rendering,
 // smaller pools, framebuffer goes to PSRAM if needed.
 constexpr bool kUseFullFramebuffer = false;
-constexpr size_t kCasPoolSize = 64 * 1024;  // PSRAM pool
+// (CAS ExprPool overlays the shared math scratch kCompute region — see
+// src/math/cas/expr.cpp and math::scratch — so no dedicated pool constant.)
 constexpr size_t kPythonHeapSize = 48 * 1024;
 constexpr int kOverclockHz = 200'000'000;  // 200 MHz
 constexpr bool kHasHardwareFpu = false;
