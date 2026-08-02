@@ -18,6 +18,11 @@ Conventions:
 
 ## Current status
 
+> ⚠️ **Frozen at the Phase 1/2 era — do not trust as current.** The live
+> "where are we / what's next" handoff moved to
+> [`next-session.md`](next-session.md); the dated entries below carry the
+> running narrative (newest first). Kept here as a historical snapshot.
+
 - **Phase**: 1 code complete; **Pico 1 fully HW-verified** (2026-07-11) and **Pico 2
   brought up** (2026-07-11/12): full-framebuffer display path works, cold-boot
   PSRAM/SD failure root-caused to a ~5-8 s peripheral rail settle and fixed with
@@ -155,6 +160,10 @@ Conventions:
   that proved the panel/driver work, isolating bugs to our code.
 
 ## HW-PENDING verification queue
+
+> ⚠️ **Frozen at the Session 14 era — do not trust as current.** Later
+> HW-verification status lives in [`next-session.md`](next-session.md) and the
+> dated worklog entries below. Kept here as a historical snapshot.
 
 Firmware now boots to the **home screen**; the diagnostics screen is the F6 overlay.
 

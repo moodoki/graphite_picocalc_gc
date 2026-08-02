@@ -6,7 +6,7 @@ Instructions for AI coding agents working on this project. Keep this file lean a
 
 PicoCalc Graphing Calculator — a TI-83/84-inspired graphing calculator firmware for the ClockworkPi PicoCalc. Native C++17 on the Raspberry Pi Pico SDK. Targets both Pico 1 H (RP2040) and Pico 2 H (RP2350). Solo developer, personal-use project.
 
-Phases: see `docs/phases/`. Currently in Phase 0 (prep) → Phase 1 (HAL + scientific calculator + basic graphing).
+Phases: see `docs/phases/`. Phases 0–3 and Phase 4 (sub-phases 4A–4D) are complete and hardware-verified on both boards — a feature-complete TI-83/84+-class graphing calculator (the pre-release milestone). Next up is a pre-Phase-5 code-review/size-optimization pass, then Phase 5 (CAS). See `docs/notes/next-session.md` for the live handoff.
 
 ## Build commands
 
@@ -126,7 +126,7 @@ The HAL wraps C drivers vendored from Coyote OS (PicoCalc calculator firmware). 
 
 - `docs/notes/next-session.md` — start-here handoff; read at the start of every session
 - `README.md` — project overview, build instructions
-- `docs/phases/phase1-spec.md` — current implementation contract
+- `docs/phases/phase4-spec.md` — the most recently completed implementation contract (Phase 4, the pre-release milestone); `docs/phases/phase5-spec.md` is the forward contract (CAS)
 - `docs/architecture.md` — layer rules and rationale
 - `docs/dev-environment.md` — toolchain details (macOS Apple Silicon)
 - `src/config.hpp` — compile-time configuration, board detection
