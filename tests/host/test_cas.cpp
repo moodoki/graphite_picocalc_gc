@@ -11,6 +11,7 @@
 #include "math/cas/expand.hpp"
 #include "math/cas/expr.hpp"
 #include "math/cas/factor.hpp"
+#include "math/cas/integrate.hpp"
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
@@ -20,6 +21,7 @@ using math::cas::differentiate;
 using math::cas::expand;
 using math::cas::Expr;
 using math::cas::factor;
+using math::cas::integrate;
 using math::cas::ExprType;
 using math::cas::g_cas_pool;
 using math::cas::parse_expr;
@@ -548,6 +550,71 @@ void test_factor() {
     check_factor("x^2 + 1", "x^2 + 1");  // irreducible over the reals
 }
 
+// ∫f is validated by the fundamental theorem: d/dx(∫f) == f at sample points.
+void check_integrate(const char* input, char var) {
+    g_cas_pool.reset();
+    Expr* f = parse_expr(input, nullptr);
+    ++g_checks;
+    if (f == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in integrate(\"%s\")\n", input);
+        return;
+    }
+    Expr* big_f = integrate(f, var);
+    if (big_f == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: integrate(\"%s\") -> null\n", input);
+        return;
+    }
+    Expr* d = differentiate(big_f, var);
+    if (d == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: d/d%c of integral of \"%s\" -> null\n", var, input);
+        return;
+    }
+    const double xs[] = {0.4, 0.9, 1.6, 2.3};
+    for (double x : xs) {
+        if (std::fabs(eval(d, var, x) - eval(f, var, x)) > 1e-5) {
+            ++g_failures;
+            std::printf("FAIL: integrate(\"%s\") fails d/dx check at %g\n", input, x);
+            return;
+        }
+    }
+}
+
+void test_integrate() {
+    check_integrate("x^3", 'x');
+    check_integrate("x^2 + 3x + 2", 'x');
+    check_integrate("1/x", 'x');
+    check_integrate("sin(x)", 'x');
+    check_integrate("cos(x)", 'x');
+    check_integrate("exp(x)", 'x');
+    check_integrate("sin(3x + 1)", 'x');  // linear substitution
+    check_integrate("exp(2x)", 'x');
+    check_integrate("x*exp(x)", 'x');  // integration by parts
+    check_integrate("ln(x)", 'x');     // by-parts closed form
+    check_integrate("5", 'x');         // constant
+
+    // Definite: symbolic antiderivative path.
+    g_cas_pool.reset();
+    auto r = math::cas::definite_integrate(parse_expr("sin(x)", nullptr), 'x',
+                                           parse_expr("0", nullptr), parse_expr("pi", nullptr));
+    ++g_checks;
+    if (!r.has_numeric || std::fabs(r.numeric_val - 2.0) > 1e-6) {
+        ++g_failures;
+        std::printf("FAIL: definite integral of sin 0..pi != 2 (got %.10g)\n", r.numeric_val);
+    }
+    // Definite: numeric fallback (no elementary antiderivative).
+    g_cas_pool.reset();
+    auto r2 = math::cas::definite_integrate(parse_expr("exp(x^2)", nullptr), 'x',
+                                            parse_expr("0", nullptr), parse_expr("1", nullptr));
+    ++g_checks;
+    if (!r2.has_numeric || std::fabs(r2.numeric_val - 1.46265) > 1e-3) {
+        ++g_failures;
+        std::printf("FAIL: numeric fallback integral exp(x^2) 0..1 (got %.10g)\n", r2.numeric_val);
+    }
+}
+
 void test_solve() {
     const char* lin[] = {"4"};
     check_solve_set("3x + 5 = 17", 'x', true, lin, 1);
@@ -633,6 +700,7 @@ int main() {
     test_expand();
     test_factor();
     test_derivative();
+    test_integrate();
     test_solve();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
