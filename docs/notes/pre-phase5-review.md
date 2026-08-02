@@ -144,11 +144,61 @@ touches hot math paths — worth a flash + matrix/stats/list/infer spot-check).
 3. **Fold the persistence `g_chunk`s** — `array.cpp`'s stays out (nests in
    compute via `fill`); the three `*_persist.cpp` ones are save/load-only
    and could share a small persistence slot. Minor (~6 KB), lower priority.
-4. **Measure `-Os`** and record the text/speed tradeoff.
-5. **Re-verify the Phase 6 MicroPython 56 KB budget** against the new ~68 KB
-   headroom (ideas #6) — now with real margin to check against.
-6. ArrayStore slab re-sizing only if still needed after the above (57.5 KB,
-   but live storage — a capacity decision, not a free win).
+4. **`-Os` / MinSizeRel — MEASURED 2026-08-02: not a lever for this pass.**
+   Built Pico 1 at MinSizeRel (`-Os -DNDEBUG`) vs the default Release
+   (`-O3 -DNDEBUG`):
+   - **text 419,680 → 293,488 (−126,192 B, −30% flash)**
+   - **bss 200,704 → 200,672 (−32 B — essentially flat)**
+   Since this pass targets *SRAM* headroom, `-Os` buys nothing here — the
+   win is entirely flash, which isn't constrained (Pico 1 has 2 MB; text is
+   ~20% of it). A host micro-benchmark of the hot expression-eval path
+   (2M evals of `sin(x)*cos(2x)+x²/(1+x)-tan(x/3)`) showed `-O3` and `-Os`
+   **within noise** (~129 ns/eval) — the path is dominated by double
+   soft-float/libm calls, not our code layout, so opt level barely moves it.
+   **Recommendation: keep `-O3`.** Don't flip the global default for this
+   pass — it gives no SRAM relief, and `-O3` stays the safer choice for the
+   compute-bound graph-recompute paths earlier sessions flagged (a 1.17 s
+   heavy redraw on Pico 1). Revisit only if flash ever gets tight, and then
+   with a proper on-device speed A/B (`graph recompute:` heartbeat), not a
+   host proxy.
+5. **Phase 6 MicroPython 56 KB budget — RE-VERIFIED 2026-08-02: the arena
+   is what makes Phase 6 fit on Pico 1.** Pico 1 has 264 KB = 270,336 B
+   total SRAM; free SRAM = total − app static (bss+data, which already
+   includes the reserved stacks):
+
+   | | app static | free SRAM |
+   |---|--:|--:|
+   | pre-arena | 222,528 | **46.7 KB** |
+   | post-arena | 200,704 | **68.0 KB** |
+
+   Phase 6's `MicroPython` heap is **lazily allocated** (P6-1 / §4.4 — only
+   when the user enters the program screen), so what matters is that **56 KB**
+   (48 KB heap + 8 KB C-stack, phase6-spec §4.4) is free *at that moment*:
+   - **Pre-arena: 46.7 KB free < 56 KB → the lazy heap could not allocate.
+     Phase 6 was infeasible on Pico 1** (4D's growth had eaten the budget —
+     exactly the re-verify §4.4 asked for).
+   - **Post-arena: 68 KB − 56 KB = ~12 KB spare → it fits.**
+
+   So the arena wasn't just headroom hygiene — it's a Phase-6 enabler on
+   Pico 1. Caveats on the ~12 KB spare: it must still absorb **Phase 5 CAS**
+   static SRAM (the CAS *pool* is PSRAM on Pico 1, so ≈0, but parser/code
+   state is nonzero) and **Phase 6 6A framework** static (program registry,
+   screens) that land before the heap. Levers if that spare gets eaten:
+   drop the heap 48→40 KB (spec Risk 6 already contemplates this; costs
+   script complexity), or item 6 below. Also reinforces that lazy-heap
+   (P6-1) is the *required* choice on Pico 1 — a static-at-boot 56 KB would
+   pin free SRAM at ~12 KB even during normal calculator work. Pico 2 is
+   comfortable regardless (~144 KB free, 104 KB Python impact).
+6. **ArrayStore slab re-sizing — reserve lever, not needed now.** 28×2 KB =
+   57.3 KB of *live* storage; `slab_alloc()` hard-fails on exhaustion (no
+   PSRAM fallback for small arrays), and the persistent baseline is already
+   ~16 slabs (6 lists + 10 matrices, if all small/real) + eval temps, so the
+   safe floor is ~20-22 slabs → ~12-16 KB safely reclaimable, and only after
+   a device high-water-mark measurement. A bigger, safer cut (~24-32 KB)
+   needs a prerequisite: add a **PSRAM fallback on slab exhaustion** so a cut
+   degrades gracefully (slower) instead of erroring. Given item 5 shows
+   Phase 6 already fits with the arena, **defer this** — take it up only if
+   Phase 5 + 6A static growth eats the ~12 KB spare.
 
 ## Non-goals (unchanged)
 

@@ -305,6 +305,55 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-02 — Pre-Phase-5 review pass: shared scratch arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified
+
+Opened the pre-Phase-5 code-review/size-optimization pass (next-session.md
+"The next job" #1). Full write-up: `docs/notes/pre-phase5-review.md`.
+Three commits landed:
+
+- **`1073f4f` docs** — de-staled `AGENTS.md` (claimed "Phase 0 → Phase 1";
+  now Phase 4 complete / Phase 5 next) and added "frozen, don't trust as
+  current" pointers to worklog.md's two era-frozen top blocks.
+- **`5f76851` perf(size): shared math scratch arena** — the headline. A
+  per-symbol SRAM audit (new `scripts/size-report.sh`) showed the rough map
+  under-counted: alongside ArrayStore's 57.5 KB, ~40 KB sat in per-module
+  256-element PSRAM-streaming scratch buffers, one private set per module,
+  never simultaneously live (single-threaded on core 0). Collapsed the
+  verified-mutually-exclusive ones onto one arena (`src/math/scratch.{hpp,
+  cpp}`), two disjoint regions: **kCompute** (list_expr | stats | infer |
+  matops — none calls another) and **kListops** (listops, disjoint because
+  list_expr calls it). Rebound by reference-aliasing so all call sites are
+  unchanged; matops' RowBufs via placement-new. **Pico 1 bss 222,528 →
+  200,704 (−21,824 B; headroom ~46 → ~68 KB)**; Pico 2 same. Host 1627
+  green, both boards clean, lint/format clean, device-verified on Pico 2.
+- **`4edba81` fix(matrix): near-zero chop** — found during the arena
+  device spot-check. `[A]^-1*[A]` showed FP roundoff (2.22e-16 off-diagonals)
+  as scientific noise instead of a clean identity. NOT an arithmetic bug and
+  NOT the arena (all matrix ops compute correctly on-device). `format_matrix`
+  now snaps a cell >~12 orders below the matrix's largest cell to `0`
+  (relative, real+complex). test_matrix +6 (381), device-verified.
+
+**Measurements banked (no code change):**
+- **`-Os`/MinSizeRel: not a lever for this pass.** Pico 1 text 419,680 →
+  293,488 (−126 KB, −30% flash) but **bss flat** (−32 B) — this pass targets
+  SRAM, so `-Os` buys nothing here; the win is flash, which isn't
+  constrained. Hot-path host bench (2M expr evals) `-O3`≈`-Os` within noise
+  (dominated by double soft-float/libm). **Keep `-O3`.**
+- **Phase 6 MicroPython budget re-verified — the arena makes Phase 6 fit on
+  Pico 1.** Free SRAM: pre-arena 46.7 KB < the 56 KB lazy heap needs (Phase 6
+  was infeasible on Pico 1); post-arena 68 KB → fits with ~12 KB spare. That
+  ~12 KB must still absorb Phase 5 CAS + 6A framework static growth.
+
+**Levers still on the table** (documented in `pre-phase5-review.md`, all
+deferred — Phase 6 already fits so none is urgent): (a) reduce the MicroPython
+heap 48→40 KB if the ~12 KB spare gets eaten (spec Risk 6); (b) ArrayStore
+slab cut — ~12-16 KB safe (needs a device high-water-mark measure first),
+~24-32 KB if a **PSRAM-fallback-on-slab-exhaustion** prerequisite lands (today
+`slab_alloc` hard-fails, no fallback); (c) fold the persistence `g_chunk`s
+(~6 KB, minor); (d) the arena's debug owner-guard (deferred — placement risk
+> value given host coverage). No decision number consumed (measurement/trim,
+not a design call).
+
 ## 2026-08-02 — UI-friction polish: matrix precision/`>Frac`, constants-picker relayout + description scroll, HW-verified
 
 Addressed the two UI-friction feature requests logged in the 2026-07-27 eval

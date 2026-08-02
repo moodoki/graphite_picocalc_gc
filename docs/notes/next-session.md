@@ -1,6 +1,31 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **UI-friction polish, source changes,
+**Last session:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
+arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified on the Pico 2.**
+Opened the pre-Phase-5 code-review/size-optimization pass. A per-symbol SRAM
+audit (new `scripts/size-report.sh`) found ~40 KB tied up in per-module
+256-element PSRAM-streaming scratch buffers that are never simultaneously
+live (single-threaded on core 0). Collapsed the verified-mutually-exclusive
+ones onto one arena (`src/math/scratch.{hpp,cpp}`), two disjoint regions:
+**kCompute** (list_expr | stats | infer | matops — none calls another) and
+**kListops** (listops, disjoint because list_expr calls it); rebound by
+reference-aliasing so call sites are unchanged (matops RowBufs via
+placement-new). **Pico 1 bss 222,528 → 200,704 (−21,824 B; headroom ~46 →
+~68 KB)**, Pico 2 same. During the device spot-check, `[A]^-1*[A]` showed FP
+roundoff (2.22e-16) as scientific noise; added a relative near-zero chop to
+`format_matrix` (cell >~12 orders below the max snaps to 0) — NOT an
+arithmetic bug and NOT the arena (all matrix ops compute correctly
+on-device). Also measured (no code change): **`-Os`** gives −126 KB flash but
+0 SRAM (not a lever for this pass — keep `-O3`); **Phase 6 MicroPython budget
+re-verified — the arena is what makes Phase 6 fit on Pico 1** (pre-arena 46.7
+KB free < the 56 KB lazy heap; post-arena 68 KB → fits, ~12 KB spare). Host
+1627 + test_matrix +6 (381) green; both boards clean; lint/format clean;
+device-verified on Pico 2. **No decision number** (measurement/trim, not a
+design call). Full detail: `docs/notes/pre-phase5-review.md`, worklog's
+2026-08-02 "Pre-Phase-5 review pass" entry. Commits `1073f4f` (doc de-stale),
+`5f76851` (arena), `4edba81` (chop).
+
+**Previous session:** 2026-08-02 — **UI-friction polish, source changes,
 HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
 UI-friction feature requests logged in the 2026-07-27 eval, plus two
 follow-ups raised during this session's on-device testing. Matrix results
@@ -20,7 +45,7 @@ suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
 4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
 polish" entry.
 
-**Previous session:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Two sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -37,7 +62,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Two sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Three sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -57,7 +82,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Three sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Four sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -72,7 +97,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Four sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Five sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -96,7 +121,7 @@ now persists.** 12 new host checks (`test_seq` now 63); both boards
 rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
 2026-08-02 bugfix entry.
 
-**Five sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
+**Six sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
 source changes** (one doc-only wishlist addition). Reflashed the Pico 2
 from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
 and ran a hardware-observation interview. First boot showed the expected
@@ -133,14 +158,24 @@ further back than this rolling summary keeps — see `worklog.md`'s
    (board-independent logic). The three-item close checklist is resolved
    — see "Last session" above for the F-evaluator-check/idea-H/ti-parity
    dispositions. The forward path from here:
-   - **Next: a pre-Phase-5 code-review + size-optimization pass.** SRAM
-     headroom has been shrinking each phase (Pico 1 bss now 222,528
-     bytes, ~48 KB headroom, down from ~57 KB pre-4D) and Phase 5 (CAS)
-     and Phase 6 (app framework + MicroPython) will both add
-     significant static footprint — worth a dedicated pass to review
-     for dead weight / bloat and trim before piling on more, rather than
-     finding out mid-Phase-5 that the budget is gone. Research starting
-     point: `size-optimization-ideas.md`.
+   - **Pre-Phase-5 code-review/size pass — LARGELY DONE 2026-08-02.** The
+     big win landed: a shared math scratch arena reclaimed **21.8 KB SRAM**
+     (Pico 1 bss 222,528 → **200,704**, headroom **~46 → ~68 KB**). Two
+     measurements banked with no code change: **`-Os` ruled out** for this
+     pass (−126 KB flash, 0 SRAM — keep `-O3`), and the **Phase 6
+     MicroPython budget re-verified — the arena is what makes Phase 6 fit
+     on Pico 1** (pre-arena 46.7 KB free was < the 56 KB lazy heap; now 68 KB
+     → fits with ~12 KB spare). Full write-up + the measurement tooling:
+     `docs/notes/pre-phase5-review.md`, `scripts/size-report.sh`.
+     **Remaining levers (all deferred — Phase 6 already fits, none urgent):**
+     (a) reduce the MicroPython heap 48→40 KB if the ~12 KB spare gets eaten
+     by Phase 5 CAS + 6A framework static growth (spec Risk 6); (b)
+     **ArrayStore slab cut** — ~12-16 KB safe after a device high-water-mark
+     measurement, ~24-32 KB if a **PSRAM-fallback-on-slab-exhaustion**
+     prerequisite lands first (today `slab_alloc` hard-fails); (c) fold the
+     persistence `g_chunk`s (~6 KB, minor); (d) the arena's debug
+     owner-guard (deferred, documented). Take these up only if a real
+     budget pinch appears — watch Pico 1 bss through Phase 5.
    - **Then Phase 5 (CAS)** per D32/D33.
    - **Then F (the unified evaluator)**, per D37/D40 — deliberately
      sequenced after Phase 5 rather than right after 4D, so a possible
