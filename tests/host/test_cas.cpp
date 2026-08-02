@@ -3,14 +3,17 @@
 // and expr_to_string (serialize.cpp). No numeric evaluation yet — that starts
 // with the Stage 1 simplifier.
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
+#include "math/cas/derivative.hpp"
 #include "math/cas/expr.hpp"
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
 
+using math::cas::differentiate;
 using math::cas::Expr;
 using math::cas::ExprType;
 using math::cas::g_cas_pool;
@@ -71,6 +74,91 @@ void check_same(const char* a, const char* b) {
     if (!ta->equals(tb)) {
         ++g_failures;
         std::printf("FAIL: \"%s\" != \"%s\" structurally\n", a, b);
+    }
+}
+
+// Numeric evaluator for host tests: evaluates an Expr with a single variable
+// bound to xval (used to check derivatives/integrals by value rather than by
+// fragile canonical form). Returns NaN on anything it can't evaluate.
+double eval(const Expr* e, char var, double xval) {
+    switch (e->type) {
+        case ExprType::kNum:
+            return e->num_val;
+        case ExprType::kVar:
+            return e->var_name == var ? xval : NAN;
+        case ExprType::kNeg:
+            return -eval(e->child, var, xval);
+        case ExprType::kAdd: {
+            double s = 0.0;
+            for (const Expr* c = e->child; c != nullptr; c = c->next) {
+                s += eval(c, var, xval);
+            }
+            return s;
+        }
+        case ExprType::kMul: {
+            double p = 1.0;
+            for (const Expr* c = e->child; c != nullptr; c = c->next) {
+                p *= eval(c, var, xval);
+            }
+            return p;
+        }
+        case ExprType::kPow:
+            return std::pow(eval(e->child, var, xval), eval(e->child->next, var, xval));
+        case ExprType::kFunc: {
+            if (e->child == nullptr) {
+                return std::strcmp(e->func_name, "pi") == 0 ? M_PI : NAN;
+            }
+            const double a = eval(e->child, var, xval);
+            const char* n = e->func_name;
+            if (!std::strcmp(n, "sin")) return std::sin(a);
+            if (!std::strcmp(n, "cos")) return std::cos(a);
+            if (!std::strcmp(n, "tan")) return std::tan(a);
+            if (!std::strcmp(n, "exp")) return std::exp(a);
+            if (!std::strcmp(n, "ln")) return std::log(a);
+            if (!std::strcmp(n, "log")) return std::log10(a);
+            if (!std::strcmp(n, "sqrt")) return std::sqrt(a);
+            if (!std::strcmp(n, "asin")) return std::asin(a);
+            if (!std::strcmp(n, "acos")) return std::acos(a);
+            if (!std::strcmp(n, "atan")) return std::atan(a);
+            if (!std::strcmp(n, "sinh")) return std::sinh(a);
+            if (!std::strcmp(n, "cosh")) return std::cosh(a);
+            if (!std::strcmp(n, "tanh")) return std::tanh(a);
+            return NAN;
+        }
+        default:
+            return NAN;
+    }
+}
+
+// differentiate(input) matches expected by value at several sample points.
+void check_deriv(const char* input, char var, const char* expected) {
+    g_cas_pool.reset();
+    Expr* in = parse_expr(input, nullptr);
+    Expr* ex = parse_expr(expected, nullptr);
+    ++g_checks;
+    if (in == nullptr || ex == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in check_deriv(\"%s\")\n", input);
+        return;
+    }
+    Expr* d = differentiate(in, var);
+    if (d == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: differentiate(\"%s\") -> null\n", input);
+        return;
+    }
+    const double xs[] = {0.3, 0.7, 1.3, 2.1};
+    for (double x : xs) {
+        const double got = eval(d, var, x);
+        const double want = eval(ex, var, x);
+        if (std::isnan(got) || std::isnan(want) || std::fabs(got - want) > 1e-6) {
+            ++g_failures;
+            char buf[128];
+            math::cas::expr_to_string(d, buf, sizeof(buf));
+            std::printf("FAIL: d/d%c \"%s\" = \"%s\": at %g got %.10g want %.10g\n", var, input,
+                        buf, x, got, want);
+            return;
+        }
     }
 }
 
@@ -292,6 +380,36 @@ void test_simplify_termination() {
     check(simplify(parse_expr("i^4", nullptr)) != nullptr, "i^4 terminates");
 }
 
+void test_derivative() {
+    check_deriv("x", 'x', "1");
+    check_deriv("x^3", 'x', "3*x^2");
+    check_deriv("x^2 + 3x + 1", 'x', "2x + 3");
+    check_deriv("sin(x)", 'x', "cos(x)");
+    check_deriv("cos(x)", 'x', "-sin(x)");
+    check_deriv("tan(x)", 'x', "1 + tan(x)^2");
+    check_deriv("exp(x)", 'x', "exp(x)");
+    check_deriv("ln(x)", 'x', "1/x");
+    check_deriv("sqrt(x)", 'x', "1/(2*sqrt(x))");
+    // Product rule + chain rule.
+    check_deriv("x^3*sin(x)", 'x', "3*x^2*sin(x) + x^3*cos(x)");
+    check_deriv("sin(x^2)", 'x', "2*x*cos(x^2)");
+    check_deriv("exp(2x)", 'x', "2*exp(2x)");
+    // Quotient (via negative power) — checked by value, not canonical form.
+    check_deriv("x/(x+1)", 'x', "1/(x+1)^2");
+    // General power rule u^v.
+    check_deriv("x^x", 'x', "x^x*(ln(x) + 1)");
+    // atan/asin chains.
+    check_deriv("atan(x)", 'x', "1/(1 + x^2)");
+    // Higher-order: d^2/dx^2 x^4 = 12x^2.
+    g_cas_pool.reset();
+    Expr* d2 = math::cas::differentiate_n(parse_expr("x^4", nullptr), 'x', 2);
+    ++g_checks;
+    if (d2 == nullptr || !simplify(d2)->equals(simplify(parse_expr("12*x^2", nullptr)))) {
+        ++g_failures;
+        std::printf("FAIL: d^2/dx^2 x^4 != 12x^2\n");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -309,6 +427,7 @@ int main() {
     test_simplify_fractions();
     test_simplify_commutativity();
     test_simplify_termination();
+    test_derivative();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
