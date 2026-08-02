@@ -13,6 +13,7 @@
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
+#include "math/cas/solve.hpp"
 
 using math::cas::differentiate;
 using math::cas::expand;
@@ -21,6 +22,8 @@ using math::cas::ExprType;
 using math::cas::g_cas_pool;
 using math::cas::parse_expr;
 using math::cas::simplify;
+using math::cas::solve;
+using math::cas::SolveResult;
 
 namespace {
 
@@ -438,6 +441,104 @@ void test_expand() {
     check_expand_value("(x+1)*(x+2)*(x+3)");
 }
 
+// solve(eq) returns exactly the expected solution set (order-independent).
+void check_solve_set(const char* eq, char var, bool allow_complex, const char* const* expected,
+                     int n) {
+    g_cas_pool.reset();
+    Expr* e = parse_expr(eq, nullptr);
+    ++g_checks;
+    if (e == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: parse null in solve(\"%s\")\n", eq);
+        return;
+    }
+    SolveResult r = solve(e, var, allow_complex);
+    if (r.count != n) {
+        ++g_failures;
+        std::printf("FAIL: solve(\"%s\") count %d != %d\n", eq, r.count, n);
+        return;
+    }
+    bool used[8] = {};
+    for (int i = 0; i < n; ++i) {
+        Expr* want = simplify(parse_expr(expected[i], nullptr));
+        bool found = false;
+        for (int j = 0; j < r.count; ++j) {
+            if (!used[j] && r.solutions[j] != nullptr && r.solutions[j]->equals(want)) {
+                used[j] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            ++g_failures;
+            std::printf("FAIL: solve(\"%s\") missing root \"%s\"\n", eq, expected[i]);
+            return;
+        }
+    }
+}
+
+// solve(eq) has `count` roots, each satisfying f(root) ~ 0 numerically.
+void check_solve_numeric(const char* eq, char var, int count) {
+    g_cas_pool.reset();
+    Expr* e = parse_expr(eq, nullptr);
+    ++g_checks;
+    if (e == nullptr || !e->is_eq()) {
+        ++g_failures;
+        std::printf("FAIL: parse null/non-eq in solve(\"%s\")\n", eq);
+        return;
+    }
+    Expr* f = Expr::add(e->child->clone(), Expr::neg(e->child->next->clone()));
+    SolveResult r = solve(e, var, true);
+    if (r.count != count) {
+        ++g_failures;
+        std::printf("FAIL: solve(\"%s\") count %d != %d\n", eq, r.count, count);
+        return;
+    }
+    for (int j = 0; j < r.count; ++j) {
+        const double xv = eval(r.solutions[j], var, 0.0);
+        if (std::fabs(eval(f, var, xv)) > 1e-6) {
+            ++g_failures;
+            std::printf("FAIL: solve(\"%s\") root %d does not satisfy eqn\n", eq, j);
+            return;
+        }
+    }
+}
+
+void test_solve() {
+    const char* lin[] = {"4"};
+    check_solve_set("3x + 5 = 17", 'x', true, lin, 1);
+    const char* q1[] = {"2", "3"};
+    check_solve_set("x^2 - 5x + 6 = 0", 'x', true, q1, 2);
+    const char* q2[] = {"2", "-2"};
+    check_solve_set("x^2 - 4 = 0", 'x', true, q2, 2);
+    // Complex roots (allowed).
+    const char* c1[] = {"i", "-i"};
+    check_solve_set("x^2 + 1 = 0", 'x', true, c1, 2);
+    const char* c2[] = {"1 + 2i", "1 - 2i"};
+    check_solve_set("x^2 - 2x + 5 = 0", 'x', true, c2, 2);
+    // REAL mode: complex roots suppressed.
+    g_cas_pool.reset();
+    SolveResult r = solve(parse_expr("x^2 + 1 = 0", nullptr), 'x', false);
+    ++g_checks;
+    if (r.count != 0 || !r.complex) {
+        ++g_failures;
+        std::printf("FAIL: REAL-mode x^2+1=0 should have no real solution\n");
+    }
+    // Irrational roots checked by value.
+    check_solve_numeric("x^2 - 2 = 0", 'x', 2);
+    check_solve_numeric("x^2 - 3x + 1 = 0", 'x', 2);
+    // Inverse-function isolation.
+    g_cas_pool.reset();
+    SolveResult s = solve(parse_expr("sin(x) = 1/2", nullptr), 'x', true);
+    ++g_checks;
+    if (s.count != 1 || std::fabs(eval(s.solutions[0], 'x', 0.0) - M_PI / 6.0) > 1e-6) {
+        ++g_failures;
+        std::printf("FAIL: solve(sin(x)=1/2) != pi/6\n");
+    }
+    const char* e1[] = {"0"};
+    check_solve_set("exp(x) = 1", 'x', true, e1, 1);
+}
+
 void test_derivative() {
     check_deriv("x", 'x', "1");
     check_deriv("x^3", 'x', "3*x^2");
@@ -487,6 +588,7 @@ int main() {
     test_simplify_termination();
     test_expand();
     test_derivative();
+    test_solve();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

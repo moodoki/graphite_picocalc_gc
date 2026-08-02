@@ -172,6 +172,7 @@ echo "== Compiling + linking test_cas =="
     tests/host/test_cas.cpp \
     src/math/cas/expr.cpp src/math/cas/parser.cpp src/math/cas/serialize.cpp \
     src/math/cas/simplify.cpp src/math/cas/derivative.cpp src/math/cas/expand.cpp \
+    src/math/cas/poly.cpp src/math/cas/solve.cpp \
     src/math/scratch.cpp \
     -o "$OUT/test_cas"
 

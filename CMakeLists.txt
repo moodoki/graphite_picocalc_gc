@@ -130,6 +130,8 @@ add_executable(picocalc_graphcalc
     src/math/cas/simplify.cpp
     src/math/cas/derivative.cpp
     src/math/cas/expand.cpp
+    src/math/cas/poly.cpp
+    src/math/cas/solve.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
