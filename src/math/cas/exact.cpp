@@ -8,7 +8,9 @@
 #include "math/cas/parser.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
+#include "math/format.hpp"
 #include "math/frac.hpp"
+#include "math/types.hpp"
 
 namespace math::cas {
 
@@ -200,6 +202,187 @@ Expr* split_radical(double v, double exponent) {
     return Expr::mul(Expr::num(coeff), root);
 }
 
+// ---- Exact trigonometric values at special angles --------------------------
+
+// A closed-form value shaped (num/den)*sqrt(rad) — enough for every exact
+// sin/cos/tan at a multiple of pi/6 or pi/4. rad == 0 marks "undefined"
+// (tan at an odd multiple of pi/2), which is left unfolded.
+struct TrigValue {
+    int num;
+    int den;
+    int rad;
+};
+
+// Angles are indexed in twelfths of pi, so one table covers both the pi/6 and
+// pi/4 families: idx = angle / (pi/12), taken mod 24. Entries at indices with
+// no exact value (1, 5, 7, ...) are never read — a q outside {1,2,3,4,6}
+// is rejected before the lookup.
+const TrigValue kSinTable[24] = {
+    {0, 1, 1},  {0, 0, 0}, {1, 2, 1},  {1, 2, 2}, {1, 2, 3},  {0, 0, 0},  {1, 1, 1},  {0, 0, 0},
+    {1, 2, 3},  {1, 2, 2}, {1, 2, 1},  {0, 0, 0}, {0, 1, 1},  {0, 0, 0},  {-1, 2, 1}, {-1, 2, 2},
+    {-1, 2, 3}, {0, 0, 0}, {-1, 1, 1}, {0, 0, 0}, {-1, 2, 3}, {-1, 2, 2}, {-1, 2, 1}, {0, 0, 0},
+};
+
+const TrigValue kTanTable[24] = {
+    {0, 1, 1},  {0, 0, 0},  {1, 3, 3},  {1, 1, 1}, {1, 1, 3},  {0, 0, 0},  {0, 0, 0},  {0, 0, 0},
+    {-1, 1, 3}, {-1, 1, 1}, {-1, 3, 3}, {0, 0, 0}, {0, 1, 1},  {0, 0, 0},  {1, 3, 3},  {1, 1, 1},
+    {1, 1, 3},  {0, 0, 0},  {0, 0, 0},  {0, 0, 0}, {-1, 1, 3}, {-1, 1, 1}, {-1, 3, 3}, {0, 0, 0},
+};
+
+// Numeric value of an already-simplified subtree, for the sole purpose of
+// asking "is this argument a rational multiple of pi?". Deliberately narrow:
+// anything it can't evaluate exactly returns false and the call is left alone.
+bool eval_numeric(const Expr* e, double* out, int depth) {
+    if (e == nullptr || depth > 6) {
+        return false;
+    }
+    switch (e->type) {
+        case ExprType::kNum:
+            *out = e->num_val;
+            return true;
+        case ExprType::kFunc: {
+            if (e->child == nullptr) {
+                if (std::strcmp(e->func_name, "pi") != 0) {
+                    return false;
+                }
+                *out = kPi;
+                return true;
+            }
+            if (std::strcmp(e->func_name, "sqrt") != 0) {
+                return false;
+            }
+            double a = 0.0;
+            if (!eval_numeric(e->child, &a, depth + 1) || a < 0.0) {
+                return false;
+            }
+            *out = std::sqrt(a);
+            return true;
+        }
+        case ExprType::kNeg: {
+            double a = 0.0;
+            if (!eval_numeric(e->child, &a, depth + 1)) {
+                return false;
+            }
+            *out = -a;
+            return true;
+        }
+        case ExprType::kPow: {
+            double b = 0.0;
+            double x = 0.0;
+            if (!eval_numeric(e->child, &b, depth + 1) ||
+                !eval_numeric(e->child->next, &x, depth + 1)) {
+                return false;
+            }
+            *out = std::pow(b, x);
+            return std::isfinite(*out);
+        }
+        case ExprType::kAdd:
+        case ExprType::kMul: {
+            double acc = e->is_add() ? 0.0 : 1.0;
+            for (const Expr* c = e->child; c != nullptr; c = c->next) {
+                double v = 0.0;
+                if (!eval_numeric(c, &v, depth + 1)) {
+                    return false;
+                }
+                acc = e->is_add() ? acc + v : acc * v;
+            }
+            *out = acc;
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+// Build (num/den)*sqrt(rad) as an Expr. split_radical does the square-free
+// reduction, so sqrt(3)/3 and sqrt(2)/2 come out in the same normal form the
+// rest of the pipeline produces.
+Expr* trig_value_expr(const TrigValue& tv) {
+    if (tv.den == 0 || tv.rad <= 0) {
+        return nullptr;
+    }
+    const double coeff = static_cast<double>(tv.num) / static_cast<double>(tv.den);
+    if (tv.rad == 1 || coeff == 0.0) {
+        return Expr::num(coeff * std::sqrt(static_cast<double>(tv.rad)));
+    }
+    Expr* root = Expr::pow(Expr::num(static_cast<double>(tv.rad)), Expr::num(0.5));
+    if (root == nullptr) {
+        return nullptr;
+    }
+    return Expr::mul(Expr::num(coeff), root);
+}
+
+// sin/cos/tan at a rational multiple of pi. Returns nullptr to mean "no exact
+// value here" — never an error. Angle-mode aware: in DEG the argument is a
+// number of degrees, so sin(60) folds the same way sin(pi/3) does in RAD.
+Expr* fold_exact_trig(const char* name, const Expr* arg) {
+    const bool is_sin = std::strcmp(name, "sin") == 0;
+    const bool is_cos = std::strcmp(name, "cos") == 0;
+    const bool is_tan = std::strcmp(name, "tan") == 0;
+    if (!is_sin && !is_cos && !is_tan) {
+        return nullptr;
+    }
+
+    double x = 0.0;
+    if (!eval_numeric(arg, &x, 0)) {
+        return nullptr;
+    }
+
+    // Reduce the argument to p/q turns of pi.
+    long p = 0;
+    long q = 1;
+    if (math::angle_mode() == math::AngleMode::kDegrees) {
+        // x degrees == (x/180) * pi.
+        if (!is_int(x) || std::fabs(x) > 100000.0) {
+            return nullptr;
+        }
+        p = static_cast<long>(x);
+        q = 180;
+    } else if (x == 0.0) {
+        p = 0;
+        q = 1;
+    } else if (!math::frac::pi_multiple(x, 10000, 12, &p, &q)) {
+        return nullptr;
+    }
+
+    // Exact values exist only for denominators dividing 12 within the pi/6
+    // and pi/4 families.
+    if (q < 1 || 12 % q != 0) {
+        // Degrees give q == 180; reduce p/180 to lowest terms first.
+        long a = p < 0 ? -p : p;
+        long b = q;
+        while (b != 0) {
+            const long t = a % b;
+            a = b;
+            b = t;
+        }
+        if (a == 0) {
+            a = 1;
+        }
+        p /= a;
+        q /= a;
+        if (q < 1 || 12 % q != 0) {
+            return nullptr;
+        }
+    }
+
+    // Index in twelfths of pi, wrapped into [0, 24).
+    const long step = 12 / q;
+    long idx = (p * step) % 24;
+    if (idx < 0) {
+        idx += 24;
+    }
+    if (is_cos) {
+        idx = (idx + 6) % 24;  // cos(x) == sin(x + pi/2)
+    }
+
+    const TrigValue tv = is_tan ? kTanTable[idx] : kSinTable[idx];
+    if (tv.den == 0) {
+        return nullptr;  // no exact value (or tan undefined) — leave it alone
+    }
+    return trig_value_expr(tv);
+}
+
 Expr* surd_pass(const Expr* e) {
     if (e == nullptr) {
         return nullptr;
@@ -211,6 +394,12 @@ Expr* surd_pass(const Expr* e) {
             if (pulled != nullptr) {
                 return pulled;
             }
+        }
+    }
+    if (e->is_func() && e->child != nullptr) {
+        Expr* folded = fold_exact_trig(e->func_name, e->child);
+        if (folded != nullptr) {
+            return folded;
         }
     }
     return map_children(e, surd_pass);
@@ -384,8 +573,24 @@ bool exact_form(const char* input, double numeric, char* out, std::size_t out_le
 
     double value = 0.0;
     unsigned flags = 0;
-    if (!sum_value(tree, &value, &flags) || flags == 0) {
+    if (!sum_value(tree, &value, &flags)) {
         return false;
+    }
+    // G4 "interesting": a bare integer is normally not worth showing, since
+    // the numeric path already displays it exactly. The exception is when the
+    // numeric path *doesn't* — sin(pi) lands on 1.2246467991e-16 and cos(pi/2)
+    // on 6.123233996e-17, which display as scientific noise where a clean 0
+    // is the right answer. Comparing the formatted strings rather than the
+    // doubles is what keeps tan(pi/4) (0.9999999999999999, which already
+    // displays as "1") out of the amber path.
+    if (flags == 0) {
+        char shown[48];
+        char want[48];
+        math::format_number(numeric, shown, sizeof(shown));
+        math::format_number(value, want, sizeof(want));
+        if (std::strcmp(shown, want) == 0) {
+            return false;
+        }
     }
     // G5: the exact form must be the same number the user would otherwise
     // have seen. This is what makes CAS-vs-numeric parser divergence unable

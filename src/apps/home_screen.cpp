@@ -65,6 +65,28 @@ char g_hist_io[kHistoryTailBytes];
 constexpr int kStatusH = 16;
 constexpr int kInputY = 268;
 constexpr int kSoftkeyY = 296;
+
+// Exact-form display (Phase 5 §10.1, 4D.24): a second, side-effect-free CAS
+// probe run after the numeric result is already committed, so it can only
+// ever change what is *shown* — Ans, the store target and the variables all
+// still come from the numeric value. Overwrites `result` and returns true
+// only on a recognized closed form; the decimal stands otherwise. Shared by
+// the REAL and complex dispatch branches below.
+bool apply_exact_form(const char* expr, double value, int stored_var, bool suppressed, char* result,
+                      size_t result_len) {
+    // A store line reads "num=>a"; splicing an exact form into it would mean
+    // re-implementing format_scalar_result's store branch, and the CAS parser
+    // cannot parse the "->" anyway.
+    if (suppressed || stored_var >= 0 || !std::isfinite(value)) {
+        return false;
+    }
+    char exact[48];
+    if (!math::cas::exact_form(expr, value, exact, sizeof(exact))) {
+        return false;
+    }
+    std::snprintf(result, result_len, "%s", exact);
+    return true;
+}
 }  // namespace
 
 // Dirty bands for partial redraw (5.6 part 2). The input band is the
@@ -312,7 +334,7 @@ void format_scalar_result(const math::EvalResult& res, char* out, size_t out_len
 
 }  // namespace
 
-void HomeScreen::evaluate_input() {
+void HomeScreen::evaluate_input(bool force_decimal) {
     if (input_.empty()) {
         return;
     }
@@ -394,7 +416,7 @@ void HomeScreen::evaluate_input() {
     // further down, per result kind (scalar in the scalar path, matrix in
     // the matrix path). >dec is the default display.
     bool to_frac = false;
-    bool to_dec = false;
+    bool to_dec = force_decimal;
     {
         const size_t elen = std::strlen(expr);
         if (elen > 5 && std::strcmp(expr + elen - 5, ">frac") == 0) {
@@ -596,6 +618,15 @@ void HomeScreen::evaluate_input() {
             r.value = cres.value.re;
             r.stored_var = cres.stored_var;
             format_scalar_result(r, result, sizeof(result));
+            // A real-valued result reached through the complex path still
+            // gets exact-form display (RECT/POLAR modes, or a REAL-mode
+            // expression that merely mentions `i`). Genuinely complex values
+            // fall to the branch below and stay decimal — the CAS reserves
+            // `i` as a variable, which the probe's no-variables gate rejects.
+            if (apply_exact_form(expr, cres.value.re, cres.stored_var, to_dec, result,
+                                 sizeof(result))) {
+                rkind = ResultKind::kSymbolic;
+            }
         } else {
             // Complex commit (4D.15): Ans and the store target hold the
             // full value; real-only readers error on them (D37).
@@ -622,17 +653,9 @@ void HomeScreen::evaluate_input() {
             const auto res = math::engine().evaluate(expr);
             format_scalar_result(res, result, sizeof(result));
             error = !res.ok;
-            // Exact-form display (Phase 5 §10.1, 4D.24): a second
-            // side-effect-free CAS probe, mirroring the D30 pattern above.
-            // It can only change what is *shown* — Ans, the store target and
-            // the variables all still come from the numeric result committed
-            // by engine().evaluate() just above. `>dec` opts out explicitly.
-            if (!error && !to_dec && res.stored_var < 0 && std::isfinite(res.value)) {
-                char exact[48];
-                if (math::cas::exact_form(expr, res.value, exact, sizeof(exact))) {
-                    std::snprintf(result, sizeof(result), "%s", exact);
-                    rkind = ResultKind::kSymbolic;
-                }
+            if (!error &&
+                apply_exact_form(expr, res.value, res.stored_var, to_dec, result, sizeof(result))) {
+                rkind = ResultKind::kSymbolic;
             }
         }
     }
@@ -758,6 +781,21 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
     }
     switch (ev.key) {
         case Key::kEnter:
+            // Shift+Enter = "show me the decimal" (Phase 5 Stage 4). With an
+            // expression entered it evaluates it with the exact-form probe
+            // suppressed, exactly as a trailing `>dec` would. With the input
+            // empty it re-runs the newest history entry that came back as an
+            // exact form, so an amber √2 can be turned into 1.414213562
+            // without retyping it. Commands (cls, help, ...) are unaffected.
+            if (ev.shift_held && input_.empty()) {
+                const Entry* last = entry_from_newest(0);
+                if (last != nullptr && last->kind == ResultKind::kSymbolic) {
+                    input_.set_text(last->expr);
+                    evaluate_input(true);
+                    invalidate(0, kSoftkeyY);
+                }
+                return true;
+            }
             if (!input_.empty()) {
                 // Trimmed command match first (cls, help, ...).
                 char cmd[16];
@@ -780,7 +818,7 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
                         return true;
                     }
                 }
-                evaluate_input();
+                evaluate_input(ev.shift_held);
                 invalidate(0, kSoftkeyY);  // History + input + status bar
             }
             return true;

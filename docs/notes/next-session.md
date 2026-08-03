@@ -1,6 +1,32 @@
 # Start here — next session
 
-**Last session:** 2026-08-03 — **Phase 5 Stage 4: exact-form (surd)
+**Last session:** 2026-08-03 — **Stage 4 follow-ups, flashed to the
+Pico 2.** Three gaps found on the first exact-form flash, decision
+**D44**. (1) **Shift+Enter is the decimal escape** — with an expression
+entered it evaluates with the probe suppressed (same as `>dec`); with the
+input empty and the newest result being an exact form, it re-runs that
+expression as a decimal, so an amber `√2` becomes `1.414213562` without
+retyping. Nothing consumed Shift+Enter and `shift_held` already rides on
+every `kEnter` event (unlike arrows — D12). (2) **Exact trig at special
+angles**: `sin(pi/3)` → `√3/2`, `tan(pi/6)` → `√3/3`, `cos(pi/3)` → `1/2`,
+via a 24-entry table indexed in *twelfths of $\pi$* (covering the $\pi/6$
+and $\pi/4$ families; `cos(x)=sin(x+pi/2)` is an index shift). **Angle-mode
+aware** — in DEGREE mode `sin(60)` folds the same way. (3) **Non-REAL
+number modes now get exact forms** for real-valued results (the D43 v1
+limitation, which had no technical reason behind it) — the probe moved
+into a shared `apply_exact_form` helper used by both dispatch branches.
+Also: **"interesting" now compares formatted strings, not doubles**, so
+`sin(pi)` shows `0` instead of `1.224646799e-16` and `cos(pi/2)` shows
+`0` instead of `6.123233996e-17`, while `tan(pi/4)` (whose
+`0.9999999999999999` already formats as `1`) stays out of the amber path.
+Host suite green, `test_cas` **238 → 272**; Pico 1 bss **201,096, still
+flat**; flash +5.3 KB; lint/format clean. **Flashed to the Pico 2, clean
+boot confirmed over serial** — interactive confirmation still pending.
+On-device HELP gained the Shift+Enter line and an `#EXACT FORMS` block.
+Full detail: worklog's 2026-08-03 "Stage 4 follow-ups" entry,
+`decisions.md` D44.
+
+**Previous session:** 2026-08-03 — **Phase 5 Stage 4: exact-form (surd)
 display, source changes, host-verified.** Home-screen results with a clean
 closed form now show that form instead of a decimal — `sqrt(2)` → `√2`,
 `sqrt(8)` → `2√2`, `1/sqrt(2)` → `√2/2`, `pi*2` → `2π`, `1/3` → `1/3`
@@ -52,7 +78,7 @@ gated on a `WIKI_TOKEN` secret (`GITHUB_TOKEN` cannot push to wikis —
 the PAT setup is documented in `docs-site/README.md`). **Prose chapters
 are stubs** — this was a scaffold-and-generators seed only.
 
-**Previous session:** 2026-08-03 — **Bugfix, source changes: home-screen
+**Two sessions ago:** 2026-08-03 — **Bugfix, source changes: home-screen
 history persistence.** Root-caused and fixed the suspected home-screen I/O
 persistence bug flagged at the end of the 2026-08-02 Stage 3 session:
 symbolic CAS results were losing their `ResultKind` on reload (always came
@@ -78,7 +104,7 @@ confirmation of history-survives-reboot is still open — folds into Stage
 5's Pico 1/Pico 2 flashing. Full detail: worklog's 2026-08-03 entry,
 `decisions.md` D4.
 
-**Two sessions ago:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
+**Three sessions ago:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
 home-screen UI integration, source changes, HW-verified on the Pico 2.**
 On the `phase-5` branch (not yet merged to `main`). Two sessions: the CAS
 engine itself — expr tree/pool, parser, serializer, simplify, differentiate,
@@ -107,7 +133,7 @@ Decisions **D41**, **D42**. `PICOCALC_PHASE` stays `"4D"` (bumping to `"5"`
 is a Stage 5 close-out task, not yet reached). Full detail: worklog's
 2026-08-02 "Phase 5 Stages 0-3" entry.
 
-**Three sessions ago:** 2026-08-02 — **CI fix + first release, docs/infra only, no
+**Four sessions ago:** 2026-08-02 — **CI fix + first release, docs/infra only, no
 source changes.** The GitHub Actions "Build" workflow had two red jobs (the
 board build jobs themselves always passed): Lint disagreed with local
 clang-format because CI installed Ubuntu's apt `clang-format 18` against
@@ -125,7 +151,7 @@ decision number consumed, no phase/sub-phase status change (Phase 4D stays
 closed, Phase 5 CAS is still next — see "The next job" below). Full detail:
 worklog's 2026-08-02 "CI fix" entry.
 
-**Four sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
+**Five sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
 arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified on the Pico 2.**
 Opened the pre-Phase-5 code-review/size-optimization pass. A per-symbol SRAM
 audit (new `scripts/size-report.sh`) found ~40 KB tied up in per-module
@@ -150,7 +176,7 @@ design call). Full detail: `docs/notes/pre-phase5-review.md`, worklog's
 2026-08-02 "Pre-Phase-5 review pass" entry. Commits `1073f4f` (doc de-stale),
 `5f76851` (arena), `4edba81` (chop).
 
-**Five sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
+**Six sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
 HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
 UI-friction feature requests logged in the 2026-07-27 eval, plus two
 follow-ups raised during this session's on-device testing. Matrix results
@@ -170,7 +196,7 @@ suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
 4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
 polish" entry.
 
-**Six sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Seven sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -187,7 +213,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Seven sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Eight sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -207,7 +233,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Eight sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Nine sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -222,7 +248,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Nine sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Ten sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -277,21 +303,33 @@ detail.
    menu, `cas` command, 4D.4/4D.20/4D.21) are both done and pushed; see
    "Last session" above and worklog's 2026-08-02 "Phase 5 Stages 0-3"
    entry. **One stage remains, per `phase5-spec.md` §11:**
-   - **Stage 4 — exact-form display (4D.23/4D.24): DONE 2026-08-03,
-     host-verified, NOT yet on hardware.** See "Last session" above and
-     `decisions.md` D43. **Its on-device pass folds into Stage 5** —
-     script: `sqrt(2)`, `sqrt(8)`, `sqrt(12)`, `1/sqrt(2)`, `sqrt(1/2)`,
-     `sqrt(2)+sqrt(8)`, `1/3`, `2/6`, `1/3+1/7`, `pi`, `pi/2`, `pi*2`,
-     `1/pi`, `1+sqrt(2)` should all show amber typeset exact forms; `2.5`,
-     `0.1+0.2`, `2+2`, `4/2`, `sqrt(4)`, `sin(1)`, `1/3>dec`, `5->a` then
-     `a/3` should all stay unchanged white decimals; `1/3>frac` still
-     works the old way. Then reboot and confirm the amber forms reload
-     amber (that also covers the 2026-08-03 history fix). **Two judgement
-     calls to make while it's in hand**: whether `1/3` rendering as a
-     stacked fraction by default is welcome or intrusive, and the same for
-     `pi` rendering as `π` — D43's "Revisit when" names the escape hatch
-     (require a `sqrt`/`pi` flag rather than any flag, which drops bare
-     rationals back to decimal).
+   - **Stage 4 — exact-form display (4D.23/4D.24): DONE 2026-08-03
+     (D43) + follow-ups the same day (D44). Flashed to the Pico 2, clean
+     boot confirmed; interactive confirmation still pending.** Remaining
+     on-device script, to run on both boards during Stage 5:
+     - Amber typeset exact forms: `sqrt(2)`, `sqrt(8)`, `sqrt(12)`,
+       `1/sqrt(2)`, `sqrt(1/2)`, `sqrt(2)+sqrt(8)`, `1/3`, `2/6`,
+       `1/3+1/7`, `pi`, `pi/2`, `pi*2`, `1/pi`, `1+sqrt(2)`;
+       trig `sin(pi/6)`, `sin(pi/3)`, `cos(pi/3)`, `tan(pi/6)`,
+       `tan(pi/3)`, and `sin(pi)`/`cos(pi/2)` → a clean `0`.
+     - DEGREE mode: `sin(30)`, `sin(45)`, `sin(60)`, `cos(30)`, `tan(60)`
+       fold; `sin(37)` does not.
+     - RECT/POLAR number mode: real-valued results still get exact forms;
+       genuinely complex ones stay decimal.
+     - Unchanged white decimals: `2.5`, `0.1+0.2`, `2+2`, `4/2`,
+       `sqrt(4)`, `sin(1)`, `sin(pi/5)`, `tan(pi/2)`, `1/3>dec`,
+       `5->a` then `a/3`. `1/3>frac` still works the old way.
+     - **Shift+Enter**: on a typed expression → decimal; on an empty line
+       after an amber result → re-runs it as a decimal. **Verify the
+       STM32 actually delivers Shift+Enter** — it swallows Shift on arrow
+       keys (D12), and Enter has never been tested. If it swallows this
+       one too, the fallback is a different chord or an F-key.
+     - Reboot and confirm amber forms reload amber (also covers the
+       2026-08-03 history fix).
+     - **Judgement calls while it's in hand**: whether `1/3` as a stacked
+       fraction and `pi` as `π` are welcome or intrusive. D43's "Revisit
+       when" names the escape hatch (require a `sqrt`/`pi` flag rather
+       than any flag, dropping bare rationals back to decimal).
    - **Stage 5 — hardening + on-device verification (4D.22), not started.**
      Stress/edge-case tests, a pool-capacity guard (abort above ~80%
      capacity, spec Risk 2), the Risk-1 termination cycle set exercised at

@@ -18,6 +18,69 @@ Format:
 
 ---
 
+## D44: Exact-form follow-ups — Shift+Enter decimal escape, exact trig at special angles, and non-REAL number modes
+
+**Date**: 2026-08-03
+**Status**: Accepted (Phase 5 Stage 4 follow-up, same day as D43)
+**Context**: The first Pico 2 flash of D43's exact-form display raised three gaps
+in immediate use. (1) `>dec` was the only way to see a decimal, which means
+retyping the whole expression with a suffix — clumsy for the common "yes I know
+it's $\sqrt{2}$, what's the number" case. (2) `sin(pi/3)` showed `0.8660254038`, not
+`√3/2` — exact trig at special angles is the single most expected case of this
+feature and it was missing. (3) Exact forms were REAL-mode only, a scoping
+decision D43 recorded as a v1 limitation with no technical reason behind it.
+**Decision**:
+
+1. **Shift+Enter is the decimal escape.** With an expression entered it
+   evaluates with the exact-form probe suppressed, identically to a trailing
+   `>dec`. With the input line empty and the newest history result being an
+   exact form, it re-runs *that* expression as a decimal, so an amber `√2` can
+   be turned into `1.414213562` without retyping. Commands (`cls`, `help`, ...)
+   are unaffected. The `#HOME` and a new `#EXACT FORMS` block in the on-device
+   HELP KEYS/SYNTAX tabs document it.
+2. **Exact trig at special angles.** `sin`/`cos`/`tan` of a rational multiple of
+   $\pi$ with denominator in $\{1,2,3,4,6\}$ fold to their exact values through a
+   24-entry table indexed in twelfths of $\pi$ (one table covers both the $\pi/6$ and
+   $\pi/4$ families; `cos(x) = sin(x + pi/2)` is an index shift, so only sine and
+   tangent tables are stored). **Angle-mode aware**: in DEGREE mode the argument
+   is read as degrees, so `sin(60)` folds exactly as `sin(pi/3)` does in RADIAN.
+   `math::frac::pi_multiple` does the recognition.
+3. **Non-REAL number modes get exact forms** for real-valued results. The probe
+   moved into a shared `apply_exact_form` helper called from both the REAL and
+   the complex dispatch branches. Genuinely complex values stay decimal.
+4. **"Interesting" now compares formatted strings, not doubles.** A bare integer
+   is still normally not upgraded, but it *is* when the numeric path would
+   display something else.
+**Rationale**: Shift+Enter was free — nothing on the home screen consumed it, and
+`shift_held` already rides on every `kEnter` event (unlike arrows, where the
+STM32 swallows Shift entirely, D12). Reusing the existing `to_dec` plumbing made
+it a one-parameter change rather than a new display path. For trig, the twelfths
+indexing is what keeps this a table lookup instead of a case analysis: every
+exact angle in both families is an integer number of $\pi/12$, so reduction is one
+modulo. Handling DEGREE mode by reinterpreting the argument (rather than
+declining to fold) matters because a calculator in DEGREE mode is where a user
+most naturally types `sin(60)`. Point 4 is what lets `sin(pi)` show `0` instead
+of `1.224646799e-16` and `cos(pi/2)` show `0` instead of `6.123233996e-17` —
+float noise the numeric path cannot avoid and the exact path knows the answer to
+— while keeping `tan(pi/4)` out of the amber path, since its
+`0.9999999999999999` already formats as `1`. Comparing doubles would have caught
+`tan(pi/4)` too; comparing `format_number` output is the precise test because
+the display is what the gate is actually about.
+**Tradeoffs**: The trig table is +5.3 KB flash (bss unchanged at 201,096). Only
+sin/cos/tan — the inverse functions (`asin(1/2)` → `π/6`) are not folded, and
+neither are hyperbolic or `atan2`. In DEGREE mode the argument must be an
+integer number of degrees, so `sin(22.5)` does not fold even though `sin(pi/8)`
+is expressible. Shift+Enter on an empty line only acts when the newest result is
+an exact form; on a plain decimal result it does nothing (deliberate — silently
+re-evaluating an arbitrary past entry would be surprising). The complex-mode
+extension means RECT/POLAR now shows amber results where it showed decimals,
+a visible change in those modes.
+**Revisit when**: Inverse-trig exact values are wanted (the table is already the
+right shape to invert); or DEGREE-mode half-degree angles turn up in real use;
+or an on-device pass finds Shift+Enter conflicts with a keyboard layout where
+the STM32 swallows Shift on Enter the way it does on arrows (untested at the
+time of writing — the header's D12 note covers arrows only).
+
 ## D43: Phase 5 Stage 4 exact-form display — always-on, gated by an integers-only input rule plus a numeric-agreement check
 
 **Date**: 2026-08-03

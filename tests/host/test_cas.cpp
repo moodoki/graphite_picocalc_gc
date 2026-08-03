@@ -19,6 +19,7 @@
 #include "math/cas/simplify.hpp"
 #include "math/cas/solve.hpp"
 #include "math/engine.hpp"
+#include "math/types.hpp"
 
 using math::cas::differentiate;
 using math::cas::expand;
@@ -894,6 +895,64 @@ void test_exact_form() {
     }
 }
 
+// ---- Exact trigonometric values at special angles --------------------------
+
+void test_exact_trig() {
+    const math::AngleMode saved = math::angle_mode();
+
+    math::set_angle_mode(math::AngleMode::kRadians);
+    check_exact("sin(pi/6)", "1/2");
+    check_exact("sin(pi/4)", "sqrt(2) / 2");
+    check_exact("sin(pi/3)", "sqrt(3) / 2");
+    check_exact("cos(pi/6)", "sqrt(3) / 2");
+    check_exact("cos(pi/3)", "1/2");
+    check_exact("cos(-pi/3)", "1/2");
+    check_exact("tan(pi/6)", "sqrt(3) / 3");
+    check_exact("tan(pi/3)", "sqrt(3)");
+    check_exact("sin(-pi/6)", "-1/2");
+    // Float noise the numeric path can't avoid: sin(pi) lands on 1.22e-16
+    // and cos(pi/2) on 6.12e-17, which display as scientific notation.
+    check_exact("sin(pi)", "0");
+    check_exact("cos(pi/2)", "0");
+    // Exact values the numeric path already displays correctly are not
+    // upgraded — sin(pi/2) is 1 either way, and tan(pi/4)'s
+    // 0.9999999999999999 already formats as "1".
+    check_exact("sin(pi/2)", nullptr);
+    check_exact("tan(pi/4)", nullptr);
+    check_exact("cos(pi)", nullptr);
+    // tan is undefined at odd multiples of pi/2 — left alone, never folded.
+    check_exact("tan(pi/2)", nullptr);
+    // Angles outside the pi/6 and pi/4 families have no exact value.
+    check_exact("sin(pi/5)", nullptr);
+    check_exact("tan(pi/7)", nullptr);
+    check_exact("sin(1)", nullptr);
+    check_exact("sin(2)", nullptr);
+    // Folded trig composes with the rest of the grammar.
+    check_exact("2*sin(pi/3)", "sqrt(3)");
+    check_exact("sin(pi/3)+sin(pi/6)", "sqrt(3) / 2 + 1/2");
+
+    // DEGREE mode reads the argument as degrees, so the same special angles
+    // are reachable without typing pi.
+    math::set_angle_mode(math::AngleMode::kDegrees);
+    check_exact("sin(30)", "1/2");
+    check_exact("sin(45)", "sqrt(2) / 2");
+    check_exact("sin(60)", "sqrt(3) / 2");
+    check_exact("cos(30)", "sqrt(3) / 2");
+    check_exact("tan(60)", "sqrt(3)");
+    check_exact("sin(-60)", "-sqrt(3) / 2");
+    check_exact("sin(120)", "sqrt(3) / 2");
+    check_exact("sin(180)", "0");
+    check_exact("sin(90)", nullptr);
+    check_exact("tan(45)", nullptr);
+    // Non-special degree angles, and a radian-style argument typed while in
+    // DEGREE mode (G5 would reject it even if the fold were attempted).
+    check_exact("sin(37)", nullptr);
+    check_exact("sin(10)", nullptr);
+    check_exact("sin(pi/3)", nullptr);
+
+    math::set_angle_mode(saved);
+}
+
 }  // namespace
 
 int main() {
@@ -918,6 +977,7 @@ int main() {
     test_solve();
     test_home_eval();
     test_exact_form();
+    test_exact_trig();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

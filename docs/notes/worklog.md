@@ -305,6 +305,63 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-03 — Stage 4 follow-ups: Shift+Enter decimal escape, exact trig, non-REAL modes (flashed to Pico 2)
+
+Three gaps that surfaced on the first Pico 2 flash of the Stage 4 work below.
+Decision **D44**.
+
+**Shift+Enter is the decimal escape.** With an expression entered it evaluates
+with the exact-form probe suppressed, identically to a trailing `>dec`. With the
+input line empty and the newest result being an exact form, it re-runs *that*
+expression as a decimal — so an amber `√2` becomes `1.414213562` without
+retyping. Nothing on the home screen consumed Shift+Enter, and `shift_held`
+already rides on every `kEnter` event (unlike arrow keys, where the STM32
+swallows Shift entirely — D12). Implemented as `evaluate_input(bool
+force_decimal)` feeding the existing `to_dec` flag, so it is one parameter, not
+a new display path. Commands (`cls`, `help`, ...) are unaffected. Documented in
+the on-device HELP `#HOME` block and a new `#EXACT FORMS` block on the SYNTAX
+tab.
+
+**Exact trig at special angles.** `sin`/`cos`/`tan` of a rational multiple of $\pi$
+with denominator in {1,2,3,4,6} now fold: `sin(pi/3)` → `√3/2`, `tan(pi/6)` →
+`sqrt(3)/3`, `cos(pi/3)` to `1/2`. A table indexed in *twelfths of $\pi$* covers
+both the $\pi/6$ and $\pi/4$ families in one lookup, and `cos(x) = sin(x + pi/2)` is an
+index shift so only sine and tangent tables exist. **Angle-mode aware**: in
+DEGREE mode the argument is read as degrees, so `sin(60)` folds exactly as
+`sin(pi/3)` does in RADIAN — which is where a user most naturally types it.
+Recognition is `math::frac::pi_multiple`, finally used for what the Stage 4 plan
+originally expected it to be used for.
+
+**Non-REAL number modes now get exact forms** for real-valued results — the D43
+v1 limitation, which was a scoping decision with no technical reason behind it.
+The probe moved into a shared `apply_exact_form` helper called from both the
+REAL and the complex dispatch branches. Genuinely complex values stay decimal
+(the CAS reserves `i` as a variable, which the no-variables gate rejects).
+
+**"Interesting" now compares formatted strings rather than doubles.** A bare
+integer is still normally not upgraded — the numeric path already shows it — but
+it *is* when the numeric path would display something else. That is what lets
+`sin(pi)` show `0` instead of `1.224646799e-16` and `cos(pi/2)` show `0` instead
+of `6.123233996e-17`: float noise the numeric path cannot avoid and the exact
+path knows the answer to. Comparing doubles would also have caught `tan(pi/4)`,
+whose `0.9999999999999999` already formats as `1`; comparing `format_number`
+output is the precise test, because the display is what the gate is about.
+
+**Verification**: host suite green, `test_cas` **238 → 272** checks (new
+`test_exact_trig` covers both angle modes, the undefined `tan(pi/2)`, non-special
+angles, and the float-noise cases), 0 failures across all 15 suites. Both boards
+build clean; Pico 1 bss **201,096, still exactly flat**; flash +5.3 KB (the trig
+table and helpers). `lint.sh`/`format.sh` clean. **Flashed to the Pico 2**
+(`picotool load -f -x`), clean boot confirmed over serial — psram-bulk healthy,
+die temp 39 C. Interactive confirmation is the user's next pass.
+
+Files: `src/math/cas/exact.cpp` (trig table, `eval_numeric`, `fold_exact_trig`,
+formatted-string "interesting" test); `src/apps/home_screen.{hpp,cpp}`
+(`apply_exact_form` helper, `evaluate_input(bool)`, Shift+Enter handling);
+`src/apps/help_screen.cpp` (HELP text); `tests/host/test_cas.cpp`.
+
+---
+
 ## 2026-08-03 — Phase 5 Stage 4: exact-form (surd) display, source changes, host-verified
 
 Stage 4 of Phase 5 (`phase5-spec.md` §10.1, tasks **4D.23** + **4D.24**), on the

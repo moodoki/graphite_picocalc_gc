@@ -73,7 +73,9 @@ private:
     void invalidate_input();
     void invalidate_history();
 
-    void evaluate_input();
+    // force_decimal suppresses the exact-form probe for this evaluation, the
+    // same way a trailing `>dec` does — Shift+Enter's "show me the decimal".
+    void evaluate_input(bool force_decimal = false);
     bool handle_command(const char* cmd);
     int visible_count() const;
     int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_

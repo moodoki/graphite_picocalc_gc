@@ -635,6 +635,21 @@ would be silently wrong); and the recognized form must agree with the
 numeric result to $10^{-9}$ relative before it is displayed, which makes
 CAS-vs-`tinyexpr` parser divergence unable to alter a shown answer.
 
+**Scope, as shipped** (extended 2026-08-03 by D44, same day): recognition
+covers rational coefficients, `sqrt` of a square-free integer, `pi`, **and
+exact `sin`/`cos`/`tan` at rational multiples of $\pi$ with denominator in
+$\{1,2,3,4,6\}$** — angle-mode aware, so `sin(60)` in DEGREE folds the same
+way `sin(pi/3)` does in RADIAN. It applies in **all number modes** for
+real-valued results, not just REAL. A bare integer result is not upgraded
+*unless* the numeric path would display something else, which is how
+`sin(pi)` shows `0` rather than its float-noise `1.224646799e-16`.
+**`Shift+Enter` is the decimal escape**: on a typed expression it evaluates
+with the probe suppressed (as `>dec` does), and on an empty input line it
+re-runs the newest exact-form result as a decimal.
+
+Not folded: inverse trig (`asin(1/2)` as $\pi/6$), hyperbolic functions,
+`pi^2`, `sqrt(pi)`, nested radicals, and non-integer degree arguments.
+
 **Scope boundary**: this is exact-*value* display for plain numbers only.
 It is explicitly **not** the same as CAS `simplify()` on a variable
 expression (§10's menu/inline syntax, which already does full symbolic
