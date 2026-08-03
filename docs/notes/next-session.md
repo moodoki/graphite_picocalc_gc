@@ -413,13 +413,21 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **2026-08-03's history-persistence fix has NOT been flashed to either
-  board yet** — built/linted/host-tested only (this is a firmware-only
-  path, no host UI to exercise it against real SD I/O). It's a persistence
-  *format* change (`history.txt` gained a third tab-separated kind
-  column) but is backward compatible — no one-time reset, old
-  two-field lines still parse as `kPlain`. Confirm on-device (both
-  boards) alongside the Stage 5 flash, see "The next job" #1.
+- **The Pico 2 is flashed to `fd61849`** (2026-08-04) — Phase 5 Stages
+  0-4 complete: the CAS engine + UI integration, exact-form display
+  (surds, `pi`, bare rationals, special-angle trig), the Alt+Enter
+  decimal escape, and the 2026-08-03 history-persistence fix. Clean boot
+  confirmed over serial (psram-bulk healthy, die temp 36-39 C).
+  **Interactive confirmation is still pending** — the script is in "The
+  next job" #1's Stage 4 bullet. **The Pico 1 has still never been
+  flashed with any Phase 5 code**; that is Stage 5.
+- **The history-persistence fix reached hardware with the build above**,
+  but its reboot behavior has not been exercised yet — the host suite has
+  no coverage for this path (it is firmware-only, with no host UI to run
+  against real SD I/O). It is a persistence *format* change (`history.txt`
+  gained a third tab-separated kind column) but backward compatible — no
+  one-time reset, old two-field lines still parse as `kPlain`. Confirm on
+  both boards alongside the Stage 5 flash, see "The next job" #1.
 - **Firmware on the Pico 2 was reflashed on `phase-5` (2026-08-02) with
   Phase 5 Stages 0-3** — the CAS engine + home-screen UI integration
   (inline `diff()`/`integ()`/`factor()`/`expand()`/`simplify()`/`solve()`,

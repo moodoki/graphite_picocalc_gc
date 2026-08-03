@@ -308,7 +308,9 @@ Still to verify on hardware:
 ## 2026-08-03 — Stage 4 follow-ups: Alt+Enter decimal escape, exact trig, non-REAL modes (flashed to Pico 2)
 
 Three gaps that surfaced on the first Pico 2 flash of the Stage 4 work below.
-Decision **D44**.
+Decision **D44**. (Session ran past midnight — the Alt+Enter rebind landed
+2026-08-04 as commit `fd61849`; kept in this entry since it is the same piece
+of work.)
 
 **Alt+Enter is the decimal escape.** With an expression entered it evaluates
 with the exact-form probe suppressed, identically to a trailing `>dec`. With the
@@ -320,9 +322,10 @@ screen showed that chord arriving as key code 59 (`kInsert`) rather than 52
 own scan codes (Shift+Enter -> 0xD1, the same family as Shift+F1..F4 ->
 F6..F9) instead of reporting base-key + modifier, so a Shift binding would
 never have fired. Rebound to Alt, which passes its flag through intact the
-way Alt+UP/DOWN already does, and which leaves the real Insert key free. Implemented as `evaluate_input(bool
-force_decimal)` feeding the existing `to_dec` flag, so it is one parameter, not
-a new display path. Commands (`cls`, `help`, ...) are unaffected. Documented in
+way Alt+UP/DOWN already does, and which leaves the real Insert key free; the
+translation behavior is now recorded in `platform/keyboard.hpp` beside the D12
+arrow note. Implemented as `evaluate_input(bool force_decimal)` feeding the
+existing `to_dec` flag, so it is one parameter, not a new display path. Commands (`cls`, `help`, ...) are unaffected. Documented in
 the on-device HELP `#HOME` block and a new `#EXACT FORMS` block on the SYNTAX
 tab.
 
