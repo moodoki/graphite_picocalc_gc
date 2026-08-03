@@ -9,6 +9,7 @@
 
 #include "math/cas/cas_eval.hpp"
 #include "math/cas/derivative.hpp"
+#include "math/cas/exact.hpp"
 #include "math/cas/expand.hpp"
 #include "math/cas/expr.hpp"
 #include "math/cas/factor.hpp"
@@ -17,6 +18,7 @@
 #include "math/cas/serialize.hpp"
 #include "math/cas/simplify.hpp"
 #include "math/cas/solve.hpp"
+#include "math/engine.hpp"
 
 using math::cas::differentiate;
 using math::cas::expand;
@@ -784,6 +786,114 @@ void test_home_eval() {
     check(evaluate_home("diff()", true).kind == HomeKind::kError, "home: diff() -> error");
 }
 
+// ---- Exact-form display (Stage 4, 4D.23/4D.24) -----------------------------
+
+// The numeric value the home screen would have shown, from the same engine
+// the real dispatch uses — so the G5 agreement gate is exercised against a
+// genuinely independent number, not against exact_form's own arithmetic.
+void check_exact(const char* input, const char* want) {
+    const auto num = math::engine().evaluate(input);
+    char out[48];
+    const bool got = math::cas::exact_form(input, num.ok ? num.value : 0.0, out, sizeof(out));
+    ++g_checks;
+    if (want == nullptr) {
+        if (got) {
+            ++g_failures;
+            std::printf("FAIL: exact(\"%s\") -> \"%s\", expected no upgrade\n", input, out);
+        }
+        return;
+    }
+    if (!got) {
+        ++g_failures;
+        std::printf("FAIL: exact(\"%s\") -> none, expected \"%s\"\n", input, want);
+        return;
+    }
+    if (std::strcmp(out, want) != 0) {
+        ++g_failures;
+        std::printf("FAIL: exact(\"%s\") -> \"%s\", expected \"%s\"\n", input, out, want);
+    }
+}
+
+void test_exact_form() {
+    // Surd extraction: perfect-square factors are pulled out of the radicand.
+    check_exact("sqrt(2)", "sqrt(2)");
+    check_exact("sqrt(8)", "2*sqrt(2)");
+    check_exact("sqrt(12)", "2*sqrt(3)");
+    check_exact("sqrt(72)", "6*sqrt(2)");
+    // Rationalization: a radical in a denominator moves to the numerator.
+    check_exact("1/sqrt(2)", "sqrt(2) / 2");
+    check_exact("sqrt(1/2)", "sqrt(2) / 2");
+    check_exact("sqrt(18)/3", "sqrt(2)");
+    // Like radicals combine (this is the simplifier doing the work for us).
+    check_exact("sqrt(2)+sqrt(8)", "3*sqrt(2)");
+    // pi keeps its closed form too (P5-6).
+    check_exact("pi", "pi");
+    check_exact("pi/2", "pi / 2");
+    check_exact("pi*2", "2*pi");
+    check_exact("3*pi/4", "3*pi / 4");
+    check_exact("1/pi", "1 / pi");
+    // Bare rationals: an integers-only input means an exact answer was meant.
+    check_exact("1/3", "1/3");
+    check_exact("2/6", "1/3");
+    check_exact("1/3+1/7", "10/21");
+    // A sum of a radical and a rational.
+    check_exact("1+sqrt(2)", "sqrt(2) + 1");
+
+    // G2 — a non-integer literal means the user typed a decimal, so leave the
+    // decimal alone. Without this, 2.5 would become 5/2 and 0.1+0.2 -> 3/10.
+    check_exact("2.5", nullptr);
+    check_exact("0.1+0.2", nullptr);
+    check_exact("1e-3", nullptr);
+    // G3 — anything naming a symbol. The CAS parser has no `ans` or `e`, so
+    // these must never be evaluated symbolically.
+    check_exact("e", nullptr);
+    check_exact("ans", nullptr);
+    check_exact("x+1", nullptr);
+    check_exact("2->a", nullptr);
+    // G4 — "interesting": a bare integer result is already exact.
+    check_exact("2+2", nullptr);
+    check_exact("4/2", nullptr);
+    check_exact("sqrt(4)", nullptr);
+    // G4 — outside the whitelist grammar.
+    check_exact("sin(1)", nullptr);
+    check_exact("ln(2)", nullptr);
+    check_exact("sqrt(pi)", nullptr);
+    check_exact("sqrt(sqrt(2))", nullptr);
+    check_exact("pi^2", nullptr);
+    check_exact("2^(1/3)", nullptr);
+    check_exact("sqrt(-4)", nullptr);
+    // Bounds: a radicand past the factorizer's cap, and a rational the
+    // serializer would print as a decimal anyway.
+    check_exact("sqrt(1000000007)", nullptr);
+    check_exact("1/10001", nullptr);
+
+    // G5 is wired and not vacuous: an exact form that disagrees with the
+    // numeric result is rejected, whatever the shape says.
+    {
+        char out[48];
+        check(!math::cas::exact_form("sqrt(2)", 99.0, out, sizeof(out)),
+              "exact: G5 rejects a form that disagrees with the numeric value");
+    }
+
+    // Pool exhaustion returns false rather than crashing (spec §13 Risk 2).
+    {
+        char deep[64];
+        std::memset(deep, '(', sizeof(deep));
+        deep[sizeof(deep) - 1] = 0;
+        char out[48];
+        check(!math::cas::exact_form(deep, 1.0, out, sizeof(out)),
+              "exact: malformed/deep input returns false");
+    }
+
+    // The probe leaves `out` untouched when it declines, so a caller that
+    // ignores the return value cannot show garbage.
+    {
+        char out[48] = "sentinel";
+        (void)math::cas::exact_form("2+2", 4.0, out, sizeof(out));
+        check(std::strcmp(out, "sentinel") == 0, "exact: declined probe leaves out untouched");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -807,6 +917,7 @@ int main() {
     test_integrate();
     test_solve();
     test_home_eval();
+    test_exact_form();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

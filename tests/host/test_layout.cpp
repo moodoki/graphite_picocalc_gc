@@ -107,10 +107,12 @@ int main() {
                    n->t.text[0] == gfx::kGlyphPi && n->t.text[1] == 0,
                "'pi' is the pi glyph");
         expect(n != nullptr && n->width == 8, "'pi' width = 1 char");
+        // Stage 4: a coefficient before a symbol glyph multiplies
+        // implicitly, so "2*pi" typesets as "2pi" with no '*' node.
         auto* h = build("2*pi");
-        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 3 &&
-                   h->h.items[2]->t.text[0] == gfx::kGlyphPi,
-               "'2*pi' substitutes the glyph");
+        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 2 &&
+                   h->h.items[1]->t.text[0] == gfx::kGlyphPi,
+               "'2*pi' substitutes the glyph, no '*'");
         // Identifiers merely containing 'pi' are untouched.
         auto* s = build("pit");
         expect(s != nullptr && s->type == NodeType::kText &&
@@ -172,6 +174,46 @@ int main() {
         auto* n = build("sin(x)/2");
         expect(n != nullptr && n->type == NodeType::kFraction,
                "'sin(x)/2' is Fraction");
+    }
+
+    // Exact-form display (Phase 5 Stage 4): a single-atom radicand loses its
+    // parens, and a coefficient in front of a radical multiplies implicitly,
+    // so the CAS's "2*sqrt(2)" typesets as the handwritten "2√2".
+    {
+        auto* n = build("sqrt(2)");
+        expect(n != nullptr && n->type == NodeType::kHBox && n->h.count == 2 &&
+                   n->h.items[0]->t.text[0] == gfx::kGlyphSqrt &&
+                   n->h.items[1]->type == NodeType::kText,
+               "'sqrt(2)' is a bare radicand");
+        expect(n != nullptr && n->width == 2 * 8, "'sqrt(2)' width = 2 chars");
+
+        // A compound radicand still needs its parens — there is no vinculum.
+        auto* c = build("sqrt(2+3)");
+        expect(c != nullptr && c->type == NodeType::kHBox && c->h.count == 2 &&
+                   c->h.items[1]->type == NodeType::kParen,
+               "'sqrt(2+3)' keeps its parens");
+
+        // ... and so does a radicand followed by '^', or "√x^2" would read
+        // as sqrt(x^2).
+        auto* s = build("sqrt(x)^2");
+        expect(s != nullptr && s->type == NodeType::kSuperscript &&
+                   s->bin.a->type == NodeType::kHBox &&
+                   s->bin.a->h.items[1]->type == NodeType::kParen,
+               "'sqrt(x)^2' keeps its parens under a power");
+
+        auto* h = build("2*sqrt(2)");
+        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 2 &&
+                   h->h.items[1]->type == NodeType::kHBox,
+               "'2*sqrt(2)' drops the '*'");
+        expect(h != nullptr && h->width == 3 * 8, "'2*sqrt(2)' width = 3 chars");
+
+        // Anti-regression for the is_call() relaxation: a bare radicand must
+        // still count as "simple" so it stacks as a fraction numerator.
+        auto* f = build("sqrt(2) / 2");
+        expect(f != nullptr && f->type == NodeType::kFraction &&
+                   f->bin.a->type == NodeType::kHBox &&
+                   f->bin.a->h.items[0]->t.text[0] == gfx::kGlyphSqrt,
+               "'sqrt(2) / 2' stacks with a radical numerator");
     }
 
     // Power in a fraction: x^2/2 stacks with a Superscript numerator.

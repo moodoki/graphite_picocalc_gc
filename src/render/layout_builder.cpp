@@ -82,11 +82,38 @@ LayoutNode* make_text(const char* s, int len, const Metrics& m) {
 bool is_call(const LayoutNode* n) {
     // name(args): a Text name followed by a Paren. The name is normally
     // alphabetic, but sqrt renders as the single radical glyph.
-    return n->type == NodeType::kHBox && n->h.count == 2 &&
-           n->h.items[0]->type == NodeType::kText &&
-           (std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 ||
-            n->h.items[0]->t.text[0] == gfx::kGlyphSqrt) &&
+    if (n->type != NodeType::kHBox || n->h.count != 2 || n->h.items[0]->type != NodeType::kText) {
+        return false;
+    }
+    if (n->h.items[0]->t.text[0] == gfx::kGlyphSqrt) {
+        // Radicals also take the bare-radicand shape (Stage 4): "√2" is
+        // HBox[radical, Text] rather than HBox[radical, Paren]. Keeping it a
+        // "call" is what lets sqrt(2)/2 still stack as a fraction.
+        return n->h.items[1]->type == NodeType::kParen || n->h.items[1]->type == NodeType::kText;
+    }
+    return std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 &&
            n->h.items[1]->type == NodeType::kParen;
+}
+
+// A radical call, in either the parenthesized or bare-radicand shape.
+bool is_radical(const LayoutNode* n) {
+    return is_call(n) && n->h.items[0]->t.text[0] == gfx::kGlyphSqrt;
+}
+
+// A single-glyph atom that reads as a symbol rather than a value — pi,
+// theta and the other Greek letters. A coefficient multiplies these
+// implicitly ("2pi" renders as 2 followed by the glyph, no '*'), which is
+// how they are written by hand. Deliberately excludes the operator-ish
+// glyphs (store arrow, not-equal, ellipsis) and the radical, which
+// is_radical() covers in its own right.
+bool is_symbol_glyph(const LayoutNode* n) {
+    if (n == nullptr || n->type != NodeType::kText || n->t.text[0] == 0 || n->t.text[1] != 0) {
+        return false;
+    }
+    const char c = n->t.text[0];
+    return c == gfx::kGlyphPi || c == gfx::kGlyphTheta || c == gfx::kGlyphSigmaLower ||
+           c == gfx::kGlyphSigmaUpper || c == gfx::kGlyphChi || c == gfx::kGlyphMu ||
+           c == gfx::kGlyphImagI || c == gfx::kGlyphLambda;
 }
 
 bool is_simple(const LayoutNode* n) {
@@ -248,7 +275,13 @@ struct Parser {
                 if (*p == ')') {
                     ++p;
                 }
-                LayoutNode* group = make_paren(args, m);
+                skip_spaces();
+                // Bare radicand (Stage 4): "√2", not "√(2)". Only when the
+                // argument is a single atom, and never when a '^' follows —
+                // there is no vinculum, so the parens are the only grouping
+                // and "√x^2" must not read as sqrt(x^2).
+                const bool bare = is_sqrt && args->type == NodeType::kText && *p != '^';
+                LayoutNode* group = bare ? args : make_paren(args, m);
                 LayoutNode* pair[2] = {name, group};
                 return make_hbox(pair, 2);
             }
@@ -309,7 +342,11 @@ struct Parser {
                 if (count == 0) {
                     items[count++] = cur;
                 }
-                if (count < LayoutNode::kMaxChildren) {
+                // Implicit multiplication before a radical or a symbol glyph
+                // (Stage 4): "2*sqrt(2)" renders "2√2" and "2*pi" renders
+                // "2π", the way they are written by hand.
+                const bool implicit = op == '*' && (is_radical(rhs) || is_symbol_glyph(rhs));
+                if (!implicit && count < LayoutNode::kMaxChildren) {
                     items[count++] = make_text(op == '*' ? "*" : "/", 1, m);
                 }
                 if (count < LayoutNode::kMaxChildren) {

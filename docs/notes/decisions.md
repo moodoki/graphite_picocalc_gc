@@ -18,6 +18,73 @@ Format:
 
 ---
 
+## D43: Phase 5 Stage 4 exact-form display — always-on, gated by an integers-only input rule plus a numeric-agreement check
+
+**Date**: 2026-08-03
+**Status**: Accepted (Phase 5 Stage 4, tasks 4D.23 / 4D.24). Resolves open questions P5-5 and P5-6.
+**Context**: `phase5-spec.md` §10.1 wanted home-screen results with a clean closed
+form to display that form instead of a truncated decimal (`sqrt(2)` → `√2`,
+`sqrt(8)` → `2√2`, `pi*2` → `2π`, `1/3` → `1/3`). Two questions were left open:
+whether recognition is always-on or a MODE toggle (P5-5), and whether `pi` gets
+the treatment alongside `sqrt` (P5-6). Both were answered "always-on, yes to pi",
+which makes the feature touch *every* plain scalar result on the home screen —
+so the real design work is bounding what it may change.
+**Decision**: Always-on, no MODE row entry; `pi` included. `>dec` is the per-result
+opt-out (it already existed and previously did nothing beyond stripping itself).
+Recognition lives in a new `src/math/cas/exact.cpp`, **not** in `simplify()`, and
+runs as a side-effect-free probe after the numeric result is committed, mirroring
+the D30 `complexexpr` pattern. Five gates decide whether the decimal is replaced:
+
+1. The numeric result must exist, be finite, and not be a store (`5->a`).
+2. Every numeric literal in the *parsed* input must be an integer.
+3. No variables may appear anywhere in the parsed tree.
+4. The simplified tree must match a whitelist grammar — rational coefficients,
+   `sqrt` of a square-free integer, `pi` — and be "interesting" (a bare integer
+   is not upgraded).
+5. The recognized form must agree with the numeric result to $10^{-9}$ relative.
+
+Display goes through the existing D42 path (serialize → `render::build_layout`,
+amber `kSymbolic`). Two layout-builder changes give the handwritten look the
+spec's acceptance text asks for: a single-atom radicand drops its parens (`√2`,
+not `√(2)`), and a coefficient before a radical or a symbol glyph multiplies
+implicitly (`2√2`, `2π`, not `2*√(2)` / `2*π`).
+**Rationale**: Gate 2 is the one that makes "always-on" safe. Without it, `2.5`
+would display as `5/2` and `0.1+0.2` as `3/10` — technically the nearest small
+rational, but a change to results the user never asked to see reinterpreted.
+"The user typed only integers" is a clean, explainable proxy for "an exact answer
+was meant", and it also rejects the decimals that `convert()`/`solve()`
+substitution splices into the expression buffer. Gate 3 is not optional: the CAS
+parser has no `ans` or `e`, so `ans` parses as `a*n*s` and `e` as a variable while
+the numeric engine gives both real values — a silent-wrong-answer generator, not
+just a missed opportunity. Gate 5 makes the whole class of CAS-vs-`tinyexpr`
+parser divergences (implicit multiplication, unary-minus binding, DEG-mode trig)
+unable to alter a displayed answer, by construction. Keeping surd extraction out
+of `simplify()` matters because `simplify()` runs inside `integrate()`, `solve()`,
+`factor()` and the derivative fixed-point loops; rewriting `POW(NUM, 1/2)` there
+would change node shape mid-loop for passes that pattern-match on `POW` (§13
+Risk 1) for zero Stage-4 benefit. The implementation works in `POW(u, 1/2)` space
+rather than `FUNC sqrt(u)` space so the existing simplifier does the factor
+collection: `sqrt(2)*sqrt(2)` collapses to `2` and `1/sqrt(2)` becomes
+`POW(2,-1/2)`, making denominator- and radicand-rationalization one code path.
+**Tradeoffs**: `1/3` now displays as an amber stacked fraction where it used to
+show `0.3333333333`, and `pi` displays as `π` — a visible change to
+long-standing behavior, deliberate but worth watching on device. `>frac` results
+stay white flat text, so `1/3` and `1/3>frac` look different despite meaning the
+same thing. Expressions naming a variable or `Ans` never get an exact form
+(gate 3), so `5->a` then `a/3` stays decimal. Non-REAL number modes get no exact
+forms at all in v1 — the `force_complex` branch is not wired, a ~6-line
+follow-up. The grammar is a whitelist, so `pi^2`, `sqrt(pi)`, `2^(1/3)` and
+`sqrt(sqrt(2))` all fall back to decimal; each extension is a separate decision.
+Radicands are capped at $10^6$ (the trial-division factorizer runs to $d = 1000$,
+~0.5 ms worst case on the M0+) and denominators at 10000, matching
+`serialize.cpp`. The layout change also alters how a *typed* `2*pi` renders on
+the input line, which required updating an existing `test_layout` assertion.
+**Revisit when**: The on-device pass judges the `1/3`-as-fraction and `pi`-as-`π`
+changes too intrusive (the escape hatch is to require a `sqrt`/`pi` flag rather
+than any flag, dropping bare rationals back to decimal); or a MODE toggle is
+wanted after all; or non-REAL modes need exact forms; or the whitelist grammar
+starts rejecting forms users actually hit.
+
 ## D42: Phase 5 CAS result rendering — reuse `render::build_layout` on the serialized string instead of a dedicated `expr_to_layout` tree-walker
 
 **Date**: 2026-08-02

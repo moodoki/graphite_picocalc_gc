@@ -173,7 +173,7 @@ echo "== Compiling + linking test_cas =="
     src/math/cas/expr.cpp src/math/cas/parser.cpp src/math/cas/serialize.cpp \
     src/math/cas/simplify.cpp src/math/cas/derivative.cpp src/math/cas/expand.cpp \
     src/math/cas/poly.cpp src/math/cas/solve.cpp src/math/cas/factor.cpp \
-    src/math/cas/integrate.cpp src/math/cas/cas_eval.cpp \
+    src/math/cas/integrate.cpp src/math/cas/cas_eval.cpp src/math/cas/exact.cpp \
     src/math/numeric_solve.cpp \
     src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
     src/math/frac.cpp src/math/catalog.cpp src/math/dist.cpp src/math/complex.cpp \

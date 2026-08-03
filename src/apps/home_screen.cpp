@@ -1,6 +1,7 @@
 #include "apps/home_screen.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -9,6 +10,7 @@
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/cas/cas_eval.hpp"
+#include "math/cas/exact.hpp"
 #include "math/cas/serialize.hpp"
 #include "math/complex_expr.hpp"
 #include "math/engine.hpp"
@@ -392,6 +394,7 @@ void HomeScreen::evaluate_input() {
     // further down, per result kind (scalar in the scalar path, matrix in
     // the matrix path). >dec is the default display.
     bool to_frac = false;
+    bool to_dec = false;
     {
         const size_t elen = std::strlen(expr);
         if (elen > 5 && std::strcmp(expr + elen - 5, ">frac") == 0) {
@@ -399,6 +402,7 @@ void HomeScreen::evaluate_input() {
             to_frac = true;
         } else if (elen > 4 && std::strcmp(expr + elen - 4, ">dec") == 0) {
             expr[elen - 4] = 0;  // Decimal is the default display
+            to_dec = true;       // ... and suppresses the exact-form probe (4D.24)
         }
     }
 
@@ -567,6 +571,7 @@ void HomeScreen::evaluate_input() {
     // engine state; only this dispatch does, exactly once).
     char result[128];
     bool error = false;
+    ResultKind rkind = ResultKind::kPlain;
     // Complex-valued variables force the complex path too (4D.15): in
     // REAL mode that yields the pointed "Non-real result" error below;
     // in RECT/POLAR the reference resolves normally.
@@ -617,12 +622,24 @@ void HomeScreen::evaluate_input() {
             const auto res = math::engine().evaluate(expr);
             format_scalar_result(res, result, sizeof(result));
             error = !res.ok;
+            // Exact-form display (Phase 5 §10.1, 4D.24): a second
+            // side-effect-free CAS probe, mirroring the D30 pattern above.
+            // It can only change what is *shown* — Ans, the store target and
+            // the variables all still come from the numeric result committed
+            // by engine().evaluate() just above. `>dec` opts out explicitly.
+            if (!error && !to_dec && res.stored_var < 0 && std::isfinite(res.value)) {
+                char exact[48];
+                if (math::cas::exact_form(expr, res.value, exact, sizeof(exact))) {
+                    std::snprintf(result, sizeof(result), "%s", exact);
+                    rkind = ResultKind::kSymbolic;
+                }
+            }
         }
     }
 
-    push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
+    push_entry(input_.text(), result, error ? ResultKind::kError : rkind);
     if (!error) {
-        persist_history_line(input_.text(), result, ResultKind::kPlain);
+        persist_history_line(input_.text(), result, rkind);
         save_variables();
     }
     input_.clear();

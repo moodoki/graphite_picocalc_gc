@@ -608,17 +608,32 @@ pattern Phase 4C's `complexexpr` REAL-mode probe already established
 (D30 §4) — a second, cheap, Enter-rate-only parse that upgrades the
 display without double-committing `Ans`/store effects.
 
-- If the simplified tree is a bare `NUM`, there's nothing exact to show
-  beyond the decimal already computed — display unchanged.
+- If the simplified tree is a bare **integer** `NUM`, there's nothing
+  exact to show beyond the decimal already computed — display unchanged.
+  (Amended 2026-08-03: a bare *non-integer* rational **is** upgraded, so
+  `1/3` shows `1/3` rather than `0.3333333333`. The original bullet said
+  every bare `NUM` was left alone; that would have excluded the `1/3`
+  case §10.1's own goal statement lists.)
 - If the simplified tree contains only rational coefficients plus
   `sqrt`/`pi` sub-expressions in a form `simplify()` couldn't reduce
   further (i.e., it's already in lowest terms — no numeric evaluation
-  needed to represent it exactly), pretty-print it via `expr_to_layout`
-  (§4) instead of the decimal.
+  needed to represent it exactly), pretty-print it instead of the
+  decimal. (Amended: via `serialize` → `render::build_layout`, not a
+  dedicated `expr_to_layout` — D42 made that call for all CAS results.)
 - Anything else (transcendental mixes, results needing numeric
   root-finding, non-exact irrationals) falls back to the existing decimal
   display — this is a narrow "recognize clean closed forms," not a
   general "always show symbolic if possible" mode.
+
+**Guard rails** (added 2026-08-03 with the implementation, D43): the probe
+is gated so that always-on recognition cannot change an answer or surprise
+a user who typed a decimal. Every numeric literal in the *parsed* input
+must be an integer (so `2.5` stays `2.5` and `0.1+0.2` stays `0.3`, rather
+than being re-rationalized into `5/2` and `3/10`); no variables may appear
+at all (the CAS parser has no `ans` or `e`, so a symbolic reading of them
+would be silently wrong); and the recognized form must agree with the
+numeric result to $10^{-9}$ relative before it is displayed, which makes
+CAS-vs-`tinyexpr` parser divergence unable to alter a shown answer.
 
 **Scope boundary**: this is exact-*value* display for plain numbers only.
 It is explicitly **not** the same as CAS `simplify()` on a variable
@@ -659,8 +674,8 @@ rather than renumbering to `5.n`.
 | 4D.20 | CAS menu UI + expression routing | 4 | CAS ops from home-screen menu |
 | 4D.21 | CAS function syntax (`diff()`, `integ()`, etc.) | 4 | Callable inline from input |
 | 4D.22 | Stress testing + edge cases | 6 | Nested exprs, complex roots, guards |
-| 4D.23 | Exact-form recognition (§10.1): rational-coefficient + surd/pi closed-form check on a simplified tree | 6 | `sqrt(8)` recognized as exact `2*sqrt(2)` form |
-| 4D.24 | Home-screen exact-form probe (side-effect-free, D30-§4-style) + display integration | 4 | `sqrt(2)` on home screen shows `√2`, not `1.41421` |
+| 4D.23 | Exact-form recognition (§10.1): rational-coefficient + surd/pi closed-form check on a simplified tree — **done 2026-08-03** (`src/math/cas/exact.cpp`) | 6 | `sqrt(8)` recognized as exact `2*sqrt(2)` form |
+| 4D.24 | Home-screen exact-form probe (side-effect-free, D30-§4-style) + display integration — **done 2026-08-03** | 4 | `sqrt(2)` on home screen shows `√2`, not `1.41421` |
 | | **Total** | **~134 hrs** | |
 
 ---
@@ -766,8 +781,8 @@ the full comparison this boundary is drawn against.
 | P5-2 | Represent symbolic results in variables (e.g., `A = x^2+1`)? | Allow expression-valued variables vs. numeric-only | phase4-spec P4-2 |
 | P5-3 | Implicit multiplication globally, or CAS-mode only? | CAS-only (safer) vs. global (natural) | phase4-spec P4-3 |
 | P5-4 | `solve()` naming collision with Phase 4A's numeric inline `solve()` (D28)? | Disambiguate by shape vs. distinct keyword (e.g. `csolve`) | New — flagged in §10 above |
-| P5-5 | Exact-form display (§10.1): always-on, or a MODE toggle (like Nspire's Auto/Approximate)? | Always-on is simpler and matches "closes a parity-adjacent gap"; a toggle matches Nspire but adds a MODE row entry for a narrow feature | New — flagged in §10.1 |
-| P5-6 | Exact-form display: does `pi` itself (not just `sqrt`) get the closed-form treatment, e.g. does `pi*2` show as `2π` rather than `6.28319`? | Yes, matches user expectation from the pi-tick-label precedent (4D.3) — probably the more consistent answer | New — flagged in §10.1 |
+| P5-5 | Exact-form display (§10.1): always-on, or a MODE toggle (like Nspire's Auto/Approximate)? | **RESOLVED 2026-08-03 (D43): always-on.** No MODE row entry; `>dec` is the per-result opt-out that already exists | New — flagged in §10.1 |
+| P5-6 | Exact-form display: does `pi` itself (not just `sqrt`) get the closed-form treatment, e.g. does `pi*2` show as `2π` rather than `6.28319`? | **RESOLVED 2026-08-03 (D43): yes.** Matches the pi-tick-label precedent (4D.3) and reads consistently next to a surd in the same result line | New — flagged in §10.1 |
 
 ---
 

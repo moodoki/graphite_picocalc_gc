@@ -135,6 +135,7 @@ add_executable(picocalc_graphcalc
     src/math/cas/factor.cpp
     src/math/cas/integrate.cpp
     src/math/cas/cas_eval.cpp
+    src/math/cas/exact.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp

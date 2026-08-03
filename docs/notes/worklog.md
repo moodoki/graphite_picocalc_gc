@@ -305,6 +305,85 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-03 — Phase 5 Stage 4: exact-form (surd) display, source changes, host-verified
+
+Stage 4 of Phase 5 (`phase5-spec.md` §10.1, tasks **4D.23** + **4D.24**), on the
+`phase-5` branch. Home-screen results that have a clean closed form now display
+that form instead of a truncated decimal: `sqrt(2)` → `√2`, `sqrt(8)` → `2√2`,
+`1/sqrt(2)` → `√2/2`, `pi*2` → `2π`, `pi/2` → `π/2`, `1/3` → `1/3`. Decision
+**D43**, which also resolves the two open questions the spec left on this
+feature: **P5-5 → always-on** (no MODE toggle; `>dec` is the per-result opt-out)
+and **P5-6 → yes, `pi` is included**.
+
+**Recognition (4D.23)** lives in a new `src/math/cas/exact.cpp`, deliberately
+**not** in `simplify()`: `simplify()` runs inside `integrate()`, `solve()`,
+`factor()` and the derivative fixed-point loops, so a `POW(NUM, 1/2)` rewrite
+there would change node shape mid-loop for passes that pattern-match on `POW`
+(§13 Risk 1) for zero Stage-4 benefit. Keeping it probe-path-only held the blast
+radius to one call site — proved by the 199 pre-existing `test_cas` checks coming
+through unchanged. The implementation works in `POW(u, 1/2)` space rather than
+`FUNC sqrt(u)` space so the existing simplifier does the factor collection for
+free: `sqrt(2)*sqrt(2)` collapses to `2` via the like-base merge in
+`simplify_product`, `sqrt(2)+sqrt(8)` combines to `3*sqrt(2)` via `split_term`,
+and `1/sqrt(2)` becomes `POW(2,-1/2)` so denominator- and radicand-
+rationalization are one code path. Perfect-square extraction is trial division to
+$d = 1000$ (radicands capped at $10^6$, ~0.5 ms worst case on the M0+), reusing
+`math::frac::decimal_to_fraction` rather than new rational recognition.
+
+**The probe (4D.24)** is a second side-effect-free pass in `HomeScreen::
+evaluate_input`, mirroring the D30 `complexexpr` pattern: it runs *after*
+`engine().evaluate()` has committed `Ans`/store/variables and can only change the
+string handed to `push_entry`. Five gates decide whether the decimal is replaced —
+(1) a finite, non-store numeric result and no `>dec` suffix; (2) every literal in
+the *parsed* input is an integer; (3) no variables anywhere; (4) a whitelist
+grammar of rational coefficients + square-free `sqrt` + `pi`, and "interesting"
+(a bare integer is never upgraded); (5) agreement with the numeric result to
+$10^{-9}$ relative. Gate 2 is what makes always-on safe (`2.5` stays `2.5` rather
+than becoming `5/2`; `0.1+0.2` stays `0.3` rather than `3/10`; and the decimals
+`convert()`/`solve()` substitution splices into the expression buffer are
+rejected). Gate 3 is not optional — the CAS parser has no `ans` or `e`, so `ans`
+parses as `a*n*s` and `e` as a variable while the numeric engine gives both real
+values. Gate 5 makes CAS-vs-`tinyexpr` parser divergence unable to alter a
+displayed answer by construction. Rendering reuses the D42 path unchanged
+(serialize → `render::build_layout`, amber `kSymbolic`, right-aligned), and the
+2026-08-03 history fix earlier the same day means exact forms reload as symbolic
+across a reboot with no extra work.
+
+**Layout builder** got the two changes the spec's acceptance text implies: a
+single-atom radicand drops its parens (`√2`, not `√(2)`) except before a `^`
+(there is no vinculum, so parens are the only grouping and `√x^2` must not read
+as `sqrt(x^2)`), and a coefficient before a radical or a symbol glyph multiplies
+implicitly (`2√2`, `2π`). `is_call()` was relaxed to accept the bare-radicand
+HBox shape — without that, `sqrt(2)/2` stops stacking as a fraction, which is
+the 2026-07-11 ASan-caught regression that made `sqrt` stay an identifier in the
+first place; there is now an explicit anti-regression test for it.
+
+**Behavior changes to watch on device**: `1/3` now shows as an amber stacked
+fraction where it used to show `0.3333333333`, and `pi` shows as `π`. Both are
+deliberate but visible. `>frac` results stay white flat text, so `1/3` and
+`1/3>frac` look different despite meaning the same thing. Expressions naming a
+variable or `Ans` never get an exact form, and non-REAL number modes get none at
+all in v1 (the `force_complex` branch is not wired — a ~6-line follow-up).
+
+**Verification**: full host suite green — `test_cas` **199 → 238** checks,
+`test_layout` **44 → 54**, 0 failures across all 15 suites, and the 199
+pre-existing CAS checks unchanged. Both boards build clean; Pico 1 bss
+**201,096 bytes, exactly flat** (the CAS pool overlays the existing kCompute
+arena, and `exact.cpp` has no statics — the only new storage is a 48-byte stack
+buffer). `lint.sh` and `format.sh` clean. **Not yet flashed to either board** —
+on-device confirmation folds into Stage 5, which already has both boards on the
+bench for the history-persistence fix and the Pico 1's first Phase 5 build.
+
+Files: new `src/math/cas/exact.{hpp,cpp}`; `src/apps/home_screen.cpp`
+(`to_dec` flag, `rkind` threading, probe call); `src/render/layout_builder.cpp`
+(`is_call`/`is_radical`/`is_symbol_glyph`, bare radicand, implicit multiply);
+`tests/host/test_cas.cpp` (`test_exact_form`), `tests/host/test_layout.cpp`;
+build wiring in `CMakeLists.txt` and `scripts/host-tests.sh`. Docs:
+`phase5-spec.md` §10.1 amended + P5-5/P5-6 resolved + 4D.23/4D.24 ticked,
+`decisions.md` D43.
+
+---
+
 ## 2026-08-03 — bugfix: home-screen history persistence — symbolic kind lost on reload, plus two latent I/O bugs found and fixed
 
 Root-caused and fixed the "BUG to investigate" flagged at the end of the

@@ -1,6 +1,58 @@
 # Start here — next session
 
-**Last session:** 2026-08-03 — **Bugfix, source changes: home-screen
+**Last session:** 2026-08-03 — **Phase 5 Stage 4: exact-form (surd)
+display, source changes, host-verified.** Home-screen results with a clean
+closed form now show that form instead of a decimal — `sqrt(2)` → `√2`,
+`sqrt(8)` → `2√2`, `1/sqrt(2)` → `√2/2`, `pi*2` → `2π`, `1/3` → `1/3`
+(tasks 4D.23/4D.24, **D43**, which also resolves **P5-5 → always-on** and
+**P5-6 → yes, `pi` included**). Recognition lives in a new
+`src/math/cas/exact.cpp`, deliberately *not* in `simplify()` (which runs
+inside integrate/solve/factor/derivative loops — a `POW(NUM,1/2)` rewrite
+there is a §13 Risk 1 hazard for zero benefit); it works in
+`POW(u,1/2)` space so the existing simplifier does the factor collection
+free (`sqrt(2)*sqrt(2)`→2, `sqrt(2)+sqrt(8)`→`3√2`, `1/sqrt(2)` and
+`sqrt(1/2)` share one rationalization path). The home-screen probe
+mirrors D30: it runs *after* `engine().evaluate()` has committed
+Ans/store and can only change the displayed string. **Five gates** bound
+it — finite non-store result + no `>dec`; every literal in the parsed
+input is an integer; no variables anywhere; a whitelist grammar
+(rational coeffs + square-free `sqrt` + `pi`) that must be "interesting";
+and agreement with the numeric result to 1e-9. Gate 2 is what makes
+always-on safe (`2.5` stays `2.5`, not `5/2`; `0.1+0.2` stays `0.3`, not
+`3/10`); gate 3 is not optional (the CAS parser has no `ans`/`e`, so
+`ans` would parse as `a*n*s`). Layout builder gained a bare radicand
+(`√2` not `√(2)`, except before `^`) and implicit multiplication before a
+radical or symbol glyph (`2√2`, `2π`) — `is_call()` was relaxed to accept
+the bare shape, with an explicit anti-regression test so `sqrt(2)/2`
+still stacks as a fraction. **Behavior changes to judge on device**:
+`1/3` now renders as an amber stacked fraction (was `0.3333333333`) and
+`pi` renders as `π`; `>frac` results stay white flat text; no exact forms
+for expressions naming a variable/`Ans`, or in non-REAL number modes (a
+~6-line follow-up). Host suite green — `test_cas` **199 → 238**,
+`test_layout` **44 → 54**, 0 failures, and the 199 pre-existing CAS
+checks unchanged (the proof that staying out of `simplify.cpp` worked).
+Both boards build clean; Pico 1 bss **201,096 bytes, exactly flat**;
+lint/format clean. **Not flashed to either board yet** — folds into
+Stage 5. Full detail: worklog's 2026-08-03 "Phase 5 Stage 4" entry,
+`decisions.md` D43.
+
+**Also 2026-08-03 (parallel, separate worktree):** a **documentation
+branch `docs/site`** was seeded off `main` (commit `0f1e8ef`, pushed; no
+PR). Plain-markdown source tree under `docs-site/` with `SUMMARY.md` as
+the single nav source, driving three outputs: `scripts/gen-wiki.sh`
+(flattened GitHub-wiki tree + `_Sidebar.md`), `scripts/gen-offline.sh`
+(concatenated markdown always, plus self-contained HTML + PDF when
+pandoc is present), and `scripts/gen-doc-reference.py` (generates the
+function catalog from `src/math/catalog.cpp` and the key/syntax
+references from `src/apps/help_screen.cpp` — firmware stays the source
+of truth). CI: `validate-docs` now covers `docs-site/`, and a new
+`.github/workflows/docs.yml` validates, fails on stale generated
+reference pages, uploads the offline bundle, and has a wiki-publish job
+gated on a `WIKI_TOKEN` secret (`GITHUB_TOKEN` cannot push to wikis —
+the PAT setup is documented in `docs-site/README.md`). **Prose chapters
+are stubs** — this was a scaffold-and-generators seed only.
+
+**Previous session:** 2026-08-03 — **Bugfix, source changes: home-screen
 history persistence.** Root-caused and fixed the suspected home-screen I/O
 persistence bug flagged at the end of the 2026-08-02 Stage 3 session:
 symbolic CAS results were losing their `ResultKind` on reload (always came
@@ -26,7 +78,7 @@ confirmation of history-survives-reboot is still open — folds into Stage
 5's Pico 1/Pico 2 flashing. Full detail: worklog's 2026-08-03 entry,
 `decisions.md` D4.
 
-**Previous session:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
+**Two sessions ago:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
 home-screen UI integration, source changes, HW-verified on the Pico 2.**
 On the `phase-5` branch (not yet merged to `main`). Two sessions: the CAS
 engine itself — expr tree/pool, parser, serializer, simplify, differentiate,
@@ -55,7 +107,7 @@ Decisions **D41**, **D42**. `PICOCALC_PHASE` stays `"4D"` (bumping to `"5"`
 is a Stage 5 close-out task, not yet reached). Full detail: worklog's
 2026-08-02 "Phase 5 Stages 0-3" entry.
 
-**Two sessions ago:** 2026-08-02 — **CI fix + first release, docs/infra only, no
+**Three sessions ago:** 2026-08-02 — **CI fix + first release, docs/infra only, no
 source changes.** The GitHub Actions "Build" workflow had two red jobs (the
 board build jobs themselves always passed): Lint disagreed with local
 clang-format because CI installed Ubuntu's apt `clang-format 18` against
@@ -73,7 +125,7 @@ decision number consumed, no phase/sub-phase status change (Phase 4D stays
 closed, Phase 5 CAS is still next — see "The next job" below). Full detail:
 worklog's 2026-08-02 "CI fix" entry.
 
-**Three sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
+**Four sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
 arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified on the Pico 2.**
 Opened the pre-Phase-5 code-review/size-optimization pass. A per-symbol SRAM
 audit (new `scripts/size-report.sh`) found ~40 KB tied up in per-module
@@ -98,7 +150,7 @@ design call). Full detail: `docs/notes/pre-phase5-review.md`, worklog's
 2026-08-02 "Pre-Phase-5 review pass" entry. Commits `1073f4f` (doc de-stale),
 `5f76851` (arena), `4edba81` (chop).
 
-**Four sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
+**Five sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
 HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
 UI-friction feature requests logged in the 2026-07-27 eval, plus two
 follow-ups raised during this session's on-device testing. Matrix results
@@ -118,7 +170,7 @@ suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
 4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
 polish" entry.
 
-**Five sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Six sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -135,7 +187,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Six sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Seven sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -155,7 +207,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Seven sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Eight sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -170,7 +222,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Eight sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Nine sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -207,20 +259,39 @@ detail.
 
 ## The next job
 
-1. **Phase 5 (CAS) is in progress on the `phase-5` branch — Stages 0-3
-   code-complete, HW-verified on the Pico 2 (2026-08-02).** The engine
+0. **Seeded but unfinished: the `docs/site` branch** (2026-08-03, off
+   `main`, commit `0f1e8ef`, pushed, no PR). Scaffold + generators + CI
+   only — every prose chapter under `docs-site/guide/` is still a TODO
+   stub, and `docs-site/reference/error-messages.md` is unwritten. Next
+   steps whenever it's picked up: write the getting-started and guide
+   prose (README's "Using the calculator" is the seed), create the wiki
+   `WIKI_TOKEN` PAT if wiki publishing is actually wanted (see
+   `docs-site/README.md`), and decide whether to rebase onto `main` after
+   Phase 5 merges so the CAS chapter can be written. Independent of the
+   Phase 5 work below — it does not block Stage 5.
+1. **Phase 5 (CAS) is in progress on the `phase-5` branch — Stages 0-4
+   code-complete; 0-3 HW-verified on the Pico 2 (2026-08-02), Stage 4
+   host-verified only (2026-08-03).** The engine
    (tree/pool/parser/serializer/simplify/diff/expand/factor/solve/integrate,
    4D.1-4D.19) and the home-screen UI integration (inline CAS calls, F6
    menu, `cas` command, 4D.4/4D.20/4D.21) are both done and pushed; see
    "Last session" above and worklog's 2026-08-02 "Phase 5 Stages 0-3"
-   entry. **Two stages remain, per `phase5-spec.md` §11:**
-   - **Stage 4 — exact-form display (4D.23/4D.24), not started.** Always-on
-     `√`/`π` recognition on a simplified tree, plus a side-effect-free
-     home-screen probe (mirror the D30 complex-probe pattern) so e.g.
-     `sqrt(2)` shows as `√2` (not `1.41421`), `sqrt(8)` → `2√2`, `pi*2` →
-     `2π`; plain decimals stay unaffected. Reuse `math::frac`'s
-     `decimal_to_fraction`/`pi_multiple` rather than writing new
-     recognition logic.
+   entry. **One stage remains, per `phase5-spec.md` §11:**
+   - **Stage 4 — exact-form display (4D.23/4D.24): DONE 2026-08-03,
+     host-verified, NOT yet on hardware.** See "Last session" above and
+     `decisions.md` D43. **Its on-device pass folds into Stage 5** —
+     script: `sqrt(2)`, `sqrt(8)`, `sqrt(12)`, `1/sqrt(2)`, `sqrt(1/2)`,
+     `sqrt(2)+sqrt(8)`, `1/3`, `2/6`, `1/3+1/7`, `pi`, `pi/2`, `pi*2`,
+     `1/pi`, `1+sqrt(2)` should all show amber typeset exact forms; `2.5`,
+     `0.1+0.2`, `2+2`, `4/2`, `sqrt(4)`, `sin(1)`, `1/3>dec`, `5->a` then
+     `a/3` should all stay unchanged white decimals; `1/3>frac` still
+     works the old way. Then reboot and confirm the amber forms reload
+     amber (that also covers the 2026-08-03 history fix). **Two judgement
+     calls to make while it's in hand**: whether `1/3` rendering as a
+     stacked fraction by default is welcome or intrusive, and the same for
+     `pi` rendering as `π` — D43's "Revisit when" names the escape hatch
+     (require a `sqrt`/`pi` flag rather than any flag, which drops bare
+     rationals back to decimal).
    - **Stage 5 — hardening + on-device verification (4D.22), not started.**
      Stress/edge-case tests, a pool-capacity guard (abort above ~80%
      capacity, spec Risk 2), the Risk-1 termination cycle set exercised at
