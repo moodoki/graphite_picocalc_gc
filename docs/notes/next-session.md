@@ -2,12 +2,18 @@
 
 **Last session:** 2026-08-03 — **Stage 4 follow-ups, flashed to the
 Pico 2.** Three gaps found on the first exact-form flash, decision
-**D44**. (1) **Shift+Enter is the decimal escape** — with an expression
+**D44**. (1) **Alt+Enter is the decimal escape** — with an expression
 entered it evaluates with the probe suppressed (same as `>dec`); with the
 input empty and the newest result being an exact form, it re-runs that
-expression as a decimal, so an amber `√2` becomes `1.414213562` without
-retyping. Nothing consumed Shift+Enter and `shift_held` already rides on
-every `kEnter` event (unlike arrows — D12). (2) **Exact trig at special
+expression as a decimal, so an amber `sqrt(2)` becomes `1.414213562`
+without retyping. **Was Shift+Enter, rebound after HW testing**: the diag
+screen showed that chord arriving as key code 59 (`kInsert`), not 52
+(`kEnter`) with `shift_held` — the STM32 *translates* Shift chords into
+their own scan codes (Shift+Enter to 0xD1, same family as Shift+F1..F4 to
+F6..F9) rather than reporting base-key + modifier, so a Shift binding
+never fires. Now recorded in `platform/keyboard.hpp` beside the D12
+arrow note. Alt passes its flag through intact (Alt+UP/DOWN already
+scrolls history), and Insert stays free for a real binding. (2) **Exact trig at special
 angles**: `sin(pi/3)` → `√3/2`, `tan(pi/6)` → `√3/3`, `cos(pi/3)` → `1/2`,
 via a 24-entry table indexed in *twelfths of $\pi$* (covering the $\pi/6$
 and $\pi/4$ families; `cos(x)=sin(x+pi/2)` is an index shift). **Angle-mode
@@ -22,7 +28,7 @@ Also: **"interesting" now compares formatted strings, not doubles**, so
 Host suite green, `test_cas` **238 → 272**; Pico 1 bss **201,096, still
 flat**; flash +5.3 KB; lint/format clean. **Flashed to the Pico 2, clean
 boot confirmed over serial** — interactive confirmation still pending.
-On-device HELP gained the Shift+Enter line and an `#EXACT FORMS` block.
+On-device HELP gained the Alt+Enter line and an `#EXACT FORMS` block.
 Full detail: worklog's 2026-08-03 "Stage 4 follow-ups" entry,
 `decisions.md` D44.
 
@@ -319,11 +325,10 @@ detail.
      - Unchanged white decimals: `2.5`, `0.1+0.2`, `2+2`, `4/2`,
        `sqrt(4)`, `sin(1)`, `sin(pi/5)`, `tan(pi/2)`, `1/3>dec`,
        `5->a` then `a/3`. `1/3>frac` still works the old way.
-     - **Shift+Enter**: on a typed expression → decimal; on an empty line
-       after an amber result → re-runs it as a decimal. **Verify the
-       STM32 actually delivers Shift+Enter** — it swallows Shift on arrow
-       keys (D12), and Enter has never been tested. If it swallows this
-       one too, the fallback is a different chord or an F-key.
+     - **Alt+Enter**: on a typed expression → decimal; on an empty line
+       after an amber result → re-runs it as a decimal. (Shift+Enter was
+       the first binding and does *not* work — it arrives as `kInsert`;
+       see "Last session" above.)
      - Reboot and confirm amber forms reload amber (also covers the
        2026-08-03 history fix).
      - **Judgement calls while it's in hand**: whether `1/3` as a stacked

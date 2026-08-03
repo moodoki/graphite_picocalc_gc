@@ -781,19 +781,29 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
     }
     switch (ev.key) {
         case Key::kEnter:
-            // Shift+Enter = "show me the decimal" (Phase 5 Stage 4). With an
-            // expression entered it evaluates it with the exact-form probe
-            // suppressed, exactly as a trailing `>dec` would. With the input
-            // empty it re-runs the newest history entry that came back as an
-            // exact form, so an amber √2 can be turned into 1.414213562
-            // without retyping it. Commands (cls, help, ...) are unaffected.
-            if (ev.shift_held && input_.empty()) {
-                const Entry* last = entry_from_newest(0);
-                if (last != nullptr && last->kind == ResultKind::kSymbolic) {
+            // Alt+Enter = "show me the decimal" (Phase 5 Stage 4). Alt, not
+            // Shift: the STM32 translates Shift+Enter into its own scan code
+            // (0xD1 -> kInsert) rather than reporting Enter with shift_held,
+            // so a Shift binding here would never fire and would also squat
+            // on a real key. Alt passes through with its flag intact, the
+            // same way Alt+UP/DOWN already scrolls the history view.
+            //
+            // With an expression entered it evaluates with the exact-form
+            // probe suppressed, exactly as a trailing `>dec` would. With the
+            // input empty it re-runs the newest history entry that came back
+            // as an exact form, so an amber sqrt(2) becomes 1.414213562
+            // without retyping it. Commands (cls, help, ...) are unaffected:
+            // they only match on the plain-Enter path below.
+            if (ev.alt_held) {
+                if (input_.empty()) {
+                    const Entry* last = entry_from_newest(0);
+                    if (last == nullptr || last->kind != ResultKind::kSymbolic) {
+                        return true;
+                    }
                     input_.set_text(last->expr);
-                    evaluate_input(true);
-                    invalidate(0, kSoftkeyY);
                 }
+                evaluate_input(true);
+                invalidate(0, kSoftkeyY);
                 return true;
             }
             if (!input_.empty()) {
@@ -818,7 +828,7 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
                         return true;
                     }
                 }
-                evaluate_input(ev.shift_held);
+                evaluate_input();
                 invalidate(0, kSoftkeyY);  // History + input + status bar
             }
             return true;

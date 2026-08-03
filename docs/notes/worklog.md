@@ -305,18 +305,22 @@ Still to verify on hardware:
 
 ---
 
-## 2026-08-03 — Stage 4 follow-ups: Shift+Enter decimal escape, exact trig, non-REAL modes (flashed to Pico 2)
+## 2026-08-03 — Stage 4 follow-ups: Alt+Enter decimal escape, exact trig, non-REAL modes (flashed to Pico 2)
 
 Three gaps that surfaced on the first Pico 2 flash of the Stage 4 work below.
 Decision **D44**.
 
-**Shift+Enter is the decimal escape.** With an expression entered it evaluates
+**Alt+Enter is the decimal escape.** With an expression entered it evaluates
 with the exact-form probe suppressed, identically to a trailing `>dec`. With the
 input line empty and the newest result being an exact form, it re-runs *that*
 expression as a decimal — so an amber `√2` becomes `1.414213562` without
-retyping. Nothing on the home screen consumed Shift+Enter, and `shift_held`
-already rides on every `kEnter` event (unlike arrow keys, where the STM32
-swallows Shift entirely — D12). Implemented as `evaluate_input(bool
+retyping. **Alt, not Shift**: the first cut bound Shift+Enter, but the diag
+screen showed that chord arriving as key code 59 (`kInsert`) rather than 52
+(`kEnter`) with `shift_held` — the STM32 *translates* Shift chords into their
+own scan codes (Shift+Enter -> 0xD1, the same family as Shift+F1..F4 ->
+F6..F9) instead of reporting base-key + modifier, so a Shift binding would
+never have fired. Rebound to Alt, which passes its flag through intact the
+way Alt+UP/DOWN already does, and which leaves the real Insert key free. Implemented as `evaluate_input(bool
 force_decimal)` feeding the existing `to_dec` flag, so it is one parameter, not
 a new display path. Commands (`cls`, `help`, ...) are unaffected. Documented in
 the on-device HELP `#HOME` block and a new `#EXACT FORMS` block on the SYNTAX
@@ -357,7 +361,8 @@ die temp 39 C. Interactive confirmation is the user's next pass.
 
 Files: `src/math/cas/exact.cpp` (trig table, `eval_numeric`, `fold_exact_trig`,
 formatted-string "interesting" test); `src/apps/home_screen.{hpp,cpp}`
-(`apply_exact_form` helper, `evaluate_input(bool)`, Shift+Enter handling);
+(`apply_exact_form` helper, `evaluate_input(bool)`, Alt+Enter handling);
+`src/platform/keyboard.hpp` (documents the Shift-chord translation);
 `src/apps/help_screen.cpp` (HELP text); `tests/host/test_cas.cpp`.
 
 ---

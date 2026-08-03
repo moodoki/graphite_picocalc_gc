@@ -18,7 +18,7 @@ Format:
 
 ---
 
-## D44: Exact-form follow-ups — Shift+Enter decimal escape, exact trig at special angles, and non-REAL number modes
+## D44: Exact-form follow-ups — Alt+Enter decimal escape, exact trig at special angles, and non-REAL number modes
 
 **Date**: 2026-08-03
 **Status**: Accepted (Phase 5 Stage 4 follow-up, same day as D43)
@@ -31,13 +31,13 @@ feature and it was missing. (3) Exact forms were REAL-mode only, a scoping
 decision D43 recorded as a v1 limitation with no technical reason behind it.
 **Decision**:
 
-1. **Shift+Enter is the decimal escape.** With an expression entered it
+1. **Alt+Enter is the decimal escape.** With an expression entered it
    evaluates with the exact-form probe suppressed, identically to a trailing
    `>dec`. With the input line empty and the newest history result being an
-   exact form, it re-runs *that* expression as a decimal, so an amber `√2` can
-   be turned into `1.414213562` without retyping. Commands (`cls`, `help`, ...)
-   are unaffected. The `#HOME` and a new `#EXACT FORMS` block in the on-device
-   HELP KEYS/SYNTAX tabs document it.
+   exact form, it re-runs *that* expression as a decimal, so an amber
+   $\sqrt{2}$ can be turned into `1.414213562` without retyping. Commands
+   (`cls`, `help`, ...) are unaffected. The `#HOME` and a new `#EXACT FORMS`
+   block in the on-device HELP KEYS/SYNTAX tabs document it.
 2. **Exact trig at special angles.** `sin`/`cos`/`tan` of a rational multiple of
    $\pi$ with denominator in $\{1,2,3,4,6\}$ fold to their exact values through a
    24-entry table indexed in twelfths of $\pi$ (one table covers both the $\pi/6$ and
@@ -51,10 +51,18 @@ decision D43 recorded as a v1 limitation with no technical reason behind it.
 4. **"Interesting" now compares formatted strings, not doubles.** A bare integer
    is still normally not upgraded, but it *is* when the numeric path would
    display something else.
-**Rationale**: Shift+Enter was free — nothing on the home screen consumed it, and
-`shift_held` already rides on every `kEnter` event (unlike arrows, where the
-STM32 swallows Shift entirely, D12). Reusing the existing `to_dec` plumbing made
-it a one-parameter change rather than a new display path. For trig, the twelfths
+**Rationale**: The decimal escape was first bound to Shift+Enter, on the
+reasoning that `shift_held` rides on every `kEnter` event. **On hardware it does
+not fire**: the diag screen showed the chord arriving as key code 59 (`kInsert`)
+rather than 52 (`kEnter`). The STM32 *translates* Shift chords into their own
+scan codes — Shift+Enter to 0xD1, the same family as Shift+F1..F4 to F6..F9 —
+instead of reporting base-key plus modifier, which is the same underlying
+behavior as the D12 arrow-swallowing seen from a different angle. Binding
+`kInsert` would have worked but squats on a real key with its own meaning, so
+the shortcut moved to **Alt+Enter**: Alt passes its flag through intact, and
+Alt+UP/DOWN already scrolls the history view, so the modifier is established on
+this screen. Reusing the existing `to_dec` plumbing made it a one-parameter
+change rather than a new display path. For trig, the twelfths
 indexing is what keeps this a table lookup instead of a case analysis: every
 exact angle in both families is an integer number of $\pi/12$, so reduction is one
 modulo. Handling DEGREE mode by reinterpreting the argument (rather than
@@ -70,16 +78,16 @@ the display is what the gate is actually about.
 sin/cos/tan — the inverse functions (`asin(1/2)` → `π/6`) are not folded, and
 neither are hyperbolic or `atan2`. In DEGREE mode the argument must be an
 integer number of degrees, so `sin(22.5)` does not fold even though `sin(pi/8)`
-is expressible. Shift+Enter on an empty line only acts when the newest result is
+is expressible. Alt+Enter on an empty line only acts when the newest result is
 an exact form; on a plain decimal result it does nothing (deliberate — silently
 re-evaluating an arbitrary past entry would be surprising). The complex-mode
 extension means RECT/POLAR now shows amber results where it showed decimals,
 a visible change in those modes.
 **Revisit when**: Inverse-trig exact values are wanted (the table is already the
 right shape to invert); or DEGREE-mode half-degree angles turn up in real use;
-or an on-device pass finds Shift+Enter conflicts with a keyboard layout where
-the STM32 swallows Shift on Enter the way it does on arrows (untested at the
-time of writing — the header's D12 note covers arrows only).
+or Insert acquires a real binding and the two want reconciling. The
+Shift-chord translation behavior is now recorded in `platform/keyboard.hpp`
+next to the D12 arrow note, so the next binding does not repeat this.
 
 ## D43: Phase 5 Stage 4 exact-form display — always-on, gated by an integers-only input rule plus a numeric-agreement check
 

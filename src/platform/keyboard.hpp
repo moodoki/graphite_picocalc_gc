@@ -86,6 +86,13 @@ enum class Key : uint8_t {
     // NB: the STM32 swallows Shift on arrow keys entirely (only the
     // kShift event arrives, no arrow); Alt and Ctrl pass through with
     // their flags intact. All re-verified on fw v1.6 (HW 2026-07-11).
+    //
+    // Shift chords are generally *translated* by the STM32 rather than
+    // reported as base-key + shift_held: Shift+F1..F4 arrive as F6..F9
+    // (0x86-0x89), and **Shift+Enter arrives as kInsert (0xD1)**, not as
+    // kEnter with shift_held set (HW-observed on the diag screen,
+    // 2026-08-03). So bind the translated key, not the chord — a handler
+    // that tests `ev.key == kEnter && ev.shift_held` never fires.
     kF1,
     kF2,
     kF3,

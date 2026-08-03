@@ -643,7 +643,7 @@ way `sin(pi/3)` does in RADIAN. It applies in **all number modes** for
 real-valued results, not just REAL. A bare integer result is not upgraded
 *unless* the numeric path would display something else, which is how
 `sin(pi)` shows `0` rather than its float-noise `1.224646799e-16`.
-**`Shift+Enter` is the decimal escape**: on a typed expression it evaluates
+**`Alt+Enter` is the decimal escape**: on a typed expression it evaluates
 with the probe suppressed (as `>dec` does), and on an empty input line it
 re-runs the newest exact-form result as a decimal.
 

@@ -74,7 +74,7 @@ private:
     void invalidate_history();
 
     // force_decimal suppresses the exact-form probe for this evaluation, the
-    // same way a trailing `>dec` does — Shift+Enter's "show me the decimal".
+    // same way a trailing `>dec` does — Alt+Enter's "show me the decimal".
     void evaluate_input(bool force_decimal = false);
     bool handle_command(const char* cmd);
     int visible_count() const;
