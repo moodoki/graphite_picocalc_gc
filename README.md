@@ -275,6 +275,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/notes/wishlist.md](docs/notes/wishlist.md)** — desired-but-unplanned features
 - **[docs/notes/decisions.md](docs/notes/decisions.md)** — architecture & design decision log
 - **[docs/notes/ti-parity.md](docs/notes/ti-parity.md)** — feature parity stocktake vs. TI-83/84+ and TI-Nspire CX II CAS
+- **[docs/references/risch-algorithm.md](docs/references/risch-algorithm.md)** — reading list for symbolic integration, and why Phase 5's integrator stops where it does (the limit is differential algebra, not the hardware)
 - **[docs/notes/design-departures-matrix-complex.md](docs/notes/design-departures-matrix-complex.md)** — unbuilt ideas for first-class matrices/vectors/complex numbers
 - **[docs/notes/docs-site-plan.md](docs/notes/docs-site-plan.md)** — plan for a public GitHub Pages docs site with TI-guidebook-style workbooks
 - **[AGENTS.md](AGENTS.md)** — for AI coding agents
