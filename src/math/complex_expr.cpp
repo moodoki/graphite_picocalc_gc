@@ -81,9 +81,49 @@ Complex do_imag(const Complex& z) {
     return {c_imag(z)};
 }
 
+// Angle-mode wrappers. complex.cpp's c_sin/c_asin/... are deliberately pure
+// math — a Complex sine must not depend on global UI state — so the DEG/RAD
+// scaling lives here at the evaluator boundary, mirroring exactly what
+// functions.cpp's rad()/deg() do for the real path. Without these the complex
+// evaluator answered every trig call in radians, so DEGREE mode was silently
+// ignored on the home screen whenever Number mode was not REAL.
+//
+// The whole complex argument is scaled, not just its real part (TI-89's
+// behavior): for a real-valued input this reduces exactly to the real path,
+// which is the property that matters — the two evaluators must not disagree
+// about sin(30).
+constexpr calc_t kDegPerRad = 180.0;
+constexpr calc_t kPiConst = 3.14159265358979323846;
+
+Complex to_radians(const Complex& z) {
+    return angle_mode() == AngleMode::kDegrees ? z * Complex(kPiConst / kDegPerRad) : z;
+}
+Complex from_radians(const Complex& z) {
+    return angle_mode() == AngleMode::kDegrees ? z * Complex(kDegPerRad / kPiConst) : z;
+}
+
+Complex m_sin(const Complex& z) {
+    return c_sin(to_radians(z));
+}
+Complex m_cos(const Complex& z) {
+    return c_cos(to_radians(z));
+}
+Complex m_tan(const Complex& z) {
+    return c_tan(to_radians(z));
+}
+Complex m_asin(const Complex& z) {
+    return from_radians(c_asin(z));
+}
+Complex m_acos(const Complex& z) {
+    return from_radians(c_acos(z));
+}
+Complex m_atan(const Complex& z) {
+    return from_radians(c_atan(z));
+}
+
 const CFn kFns[] = {
-    {"sqrt", c_sqrt}, {"exp", c_exp},   {"ln", c_ln},      {"sin", c_sin},    {"cos", c_cos},
-    {"tan", c_tan},   {"asin", c_asin}, {"acos", c_acos},  {"atan", c_atan},  {"abs", do_abs},
+    {"sqrt", c_sqrt}, {"exp", c_exp},   {"ln", c_ln},      {"sin", m_sin},    {"cos", m_cos},
+    {"tan", m_tan},   {"asin", m_asin}, {"acos", m_acos},  {"atan", m_atan},  {"abs", do_abs},
     {"arg", do_arg},  {"conj", c_conj}, {"real", do_real}, {"imag", do_imag},
 };
 

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 #include "math/complex_expr.hpp"
 #include "math/engine.hpp"
@@ -237,6 +238,91 @@ void test_number_mode_default() {
     math::set_number_mode(math::NumberMode::kReal);
 }
 
+// The complex evaluator must honour DEGREE mode exactly as the real one
+// does. It did not until 2026-08-05 (D46): complex.cpp's c_sin/c_asin/... are
+// pure math with no rad()/deg() scaling, so every trig call in RECT/POLAR
+// Number mode answered in radians and the MODE row was silently ignored.
+// Found on hardware during the Stage 5 pass; invisible here because no test
+// had ever varied angle mode against this evaluator.
+void test_angle_mode() {
+    const auto saved = math::angle_mode();
+
+    math::set_angle_mode(math::AngleMode::kRadians);
+    check_ok("sin(1)", 0.8414709848078965, 0.0, "RAD sin(1)");
+    check_ok("cos(0)", 1.0, 0.0, "RAD cos(0)");
+    check_ok("tan(1)", 1.5574077246549023, 0.0, "RAD tan(1)");
+
+    math::set_angle_mode(math::AngleMode::kDegrees);
+    check_ok("sin(30)", 0.5, 0.0, "DEG sin(30)");
+    check_ok("sin(90)", 1.0, 0.0, "DEG sin(90)");
+    check_ok("cos(60)", 0.5, 0.0, "DEG cos(60)");
+    check_ok("tan(45)", 1.0, 0.0, "DEG tan(45)");
+    check_ok("sin(1)", 0.017452406437283512, 0.0, "DEG sin(1)");
+    // Inverse trig scales on the way out, not in.
+    check_ok("asin(1)", 90.0, 0.0, "DEG asin(1)");
+    check_ok("acos(0)", 90.0, 0.0, "DEG acos(0)");
+    check_ok("atan(1)", 45.0, 0.0, "DEG atan(1)");
+
+    // The property that actually matters: for a real-valued argument the two
+    // evaluators must agree, in either mode. A disagreement here is what the
+    // user sees as "DEG mode does nothing".
+    const char* const reals[] = {"sin(30)", "cos(60)", "tan(45)", "sin(1)", "asin(1)", "atan(1)"};
+    for (const auto* mode : {"deg", "rad"}) {
+        math::set_angle_mode(std::strcmp(mode, "deg") == 0 ? math::AngleMode::kDegrees
+                                                           : math::AngleMode::kRadians);
+        for (const char* e : reals) {
+            ++g_checks;
+            const auto rr = math::engine().evaluate(e);
+            const auto cc = math::complexexpr::evaluate(e);
+            if (!rr.ok || !cc.ok || std::fabs(rr.value - cc.value.re) > 1e-9 ||
+                std::fabs(cc.value.im) > 1e-12) {
+                std::printf("FAIL: %s in %s: real=%.12g complex=(%.12g,%.12g)\n", e, mode,
+                            rr.value, cc.value.re, cc.value.im);
+                ++g_failures;
+            }
+        }
+    }
+
+    // A genuinely complex argument still works (the whole argument scales,
+    // TI-89 style) — sin(90 + 0i) in DEG is 1, not sin(90 rad).
+    math::set_angle_mode(math::AngleMode::kDegrees);
+    check_ok("sin(90+0i)", 1.0, 0.0, "DEG sin(90+0i)");
+
+    math::set_angle_mode(saved);
+}
+
+// Real powers must come back exact, not exp(ln)-approximated. Reported from
+// the bench 2026-08-05: 10202^2 displayed white in REAL mode but amber in
+// a+bi mode, because the complex path's drift failed format_number's
+// `x == floor(x)` integer test and printed a fractional digit. D46.
+void test_real_pow_exact() {
+    check_ok("10202^2", 104080804.0, 0.0, "10202^2 exact in complex mode");
+    check_ok("((((2+1)^2+1)^2+1)^2+1)^2+1", 104080805.0, 0.0, "nesting rung 4 exact");
+    check_ok("2^10", 1024.0, 0.0, "2^10 exact");
+    check_ok("3^5", 243.0, 0.0, "3^5 exact");
+    // Exactness is the point: these must be integers on the nose, since the
+    // display path branches on x == floor(x).
+    const char* const ints[] = {"10202^2", "2^10", "3^5", "7^4", "((((2+1)^2+1)^2+1)^2+1)^2+1"};
+    for (const char* e : ints) {
+        ++g_checks;
+        const auto r = math::complexexpr::evaluate(e);
+        if (!r.ok || r.value.re != std::floor(r.value.re) || r.value.im != 0.0) {
+            std::printf("FAIL: %s -> (%.17g,%.17g), expected an exact integer\n", e, r.value.re,
+                        r.value.im);
+            ++g_failures;
+        }
+    }
+    // Negative base with an integer exponent — exp(ln) cannot do this on the
+    // real line at all.
+    check_ok("(-2)^3", -8.0, 0.0, "(-2)^3");
+    check_ok("(-2)^2", 4.0, 0.0, "(-2)^2");
+    // Genuinely complex powers still route through exp(ln): i^2 = -1.
+    check_ok("i^2", -1.0, 0.0, "i^2 still correct");
+    check_ok("(1+i)^2", 0.0, 2.0, "(1+i)^2 still correct");
+    // Fractional exponent on a positive real stays real.
+    check_ok("4^0.5", 2.0, 0.0, "4^0.5");
+}
+
 }  // namespace
 
 int main() {
@@ -249,6 +335,8 @@ int main() {
     test_errors();
     test_format_complex();
     test_number_mode_default();
+    test_angle_mode();
+    test_real_pow_exact();
 
     std::printf("%d/%d checks passed\n", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

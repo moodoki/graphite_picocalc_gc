@@ -10,6 +10,18 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Inverse-trig exact forms** (raised 2026-08-05, Pico 2 Stage 5 testdrive):
+  `asin(1)` shows `1.570796327` where the forward direction already shows
+  `sin(pi/6)` as `1/2`. D44 built a *forward* special-angle table only
+  (`src/math/cas/exact.cpp`, 24 entries indexed in twelfths of $\pi$), so
+  nothing recognizes `asin(1)` as $\pi/2$ or `atan(1)` as $\pi/4$. The
+  symmetric completion needs its own table over the inverse arguments
+  ($0$, $\pm 1/2$, $\pm\sqrt{2}/2$, $\pm\sqrt{3}/2$, $\pm 1$ for asin/acos;
+  $0$, $\pm\sqrt{3}/3$, $\pm 1$, $\pm\sqrt{3}$ for atan), angle-mode
+  awareness (in DEGREE, `asin(1)` is a plain `90` and correctly stays
+  white), and its own tests — comparable in size to D44. Deliberately
+  deferred out of Phase 5 Stage 5 rather than grown into a hardening
+  session; no design work beyond this note.
 - **Copy/paste in expression editors** (raised 2026-08-02, Pico 2 testdrive):
   no way to copy text between fields — e.g. duplicating one Y= expression
   into another slot means retyping it in full on the physical keypad. No

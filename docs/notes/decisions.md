@@ -18,6 +18,91 @@ Format:
 
 ---
 
+## D46: The complex evaluator must not disagree with the real one — DEGREE-mode trig, and exact real powers
+
+**Date**: 2026-08-05
+**Status**: Accepted (bugfix; Phase 4C defect found during the Phase 5 Stage 5
+hardware pass)
+**Context**: Reported from the bench: "trig functions in deg mode give results
+identical to radian mode." Root cause is `src/math/complex.cpp` — `c_sin(z)`
+is `{std::sin(z.re) * cosh(z.im), ...}`, calling `std::sin` on the raw value.
+The real evaluator's trig goes through `functions.cpp`'s `rad()`, which
+applies the degree scaling; the complex evaluator never did. So whenever
+Number mode is RECT or POLAR (which routes home-screen evaluation through
+`complexexpr`), **every trig call answered in radians and the MODE row's
+DEGREE setting was silently ignored**. Confirmed on the host:
+`sin(30)` in DEGREE gave `0.5` from the real path and `-0.9880316241` from the
+complex path.
+
+This is **not** a Phase 5 regression — `complex.cpp` predates it and has
+shipped since Session 18 (Phase 4C). It surfaced now only because the Stage 4
+verification script sends the tester into RECT/POLAR mode.
+
+**Decision**: add angle-mode wrappers (`m_sin`/`m_cos`/`m_tan` scaling in,
+`m_asin`/`m_acos`/`m_atan` scaling out) in `complex_expr.cpp`'s `kFns` table.
+`complex.cpp`'s `c_*` functions stay pure math. The whole complex argument is
+scaled, not just its real part (TI-89's behavior).
+
+**Rationale**: `complex_expr.cpp`'s table is the only caller of the `c_*`
+trig functions, so the wrapper layer is complete by construction. Putting the
+scaling at the evaluator boundary mirrors where the real path already does
+it, and keeps a `Complex` sine from depending on global UI state — which
+matters because `Complex` is also used by matrices, lists and stats, none of
+which should acquire an angle mode by accident. Scaling the whole argument is
+what makes the decisive property hold: **for a real-valued argument the two
+evaluators agree in either mode**, which is exactly what "DEG mode does
+nothing" was violating.
+
+**Tradeoffs**: `sin(2+3i)` in DEGREE now means `sin((2+3i) x pi/180)` rather
+than radians-regardless. That is a genuine semantic choice for an input no
+calculator agrees on, taken because it is the one that degrades correctly to
+the real case. Nothing else in the codebase consumes complex trig, so the
+blast radius is the home screen in non-REAL Number mode.
+
+**Test gap this exposed**: `test_complex`/`test_complex_expr` never varied
+angle mode, and `test_exact_trig` varies it but goes through the real
+evaluator — so nothing crossed the two. `test_angle_mode()` now asserts both
+evaluators agree on a corpus of real-valued trig in both modes
+(`test_complex_expr` 75 → 99 checks).
+
+### Second defect, same principle: `c_pow` was not exact for real powers
+
+Found in the same bench pass. `10202^2` and the nesting rung
+`((((2+1)^2+1)^2+1)^2+1)^2+1` displayed **white in REAL mode but amber in a+bi
+mode**. Cause: `c_pow(base, exp)` was unconditionally `c_exp(c_ln(base) *
+exp)`, so a real power came back a hair off the integer. That is enough to
+fail `format_number`'s `x == std::floor(x)` test (`format.cpp:128`), dropping
+the value out of the `"%.0f"` integer branch into `"%.10g"`, which prints a
+fractional digit. The exact-form probe then compared `"104080805.x"` against
+its own `"104080805"`, found them different, declared the result
+"interesting", and rendered it amber.
+
+Only that one rung showed it, and the reason is worth recording: rungs 1-3
+(10, 101, 10202) are too small for the drift to reach ten significant
+digits, and rungs 5-6 (>= 1e10) take `format_number`'s scientific branch
+where it is invisible. **104080805 is nine digits — the only rung whose tenth
+significant digit lands in the fraction.**
+
+Fixed by taking `std::pow` directly when both operands are real and either
+the base is positive or the exponent is an integer; genuinely complex powers
+still route through `exp(ln)`. The real fast path also handles a negative
+base with an integer exponent (`(-2)^3`), which `exp(ln)` cannot do on the
+real line at all. This one lives in `complex.cpp` rather than the wrapper
+layer, because unlike the angle scaling it is pure math with no dependence on
+UI state.
+
+**Note on what was *not* a bug**: the amber itself was the exact-form feature
+behaving exactly as designed — the decimal really had drifted, and the exact
+value really was the better answer. The defect was upstream, in the
+arithmetic.
+
+**Revisit when**: a second consumer of `c_sin`/`c_asin` appears — the scaling
+is per-caller by design, so a new caller must decide for itself rather than
+inherit it. `mat_expr.cpp:682` calls `c_pow` and now inherits the exact real
+path, which is what matrix element arithmetic wants.
+
+---
+
 ## D45: Phase 5 Stage 5 hardening — CAS pass scratch moves off the stack into a two-ended pool, plus stated depth caps and a real Risk-2 abort
 
 **Date**: 2026-08-05
