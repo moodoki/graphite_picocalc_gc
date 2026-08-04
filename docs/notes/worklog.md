@@ -305,6 +305,98 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-05 — Phase 5 Stage 5: CAS hardening (4D.22, D45) + two complex-evaluator bugfixes (D46). **PHASE 5 CLOSED, HW-verified on both boards.**
+
+Stage 5's brief was "stress testing + edge cases". The audit found a live
+memory-corruption bug first, and the bench pass found two more in Phase 4C.
+
+**D45 — the headline.** `simplify_sum` and `simplify_product` each held four
+`kMaxOperands = 64` arrays on the stack: **1,144 B and ~1,140 B frames**,
+measured on the linked Pico 1 object. They nest through `simplify_rec` once
+per level of ADD-inside-POW-inside-ADD. Core 0 has 2 KB declared
+(`__StackBottom 0x20041800`) and only **4 KB before `__StackOneTop`** — core
+1's stack, running the display service on both boards since D10 leg A.
+`PICO_USE_STACK_GUARDS` is not set, so nothing traps. Reach is wider than CAS
+calls: `exact_form()` runs parse + two simplify passes on *every* home-screen
+input whose literals are all integers.
+
+**Reproduced on the Pico 2, and the repro is the interesting part.** The
+ladder `(2+1)^2+1` → … out to rung 6 (six nested levels, ~6.9 KB) **returned
+the correct answer** (1.173e32) with 46 `temp:` and 46 `psram-bulk:`
+heartbeats, no gap, no fault, no reboot. It overran past core 1's stack top
+*and* its declared bottom into the unused gap above the heap; core 1's
+display loop only occupies the top few hundred bytes of its region, so
+nothing live was hit. **Silent memory corruption whose blast radius depends
+on what core 1 is doing at that instant — not a deterministic fault**, and
+structurally invisible to the host suite (8 MB stack).
+
+Fixes: the `ExprPool` arena is now **two-ended** (nodes bump up, pass scratch
+bumps down under LIFO mark/release via `ScratchScope`) — scratch cannot share
+the node end because `simplify()` runs its fixed-point loop up to 50 times
+without resetting; **stated depth caps** replace bounds that fell out of input
+length (parser 12, simplifier 8), sized to the measurement now that the
+deepest-recursing frame is `integrate_rec` at 172 B; **Risk 2 implemented**
+(sticky `overflowed()` + `near_capacity()`, `evaluate_home` reports "Too
+complex", `exact_form` leaves the decimal standing) instead of `simplify()`'s
+"last good form" masquerading as converged; and **`expand()` no longer
+simplifies twice** (~5.4 KB of a 22.5 KB arena spent re-canonicalising an
+already-canonical tree — enough alone to push `expand((x+1)^10)` over).
+
+Largest recursive CAS frame **1,144 B → 172 B**; worst-case CAS stack ~2.6 KB,
+bounded. Pico 1 bss **201,096 → 198,836**. `test_cas` **272 → 368** checks.
+The new `test_stress_edge_cases()` earned itself immediately by catching a
+defect in the first cut of this very change: `alloc_raw` bounded the node end
+against the arena end rather than the scratch end, so nodes bumped through
+live scratch arrays and a pass read back overwritten `Expr` pointers.
+
+**D46 — two Phase 4C defects found on the bench** (not Phase 5 regressions;
+both have shipped since Session 18, and surfaced only because the Stage 4
+script sends the tester into RECT/POLAR). (1) **DEGREE mode was silently
+ignored** in non-REAL Number modes: `c_sin(z)` calls `std::sin` on the raw
+value with no `rad()` conversion, so the complex evaluator answered every
+trig call in radians — `sin(30)` gave `0.5` from the real path and
+`-0.9880316241` from the complex one. Fixed with angle wrappers in
+`complex_expr.cpp`'s `kFns` table (the only caller of the `c_*` trig
+functions, so the wrapper layer is complete by construction); `complex.cpp`
+stays pure math because `Complex` is shared with matrices/lists/stats.
+(2) **`c_pow` was not exact for real powers** — unconditional
+`c_exp(c_ln(base) * exp)`, so `10202^2` came back a hair off `104080804`,
+failing `format_number`'s `x == floor(x)` test, dropping from `"%.0f"` to
+`"%.10g"`, printing a fractional digit, and rendering amber where REAL mode
+rendered white. Only rung 4 of the ladder showed it: rungs 1-3 are too small
+for the drift to reach ten significant digits and rungs 5-6 take the
+scientific branch — **104080805 is nine digits, the only value whose tenth
+significant digit lands in the fraction.** The amber itself was *not* a bug;
+the exact-form feature was working as designed and the defect was upstream in
+the arithmetic. `test_complex_expr` **75 → 113** checks.
+
+**Hardware.** Pico 2 reflashed and verified. **The Pico 1 was flashed with
+Phase 5 for the first time** and passed: the ladder computes clean, CAS ops
+are perceptibly slower but well inside budget (no FPU), the D46 fixes hold,
+and — uniquely testable on this board, since it was still on Phase 4D — the
+**legacy two-field `history.txt` migrated correctly** (old lines reload as
+plain, new symbolic results reload amber), closing the 2026-08-03 fix's
+outstanding on-device confirmation.
+
+**Deliberately deferred, recorded rather than fixed**: (a)
+`PICO_USE_STACK_GUARDS=1` + `PICO_STACK_SIZE=4096` would trap this whole bug
+class, but it is a whole-firmware change — this session proved one path
+overran silently and others may currently work *because* nothing traps; it
+needs its own soak. (b) **A latent MODE-clobber confirmed by code reading but
+not observed on hardware**: `main.cpp:432` re-runs `load_graph_state()` when
+storage arrives late (D14 rail settle), and `graph_persist.cpp:56` is
+`*this = g_image.state` — a whole-struct overwrite — so a MODE toggle made
+before storage mounts is silently reverted (its `save_graph_state()` also
+failed). Needs a genuine cold power-on plus a toggle inside the window.
+(c) **Inverse-trig exact forms** (`asin(1)` → $\pi/2$) — a missing feature,
+not a bug; on the wishlist.
+
+`PICOCALC_PHASE` bumped `"4D"` → `"5"`. Full host suite green (14 suites),
+both boards build clean, lint/format clean. Commits `b39ae3e` (D45),
+`5ef025f` (D46).
+
+---
+
 ## 2026-08-03 — Stage 4 follow-ups: Alt+Enter decimal escape, exact trig, non-REAL modes (flashed to Pico 2)
 
 Three gaps that surfaced on the first Pico 2 flash of the Stage 4 work below.

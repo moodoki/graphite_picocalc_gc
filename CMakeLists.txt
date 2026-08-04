@@ -220,7 +220,7 @@ message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 # screen. Not derivable from git — bump it here when a phase/sub-phase
 # reaches code-complete (the session-wrapup agent's README status pass
 # covers this).
-set(PICOCALC_PHASE "4D")
+set(PICOCALC_PHASE "5")
 
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).

@@ -18,13 +18,15 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > release, [v0.1.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.1.0),
 > is published** (prebuilt UF2s for both boards); CI (build, lint, docs
 > validation, release) is green on every job. **Phase 5 (symbolic CAS) is
-> now in progress** on the `phase-5` branch: the engine (simplify, expand,
-> factor, differentiate, solve, integrate), its home-screen UI integration
-> (inline calls, F6 CAS menu, `cas` command), and exact-form display
-> (`sqrt(8)` shown as `2√2`, `pi*2` as `2π`, `1/3` as a stacked fraction,
-> `sin(pi/3)` as `√3/2` — with Alt+Enter as the decimal escape) are all
-> code-complete and flashed to the Pico 2; hardening plus the Pico 1 leg
-> remain before the phase closes and merges to `main`. See
+> complete and hardware-verified on both boards** (on the `phase-5` branch,
+> pending merge to `main`): the engine (simplify, expand, factor,
+> differentiate, solve, integrate), its home-screen UI integration (inline
+> calls, F6 CAS menu, `cas` command), exact-form display (`sqrt(8)` shown as
+> `2√2`, `pi*2` as `2π`, `1/3` as a stacked fraction, `sin(pi/3)` as `√3/2`
+> — with Alt+Enter as the decimal escape), and a Stage 5 hardening pass that
+> moved the CAS passes' working arrays off a 4 KB stack they could silently
+> overrun, gave the recursion stated depth caps, and turned pool exhaustion
+> into a reported error instead of a plausible-looking wrong answer. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -77,17 +79,22 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   feature-complete as a graphing calculator, independent of CAS or
   programmability. See
   [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md).
-- **Phase 5 (in progress, `phase-5` branch)**: symbolic math (CAS) —
-  simplify, expand, factor, differentiate, solve (complex-aware), and a
-  bounded form of symbolic integration are code-complete and HW-verified
-  on the Pico 2, reachable inline from the home screen (`diff()`,
-  `integ()`, `factor()`, `expand()`, `simplify()`, `solve()`) or via the F6
-  CAS menu. Exact-value display also ships: results with a clean closed
-  form typeset in amber instead of a decimal — `sqrt(8)` as `2√2`,
-  `1/sqrt(2)` as `√2/2`, `pi*2` as `2π`, `1/3` as a stacked fraction, and
-  `sin(pi/3)` as `√3/2` (special-angle trig, in both RADIAN and DEGREE).
-  Alt+Enter is the decimal escape. A hardening pass and the Pico 1 leg
-  remain before the phase closes. See
+- **Phase 5 (complete, `phase-5` branch pending merge)**: symbolic math
+  (CAS) — simplify, expand, factor, differentiate, solve (complex-aware),
+  and a bounded form of symbolic integration, HW-verified on both boards
+  and reachable inline from the home screen (`diff()`, `integ()`,
+  `factor()`, `expand()`, `simplify()`, `solve()`) or via the F6 CAS menu.
+  Exact-value display also ships: results with a clean closed form typeset
+  in amber instead of a decimal — `sqrt(8)` as `2√2`, `1/sqrt(2)` as `√2/2`,
+  `pi*2` as `2π`, `1/3` as a stacked fraction, and `sin(pi/3)` as `√3/2`
+  (special-angle trig, in both RADIAN and DEGREE). Alt+Enter is the decimal
+  escape. Stage 5 hardening closed the phase: the simplifier's per-call
+  working arrays moved off the stack into the expression pool (they were
+  ~1.1 KB frames nesting on a 4 KB stack shared with core 1 — a silent
+  overrun reproduced on hardware), parser and simplifier recursion gained
+  stated depth caps sized to measured frame sizes, and pool exhaustion is
+  now reported as an error rather than returning an unconverged tree that
+  looks converged. See
   [docs/phases/phase5-spec.md](docs/phases/phase5-spec.md).
 - **Phase 6 (planned)**: non-calculator functions — an app-launcher
   framework (6A) and MicroPython as its first base app (6B), plus room
@@ -229,7 +236,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 │   ├── ui/                # Screen manager, widgets
 │   ├── math/              # Expression engine, function catalog, numeric eval,
 │   │                      #   lists/stats/distributions/inference, matrices,
-│   │                      #   complex numbers, cas/ (Phase 5, in progress
+│   │                      #   complex numbers, cas/ (Phase 5, complete   
 │   │                      #   on the `phase-5` branch)
 │   ├── render/            # Natural math layout-node renderer
 │   ├── graph/             # Graphing subsystem: viewport, plotter, modes,
@@ -258,7 +265,7 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (complete; retro in [docs/notes/phase2-retro.md](docs/notes/phase2-retro.md))
 - **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics; code-complete)
 - **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; complete, HW-verified on both boards)
-- **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; in progress on the `phase-5` branch — engine, UI integration and exact-form display code-complete; hardening and the Pico 1 leg remain)
+- **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; complete on the `phase-5` branch — engine, UI integration, exact-form display and Stage 5 hardening, HW-verified on both boards)
 - **[docs/phases/phase6-spec.md](docs/phases/phase6-spec.md)** — Phase 6 design contract (non-calculator functions: app framework, MicroPython; specced, not started)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
 - **[docs/hardware.md](docs/hardware.md)** — hardware reference
@@ -286,7 +293,7 @@ Background research:
 | 3: Statistics | **Complete** | Lists, regression, distributions, inference, stat plots; HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase3-retro.md; Pico 1 pass via task 3D.14) |
 | 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
 | 4D: GC completeness (pre-release milestone) | **Complete** | All 9 D38 batches shipped 2026-07-26, HW-verified on Pico 1 2026-07-26/27; Pico 2 leg closed as a formality; docs/phases/phase4-spec.md §7, decisions.md D40 |
-| 5: CAS (symbolic math) | In progress (`phase-5` branch) | Stages 0-4 (engine, UI integration, exact-form display) code-complete and flashed to Pico 2; Stage 5 hardening + the Pico 1 leg remain; docs/phases/phase5-spec.md (D32, D41, D42, D43, D44) |
+| 5: CAS (symbolic math) | **Complete** (`phase-5` branch, pending merge) | Stages 0-5: engine, UI integration, exact-form display, hardening; HW-verified on Pico 1 + Pico 2 2026-08-05; docs/phases/phase5-spec.md (D32, D41, D42, D43, D44, D45) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 
 Both boards build clean and the host test suite (1300+ checks) passes. See

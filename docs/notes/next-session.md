@@ -1,36 +1,99 @@
 # Start here — next session
 
-**Last session:** 2026-08-03 — **Stage 4 follow-ups, flashed to the
-Pico 2.** Three gaps found on the first exact-form flash, decision
-**D44**. (1) **Alt+Enter is the decimal escape** — with an expression
-entered it evaluates with the probe suppressed (same as `>dec`); with the
-input empty and the newest result being an exact form, it re-runs that
-expression as a decimal, so an amber `sqrt(2)` becomes `1.414213562`
-without retyping. **Was Shift+Enter, rebound after HW testing**: the diag
-screen showed that chord arriving as key code 59 (`kInsert`), not 52
-(`kEnter`) with `shift_held` — the STM32 *translates* Shift chords into
-their own scan codes (Shift+Enter to 0xD1, same family as Shift+F1..F4 to
-F6..F9) rather than reporting base-key + modifier, so a Shift binding
-never fires. Now recorded in `platform/keyboard.hpp` beside the D12
-arrow note. Alt passes its flag through intact (Alt+UP/DOWN already
-scrolls history), and Insert stays free for a real binding. (2) **Exact trig at special
-angles**: `sin(pi/3)` → `√3/2`, `tan(pi/6)` → `√3/3`, `cos(pi/3)` → `1/2`,
-via a 24-entry table indexed in *twelfths of $\pi$* (covering the $\pi/6$
-and $\pi/4$ families; `cos(x)=sin(x+pi/2)` is an index shift). **Angle-mode
-aware** — in DEGREE mode `sin(60)` folds the same way. (3) **Non-REAL
-number modes now get exact forms** for real-valued results (the D43 v1
-limitation, which had no technical reason behind it) — the probe moved
-into a shared `apply_exact_form` helper used by both dispatch branches.
-Also: **"interesting" now compares formatted strings, not doubles**, so
-`sin(pi)` shows `0` instead of `1.224646799e-16` and `cos(pi/2)` shows
-`0` instead of `6.123233996e-17`, while `tan(pi/4)` (whose
-`0.9999999999999999` already formats as `1`) stays out of the amber path.
-Host suite green, `test_cas` **238 → 272**; Pico 1 bss **201,096, still
-flat**; flash +5.3 KB; lint/format clean. **Flashed to the Pico 2, clean
-boot confirmed over serial** — interactive confirmation still pending.
-On-device HELP gained the Alt+Enter line and an `#EXACT FORMS` block.
-Full detail: worklog's 2026-08-03 "Stage 4 follow-ups" entry,
-`decisions.md` D44.
+**Last session:** 2026-08-05 — **Phase 5 Stage 5: CAS hardening (4D.22,
+D45) plus two Phase 4C bugfixes (D46). PHASE 5 IS CLOSED, HW-verified on
+both boards.** Stage 5's brief was "stress testing + edge cases"; the audit
+found a live memory-corruption bug first. `simplify_sum` and
+`simplify_product` each held four `kMaxOperands = 64` arrays on the stack —
+**1,144 B and ~1,140 B frames**, measured on the linked Pico 1 object —
+nesting through `simplify_rec` once per level of ADD-inside-POW-inside-ADD.
+Core 0 has 2 KB declared and only **4 KB before core 1's stack**
+(`__StackOneTop 0x20041000`), which runs the display service on both boards;
+no stack guards. `exact_form()` runs parse + two simplify passes on *every*
+all-integer home-screen input, so plain arithmetic reached it.
+**Reproduced on the Pico 2 — and it did not crash**: the ladder
+`(2+1)^2+1` → … out to rung 6 (~6.9 KB) returned the *correct* answer with
+46 unbroken serial heartbeats, having overrun past core 1's stack top and
+declared bottom into unused space. Silent corruption, not a fault, and
+structurally invisible to the host suite (8 MB stack). Fixed by making the
+`ExprPool` arena **two-ended** (nodes up, pass scratch down under LIFO
+mark/release — scratch can't share the node end because `simplify()` runs up
+to 50 fixed-point passes without resetting), adding **stated depth caps**
+sized to the measurement (parser 12, simplifier 8; deepest recursing frame is
+now `integrate_rec` at 172 B), **implementing Risk 2** (sticky `overflowed()`
++ `near_capacity()`, "Too complex" instead of `simplify()`'s "last good form"
+masquerading as converged), and stopping `expand()` simplifying twice.
+Largest recursive frame **1,144 B → 172 B**; Pico 1 bss **201,096 →
+198,836**; `test_cas` **272 → 368**. The new `test_stress_edge_cases()`
+immediately caught a defect in the first cut of the fix itself (`alloc_raw`
+bounded against the arena end, not the scratch end). **D46** fixed two
+Phase 4C defects found on the bench: DEGREE mode was silently ignored in
+non-REAL Number modes (`c_sin` never applied `rad()`), and `c_pow` was
+`exp(ln)`-inexact so `10202^2` rendered amber in a+bi mode but white in REAL;
+`test_complex_expr` **75 → 113**. **The Pico 1 was flashed with Phase 5 for
+the first time and passed**, including the legacy two-field `history.txt`
+migration — only testable on that board, which closes the 2026-08-03 fix's
+outstanding confirmation. `PICOCALC_PHASE` bumped to `"5"`. Full detail:
+worklog's 2026-08-05 entry, `decisions.md` D45/D46.
+
+## The next job
+
+0. **Open the `phase-5` → `main` PR** if it is not already merged. The branch
+   carries Stages 0-5 and is HW-verified on both boards; README, ti-parity §8
+   and `PICOCALC_PHASE` are all flipped to reflect a closed phase.
+1. **Three items deferred from Stage 5, recorded rather than fixed:**
+   - **`PICO_USE_STACK_GUARDS=1` + `PICO_STACK_SIZE=4096`** would put a trap
+     exactly where core 0 starts eating core 1's stack, turning the whole
+     D45 bug class from silent corruption into a hard fault. Deliberately
+     *not* bundled into the phase close: it is a whole-firmware change, and
+     this session proved at least one path overran silently — graph
+     rendering, matrix ops and Phase 6's MicroPython heap may currently work
+     *because* nothing traps. Needs its own soak on both boards. This is the
+     highest-value follow-up on this list.
+   - **Latent MODE clobber, confirmed by code reading, never observed.**
+     `main.cpp:432` re-runs `apps::load_graph_state()` when storage arrives
+     late (the D14 5-8 s rail settle), and `graph_persist.cpp:56` is
+     `*this = g_image.state` — a whole-struct overwrite including `.angle`.
+     So a MODE toggle made *before* storage mounts is silently reverted (its
+     own `save_graph_state()` having also failed). Repro needs a genuine cold
+     power-on plus a toggle inside that window; a bench attempt on 2026-08-05
+     could not catch it. Likely fix: have a failed `save_graph_state()` mark
+     the in-memory state dirty, and have the late `load_graph_state()` skip
+     the apply and re-save instead. Pre-existing (D14-era), not a Phase 5
+     regression.
+   - **Inverse-trig exact forms** (`asin(1)` → $\pi/2$, `atan(1)` →
+     $\pi/4$): a missing feature, not a bug. D44 built a *forward*
+     special-angle table only. Needs its own inverse table, angle-mode
+     awareness and tests — comparable in size to D44. On
+     [wishlist.md](wishlist.md).
+2. **Seeded but unfinished: the `docs/site` branch** (2026-08-03, off `main`,
+   commit `0f1e8ef`, pushed, no PR). Scaffold + generators + CI only — every
+   prose chapter under `docs-site/guide/` is still a TODO stub and
+   `docs-site/reference/error-messages.md` is unwritten. Now that Phase 5 has
+   closed, the open question from that session resolves: **rebase onto `main`
+   after the Phase 5 merge so the CAS chapter can be written.**
+3. **After Phase 5: F — the unified evaluator** (D37/D40), deliberately
+   sequenced after CAS so a possible 4th symbolic evaluator is known before
+   unification. D46 is direct evidence for it: the real and complex
+   evaluators had silently disagreed about DEGREE-mode trig since Session 18,
+   which is exactly the class of bug unification removes. Then revisit idea H
+   (polymorphic variables, D40 — unscheduled, only if real usage demands it).
+4. **D10 leg B** (no phase home): compute-parallelize
+   `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`) —
+   needs a second engine/vars context (shared `X` mutation), not just a
+   spawned task. The pipeline gives ~0 benefit on compute-bound screens; a
+   heavy graph redraw measured 1.17 s on the Pico 1. See
+   `testdrive-2026-08-02-observations.md` for a nesting-depth scaling anomaly
+   worth another look if this is picked up.
+5. **Pre-Phase-6 SRAM levers** (all still deferred, none urgent; Pico 1 bss
+   is 198,836 after Stage 5, ~2.3 KB better than before): (a) MicroPython
+   heap 48→40 KB if the ~12 KB spare gets eaten by 6A framework growth (spec
+   Risk 6); (b) ArrayStore slab cut (~12-16 KB, more with a PSRAM-fallback
+   prerequisite); (c) persistence `g_chunk` fold (~6 KB); (d) arena debug
+   owner-guard. Full write-up: `docs/notes/pre-phase5-review.md`.
+
+Mind the §8 strip-safety rule (idempotent `render()`) for any new screens
+touched during on-device passes.
 
 **Previous session:** 2026-08-03 — **Phase 5 Stage 4: exact-form (surd)
 display, source changes, host-verified.** Home-screen results with a clean
@@ -413,14 +476,19 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
-- **The Pico 2 is flashed to `fd61849`** (2026-08-04) — Phase 5 Stages
-  0-4 complete: the CAS engine + UI integration, exact-form display
-  (surds, `pi`, bare rationals, special-angle trig), the Alt+Enter
-  decimal escape, and the 2026-08-03 history-persistence fix. Clean boot
-  confirmed over serial (psram-bulk healthy, die temp 36-39 C).
-  **Interactive confirmation is still pending** — the script is in "The
-  next job" #1's Stage 4 bullet. **The Pico 1 has still never been
-  flashed with any Phase 5 code**; that is Stage 5.
+- **Both boards are flashed to `5ef025f`** (2026-08-05) — all of Phase 5
+  (Stages 0-5) plus the D46 complex-evaluator fixes. **The Pico 1's flash is
+  the first time any Phase 5 code has run on that board**, and it passed:
+  the D45 nesting ladder computes clean, CAS ops are perceptibly slower but
+  well inside budget (no FPU), and the D46 fixes hold. Pico 1 bss **198,836**
+  (was 201,096); serial healthy on both (Pico 1 psram-bulk 232/200 us vs the
+  Pico 2's 150/155, die temp ~25 C).
+- **The 2026-08-03 history-persistence fix is now confirmed on hardware.**
+  The Pico 1 was still on Phase 4D, so its `history.txt` was the legacy
+  two-field format — that board was the only place the migration path could
+  be exercised, and it migrated correctly (old lines reload plain, new
+  symbolic results reload amber). This closes the last outstanding item from
+  that session.
 - **The history-persistence fix reached hardware with the build above**,
   but its reboot behavior has not been exercised yet — the host suite has
   no coverage for this path (it is firmware-only, with no host UI to run

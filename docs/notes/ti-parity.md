@@ -117,26 +117,26 @@ Legend: ✅ shipped/on par · 🟡 partial or different shape · ❌ not present
 ## 8. CAS — comparison against TI-Nspire CX II CAS
 
 TI-83/84+ has **no CAS at all** (that's the TI-89/Nspire CAS tier), so the
-right reference for symbolic math is the Nspire CAS. This section previews
-where the not-yet-started Phase 5 (CAS, formerly 4D) will land relative to
-that machine, based on the design already sketched in the old phase4-spec
-§6 (now [phase5-spec.md](../phases/phase5-spec.md)).
+right reference for symbolic math is the Nspire CAS. **Phase 5 closed
+2026-08-05, HW-verified on both boards** — this section is now a record of
+where it landed, not a forecast. See
+[phase5-spec.md](../phases/phase5-spec.md) and `decisions.md` D41-D45.
 
-| Feature | TI-Nspire CX II CAS | PicoCalc GraphCalc (Phase 5, planned) | Status |
+| Feature | TI-Nspire CX II CAS | PicoCalc GraphCalc (Phase 5, shipped) | Status |
 |---|---|---|---|
-| Symbolic simplify | ✅ (full CAS, Derive-derived engine) | 🟡 planned: rule-based rewriting to a fixed point, not a general normal form | 🟡 (scoped-down by design) |
-| Expand / factor | ✅ (arbitrary degree, multi-variable) | 🟡 planned: expand any degree; factor via GCD/diff-of-squares/quadratic formula/rational-root theorem, degree $\leq 4$, single-variable | 🟡 (deliberately bounded — see phase5-spec §6.6 rationale) |
-| Symbolic differentiation | ✅ (arbitrary, including partials, implicit) | 🟡 planned: single-variable, standard rule table incl. chain/product/quotient | 🟡 (no partials/implicit diff planned) |
-| Symbolic integration | ✅ (Risch-derived, very capable) | 🟡 planned: table lookup + linearity + linear substitution + power-rule generalization + one-level IBP; falls back to numeric | 🟡 (deliberately bounded — Risch is out of scope, documented in phase5-spec §6.8) |
-| Symbolic equation solving | ✅ (`solve`, `cSolve`, systems, arbitrary degree) | 🟡 planned: linear, quadratic (complex-aware), degree 3–4 via rational roots, standard inverse-function isolation, numeric fallback | 🟡 (no symbolic systems of equations planned) |
-| Complex CAS (`cSolve`, complex simplify) | ✅ | 🟡 planned: `i` as a reserved symbolic constant with `i²=-1` rewrite rule, feeding the existing numeric `Complex` type (Phase 4C) | 🟡 (narrower — see design-departures doc for how far to push this) |
+| Symbolic simplify | ✅ (full CAS, Derive-derived engine) | ✅ rule-based rewriting to a fixed point (50-pass cap), not a general normal form | 🟡 (shipped; scoped-down by design) |
+| Expand / factor | ✅ (arbitrary degree, multi-variable) | ✅ expand to degree $\leq 20$; factor via GCD/diff-of-squares/quadratic formula/rational-root theorem, degree $\leq 4$, single-variable | 🟡 (shipped; deliberately bounded — see phase5-spec §6.6 rationale) |
+| Symbolic differentiation | ✅ (arbitrary, including partials, implicit) | ✅ single-variable, standard rule table incl. chain/product/quotient, nth order | 🟡 (shipped; no partials/implicit diff) |
+| Symbolic integration | ✅ (Risch-derived, very capable) | ✅ table lookup + linearity + linear substitution + power-rule generalization + one-level IBP; falls back to numeric | 🟡 (shipped; deliberately bounded — Risch is out of scope, documented in phase5-spec §6.8) |
+| Symbolic equation solving | ✅ (`solve`, `cSolve`, systems, arbitrary degree) | ✅ linear, quadratic (complex-aware), degree 3–4 via rational roots, standard inverse-function isolation, numeric fallback | 🟡 (shipped; no symbolic systems of equations) |
+| Complex CAS (`cSolve`, complex simplify) | ✅ | ✅ `i` as a reserved symbolic constant with `i²=-1` rewrite rule, feeding the existing numeric `Complex` type (Phase 4C) | 🟡 (shipped; narrower — see design-departures doc for how far to push this) |
 | Systems of equations / linear algebra CAS (`solve` on systems, symbolic `rref`) | ✅ | ❌ not planned | ❌ (would need multi-equation solve; not in phase5-spec) |
 | Calculus: limits, series, sums (symbolic) | ✅ | ❌ not planned | ❌ |
-| Exact-value display ($\sqrt{2}$ stays $\sqrt{2}$, not 1.414) | ✅ (native) | 🟡 planned: Phase 5 §10.1 (closed-form recognition on simplified results, home-screen only) | 🟡 (narrower — recognition-based, not full symbolic evaluation throughout) |
+| Exact-value display ($\sqrt{2}$ stays $\sqrt{2}$, not 1.414) | ✅ (native) | ✅ closed-form recognition on simplified results, home-screen only (§10.1, D43/D44): surds, `pi`, bare rationals, special-angle trig in RAD and DEG; Alt+Enter escapes to decimal | 🟡 (shipped; narrower — recognition-based, not full symbolic evaluation throughout) |
 | Unit/dimensional arithmetic (`3 m/s` stays symbolic through arithmetic) | ✅ (native) | ❌ | ❌ (Phase 5 non-goal — materially bigger than exact-value display) |
-| CAS/numeric mode toggle | ✅ (Nspire has an "Auto/Approximate" setting) | 🟡 planned: CAS is explicit-invocation only (menu or `diff`/`integ`/`solve`/`factor`/`expand`/`simplify` keywords) — never silently replaces the numeric evaluator | 🟡 (by design — the numeric fast path must stay untouched for graphing) |
+| CAS/numeric mode toggle | ✅ (Nspire has an "Auto/Approximate" setting) | ✅ CAS is explicit-invocation only (F6 menu or `diff`/`integ`/`solve`/`factor`/`expand`/`simplify` keywords) — never silently replaces the numeric evaluator; the exact-form probe runs after the numeric result is committed and can only change what is displayed | 🟡 (shipped; by design — the numeric fast path stays untouched for graphing) |
 
-**Read**: Phase 5 is scoped to be a **competent high-school/early-college
+**Read**: Phase 5 shipped as a **competent high-school/early-college
 CAS** — on par with a scientific-calculator-class symbolic engine, not a
 Nspire-class general-purpose computer algebra system. The phase4-spec's own
 words on factoring apply project-wide: *"this handles the vast majority of
@@ -148,6 +148,20 @@ limits, series, unit/dimensional arithmetic) is explicitly not a goal for
 Phase 5 as scoped; if wanted later it would need its own follow-up phase.
 (Plain exact-*value* display — $\sqrt{2}$ staying $\sqrt{2}$ — is the one
 exception: it's narrow enough to fold into Phase 5 core scope, §10.1.)
+
+**Known gap within what shipped**: exact forms are recognized in the
+*forward* trig direction only — `sin(pi/6)` displays as `1/2`, but
+`asin(1)` still shows `1.570796327` rather than $\pi/2$. The inverse table
+is on the [wishlist](wishlist.md), deferred rather than grown into the
+Stage 5 hardening pass.
+
+**Where the engine's real ceiling is**: `Expr::NUM` holds a `calc_t`
+(double), so exactness degrades wherever a result exceeds double precision —
+a Sympy/Maxima-class CAS keeps arbitrary-precision rationals instead. The
+fixed 32-byte node with a union has no bignum arm, and adding one means
+variable-length node payloads, i.e. a redesign of the pool allocator rather
+than more memory. That is the one genuinely architectural limit; the rest of
+the boundary above is scope chosen deliberately.
 
 ---
 
