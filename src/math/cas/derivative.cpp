@@ -71,8 +71,19 @@ Expr* deriv_func(const char* name, const Expr* u, Expr* du) {
 }
 
 // d/dvar of a product (n-ary): sum_i (f0 * ... * fi' * ... * fn).
+//
+// The factor list lives in the pool's LIFO scratch, not on the stack (D45).
+// GCC inlines this into deriv(), which recurses once per level of tree depth,
+// so a stack-local kMaxFactors array is paid at every level — 256 B x the
+// parser's nesting cap, on a core-0 stack with a 2 KB declared floor. Same
+// hazard the simplifier had.
 Expr* deriv_product(const Expr* e, char var) {
-    const Expr* factors[kMaxFactors];
+    ScratchScope scope;
+    auto** factors = static_cast<const Expr**>(
+        scope.alloc(sizeof(const Expr*) * kMaxFactors, alignof(const Expr*)));
+    if (factors == nullptr) {
+        return nullptr;
+    }
     int n = 0;
     for (const Expr* c = e->child; c != nullptr; c = c->next) {
         if (n >= kMaxFactors) {

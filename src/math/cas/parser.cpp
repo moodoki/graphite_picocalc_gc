@@ -21,10 +21,25 @@ const char* const kFuncNames[] = {
 // Named constants (nullary FUNC nodes), matched without a following '('.
 const char* const kConstNames[] = {"pi"};
 
+// Nesting cap (D45). Every level of parens, function argument or unary sign
+// costs a chain of parse_* frames, and the tree it builds is then walked
+// recursively afterwards by simplify / deriv / integrate_rec. That walk, not
+// the parse, is what sets this number.
+//
+// Measured on the linked Pico 1 build, the deepest-recursing CAS frame is
+// integrate_rec at 172 B (simplify_sum/simplify_product and deriv_product
+// were the big ones at ~1.1 KB and 256 B; both now take their arrays from the
+// pool). 12 x 172 B = ~2.1 KB, plus evaluate_home's 580 B base, keeps a CAS
+// operation near 2.7 KB — inside the 4 KB core 0 has before it reaches core
+// 1's stack, with margin. Hand-entered expressions sit at 2-4 levels;
+// sin(cos(tan(x))) is 3.
+constexpr int kMaxDepth = 12;
+
 struct Parser {
     const char* p = nullptr;
     const char** err = nullptr;
     bool failed = false;
+    int depth = 0;
 
     void fail(const char* msg) {
         if (!failed) {
@@ -52,7 +67,20 @@ struct Parser {
                std::isalpha(static_cast<unsigned char>(c)) || c == '(';
     }
 
+    // Every nested group re-enters here (parens in parse_atom, function
+    // arguments in parse_identifier), so this is where nesting is counted.
     Expr* parse_equation() {
+        if (depth >= kMaxDepth) {
+            fail("too deeply nested");
+            return nullptr;
+        }
+        ++depth;
+        Expr* r = parse_equation_inner();
+        --depth;
+        return r;
+    }
+
+    Expr* parse_equation_inner() {
         Expr* lhs = parse_add();
         if (lhs == nullptr) {
             return nullptr;
@@ -128,23 +156,31 @@ struct Parser {
 
     Expr* parse_unary() {
         const char c = peek();
-        if (c == '-') {
-            ++p;
-            Expr* operand = parse_unary();
-            if (operand == nullptr) {
-                return nullptr;
-            }
-            Expr* r = Expr::neg(operand);
-            if (r == nullptr) {
-                fail("out of memory");
-            }
-            return r;
+        if (c != '-' && c != '+') {
+            return parse_power();
+        }
+        // A sign chain (`---x`) recurses without passing through
+        // parse_equation, so it needs its own count against the same cap.
+        if (depth >= kMaxDepth) {
+            fail("too deeply nested");
+            return nullptr;
+        }
+        ++depth;
+        Expr* operand = nullptr;
+        ++p;
+        operand = parse_unary();
+        --depth;
+        if (operand == nullptr) {
+            return nullptr;
         }
         if (c == '+') {
-            ++p;
-            return parse_unary();
+            return operand;
         }
-        return parse_power();
+        Expr* r = Expr::neg(operand);
+        if (r == nullptr) {
+            fail("out of memory");
+        }
+        return r;
     }
 
     Expr* parse_power() {

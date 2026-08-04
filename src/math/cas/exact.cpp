@@ -599,6 +599,14 @@ bool exact_form(const char* input, double numeric, char* out, std::size_t out_le
         return false;
     }
 
+    // A failed allocation anywhere above means the tree is an incomplete
+    // simplification. G5 would usually catch that as a numeric mismatch, but
+    // "usually" is not the contract here — an unconverged tree can still hit
+    // the right value. Leave the decimal standing (spec §13 Risk 2).
+    if (g_cas_pool.overflowed()) {
+        return false;
+    }
+
     char text[64];
     const std::size_t n = expr_to_string(tree, text, sizeof(text));
     if (n == 0 || n + 1 >= sizeof(text) || n + 1 > out_len) {

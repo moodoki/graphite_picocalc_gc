@@ -18,6 +18,109 @@ Format:
 
 ---
 
+## D45: Phase 5 Stage 5 hardening — CAS pass scratch moves off the stack into a two-ended pool, plus stated depth caps and a real Risk-2 abort
+
+**Date**: 2026-08-05
+**Status**: Accepted (Phase 5 Stage 5, task 4D.22)
+**Context**: Stage 5's brief was "stress testing + edge cases". An audit of
+`src/math/cas/` against spec §13 first found something worse than a missing
+test. `simplify_sum` and `simplify_product` each held four `kMaxOperands = 64`
+arrays on the stack — **1,144 B and ~1,140 B frames, measured on the linked
+Pico 1 object** — and they nest through `simplify_rec` once per level of
+ADD-inside-POW-inside-ADD. Core 0's stack is `__StackBottom 0x20041800` →
+`__StackTop 0x20042000`: 2 KB declared, and only 4 KB before `__StackOneTop`
+(0x20041000), which is core 1's stack — running the display service on both
+boards since D10 leg A. `PICO_USE_STACK_GUARDS` is not defined, so nothing
+traps.
+
+The blast radius was wider than CAS calls: `exact_form()` runs `parse_expr` +
+two `simplify()` passes on *every* home-screen input whose literals are all
+integers, so plain arithmetic reaches it.
+
+**Reproduced on the Pico 2 (fd61849), 2026-08-05.** The ladder
+`(2+1)^2+1` → `((2+1)^2+1)^2+1` → ... was typed out to rung 6, which is six
+nested levels ≈ 6.9 KB of stack. It **returned the correct answer**
+(1.173e32) and serial showed 46 `temp:` and 46 `psram-bulk:` heartbeats with
+no gap, no fault, no reboot. The overrun ran past core 1's stack top *and*
+past its declared bottom into the unused gap above the heap — core 1's
+display loop only occupies the top few hundred bytes of its region, so
+nothing live was hit. **The failure mode is therefore silent memory
+corruption whose blast radius depends on what core 1 is doing at that
+instant, not a deterministic fault** — which is worse to diagnose, and
+invisible to the host suite (x86, 8 MB stack).
+
+**Decision**: four changes, all in `src/math/cas/`.
+
+1. **The `ExprPool` arena becomes two-ended.** Nodes bump up from the bottom
+   as before; the passes' per-invocation scratch arrays bump *down* from the
+   top under LIFO `scratch_mark()`/`scratch_release()` (RAII `ScratchScope`).
+   `simplify_product`, `simplify_sum`, `split_term` and `deriv_product` take
+   their arrays from there instead of the stack. Scratch cannot share the
+   node end: `simplify()` runs its fixed-point loop up to 50 times without
+   resetting, so a bump-only scratch would multiply by passes x depth and
+   exhaust the arena; LIFO release makes every pass reuse the same space.
+2. **Stated depth caps** replace bounds that happened to fall out of input
+   length. Parser `kMaxDepth = 12` (parens, function arguments, unary sign
+   chains); simplifier `kMaxDepth = 8` on the two n-ary passes only.
+3. **Risk 2 is actually implemented.** `ExprPool` gained a sticky
+   `overflowed()` flag and `near_capacity()` (the spec's 80%). `evaluate_home`
+   now reports `"Too complex"` when the flag is set, and `exact_form` leaves
+   the decimal standing — previously `simplify()`'s "last good form" fallback
+   returned a tree indistinguishable from a converged one.
+4. **`expand()` no longer simplifies twice.** The binomial path returned
+   `simplify(sum)` and `expand()` then simplified that again — ~5.4 KB of a
+   22.5 KB arena spent re-canonicalising an already-canonical tree.
+
+**Rationale**: the arrays were the whole problem, and the pool is what the
+arena exists for. Moving them there fixes the hazard at its source rather
+than capping depth until the symptom goes away, keeps `kMaxOperands` at 64 so
+no expression that worked before stops working, and converts an
+unbounded-and-silent overrun into a bounded failure that returns `nullptr`.
+The caps are then sized to the *measured* worst case rather than a round
+number: the deepest-recursing CAS frame is now `integrate_rec` at 172 B, so
+12 x 172 B + `evaluate_home`'s 580 B base keeps an operation near 2.6 KB,
+inside the 4 KB with margin. Rejected: shrinking `kMaxOperands` to 24 (silently
+degrades 25-64-term expressions and still leaves 2 KB at four levels), and a
+depth cap alone (rejects working input, leaves the frames as a trap for the
+next caller).
+
+**Tradeoffs**: scratch costs ~1 KB of the 22.5 KB arena per nesting level,
+bounded by the depth cap. Expressions nested past 12 levels are now refused
+rather than attempted — no hand-entered expression comes close, and
+`kMaxInputLen` (48) admits at most 7 of the worst-case shape anyway. The
+`near_capacity()` abort is deliberately **not** applied to expand's binomial
+path: that path is linear in n (capped at 20) with a known cost, and
+`(x+1)^10` legitimately reaches ~76% of the arena, so an 80% abort there
+would reject working input.
+
+**Results**: `test_cas` 272 → **368 checks**, 0 failures; full host suite
+green. Pico 1 bss 201,096 → **198,836** (−2,260). Largest recursive CAS frame
+1,144 B → **172 B**. lint/format clean. The new `test_stress_edge_cases()`
+immediately earned itself by catching a defect in the first cut of this very
+change: `alloc_raw` bounded the node end against the arena end rather than
+the scratch end, so nodes bumped through live scratch arrays and the pass
+read back overwritten `Expr` pointers.
+
+**Revisit when**: (a) a CAS pass is added that recurses deeper than
+`integrate_rec` or carries a bigger frame — re-measure and re-derive the
+parser cap, the arithmetic is in `parser.cpp`'s comment; (b) the arena moves
+off `scratch::kCompute` or changes size, which shifts both the scratch budget
+and the ~76% that `(x+1)^10` occupies; (c) **`PICO_USE_STACK_GUARDS` is
+considered** — see the follow-up note below, deliberately left out of this
+change.
+
+**Follow-up left open (not done here)**: enabling `PICO_USE_STACK_GUARDS=1`
+with `PICO_STACK_SIZE=4096` would put a trap exactly where core 0 starts
+eating core 1's stack, turning this whole class of bug from silent corruption
+into a hard fault. It is not bundled into Stage 5 because it is a
+whole-firmware change, not a CAS one: this session proved at least one path
+overran silently, and there may be others (graph rendering, matrix ops, and
+Phase 6's MicroPython heap) that currently work *because* nothing traps.
+It deserves its own soak on both boards rather than riding along with a
+phase close.
+
+---
+
 ## D44: Exact-form follow-ups — Alt+Enter decimal escape, exact trig at special angles, and non-REAL number modes
 
 **Date**: 2026-08-03

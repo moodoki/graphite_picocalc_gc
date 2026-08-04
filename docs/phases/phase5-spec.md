@@ -191,6 +191,16 @@ a 50-term polynomial after expansion produces ~150 nodes. Deeply
 recursive operations (repeated integration) may need the pool to spill
 into PSRAM on Pico 1, which is why the pool lives there by default.
 
+**As built (D41, corrected 2026-08-05)**: the pool overlays
+`scratch::kCompute` — **22,528 bytes, ~704 nodes on device** (nodes are 32 B
+there, 40 B on the host's 64-bit build), not the 64 KB / ~2000 sketched
+above. Risk 2's 80% threshold below was written against the larger figure, so
+read it against 22.5 KB. Measured headroom: `expand((x+1)^10)` occupies ~76%
+of it, which is the closest any supported operation comes to the ceiling.
+Since D45 the arena is **two-ended** — nodes bump up from the bottom, the
+passes' scratch arrays bump down from the top under LIFO release — so
+`capacity()`/`used()` account for both.
+
 **Note (Pico 1 headroom)**: this budget was set when Pico 1 bss was well
 under half of the 264 KB SRAM budget. As of the most recent Phase 4
 sessions (D28–D31), Pico 1 bss sits at ~188.8 KB with roughly 76 KB of
@@ -688,7 +698,7 @@ rather than renumbering to `5.n`.
 | 4D.19 | Definite integration (symbolic + numeric fallback) | 4 | $\int_0^\pi \sin x\,dx$ = 2 |
 | 4D.20 | CAS menu UI + expression routing | 4 | CAS ops from home-screen menu |
 | 4D.21 | CAS function syntax (`diff()`, `integ()`, etc.) | 4 | Callable inline from input |
-| 4D.22 | Stress testing + edge cases | 6 | Nested exprs, complex roots, guards |
+| 4D.22 | Stress testing + edge cases — **done 2026-08-05** (D45): pass scratch moved off the stack into a two-ended pool, stated depth caps, Risk-2 abort wired through, `test_stress_edge_cases()` | 6 | Nested exprs, complex roots, guards |
 | 4D.23 | Exact-form recognition (§10.1): rational-coefficient + surd/pi closed-form check on a simplified tree — **done 2026-08-03** (`src/math/cas/exact.cpp`) | 6 | `sqrt(8)` recognized as exact `2*sqrt(2)` form |
 | 4D.24 | Home-screen exact-form probe (side-effect-free, D30-§4-style) + display integration — **done 2026-08-03** | 4 | `sqrt(2)` on home screen shows `√2`, not `1.41421` |
 | | **Total** | **~134 hrs** | |

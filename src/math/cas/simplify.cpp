@@ -10,6 +10,51 @@ namespace {
 constexpr int kMaxOperands = 64;  // cap on n-ary width handled in one node
 constexpr int kMaxPasses = 50;    // fixed-point cap (spec §13 Risk 1)
 
+// Per-invocation working arrays for the two n-ary passes. These live in the
+// pool's LIFO scratch end, not on the stack (D45): at kMaxOperands = 64 they
+// are ~1.2 KB each, and simplify_sum/simplify_product nest once per level of
+// ADD-inside-POW-inside-ADD, so stack-local copies walked core 0's stack off
+// its 4 KB and into core 1's — silently, since core 1's display loop only
+// occupies the top of its own region. Measured on hardware 2026-08-05:
+// ((((((2+1)^2+1)...)^2+1) computed the correct answer while overrunning by
+// ~3 KB.
+//
+// Neither struct carries a separate `parts` array: the assembled operand list
+// is written back over `factors` / `rests` in place. That is safe because the
+// write index never runs ahead of the read index (entries are only dropped,
+// never inserted), and it keeps ~260 B per nesting level out of an arena that
+// (x+1)^10 already fills to ~76%.
+struct ProductScratch {
+    Expr* bases[kMaxOperands];
+    double exps[kMaxOperands];
+    Expr* factors[kMaxOperands + 1];  // +1: the coefficient can be prepended
+};
+
+struct SumScratch {
+    Expr* rests[kMaxOperands + 1];  // +1: the constant term can be appended
+    double coeffs[kMaxOperands];
+    Expr* term_factors[kMaxOperands];  // split_term's, live only within a call
+};
+
+// Nesting cap for the two heavy passes. The arena bounds depth on its own
+// (scratch meets nodes and fails cleanly), but that bound is ~17 levels,
+// which at ~200 B of stack per level would again approach the 2 KB declared
+// core-0 floor. 8 keeps the stack near 1.6 KB while being far deeper than any
+// hand-entered expression — kMaxInputLen (48) admits at most 7 levels of the
+// worst-case shape.
+constexpr int kMaxDepth = 8;
+int g_depth = 0;
+
+struct DepthGuard {
+    DepthGuard() : ok(g_depth < kMaxDepth) { ++g_depth; }
+    ~DepthGuard() { --g_depth; }
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+    DepthGuard(DepthGuard&&) = delete;
+    DepthGuard& operator=(DepthGuard&&) = delete;
+    bool ok;
+};
+
 Expr* simplify_rec(const Expr* e);
 
 bool is_integer(double v) {
@@ -308,9 +353,17 @@ bool add_factor(Expr* f, double* coeff, Expr** bases, double* exps, int* nb) {
 }
 
 Expr* simplify_product(const Expr* e) {
+    const DepthGuard depth;
+    ScratchScope scope;
+    auto* s =
+        static_cast<ProductScratch*>(scope.alloc(sizeof(ProductScratch), alignof(ProductScratch)));
+    if (!depth.ok || s == nullptr) {
+        return nullptr;  // too deep, or the arena's two ends met
+    }
+
     double coeff = 1.0;
-    Expr* bases[kMaxOperands];
-    double exps[kMaxOperands];
+    Expr** bases = s->bases;
+    double* exps = s->exps;
     int nb = 0;
 
     for (const Expr* c = e->child; c != nullptr; c = c->next) {
@@ -346,7 +399,7 @@ Expr* simplify_product(const Expr* e) {
         }
     }
 
-    Expr* factors[kMaxOperands];
+    Expr** factors = s->factors;
     int nf = 0;
     for (int i = 0; i < nb; ++i) {
         if (exps[i] == 0.0) {
@@ -366,19 +419,24 @@ Expr* simplify_product(const Expr* e) {
     if (coeff == 1.0) {
         return make_product(factors, nf);
     }
-    Expr* parts[kMaxOperands + 1];
-    parts[0] = Expr::num(coeff);
-    for (int i = 0; i < nf; ++i) {
-        parts[i + 1] = factors[i];
+    // Shift right by one and prepend the coefficient, in place.
+    for (int i = nf; i > 0; --i) {
+        factors[i] = factors[i - 1];
     }
-    return make_product(parts, nf + 1);
+    factors[0] = Expr::num(coeff);
+    if (factors[0] == nullptr) {
+        return nullptr;
+    }
+    return make_product(factors, nf + 1);
 }
 
 // ---- Sum ------------------------------------------------------------------
 
 // Split a term into a numeric coefficient and its (canonical) non-numeric
 // "rest". rest == nullptr means the term was a pure number.
-void split_term(Expr* t, double* coeff, Expr** rest) {
+// `factors` is caller-supplied scratch (kMaxOperands wide). split_term never
+// re-enters itself, so one buffer per simplify_sum call is enough.
+void split_term(Expr* t, double* coeff, Expr** rest, Expr** factors) {
     if (t->is_num()) {
         *coeff = t->num_val;
         *rest = nullptr;
@@ -386,7 +444,6 @@ void split_term(Expr* t, double* coeff, Expr** rest) {
     }
     if (t->is_mul() && t->child->is_num()) {
         *coeff = t->child->num_val;
-        Expr* factors[kMaxOperands];
         int nf = 0;
         for (const Expr* c = t->child->next; c != nullptr && nf < kMaxOperands; c = c->next) {
             factors[nf++] = c->clone();
@@ -398,10 +455,12 @@ void split_term(Expr* t, double* coeff, Expr** rest) {
     *rest = t->clone();
 }
 
-bool add_summand(Expr* t, double* constant, Expr** rests, double* coeffs, int* nt) {
+bool add_summand(Expr* t, double* constant, SumScratch* s, int* nt) {
+    Expr** rests = s->rests;
+    double* coeffs = s->coeffs;
     double c = 0.0;
     Expr* rest = nullptr;
-    split_term(t, &c, &rest);
+    split_term(t, &c, &rest, s->term_factors);
     if (rest == nullptr) {
         *constant += c;
         return true;
@@ -422,9 +481,16 @@ bool add_summand(Expr* t, double* constant, Expr** rests, double* coeffs, int* n
 }
 
 Expr* simplify_sum(const Expr* e) {
+    const DepthGuard depth;
+    ScratchScope scope;
+    auto* s = static_cast<SumScratch*>(scope.alloc(sizeof(SumScratch), alignof(SumScratch)));
+    if (!depth.ok || s == nullptr) {
+        return nullptr;  // too deep, or the arena's two ends met
+    }
+
     double constant = 0.0;
-    Expr* rests[kMaxOperands];
-    double coeffs[kMaxOperands];
+    Expr** rests = s->rests;
+    double* coeffs = s->coeffs;
     int nt = 0;
 
     for (const Expr* c = e->child; c != nullptr; c = c->next) {
@@ -435,19 +501,20 @@ Expr* simplify_sum(const Expr* e) {
         if (sc->is_add()) {
             for (Expr* t = sc->child; t != nullptr;) {
                 Expr* nx = t->next;
-                if (!add_summand(t, &constant, rests, coeffs, &nt)) {
+                if (!add_summand(t, &constant, s, &nt)) {
                     return e->clone();
                 }
                 t = nx;
             }
-        } else if (!add_summand(sc, &constant, rests, coeffs, &nt)) {
+        } else if (!add_summand(sc, &constant, s, &nt)) {
             return e->clone();
         }
     }
 
     sort_exprs_with_coeffs(rests, coeffs, nt);
 
-    Expr* parts[kMaxOperands + 1];
+    // Assemble over `rests` in place — np <= i throughout, since terms are
+    // only dropped (zero coefficient), never inserted.
     int np = 0;
     for (int i = 0; i < nt; ++i) {
         if (coeffs[i] == 0.0) {
@@ -457,12 +524,12 @@ Expr* simplify_sum(const Expr* e) {
         if (term == nullptr) {
             return nullptr;
         }
-        parts[np++] = term;
+        rests[np++] = term;
     }
     if (constant != 0.0 || np == 0) {
-        parts[np++] = Expr::num(constant);
+        rests[np++] = Expr::num(constant);
     }
-    return make_sum(parts, np);
+    return make_sum(rests, np);
 }
 
 // ---- Driver ---------------------------------------------------------------

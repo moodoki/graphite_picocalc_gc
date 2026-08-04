@@ -13,16 +13,55 @@ std::size_t ExprPool::capacity() const {
     return math::scratch::kComputeBytes;
 }
 
-Expr* ExprPool::alloc() {
+void* ExprPool::alloc_raw(std::size_t bytes, std::size_t align) {
     std::uint8_t* region = math::scratch::compute_region();
     void* cur = region + offset_;
-    std::size_t space = math::scratch::kComputeBytes - offset_;
-    if (std::align(alignof(Expr), sizeof(Expr), cur, space) == nullptr) {
-        return nullptr;  // pool exhausted (spec §13 Risk 2 abort path)
+    // The ceiling is the scratch end, not the arena end — held scratch arrays
+    // are live memory. Without this the node end bumps straight through them
+    // and a pass reads back overwritten Expr pointers.
+    const std::size_t limit = math::scratch::kComputeBytes - scratch_used_;
+    if (offset_ > limit) {
+        overflow_ = true;
+        return nullptr;
     }
-    Expr* e = static_cast<Expr*>(cur);
-    offset_ = static_cast<std::size_t>(static_cast<std::uint8_t*>(cur) - region) + sizeof(Expr);
-    return e;
+    std::size_t space = limit - offset_;
+    if (std::align(align, bytes, cur, space) == nullptr) {
+        overflow_ = true;  // pool exhausted (spec §13 Risk 2 abort path)
+        return nullptr;
+    }
+    offset_ = static_cast<std::size_t>(static_cast<std::uint8_t*>(cur) - region) + bytes;
+    return cur;
+}
+
+Expr* ExprPool::alloc() {
+    return static_cast<Expr*>(alloc_raw(sizeof(Expr), alignof(Expr)));
+}
+
+void* ExprPool::alloc_scratch(std::size_t bytes, std::size_t align) {
+    // Grow down from the top. compute_region() is 16-byte aligned (see
+    // scratch.cpp), so aligning the offset aligns the address.
+    const std::size_t top = math::scratch::kComputeBytes - scratch_used_;
+    if (top < bytes) {
+        overflow_ = true;
+        return nullptr;
+    }
+    const std::size_t base = (top - bytes) & ~(align - 1);
+    if (base < offset_) {
+        overflow_ = true;  // the two ends would cross
+        return nullptr;
+    }
+    scratch_used_ = math::scratch::kComputeBytes - base;
+    return math::scratch::compute_region() + base;
+}
+
+ScratchScope::ScratchScope() : mark_(g_cas_pool.scratch_mark()) {}
+
+ScratchScope::~ScratchScope() {
+    g_cas_pool.scratch_release(mark_);
+}
+
+void* ScratchScope::alloc(std::size_t bytes, std::size_t align) {
+    return g_cas_pool.alloc_scratch(bytes, align);
 }
 
 // ---- Factories ----

@@ -87,15 +87,76 @@ struct Expr {
 // operation; there is no per-node free. Because it borrows kCompute, a CAS
 // operation must not call into the region's other owners (list_expr / stats
 // / infer / matops) while it holds the arena — it never does in v1.
+//
+// The arena is two-ended (Stage 5 / D45):
+//
+//   [ nodes ---->                              <---- scratch ]
+//   0                                              kComputeBytes
+//
+// Nodes bump up from the bottom and are only reclaimed by reset(). The
+// passes' per-invocation scratch arrays bump *down* from the top under
+// LIFO mark/release, because they used to be stack-local: 64-operand arrays
+// gave simplify_sum/simplify_product ~1.1 KB frames on a core-0 stack with
+// only 4 KB below it before core 1's (see simplify.cpp). They cannot share
+// the node end — simplify() runs its fixed-point loop up to 50 times without
+// resetting, so a bump-only scratch would multiply by passes x depth and
+// exhaust the arena. LIFO release makes each pass reuse the same space.
+// Exhaustion at either end is a clean nullptr; a stack overrun was not.
 class ExprPool {
 public:
-    void reset() { offset_ = 0; }
+    void reset() {
+        offset_ = 0;
+        scratch_used_ = 0;
+        overflow_ = false;
+    }
     Expr* alloc();  // nullptr when full
-    std::size_t used() const { return offset_; }
+
+    // Raw bump allocation from the node end, for anything node-lifetime.
+    void* alloc_raw(std::size_t bytes, std::size_t align);
+
+    // ---- LIFO scratch end (align must be a power of two) ----
+    void* alloc_scratch(std::size_t bytes, std::size_t align);
+    std::size_t scratch_mark() const { return scratch_used_; }
+    void scratch_release(std::size_t mark) { scratch_used_ = mark; }
+
+    // Both ends together — what near_capacity() judges.
+    std::size_t used() const { return offset_ + scratch_used_; }
     std::size_t capacity() const;
 
+    // Sticky: set by any allocation that failed since the last reset(). When
+    // this is set the operation's result is incomplete, so callers must
+    // report an error rather than display it (spec §13 Risk 2) — the
+    // simplifier's own "last good form" fallback is otherwise indistinguishable
+    // from a converged answer.
+    bool overflowed() const { return overflow_; }
+
+    // At or past the spec's 80% abort threshold. Node-multiplying passes
+    // check this and give up early rather than grinding the pool to nothing.
+    bool near_capacity() const { return used() * 5 >= capacity() * 4; }
+
 private:
-    std::size_t offset_ = 0;
+    std::size_t offset_ = 0;        // node end, grows up
+    std::size_t scratch_used_ = 0;  // scratch end, grows down from the top
+    bool overflow_ = false;
+};
+
+// Scoped LIFO scratch allocation. Takes a mark on construction and restores
+// it on destruction, so a pass's arrays are released even on the early-return
+// paths (of which the simplifier has many).
+class ScratchScope {
+public:
+    ScratchScope();
+    ~ScratchScope();
+    ScratchScope(const ScratchScope&) = delete;
+    ScratchScope& operator=(const ScratchScope&) = delete;
+    ScratchScope(ScratchScope&&) = delete;
+    ScratchScope& operator=(ScratchScope&&) = delete;
+
+    // nullptr when the arena is full; the caller must abort the pass.
+    void* alloc(std::size_t bytes, std::size_t align);
+
+private:
+    std::size_t mark_;
 };
 
 extern ExprPool g_cas_pool;

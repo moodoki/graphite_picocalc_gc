@@ -221,6 +221,9 @@ HomeResult evaluate_home(const char* input, bool allow_complex) {
         }
     } else if (std::strcmp(op, "solve") == 0) {
         const SolveResult sr = solve(e, var, allow_complex);
+        if (g_cas_pool.overflowed()) {
+            return make_error("Too complex", op, var);  // see the note below
+        }
         if (sr.count == 0) {
             return make_error(sr.complex ? "No real solutions" : "No solution", op, var);
         }
@@ -233,6 +236,14 @@ HomeResult evaluate_home(const char* input, bool allow_complex) {
         return r;
     }
 
+    // Risk-2 (spec §13): a failed allocation anywhere in the pass means the
+    // result is incomplete — simplify()'s "last good form" fallback returns a
+    // tree that looks converged but is not. Report it rather than show it.
+    // Checked before the null test so an out-of-memory abort is not reported
+    // as an evaluation failure.
+    if (g_cas_pool.overflowed()) {
+        return make_error("Too complex", op, var);
+    }
     if (r.result == nullptr) {
         return make_error("Cannot evaluate", op, var);
     }

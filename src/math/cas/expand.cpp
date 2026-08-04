@@ -18,6 +18,12 @@ Expr* multiply_expand(Expr* a, Expr* b) {
     if (a == nullptr || b == nullptr) {
         return nullptr;
     }
+    // Risk-2 abort (spec §13): this is the node multiplier, so it is where
+    // the 80% check belongs. Giving up here leaves the pool with room to
+    // build the error path; grinding on to a failed alloc does not.
+    if (g_cas_pool.near_capacity()) {
+        return nullptr;
+    }
     Expr* sum = nullptr;
     for (Expr* ai = a->is_add() ? a->child : a; ai != nullptr;) {
         Expr* ai_next = a->is_add() ? ai->next : nullptr;
@@ -62,6 +68,11 @@ Expr* expand_pow(const Expr* e) {
         if (base->child_count() == 2) {
             Expr* a = base->child;
             Expr* b = base->child->next;
+            // No near_capacity() check here: this path is linear in n (capped
+            // at kExpandExpCap = 20) and its cost is known up front, unlike
+            // multiply_expand's. (x+1)^10 legitimately reaches ~83% of the
+            // arena, so an 80% abort on this path would reject working input.
+            // A failed alloc still aborts it cleanly.
             Expr* sum = nullptr;
             for (int k = 0; k <= n; ++k) {
                 Expr* term = Expr::mul(
@@ -72,12 +83,21 @@ Expr* expand_pow(const Expr* e) {
                 }
                 sum = (sum == nullptr) ? term : Expr::add(sum, term);
             }
-            return simplify(sum);
+            // Deliberately NOT simplified here: expand() simplifies the whole
+            // result on the way out, and running a second fixed-point loop
+            // over an already-canonical tree cost ~5.4 KB of the 22.5 KB
+            // arena for no change — enough on its own to push (x+1)^10 over
+            // the edge. The iterative path below still needs its per-step
+            // simplify, because there the tree grows without one.
+            return sum;
         }
         // General (multi-term) base: iterative multiply, simplifying each step.
         // Lower ceiling because bump-pool garbage accumulates (spec Risk 2).
         Expr* result = base->clone();
         for (int k = 1; k < n && result != nullptr; ++k) {
+            if (g_cas_pool.near_capacity()) {
+                return nullptr;  // Risk-2 abort
+            }
             result = multiply_expand(result, base->clone());
             if (result != nullptr) {
                 result = simplify(result);

@@ -19,6 +19,7 @@
 #include "math/cas/simplify.hpp"
 #include "math/cas/solve.hpp"
 #include "math/engine.hpp"
+#include "math/scratch.hpp"
 #include "math/types.hpp"
 
 using math::cas::differentiate;
@@ -953,6 +954,347 @@ void test_exact_trig() {
     math::set_angle_mode(saved);
 }
 
+// ---- Stage 5 stress + edge cases (task 4D.22, decisions D45) --------------
+
+// Build the nesting ladder the 2026-08-05 hardware session walked:
+// rung 1 = "(2+1)^2+1", rung n wraps the previous in "(...)^2+1". Each rung is
+// one more level of ADD-inside-POW-inside-ADD, which is one more nested
+// simplify_sum. Before D45 those were ~1.1 KB stack frames each and rung 6
+// overran core 0's 4 KB stack into core 1's, silently returning the right
+// answer (1.173e32) while scribbling on memory nothing happened to be using.
+void build_rung(int n, char* out, std::size_t cap) {
+    std::snprintf(out, cap, "2+1");
+    for (int i = 0; i < n; ++i) {
+        char wrapped[256];
+        std::snprintf(wrapped, sizeof(wrapped), "(%s)^2+1", out);
+        std::snprintf(out, cap, "%s", wrapped);
+    }
+}
+
+// Expected value of rung n: v0 = 3, v(k+1) = v(k)^2 + 1.
+double rung_value(int n) {
+    double v = 3.0;
+    for (int i = 0; i < n; ++i) {
+        v = v * v + 1.0;
+    }
+    return v;
+}
+
+void test_stress_nesting() {
+    // The ladder must produce the right number at every rung, and must fail
+    // cleanly (never a wrong number, never a crash) once past the depth cap.
+    for (int n = 1; n <= 10; ++n) {
+        char expr[256];
+        build_rung(n, expr, sizeof(expr));
+        g_cas_pool.reset();
+        Expr* t = parse_expr(expr, nullptr);
+        if (t == nullptr) {
+            continue;  // past the parser's nesting cap: a clean refusal
+        }
+        Expr* s = simplify(t);
+        ++g_checks;
+        if (s == nullptr || g_cas_pool.overflowed()) {
+            continue;  // clean abort past the simplifier's depth cap
+        }
+        if (!s->is_num() || std::fabs(s->num_val - rung_value(n)) > 1e-6 * rung_value(n)) {
+            ++g_failures;
+            char got[128] = "?";
+            expr_to_string(s, got, sizeof(got));
+            std::printf("FAIL: rung %d simplify -> %s, expected %g\n", n, got, rung_value(n));
+        }
+    }
+
+    // Rung 5 is the deepest that fits kMaxInputLen (48) on the home screen,
+    // and it is inside the depth cap, so it must still give a real answer.
+    {
+        char expr[256];
+        build_rung(5, expr, sizeof(expr));
+        g_cas_pool.reset();
+        Expr* s = simplify(parse_expr(expr, nullptr));
+        check(s != nullptr && s->is_num() &&
+                  std::fabs(s->num_val - rung_value(5)) < 1e-6 * rung_value(5),
+              "rung 5 still computes");
+    }
+}
+
+void test_stress_parser_depth() {
+    // Nested parens well past the cap: refused, not a stack walk.
+    {
+        char buf[256];
+        std::size_t i = 0;
+        for (; i < 40; ++i) {
+            buf[i] = '(';
+        }
+        buf[i++] = 'x';
+        for (int k = 0; k < 40; ++k) {
+            buf[i++] = ')';
+        }
+        buf[i] = '\0';
+        g_cas_pool.reset();
+        const char* err = nullptr;
+        check(parse_expr(buf, &err) == nullptr, "40 nested parens refused");
+        check(err != nullptr && std::strcmp(err, "too deeply nested") == 0,
+              "40 nested parens report the depth error");
+    }
+
+    // A long unary-sign chain recurses without passing through
+    // parse_equation, so it needs its own count against the same cap.
+    {
+        char buf[64];
+        std::size_t i = 0;
+        for (; i < 40; ++i) {
+            buf[i] = '-';
+        }
+        buf[i++] = 'x';
+        buf[i] = '\0';
+        g_cas_pool.reset();
+        const char* err = nullptr;
+        check(parse_expr(buf, &err) == nullptr, "40-long sign chain refused");
+        check(err != nullptr && std::strcmp(err, "too deeply nested") == 0,
+              "sign chain reports the depth error");
+    }
+
+    // Nested function arguments take the same path as parens.
+    {
+        char buf[256];
+        buf[0] = '\0';
+        std::size_t used = 0;
+        for (int k = 0; k < 30; ++k) {
+            used += static_cast<std::size_t>(std::snprintf(buf + used, sizeof(buf) - used, "sin("));
+        }
+        used += static_cast<std::size_t>(std::snprintf(buf + used, sizeof(buf) - used, "x"));
+        for (int k = 0; k < 30; ++k) {
+            used += static_cast<std::size_t>(std::snprintf(buf + used, sizeof(buf) - used, ")"));
+        }
+        g_cas_pool.reset();
+        check(parse_expr(buf, nullptr) == nullptr, "30 nested sin() refused");
+    }
+
+    // Just inside the cap still parses — the guard must not be off-by-one
+    // into rejecting ordinary input.
+    {
+        g_cas_pool.reset();
+        check(parse_expr("((((((x+1))))))", nullptr) != nullptr, "6 nested parens still parse");
+        g_cas_pool.reset();
+        check(parse_expr("sin(cos(tan(x)))", nullptr) != nullptr, "3 nested funcs still parse");
+    }
+}
+
+// simplify() must be idempotent: a second pass over a canonical tree changes
+// nothing. This is the real Risk-1 termination property — a rule cycle shows
+// up as simplify(simplify(e)) != simplify(e) — and it needs no new API.
+void check_idempotent(const char* input) {
+    g_cas_pool.reset();
+    Expr* a = parse_expr(input, nullptr);
+    ++g_checks;
+    if (a == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: idempotence parse null for \"%s\"\n", input);
+        return;
+    }
+    Expr* once = simplify(a);
+    if (once == nullptr) {
+        return;  // a clean abort is acceptable; a wrong answer is not
+    }
+    char first[192] = "?";
+    expr_to_string(once, first, sizeof(first));
+    Expr* twice = simplify(once);
+    if (twice == nullptr) {
+        ++g_failures;
+        std::printf("FAIL: simplify(simplify(\"%s\")) -> null\n", input);
+        return;
+    }
+    char second[192] = "?";
+    expr_to_string(twice, second, sizeof(second));
+    if (std::strcmp(first, second) != 0) {
+        ++g_failures;
+        std::printf("FAIL: not idempotent: simplify(\"%s\") = \"%s\", again = \"%s\"\n", input,
+                    first, second);
+    }
+}
+
+void test_stress_termination() {
+    // The spec §13 Risk-1 set, plus the shapes most likely to cycle: powers
+    // that cancel, reciprocals, i, and mixed rational coefficients.
+    const char* const corpus[] = {
+        "x/x",         "0^0",        "i^4",         "1^x",          "x^0",
+        "0*x",         "sqrt(x)^2",  "(x^2)^0.5",   "x^2/x",        "x/x^2",
+        "(x+y)^20",    "1/(1/x)",    "1/(1/(1/x))", "x*y/(y*x)",    "(x+1)/(x+1)",
+        "2x/(4x^2)",   "i*i*i*i",    "-(-(-(-x)))", "x - x",        "x + x - 2x",
+        "(2/3)x",      "3x/6",       "x^1.5*x^0.5", "sin(x)/sin(x)", "(x*y)^2/(x^2*y^2)",
+        "sqrt(2)*sqrt(2)", "1/sqrt(2)", "pi*2/pi",  "(x+y+z)*0",    "abs(abs(x))",
+    };
+    for (const char* s : corpus) {
+        check_idempotent(s);
+    }
+
+    // Termination is not just convergence — the tricky ones must still be
+    // the right value.
+    check_simplify_num("x/x", 1.0);
+    check_simplify_num("0^0", 1.0);
+    check_simplify_num("i^4", 1.0);
+    check_simplify_num("1/(1/(1/2))", 0.5);
+}
+
+void test_stress_wide_nary() {
+    // Wide sums and products must either fold correctly or degrade
+    // gracefully — never crash, never corrupt.
+    const int widths[] = {10, 50, 100, 200};
+    for (int n : widths) {
+        char buf[2048];
+        std::size_t used = 0;
+        for (int k = 0; k < n; ++k) {
+            used += static_cast<std::size_t>(
+                std::snprintf(buf + used, sizeof(buf) - used, k == 0 ? "x" : "+x"));
+        }
+        g_cas_pool.reset();
+        Expr* t = parse_expr(buf, nullptr);
+        ++g_checks;
+        if (t == nullptr) {
+            continue;
+        }
+        Expr* s = simplify(t);
+        if (s == nullptr || g_cas_pool.overflowed()) {
+            continue;  // graceful abort
+        }
+        // n*x, or the untouched input if it exceeded kMaxOperands.
+        if (std::fabs(eval(s, 'x', 2.0) - 2.0 * n) > 1e-9) {
+            ++g_failures;
+            std::printf("FAIL: %d-term sum simplified to the wrong value\n", n);
+        }
+    }
+}
+
+void test_stress_pool_guards() {
+    // reset() clears both the overflow flag and both ends of the arena.
+    g_cas_pool.reset();
+    check(!g_cas_pool.overflowed(), "reset clears the overflow flag");
+    check(!g_cas_pool.near_capacity(), "an empty pool is not near capacity");
+    check(g_cas_pool.used() == 0, "reset empties the pool");
+
+    // Filling the node end trips near_capacity() before it trips overflow.
+    g_cas_pool.reset();
+    bool saw_near_before_overflow = false;
+    while (Expr::num(1.0) != nullptr) {
+        if (g_cas_pool.near_capacity() && !g_cas_pool.overflowed()) {
+            saw_near_before_overflow = true;
+        }
+    }
+    check(saw_near_before_overflow, "near_capacity() warns before the pool actually fails");
+    check(g_cas_pool.overflowed(), "a failed alloc sets the overflow flag");
+    g_cas_pool.reset();
+    check(!g_cas_pool.overflowed(), "reset clears overflow after a real exhaustion");
+
+    // The scratch end is LIFO: a mark taken now is restored on release, so
+    // the simplifier's fixed-point passes reuse the same space instead of
+    // accumulating (which is why scratch cannot share the node end).
+    g_cas_pool.reset();
+    const std::size_t mark = g_cas_pool.scratch_mark();
+    check(g_cas_pool.alloc_scratch(1024, 8) != nullptr, "scratch allocates");
+    check(g_cas_pool.scratch_mark() > mark, "scratch mark advances");
+    g_cas_pool.scratch_release(mark);
+    check(g_cas_pool.scratch_mark() == mark, "scratch release rewinds");
+
+    // The two ends must meet cleanly rather than overlap.
+    g_cas_pool.reset();
+    void* big = g_cas_pool.alloc_scratch(math::scratch::kComputeBytes / 2, 8);
+    check(big != nullptr, "half the arena is available as scratch");
+    int nodes = 0;
+    while (Expr::num(1.0) != nullptr) {
+        ++nodes;
+    }
+    check(g_cas_pool.overflowed(), "nodes growing into held scratch fail cleanly");
+    check(static_cast<std::size_t>(nodes) * sizeof(Expr) <= math::scratch::kComputeBytes / 2,
+          "nodes never overran the held scratch");
+    g_cas_pool.reset();
+}
+
+void test_stress_risk2_abort() {
+    // (x+y+z)^15 is spec §13 Risk 2's own example. It must come back as an
+    // error, not as a plausible-looking partial expansion.
+    const HomeResult r = evaluate_home("expand((x+y+z)^15)", true);
+    check(r.kind == HomeKind::kError, "expand((x+y+z)^15) is an error, not a wrong answer");
+    check(r.error != nullptr && std::strcmp(r.error, "Too complex") == 0,
+          "expand((x+y+z)^15) reports Too complex");
+
+    // The expansions that legitimately fit must keep working — the guard
+    // must not have cost real capability. (x+1)^10 sits at ~76% of the
+    // arena, the closest of these to the ceiling.
+    check_home_value("expand((x+1)^10)", "x^10+10x^9+45x^8+120x^7+210x^6+252x^5+210x^4+120x^3+45x^2+10x+1",
+                     'x');
+    check_home_value("expand((x+1)^8)", "x^8+8x^7+28x^6+56x^5+70x^4+56x^3+28x^2+8x+1", 'x');
+
+    // exact_form() resets the pool itself (D41 pool discipline), so a pool
+    // left exhausted by an earlier operation must not poison it.
+    g_cas_pool.reset();
+    while (Expr::num(1.0) != nullptr) {
+    }
+    check(g_cas_pool.overflowed(), "pool is exhausted going in");
+    char out[48];
+    check(math::cas::exact_form("sqrt(2)", 1.4142135623730951, out, sizeof(out)) &&
+              std::strcmp(out, "sqrt(2)") == 0,
+          "exact_form recovers from a previously exhausted pool");
+}
+
+void test_stress_degenerate_input() {
+    // Degenerate and malformed home-screen input: every one of these must
+    // return a defined result, never crash and never a stale pointer.
+    const char* const not_cas[] = {"", " ", "   ", "2+3", "x", "(", ")", "()"};
+    for (const char* s : not_cas) {
+        const HomeResult r = evaluate_home(s, true);
+        check(r.kind == HomeKind::kNone || r.kind == HomeKind::kError,
+              "degenerate input returns none or error");
+    }
+
+    // Recognized op, unusable arguments.
+    check(evaluate_home("diff()", true).kind == HomeKind::kError, "diff() errors");
+    check(evaluate_home("simplify()", true).kind == HomeKind::kError, "simplify() errors");
+    check(evaluate_home("diff(x,,)", true).kind == HomeKind::kError, "diff(x,,) errors");
+    check(evaluate_home("diff(x, 9)", true).kind == HomeKind::kError, "non-var 2nd arg errors");
+    {
+        // Deep parenthesisation inside a recognized op: whatever it returns,
+        // it must be one of the defined kinds.
+        const HomeResult r = evaluate_home("factor((((((((((x))))))))))", true);
+        check(r.kind == HomeKind::kExpr || r.kind == HomeKind::kError,
+              "deeply parenthesised factor returns a defined kind");
+    }
+
+    // Over-long input is refused rather than truncated into a different
+    // expression.
+    {
+        char buf[512];
+        std::size_t used = static_cast<std::size_t>(std::snprintf(buf, sizeof(buf), "simplify("));
+        for (int k = 0; k < 200; ++k) {
+            used += static_cast<std::size_t>(std::snprintf(buf + used, sizeof(buf) - used, "x+"));
+        }
+        std::snprintf(buf + used, sizeof(buf) - used, "x)");
+        const HomeResult r = evaluate_home(buf, true);
+        check(r.kind == HomeKind::kError, "over-long CAS input errors");
+    }
+
+    // An equation where both sides are identical: solve must not claim a
+    // finite solution set for something true everywhere.
+    {
+        const HomeResult r = evaluate_home("solve(x=x)", true);
+        check(r.kind == HomeKind::kError || r.kind == HomeKind::kSolutions,
+              "solve(x=x) returns a defined result");
+    }
+
+    // The numeric solver's shape (>=3 args) must still fall through to it.
+    check(evaluate_home("solve(x^2-2, x, 1)", true).kind == HomeKind::kNone,
+          "solve with a guess falls through to the numeric solver");
+}
+
+void test_stress_edge_cases() {
+    test_stress_nesting();
+    test_stress_parser_depth();
+    test_stress_termination();
+    test_stress_wide_nary();
+    test_stress_pool_guards();
+    test_stress_risk2_abort();
+    test_stress_degenerate_input();
+}
+
 }  // namespace
 
 int main() {
@@ -978,6 +1320,7 @@ int main() {
     test_home_eval();
     test_exact_form();
     test_exact_trig();
+    test_stress_edge_cases();
 
     std::printf("test_cas: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
