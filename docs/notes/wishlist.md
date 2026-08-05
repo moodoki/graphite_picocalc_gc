@@ -10,6 +10,50 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Screenshot capture — serial dump (debug aid) + save-to-SD (user feature)**
+  (raised 2026-08-05, same session as serial key injection below — two uses
+  of the same underlying capability). Frame is 320x320 RGB565 (200 KB raw),
+  identical resolution/format on both boards, but the capture path differs
+  sharply by board: **Pico 2** holds a complete frame in SRAM at once
+  (`frame_buf`, `src/gfx/framebuffer.cpp:17`) with a genuinely stable window
+  to read it — right after `render()` returns and before the next frame's
+  `drain_acks()` lets core 0 overwrite it again
+  (`framebuffer.cpp:104-109`). **Pico 1 never has a full frame in SRAM at
+  all** — it renders in 16-row strips (`config::kStripHeight`, ~20
+  calls/frame) into two 10 KB ping-pong buffers; a screenshot there means
+  accumulating each finished strip (grabbed right before `submit()`, not by
+  re-entering `render()`, to respect the idempotent-`render()` strip
+  contract in `phase3-spec.md` §8) into a scratch region — SRAM doesn't have
+  200 KB of spare headroom on Pico 1, so PSRAM (not memory-mapped, only
+  `read()`/`write()` via PIO/SPI, `psram.hpp:38-39`, ~6.8 MB/s HW-measured
+  bulk throughput — ~29 ms for a full frame) is close to mandatory as the
+  accumulator there, optional on Pico 2. Both boards' core-1 display-push
+  path is `__not_in_flash_func` (RAM-resident) per D10, because running it
+  from flash while core 0's USB/TinyUSB stack is active hard-faults the chip
+  (shared XIP cache contention) — any new capture code touching the
+  display/DMA path from core 1 while USB is live must stay RAM-resident
+  too, same landmine D10 already fought.
+  - **Debug-aid variant (serial dump)**: stream the captured frame out over
+    `stdio_usb` (already enabled, output-only today — printf diagnostics
+    only, nothing reads stdin, no existing screenshot code anywhere in the
+    repo including the vendored `picocalc_diag` bring-up target). Actual
+    `stdio_usb` throughput is **undocumented/unmeasured anywhere in this
+    project** — needs a real bench number before committing to raw dump vs.
+    an encoding; given calculator screens are mostly sparse/few-color
+    (`display.hpp:20-34`'s small fixed palette), simple RLE is very likely
+    worth it over a raw 200 KB dump, but that's inference, not measured.
+    Host-side capture script would need to assert DTR/RTS the same way
+    `scripts/serial-capture.py` already does for other serial reads, or
+    output will silently drop.
+  - **User-facing variant (save to SD)**: write the captured frame to
+    storage as a file (format/encoding TBD — raw RGB565 dump, or convert to
+    a standard image format like BMP/PPM for viewing off-device without
+    custom tooling). No existing SD image-write path to build on; would
+    follow the existing `Storage`/persistence conventions used elsewhere
+    (list/matrix/graph-state files) for the write side, but the pixel
+    encoding itself is new design work.
+  - No prior design work on either variant before this session; no phase
+    home.
 - **Serial key injection for on-device test automation** (raised 2026-08-05,
   Pico 1 testdrive session — dev tooling, not a calculator feature). USB
   serial (`stdio_usb`) is enabled and output-only today (`printf`
