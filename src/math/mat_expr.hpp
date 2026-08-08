@@ -74,38 +74,49 @@ struct Result {
 // function argument (parse_matrix_fn) or matrix-literal element
 // (parse_matrix_literal) costs one more, since all three re-enter parse_expr.
 //
-// Measured on the Pico 1, high-water marks against core 0's 4 KB:
+// High-water marks against core 0's 4 KB. "leaf fix" = parse_scalar_span's
+// strtod fast path + static span buffer, in the same commit as this cap.
 //
-//   BEFORE this cap
-//     depth 2  det([A]*[B]+[C])              3,492 of 4,096   (604 margin)
-//     depth 3  det([[1,2][3,4]])             3,940 of 4,096   (156 margin)
-//     depth 4  det(([a]*([c]+[d]))+[d])      hard fault, sp below __StackBottom
-//   AFTER
-//     depth 3  det([[1,2][3,4]])             4,012 of 4,096   ( 84 margin)
-//     depth 3  det(identity(2))              3,540 of 4,096
-//     depth 4  det(([a]*([c]+[d]))+[d])      "Too deeply nested", no fault
+//   Pico 1, uncapped            det([[1,2][3,4]])  d3  3,940  (156 margin)
+//                               det(([a]*([c]+[d]))+[d]) d4  HARD FAULT
+//   Pico 1, capped              det([[1,2][3,4]])  d3  4,012  ( 84 margin)
+//                               d4  "Too deeply nested", no fault
+//   Pico 2, capped, no leaf fix det([[1,2][3,4]])  d3  HARD FAULT
+//                               (parse_power prologue, sp = __StackBottom+160)
+//   Pico 2, capped + leaf fix   worst of five      3,860  (236 margin), correct
 //
-// The 3,940 -> 4,012 pair is the same input before and after, so the +72 B
-// is the guard's own cost, not a difference between expressions. The matrix
-// literal is the heavier of the two depth-3 shapes.
+// The 3,940 -> 4,012 pair is the same input before and after the cap, so the
+// +72 B is the guard's own cost (P gained `depth`, each level carries a
+// DepthGuard: cycle 808 -> 832 B/level).
 //
-// So ~448 B/level in practice — the static frame sum (808) overestimates,
-// the four functions are not all live at once. These are measurements, not
-// arithmetic: the depth-4 figure is the crash that prompted D48.
+// **The Pico 2 crash is why the leaf fix exists.** det([[1,2][3,4]]) and
+// det(identity(2)) died at depth 3 while det([a]*[c]+[d]) was fine — the
+// difference is a numeric literal *at maximum depth*, which parse_scalar_span
+// was handing to eval_field, i.e. the whole tinyexpr engine at the deepest
+// point of the recursion. D47's a0939bf fixed exactly this in complexexpr;
+// matexpr has its own copy of that function and never got it. Removing it
+// took the cycle to 600 B/level (Pico 1) and 536 (Pico 2), -232 either way,
+// for +256 B of .bss. See the comment at parse_scalar_span.
 //
 // 3 is forced from both sides. Below it, shipped behaviour breaks —
 // det(identity(2)) and matrix literals inside a function argument are both
-// depth 3 and are pinned by test_matrix. Above it, depth 4 faults.
+// depth 3 and are pinned by test_matrix. Above it, depth 4 faulted.
 //
-// !! The depth-3 margin is 84 B, and the guard is *why* it is 84 and not
-// 156: P gained `depth` and every level carries a DepthGuard, ~72 B across
-// three levels. This cap converts a reachable hard fault into an error
-// message, which is strictly better, but it is containment and it made the
-// surviving margin worse. Depth 3 is not safe to build on. Frame reduction
-// is now required, not optional — parse_power alone is 416 B holding matrix
-// temporaries, cf. D47's eval_list_into (2,248 -> 32 B) — or idea F, the
-// unified evaluator, which retires this parser outright.
-// **Re-measure on hardware before growing anything on this path.**
+// !! Margins are thin on both boards and the numbers above are not
+// predictions — every attempt this session to derive a peak from frame sizes
+// was wrong (by 360 B, then 560 B, always optimistic). Static frame sums are
+// an upper bound on a *single* frame, not a usable model of a peak. Measure.
+//
+// The Pico 1 has not been re-measured since the leaf fix (board swaps are
+// batched to stage closures). It does not need to be for safety: the leaf fix
+// only ever *removes* stack from this path — literals bypass eval_field, every
+// other span takes the same route minus a 256 B buffer — and the Pico 1 was
+// already passing at 4,012 without faulting, so it can only improve. Only the
+// 4,012 figure is stale, not the safety case.
+//
+// Still containment, not headroom. Real fixes: idea F, the unified evaluator,
+// which retires this parser outright and should be built on an explicit
+// evaluation stack; or moving core 0's stack out of its 4 KB scratch bank.
 //
 // One production entry point (home_screen.cpp) means one constant, unlike
 // complexexpr's split kMaxParseDepth/kMaxParseDepthNested.

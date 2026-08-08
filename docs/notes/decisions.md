@@ -92,8 +92,54 @@ so there is no address a stack could target — on either board, since both use
 the PIO driver rather than the RP2350's native QMI mapping. At ~200 us/KB it
 would be unusable for a call stack regardless.
 
+**Amendment, same day — the cap alone was not enough, and the Pico 2 proved
+it.** Flashed to the Pico 2 (first time on this branch) and `det([[1,2][3,4]])`
+and `det(identity(2))` — both depth 3, both *allowed* by the cap — hard-faulted,
+while `det([a]*[c]+[d])` was fine. This board's fault reporter gave a real PC
+where the Pico 1's had given garbage: `parse_power`'s prologue
+(`mat_expr.cpp:625`) called from `parse_unary`, `sp = __StackBottom + 160`.
+
+The discriminator is a **numeric literal at maximum depth**. `parse_scalar_span`
+put a `char span[256]` on the stack and handed it to `eval_field` -> the whole
+tinyexpr engine (`Engine::compile`/`compile_with`, 280/288 B each) — at the
+*leaf* of the recursion, i.e. the deepest point on the stack. **This is D47's
+bug verbatim**: `a0939bf` fixed exactly it in `complexexpr`, but `matexpr` has
+its own copy of that function and never received the fix.
+
+Fixed the same way: `strtod` for a plain literal (what tinyexpr would have used
+anyway), and `span` becomes `static` — non-reentrant by the same argument, since
+`parse_scalar_span` consumes a terminal span and neither `eval_field` nor
+`complexexpr::evaluate` re-enters this parser. **Cycle 832 -> 600 B/level
+(Pico 1) and 768 -> 536 (Pico 2), -232 on both, for +256 B of `.bss`** (211,100
+-> 211,356). Pico 2 re-verified: all five expressions correct, no fault, worst
+case **3,860 of 4,096 (236 margin)**.
+
+Two corrections to the entry above. First, the Pico 2 is *not* simply better
+off — it faulted where the Pico 1 survived, despite every statically-reported
+frame being smaller and its idle baseline 304 B lower. Second, part of why:
+**`size-report.sh` does not count FP register saves.** The Pico 1 image has zero
+`vpush` instructions; the Pico 2 has 19, including inside `math::eval_field` on
+the crash path. Every Pico 2 frame figure in this entry is therefore low by an
+unquantified amount, and the tool should be taught to count `vpush`.
+
+The Pico 1 has not been re-measured since the leaf fix — board swaps are batched
+to stage closures — and does not need to be for safety: **the leaf fix only ever
+removes stack from this path**, and the Pico 1 was already passing at 4,012
+without faulting, so it can only improve. The 4,012 figure is stale; the safety
+argument is not.
+
+**Method note worth keeping.** Three separate attempts this session to derive a
+peak from frame sizes were wrong, always optimistic: depth 3 predicted
+unreachable (it fit, 360 B error), the Pico 2 predicted ~3,500 (it crashed), and
+the post-fix Pico 2 predicted ~3,300 (measured 3,860, 560 B error). Static frame
+sums bound a *single* frame; they are not a model of a peak. Prefer measurement,
+and where a board isn't available prefer **monotonic arguments** ("this can only
+remove stack") over predictions.
+
 **Revisit when**: depth 3 proves too restrictive in real use, or anything on
-this path grows a frame. Three levers, cheapest first: (a) frame reduction —
+this path grows a frame. Note the cap was sized against the *old* 832 B/level
+frames and may now be conservative — but raising it needs a measurement pass on
+both boards, not arithmetic. Three levers, cheapest first: (a) frame reduction —
 `parse_power` alone is 388-416 B holding matrix temporaries, cf. D47's
 `eval_list_into` at 2,248 -> 32 B, worth maybe 2-3x the depth; (b) move core 0's
 stack out of the scratch bank into main SRAM via the linker script — raises the

@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "math/complex_expr.hpp"
@@ -208,11 +209,39 @@ Value parse_scalar_span(P& p) {
         return fail(p, "Syntax error");
     }
 
-    char span[kMaxLen];
     const auto len = static_cast<size_t>(p.s - start);
-    if (len == 0 || len >= sizeof(span)) {
+    if (len == 0 || len >= kMaxLen) {
         return fail(p, "Syntax error");
     }
+
+    // Plain numeric literal: parse it here instead of handing it to
+    // eval_field. That fallback runs the whole tinyexpr engine —
+    // Engine::compile/compile_with (280/288 B) plus its own recursive parser —
+    // and it sits at the *leaf* of this parser's recursion, i.e. at maximum
+    // stack depth. Same defect D47 fixed in complexexpr (a0939bf); matexpr has
+    // its own copy of this function and never got it. It cost the Pico 2 a
+    // hard fault on 2026-08-08: det([[1,2][3,4]]) and det(identity(2)) both
+    // crashed at depth 3 in parse_power's prologue, while det([a]*[c]+[d]) —
+    // matrix references only, no literal at depth — was fine. strtod is what
+    // tinyexpr would have used for these anyway.
+    //
+    // "2i" shorthand falls through correctly: strtod stops at the 'i', so
+    // `end` lands before p.s and the complex path below takes it.
+    if (std::isdigit(static_cast<unsigned char>(*start)) != 0 || *start == '.') {
+        char* end = nullptr;
+        const double d = std::strtod(start, &end);
+        if (end == p.s) {
+            Value v;
+            v.s = Complex(static_cast<calc_t>(d));
+            return v;
+        }
+    }
+
+    // Static for the same reason as complexexpr's: this is the leaf of the
+    // parser's recursion, so its frame is paid at maximum depth.
+    // parse_scalar_span never nests — it consumes a terminal span, and neither
+    // eval_field nor complexexpr::evaluate re-enters this parser.
+    static char span[kMaxLen];
     std::memcpy(span, start, len);
     span[len] = 0;
     Value v;

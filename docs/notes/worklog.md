@@ -376,9 +376,43 @@ integers. And the graph screen has **no pan**, confirmed in source
 (`graph_screen.cpp:1307` binds all four arrows only when `trace_.active`);
 logged as a feature request with an implementation sketch, not fixed.
 
-**Not done**: the Pico 2 was not flashed at all — it has neither D48 nor any of
-groups 5-6, and its 84-byte-equivalent margin is a projection, not a
-measurement.
+**Then the Pico 2 was flashed (first time on this branch) and the cap turned
+out not to be enough.** `det([[1,2][3,4]])` and `det(identity(2))` — both depth
+3, both *allowed* — hard-faulted, while `det([a]*[c]+[d])` was fine. This
+board's reporter gave a **real PC** where the Pico 1's had given garbage:
+`parse_power` prologue (`mat_expr.cpp:625`) from `parse_unary`,
+`sp = __StackBottom + 160`. The discriminator is a **numeric literal at maximum
+depth**: `parse_scalar_span` put a `char span[256]` on the stack and handed it
+to `eval_field` -> the whole tinyexpr engine, at the *leaf* of the recursion.
+**D47's bug verbatim** — `a0939bf` fixed it in `complexexpr`, but `matexpr` has
+its own copy of that function and never got it. Fixed the same way (strtod fast
+path + static buffer): **cycle 832 -> 600 B/level (Pico 1), 768 -> 536 (Pico 2),
+-232 both, for +256 B `.bss`** (211,100 -> 211,356). Pico 2 re-verified: all
+five correct, no fault, worst case **3,860 of 4,096 (236 margin)**.
+
+**Two things the Pico 2 taught that the Pico 1 could not.** (1) It is not simply
+the roomier board — it faulted where the Pico 1 survived, despite every
+statically-reported frame being smaller and its idle baseline 304 B lower.
+(2) **`size-report.sh` does not count FP register saves**: the Pico 1 image has
+zero `vpush`, the Pico 2 has 19, including inside `math::eval_field` on the
+crash path. Every Pico 2 frame number is low by an unquantified amount; teaching
+the tool to count `vpush` is now a real todo.
+
+**Method note.** Three attempts to derive a peak from frame sizes were wrong
+this session, always optimistic — depth 3 called unreachable (fit, 360 B error),
+Pico 2 predicted ~3,500 (crashed), post-fix Pico 2 predicted ~3,300 (measured
+3,860). Static frame sums bound a single frame, not a peak. Where a board is not
+on the bench, prefer **monotonic arguments** to predictions: the leaf fix only
+ever removes stack, and the Pico 1 already passed at 4,012 without faulting, so
+it cannot have got worse — no re-measure needed for safety.
+
+`picotool load -f -x <uf2>` reflashes the connected board over USB with no
+BOOTSEL button, which is how the Pico 2 was re-flashed mid-session.
+
+**Not done**: the **Pico 1 has not been re-measured since the leaf fix** (board
+swaps are batched to major stage closures) — its 4,012 figure is stale though
+the safety case holds. Groups 1-6 on the Pico 2 beyond the D48 checks were not
+run. `size-report.sh` still misses `vpush`.
 
 ---
 

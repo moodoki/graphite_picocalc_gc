@@ -744,6 +744,35 @@ void test_expr_depth_cap() {
     check_mat_scalar("---det([A])", 2.0, "unary sign chain not accumulated");
 }
 
+// D48 follow-up: parse_scalar_span must not hand a bare numeric literal to
+// eval_field, which drags the whole tinyexpr engine onto the stack at the
+// leaf of the recursion (D47's a0939bf, applied to complexexpr but not here).
+// The Pico 2 hard-faulted on det([[1,2][3,4]]) and det(identity(2)) at depth
+// 3 because of it, while det([a]*[c]+[d]) — no literal at depth — was fine.
+// These pin that the fast path parses the same values the engine did, and
+// that everything it must *not* swallow still reaches the fallbacks.
+void test_scalar_span_fast_path() {
+    using namespace math;
+    const double va[4] = {1, 2, 3, 4};
+    check(fill(matrices().matrix(0), 2, 2, va), "fastpath fill [A]");
+
+    // Plain literals: integer, decimal, leading dot, exponent forms.
+    check_mat_scalar("det(2*[A])", -8.0, "integer literal");
+    check_mat_scalar("det(0.5*[A])", -0.5, "decimal literal");
+    check_mat_scalar("det(.5*[A])", -0.5, "leading-dot literal");
+    check_mat_scalar("det(2e0*[A])", -8.0, "exponent literal");
+    check_mat_scalar("det(2E+0*[A])", -8.0, "signed-exponent literal");
+    const double vlit[4] = {1, 2, 3, 4};
+    check_mat_result("[[1,2][3,4]]", 2, 2, vlit, "matrix literal elements");
+    check_mat_scalar("det([[1.5,0][0,2]])", 3.0, "decimal literal in matrix literal");
+
+    // Must NOT take the fast path — strtod stops short of the span end, so
+    // these still reach eval_field or the complex evaluator.
+    check_mat_scalar("det(2*3*[A])", -72.0, "literal arithmetic still evaluated");
+    check_mat_scalar("det(pi*0*[A]+[A])", -2.0, "constant folded via eval_field");
+    check_mat_scalar("det(sin(0)*[A]+[A])", -2.0, "function call via eval_field");
+}
+
 void test_format_matrix() {
     using namespace math;
     Array m;
@@ -1189,6 +1218,7 @@ int main() {
     test_expr_store();
     test_expr_errors();
     test_expr_depth_cap();
+    test_scalar_span_fast_path();
     test_format_matrix();
     test_store();
     test_complex_matops();

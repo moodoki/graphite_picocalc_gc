@@ -28,8 +28,33 @@ unchanged at 211,100. Flashed to the Pico 1 and all three checks verified.
 actually lift the depth belongs to **idea F** (it retires `matexpr`, so building
 it there is throwaway work), and F should be built on an explicit,
 PSRAM-capable evaluation stack. PSRAM cannot host a call stack — PIO SPI, not
-memory mapped. Full detail: worklog's 2026-08-08 (later) entry, `decisions.md`
-**D48**, `design-departures-matrix-complex.md` §F.
+memory mapped.
+
+**Then the Pico 2 was flashed and the cap turned out not to be enough.**
+`det([[1,2][3,4]])` and `det(identity(2))` — both depth 3, both *allowed* —
+hard-faulted there, while `det([a]*[c]+[d])` was fine. That board's reporter
+gave a **real PC** where the Pico 1's had given garbage: `parse_power` prologue
+(`mat_expr.cpp:625`) from `parse_unary`, `sp = __StackBottom + 160`. The
+discriminator is a **numeric literal at maximum depth** — `parse_scalar_span`
+put a `char span[256]` on the stack and handed it to `eval_field`, i.e. the
+whole tinyexpr engine, at the *leaf* of the recursion. **D47's bug verbatim**:
+`a0939bf` fixed exactly this in `complexexpr`, but `matexpr` has its own copy
+and never got it. Fixed the same way (strtod fast path + static buffer):
+**cycle 832 -> 600 B/level (Pico 1), 768 -> 536 (Pico 2), -232 both**, for
++256 B `.bss` (211,100 -> 211,356). Pico 2 re-verified: all five correct, no
+fault, worst case **3,860 of 4,096 (236 margin)**. `test_matrix` 397 -> **408**.
+**Two things only the Pico 2 could show**: it is *not* simply the roomier board
+(it faulted where the Pico 1 survived, despite smaller reported frames and a
+304 B lower baseline), and **`size-report.sh` does not count FP register saves**
+— zero `vpush` on the Pico 1, 19 on the Pico 2 including in `math::eval_field`.
+**Method note**: three attempts to derive a peak from frame sizes were wrong
+this session, always optimistic (360 B, then a crash, then 560 B). Static frame
+sums bound a single frame, not a peak — measure, and where a board is off the
+bench prefer **monotonic arguments** ("this can only remove stack") over
+predictions.
+
+Full detail: worklog's 2026-08-08 (later) entry, `decisions.md` **D48** (with
+its same-day amendment), `design-departures-matrix-complex.md` §F.
 
 **Previous session:** 2026-08-08 — **Both 2026-08-05 testdrive items fixed and
 HW-verified on the Pico 1, plus a separate 4-nested-paren crash the first
@@ -97,14 +122,28 @@ draws red (correctly rejected), the graph works, three `graph recompute:` at
 1. **Flash the Pico 2 — it is the whole of what's left on the bench pass.**
    Groups 1-4 passed 2026-08-08; **groups 5 and 6 passed on the Pico 1 later
    the same day** (see "Last session"), so the Pico 1 leg is done. Remaining:
-   - **The Pico 2 has never been flashed on this branch.** It has neither D48
-     nor any of groups 1-6. Its stack layout is identical (4 KB core 0, core 1
-     immediately below) and its `matexpr` frames are only ~8% cheaper, so the
-     **84-byte depth-3 margin there is a projection, not a measurement** —
-     re-measure it. Repeat the typeset-display, a+bi, guards and CAS groups.
-   - **D48 on the Pico 2 specifically**: `det(([a]*([c]+[d]))+[d])` must say
-     "Too deeply nested"; `det([[1,2][3,4]])` -> -2 and `det(identity(2))` -> 1
-     must still compute; watch the peak on both.
+   - ~~The Pico 2 has never been flashed on this branch~~ — **flashed and D48
+     verified there** (all five det checks correct, no fault, worst case 3,860
+     of 4,096). It took a **leaf fix** to get there: the cap alone still
+     hard-faulted on this board, see "Last session".
+   - **Groups 1-6 on the Pico 2 beyond the D48 checks.** It jumped straight
+     from Phase 4D-era firmware, so typeset display, a+bi, guards and the full
+     CAS script have never run there. Full framebuffer + hardware FPU, so
+     **rung 4 of the D45 ladder (white vs amber) is the highest-value single
+     item** — it is precision-sensitive and the one place the FPU could
+     genuinely diverge from the Pico 1.
+   - **`size-report.sh` misses FP register saves.** Zero `vpush` in the Pico 1
+     image, **19 in the Pico 2's**, including inside `math::eval_field` on the
+     crash path. Every Pico 2 frame figure is low by an unquantified amount —
+     teach the tool to count `vpush` before making another stack decision
+     there.
+   - **Board swaps are batched to major stage closures** — don't swap to chase
+     a number. `picotool load -f -x <uf2>` reflashes the *connected* board over
+     USB with no BOOTSEL button, so re-flashing what's attached is cheap.
+   - **Pico 1 re-measure, deferred to the next swap.** Its documented 4,012 is
+     stale since the leaf fix. Not a safety issue: the fix only ever removes
+     stack from that path, and the Pico 1 already passed at 4,012 without
+     faulting, so it can only have improved.
    - ~~Guards-are-live sweep~~ — **done on the Pico 1.** Idle 1,540, graph
      redraw + zoom 2,360, list/stats/inference no new mark, D45 ladder 3,588
      (by design), `matexpr` crash found and capped (D48).
