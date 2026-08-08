@@ -65,6 +65,110 @@ Complex m_atan(const Complex& z) {
     return from_radians(c_atan(z));
 }
 
+
+// ---- Builtins (5.2.5) ----------------------------------------------------
+//
+// Everything callable from the home screen that catalog.cpp does not carry.
+// Two distinct origins, unified here because a Value-based evaluator has no
+// reason to keep them apart:
+//
+//   * tinyexpr's own builtin table — sqrt, abs, exp, the hyperbolics,
+//     ceil/floor/log10/atan2/pow. Reachable today only because every
+//     unrecognised scalar span escaped to eval_field.
+//   * complex_expr's complex-only kFns — conj, real, imag, arg. These have no
+//     real counterpart at all; a real argument is simply the degenerate case.
+//
+// `cx` is the complex implementation, used when the argument is complex.
+// nullptr there means a complex argument is an error rather than a silent
+// truncation to the real part.
+Complex c_absz(const Complex& z) {
+    return {z.modulus(), 0.0};
+}
+Complex c_argz(const Complex& z) {
+    return {z.argument(), 0.0};
+}
+Complex c_realz(const Complex& z) {
+    return {z.re, 0.0};
+}
+Complex c_imagz(const Complex& z) {
+    return {z.im, 0.0};
+}
+
+double r_abs(double x) {
+    return std::fabs(x);
+}
+double r_sqrt(double x) {
+    return std::sqrt(x);
+}
+double r_exp(double x) {
+    return std::exp(x);
+}
+double r_sinh(double x) {
+    return std::sinh(x);
+}
+double r_cosh(double x) {
+    return std::cosh(x);
+}
+double r_tanh(double x) {
+    return std::tanh(x);
+}
+double r_ceil(double x) {
+    return std::ceil(x);
+}
+double r_floor(double x) {
+    return std::floor(x);
+}
+double r_log10(double x) {
+    return std::log10(x);
+}
+double r_conj(double x) {
+    return x;
+}
+double r_real(double x) {
+    return x;
+}
+double r_imag(double x) {
+    (void)x;  // imag() of a real is always zero
+    return 0.0;
+}
+double r_arg(double x) {
+    return x >= 0 ? 0.0 : 3.14159265358979323846;
+}
+double r_atan2(double y, double x) {
+    return std::atan2(y, x);
+}
+double r_pow(double a, double b) {
+    return std::pow(a, b);
+}
+
+struct Builtin {
+    const char* name;
+    int arity;
+    double (*r1)(double);
+    double (*r2)(double, double);
+    Complex (*cx)(const Complex&);
+};
+
+const Builtin kBuiltins[] = {
+    {"sqrt", 1, r_sqrt, nullptr, c_sqrt},
+    {"abs", 1, r_abs, nullptr, c_absz},
+    {"exp", 1, r_exp, nullptr, c_exp},
+    {"sinh", 1, r_sinh, nullptr, nullptr},
+    {"cosh", 1, r_cosh, nullptr, nullptr},
+    {"tanh", 1, r_tanh, nullptr, nullptr},
+    {"ceil", 1, r_ceil, nullptr, nullptr},
+    {"floor", 1, r_floor, nullptr, nullptr},
+    {"log10", 1, r_log10, nullptr, nullptr},
+    // Complex-only in origin; a real argument is the degenerate case.
+    {"conj", 1, r_conj, nullptr, c_conj},
+    {"real", 1, r_real, nullptr, c_realz},
+    {"imag", 1, r_imag, nullptr, c_imagz},
+    {"arg", 1, r_arg, nullptr, c_argz},
+    {"atan2", 2, nullptr, r_atan2, nullptr},
+    {"pow", 2, nullptr, r_pow, nullptr},
+};
+constexpr int kBuiltinCount = static_cast<int>(sizeof(kBuiltins) / sizeof(kBuiltins[0]));
+
 struct CFn {
     const char* name;
     Complex (*fn)(const Complex&);
@@ -178,6 +282,46 @@ struct Machine {
         // real, so `i^2` is -1 rather than -1+0i. Exactness is the test, not a
         // tolerance — D49 made the values exact so this can be.
         return push(v.im == 0.0 ? Value::real(v.re) : Value::complex(v));
+    }
+
+    bool call_builtin(const Instr& in) {
+        if (in.b >= static_cast<uint16_t>(kBuiltinCount)) {
+            return fail("Syntax error");
+        }
+        const Builtin& b = kBuiltins[in.b];
+        const int argc = in.a;
+        if (argc != b.arity) {
+            return fail("Syntax error");
+        }
+        Value args[2];
+        for (int i = argc - 1; i >= 0; --i) {
+            if (!pop(&args[i])) {
+                return false;
+            }
+        }
+        for (int i = 0; i < argc; ++i) {
+            if (args[i].is_array()) {
+                return fail("Matrix not allowed here");  // 5.2.6/5.2.7
+            }
+        }
+        if (argc == 1 && args[0].kind == Kind::kComplex) {
+            if (b.cx == nullptr) {
+                return fail("Non-real result");
+            }
+            const Complex v = b.cx(args[0].as_complex());
+            return push(v.im == 0.0 ? Value::real(v.re) : Value::complex(v));
+        }
+        // sqrt of a negative real is the one place a real argument must still
+        // produce a complex result — matching complexexpr, where sqrt(-4) is
+        // 2i rather than NaN.
+        if (argc == 1 && b.cx == c_sqrt && args[0].r < 0) {
+            const Complex v = c_sqrt(Complex(args[0].r));
+            return push(Value::complex(v));
+        }
+        if (argc == 1) {
+            return push(Value::real(b.r1(args[0].r)));
+        }
+        return push(Value::real(b.r2(args[0].r, args[1].r)));
     }
 
     bool call(const Instr& in) {
@@ -304,6 +448,8 @@ struct Machine {
             }
             case Op::kCall:
                 return call(in);
+            case Op::kCallBi:
+                return call_builtin(in);
             default:
                 // kPushMat / kPushList / kPushElem / kIndex / kTranspose /
                 // kStore arrive with their tiers.
@@ -313,6 +459,20 @@ struct Machine {
 };
 
 }  // namespace
+
+int builtin_index(const char* name, size_t len) {
+    for (int i = 0; i < kBuiltinCount; ++i) {
+        if (std::strlen(kBuiltins[i].name) == len &&
+            std::strncmp(kBuiltins[i].name, name, len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int builtin_arity(int idx) {
+    return (idx >= 0 && idx < kBuiltinCount) ? kBuiltins[idx].arity : -1;
+}
 
 bool run(const Program& p, Value* out, const char** err) {
     if (err != nullptr) {

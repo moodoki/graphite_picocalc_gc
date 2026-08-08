@@ -23,11 +23,12 @@ enum class Tok : uint8_t { kBinary, kUnary, kLParen, kFunc };
 
 struct OpTok {
     Tok tok = Tok::kBinary;
-    char ch = 0;         // '+' '-' '*' '/' '^' for kBinary/kUnary
-    uint8_t prec = 0;    // higher binds tighter
-    bool right = false;  // right-associative (only '^')
-    uint16_t fn = 0;     // catalog index, kFunc only
-    uint8_t argc = 0;    // arguments seen so far, kFunc only
+    char ch = 0;           // '+' '-' '*' '/' '^' for kBinary/kUnary
+    uint8_t prec = 0;      // higher binds tighter
+    bool right = false;    // right-associative (only '^')
+    uint16_t fn = 0;       // catalog or builtin index, kFunc only
+    bool builtin = false;  // fn indexes the builtin table, not the catalog
+    uint8_t argc = 0;      // arguments seen so far, kFunc only
 };
 
 // Precedence. Matches the existing evaluators' grammar
@@ -132,7 +133,7 @@ struct Compiler {
             return t.ch == '-' ? emit(Op::kNeg) : true;
         }
         if (t.tok == Tok::kFunc) {
-            return emit(Op::kCall, t.argc, t.fn);
+            return emit(t.builtin ? Op::kCallBi : Op::kCall, t.argc, t.fn);
         }
         switch (t.ch) {
             case '+':
@@ -240,6 +241,19 @@ struct Compiler {
                 t.argc = 1;  // corrected to 0 below if the call is empty
                 return push_op(t);
             }
+        }
+        // Not in the catalogue: try the builtin table (tinyexpr's own
+        // functions plus the complex-only set). Catalog first, deliberately —
+        // its sin/cos/tan are the angle-mode-aware entries, and tinyexpr's raw
+        // radian versions must not shadow them (D46).
+        const int bi = builtin_index(name, len);
+        if (bi >= 0) {
+            OpTok t;
+            t.tok = Tok::kFunc;
+            t.fn = static_cast<uint16_t>(bi);
+            t.builtin = true;
+            t.argc = 1;
+            return push_op(t);
         }
         return fail("Syntax error");
     }

@@ -431,16 +431,46 @@ void test_vm_errors() {
     // their tiers land in 5.2.6/5.2.7.
     check_eval_error("sum(1)", "Syntax error", "help-only catalog row is not callable");
 
-    // KNOWN GAP for 5.2.5: sqrt, abs, conj, real, imag and arg are not in
-    // catalog.cpp at all. sqrt/abs are tinyexpr *builtins* (tinyexpr.c's own
-    // table) and the rest are complex-only, living in complex_expr's kFns. The
-    // compiler resolves names against the catalog alone, so these do not
-    // compile yet. Absorbing the catalogue therefore also means absorbing the
-    // builtin table and the complex-only set — a wider surface than "the
-    // catalogue" suggested when the decision was taken.
-    check_compile_error("sqrt(4)", "Syntax error", "sqrt is a tinyexpr builtin, not catalog");
-    check_compile_error("abs(-2)", "Syntax error", "abs is a tinyexpr builtin, not catalog");
-    check_compile_error("conj(1+2i)", "Syntax error", "conj is complex-only, not catalog");
+    check_compile_error("nosuchfn(1)", "Syntax error", "unknown name is still an error");
+}
+
+// 5.2.5 closed the gap 5.2.4 found: the callable surface is three tables, not
+// one — catalog.cpp's 82 rows, tinyexpr's builtins, and complex_expr's
+// complex-only set. These pin all three reaching the evaluator.
+void test_builtins() {
+    check_real("sqrt(4)", 2, "sqrt (tinyexpr builtin)");
+    check_real("abs(-2)", 2, "abs (tinyexpr builtin)");
+    check_real("exp(0)", 1, "exp (tinyexpr builtin)");
+    check_real("floor(2.7)", 2, "floor");
+    check_real("ceil(2.1)", 3, "ceil");
+    check_real("log10(100)", 2, "log10");
+    check_real("atan2(0,1)", 0, "atan2, arity 2");
+    check_real("pow(2,10)", 1024, "pow, arity 2");
+    check_real("sinh(0)", 0, "sinh");
+
+    // Complex-only functions, with a real argument as the degenerate case.
+    check_real("real(3+4i)", 3, "real() of a complex");
+    check_real("imag(3+4i)", 4, "imag() of a complex");
+    check_real("abs(3+4i)", 5, "abs() of a complex is the modulus");
+    check_cplx("conj(3+4i)", 3, -4, "conj()");
+    check_real("real(7)", 7, "real() of a real");
+    check_real("imag(7)", 0, "imag() of a real is zero");
+
+    // sqrt of a negative real must produce a complex result, as complexexpr
+    // does — sqrt(-4) is 2i, not NaN. This is the one place a real argument
+    // legitimately leaves the real tier.
+    check_cplx("sqrt(-4)", 0, 2, "sqrt(-4) is 2i, not NaN");
+    check_cplx("sqrt(-1)", 0, 1, "sqrt(-1) is i");
+
+    // The catalogue must win over the builtin table for shared names: its
+    // sin/cos/tan are angle-mode aware, tinyexpr's are raw radians. If the
+    // builtin shadowed it, DEGREE mode would silently break — D46 again.
+    math::set_angle_mode(math::AngleMode::kDegrees);
+    check_real("sin(30)", 0.5, "catalog's angle-aware sin wins over the builtin");
+    math::set_angle_mode(math::AngleMode::kRadians);
+
+    // Euler's identity, end to end through both tables.
+    check_real("exp(0)*cos(0)", 1, "builtin and catalog compose");
 }
 
 }  // namespace
@@ -453,6 +483,7 @@ int main() {
     test_vm_variables();
     test_vm_constants();
     test_vm_errors();
+    test_builtins();
     test_compile_basics();
     test_compile_associativity();
     test_compile_unary();

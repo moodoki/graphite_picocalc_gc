@@ -109,6 +109,7 @@ enum class Op : uint8_t {
     kNeg,
     kTranspose,  // postfix ^T
     kCall,       // b = catalog index, a = arity
+    kCallBi,     // b = builtin index, a = arity — see builtin_index()
     kIndex,      // [A](row, col) — pops col, row, matrix
     kStore,      // b = encoded target, see StoreTarget
 };
@@ -175,6 +176,16 @@ struct Program {
 // can be read directly at run time.
 //
 // Returns false and sets *err to a static string on failure.
+// Builtin functions: the surface that is NOT in catalog.cpp. Absorbing "the
+// catalogue" turned out to mean absorbing three tables, not one (found in
+// 5.2.4) — catalog.cpp's 82 rows, tinyexpr's own 24 builtins (sqrt, abs, exp,
+// the hyperbolics, ceil/floor/log10/atan2/pow), and complex_expr's complex-only
+// set (conj, real, imag, arg). These two are the latter pair.
+//
+// Returns a table index, or -1 if the name is not a builtin.
+int builtin_index(const char* name, size_t len);
+int builtin_arity(int idx);
+
 bool compile(const char* src, Program& out, const char** err);
 
 // ---- Stack machine (5.2.4) -----------------------------------------------
