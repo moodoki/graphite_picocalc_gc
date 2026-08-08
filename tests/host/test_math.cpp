@@ -199,12 +199,12 @@ int main() {
     // the defect behind the 2026-08-05 Y=-editor lockup, whose slot held a
     // 20-deep nesting stress probe. Must be a clean error, never a crash.
     {
-        // Eight levels is the documented cap and has to keep working.
-        char ok_expr[64] = "sin(cos(sin(cos(sin(cos(sin(cos(1))))))))";
+        // Seven levels is the documented cap and has to keep working.
+        char ok_expr[64] = "sin(cos(sin(cos(sin(cos(sin(1)))))))";
         ++g_checks;
         void* h = math::engine().compile(ok_expr);
         if (h == nullptr) {
-            std::printf("FAIL: 8-level nesting should compile\n");
+            std::printf("FAIL: 7-level nesting should compile\n");
             ++g_failures;
         } else {
             math::engine().free_compiled(h);
@@ -212,7 +212,7 @@ int main() {
 
         // Build one deeper than the cap, then far deeper, from a loop so
         // the test does not depend on hand-counting parens.
-        const int depths[] = {9, 20, 40};
+        const int depths[] = {8, 20, 40};
         for (const int depth : depths) {
             char deep[512];
             std::size_t w = 0;

@@ -326,6 +326,40 @@ int main() {
                "'2^2^2^2' base fits inside the node box");
     }
 
+    // Deep nesting must terminate and degrade, never run away (HW
+    // 2026-08-08: four nested parens overran core 0's stack from inside
+    // HomeScreen::render()). The staging arrays now live at the pool's
+    // scratch end and parse_power carries a depth cap.
+    {
+        char deep[256];
+        for (int parens = 4; parens <= 60; parens += 28) {
+            std::size_t w = 0;
+            for (int i = 0; i < parens; ++i) {
+                deep[w++] = '(';
+            }
+            deep[w++] = '1';
+            deep[w++] = '+';
+            deep[w++] = '1';
+            for (int i = 0; i < parens; ++i) {
+                deep[w++] = ')';
+            }
+            deep[w] = 0;
+            const render::LayoutNode* n = build(deep);
+            expect(n != nullptr, "deep paren nest returns a tree");
+            expect(n == nullptr || n->height > 0, "deep paren nest has a real height");
+        }
+        // A '^' tower recurses through parse_power without any parentheses,
+        // so it exercises the other cycle the same guard covers.
+        std::size_t w = 0;
+        for (int i = 0; i < 40; ++i) {
+            deep[w++] = '2';
+            deep[w++] = '^';
+        }
+        deep[w++] = '2';
+        deep[w] = 0;
+        expect(build(deep) != nullptr, "deep '^' tower returns a tree");
+    }
+
     // Robustness: empty string
     expect(build("") == nullptr, "empty string -> nullptr");
 

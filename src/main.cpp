@@ -70,7 +70,7 @@ constexpr uint32_t kBulkTestMarker = 0xB07DFACEu;
 // Hard fault on the previous boot (D47), read before anything else can
 // consume the watchdog reboot cause and reported once USB is up.
 bool g_prior_fault = false;
-uint32_t g_prior_fault_pc = 0;
+platform::FaultInfo g_fault;
 
 void run_psram_bulk_test() {
     if (watchdog_caused_reboot() && watchdog_hw->scratch[0] == kBulkTestMarker) {
@@ -326,7 +326,10 @@ int main() {
 
     // Before anything else can consume the watchdog reboot cause — a
     // fault-triggered reboot looks like any other to run_self_tests().
-    g_prior_fault = platform::take_prior_fault(&g_prior_fault_pc);
+    g_prior_fault = platform::take_prior_fault(&g_fault);
+    // Paint the unused stack now, while it is shallow, so the heartbeat
+    // below can report how deep anything has actually gone (D47).
+    platform::paint_stack();
 
     g_init_status = platform::init();
     run_self_tests();
@@ -517,6 +520,36 @@ int main() {
             }
         }
 
+        // Once the app has stayed up a few seconds, forget any fault streak:
+        // the BOOTSEL escape in fault_capture() is only meant to fire for a
+        // fault that recurs every boot, not for an isolated one.
+        {
+            static bool streak_cleared = false;
+            if (!streak_cleared && platform::uptime_ms() > 5'000) {
+                streak_cleared = true;
+                platform::clear_fault_streak();
+            }
+        }
+
+        // Core-0 stack high-water mark (D47). The guard says *that* it
+        // overflowed; this says how close normal work comes, which is what
+        // sizing a depth cap actually needs. 4096 is the whole of SCRATCH_Y,
+        // with core 1's stack immediately below it.
+        {
+            static uint32_t last_stack_report_ms = 0;
+            static uint32_t last_peak = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            const uint32_t peak = platform::stack_peak_used();
+            // Report on the usual 30 s cadence, but also immediately on any
+            // new high-water mark — that is the interesting event.
+            if (now_ms > 3'000 && (peak > last_peak || now_ms - last_stack_report_ms >= 30'000)) {
+                last_stack_report_ms = now_ms;
+                last_peak = peak;
+                printf("stack: peak %lu of %lu\n", static_cast<unsigned long>(peak),
+                       static_cast<unsigned long>(platform::stack_total()));
+            }
+        }
+
         // Previous boot ended in a hard fault (D47). Repeated on the
         // same 30 s heartbeat as the others rather than printed once at
         // boot — a one-shot before USB enumerates is a one-shot nobody
@@ -526,8 +559,15 @@ int main() {
             const uint32_t now_ms = platform::uptime_ms();
             if (now_ms > 3'000 && now_ms - last_fault_report_ms >= 30'000) {
                 last_fault_report_ms = now_ms;
-                printf("fault: previous boot hard-faulted at pc=0x%08lx\n",
-                       static_cast<unsigned long>(g_prior_fault_pc));
+                printf(
+                    "fault: core %lu streak %lu  pc=0x%08lx lr=0x%08lx sp=0x%08lx  "
+                    "stack %lu of %lu\n",
+                    static_cast<unsigned long>(g_fault.core),
+                    static_cast<unsigned long>(g_fault.streak),
+                    static_cast<unsigned long>(g_fault.pc), static_cast<unsigned long>(g_fault.lr),
+                    static_cast<unsigned long>(g_fault.sp),
+                    static_cast<unsigned long>(g_fault.depth),
+                    static_cast<unsigned long>(platform::stack_total()));
             }
         }
 

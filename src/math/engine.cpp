@@ -25,8 +25,15 @@ constexpr size_t kMaxExpr = 256;
 // fails compile with the normal parse error. Numeric literals are
 // unaffected — tinyexpr parses them with strtod, which accepts 1E10.
 // Returns false if the expression is too long.
+// tmp/rebuilt are static, not stack locals. At kMaxExpr each they made this
+// a 560 B frame, and preprocess sits at the very bottom of every engine
+// call — including the one complexexpr's parser reaches at the leaf of its
+// recursion, where it was the frame that finally overran core 0's stack
+// (HW 2026-08-08: the fault PC was this function's prologue). Safe to share:
+// preprocess is a pure string rewrite that calls nothing which re-enters it,
+// and the UI is single-threaded on core 0.
 bool preprocess(const char* in, char* out, size_t out_len) {
-    char tmp[kMaxExpr];
+    static char tmp[kMaxExpr];
     size_t n = 0;
     for (const char* p = in; *p != 0; ++p) {
         if (n + 1 >= sizeof(tmp)) {
@@ -79,7 +86,7 @@ bool preprocess(const char* in, char* out, size_t out_len) {
         }
 
         // Rebuild: [0,s) + "fac(" + [s,end) + ")" + [bang+1,...)
-        char rebuilt[kMaxExpr];
+        static char rebuilt[kMaxExpr];
         const auto head = static_cast<int>(s - tmp);
         const auto prim = static_cast<int>(end - s);
         const int wrote = std::snprintf(rebuilt, sizeof(rebuilt), "%.*sfac(%.*s)%s", head, tmp,
@@ -233,21 +240,26 @@ int lookup_table(Variables& vars) {
 // function-argument nesting — and it has no limit of its own, so the
 // depth is whatever the input says.
 //
-// Sized to the measurement, not to taste: the cycle is **200 B** per
-// level on the Pico 1, and core 0 has 4 KB before core 1's stack. The
-// tightest caller is the list-lift path
-// (evaluate_input -> listexpr::evaluate -> eval_list_into x3 ->
-// eval_lift -> compile_with), which leaves ~1,696 B for the parser —
-// eight levels. The Y= editor's own path would allow sixteen, but one
-// cap has to hold for every call site.
+// Sized to the measurement, not to taste: the cycle is **200 B** per level
+// on the Pico 1, and core 0 has 4 KB before core 1's stack. The tightest
+// caller is the list-lift path
+// (evaluate_input -> listexpr::evaluate -> eval_list_into x3 -> eval_lift ->
+// compile_with), whose prefix measures 2,392 B and so affords seven levels.
+// A bare home-screen expression starts ~1,296 B in and could afford
+// thirteen, but one cap has to hold for every call site.
 //
-// This is what the 2026-08-05 Y= lockup actually needed. Its stored
-// slot held one of the 2026-08-02 nesting stress probes ("up to 20
-// nested trig calls"), and at 20 levels the parser walked off the stack
-// — silently into core 1 before stack guards, and as a hard fault in
-// `factor`'s prologue push after them. Now it is a parse error, so the
-// row just draws red and the slot stays editable.
-constexpr int kMaxParseDepth = 8;
+// This was 8 when first written, sized against frames that have since
+// shrunk on one path and not the other; re-measuring after the D47 leaf
+// work showed 8 overshooting the list-lift budget by 24 B. Kept equal to
+// math::complexexpr's home cap so both number modes stop at the same place.
+//
+// This is what the 2026-08-05 Y= lockup needed. Its stored slot held one of
+// the 2026-08-02 nesting stress probes ("up to 20 nested trig calls"), and
+// at 20 levels the parser walked off the stack — silently into core 1
+// before stack guards, and as a hard fault in `factor`'s prologue push
+// after them. Now it is a parse error, so the row just draws red and the
+// slot stays editable.
+constexpr int kMaxParseDepth = 7;
 
 bool too_deeply_nested(const char* expr) {
     int depth = 0;
@@ -270,7 +282,11 @@ Engine::Engine() = default;
 EvalResult Engine::eval_internal(const char* expr) {
     EvalResult res;
 
-    char processed[kMaxExpr];
+    // Static, like preprocess's buffers below: this chain is reached at the
+    // leaf of complexexpr's recursion, where every byte of frame is paid at
+    // maximum stack depth (D47). Not reentrant — nothing it calls comes back
+    // through the engine.
+    static char processed[kMaxExpr];
     if (!preprocess(expr, processed, sizeof(processed))) {
         res.error = "Expression too long";
         return res;
@@ -373,7 +389,11 @@ void Engine::free_compiled(void* handle) {
 EvalResult Engine::evaluate(const char* expr) {
     // Store operator (D1): "expr->A" / "expr->theta". Split on the last
     // "->" whose right side is a bare variable name.
-    char body[kMaxExpr];
+    //
+    // Static for the same reason as eval_internal's buffer: this is reached
+    // at the leaf of complexexpr's recursion (D47). eval_internal copies out
+    // of it before doing anything, so the two statics never alias.
+    static char body[kMaxExpr];
     std::strncpy(body, expr, sizeof(body) - 1);
     body[sizeof(body) - 1] = 0;
 

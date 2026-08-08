@@ -1,6 +1,7 @@
 #include "math/complex_expr.hpp"
 
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 
 #include "math/engine.hpp"
@@ -223,11 +224,31 @@ Complex parse_scalar_span(P& p) {
         return fail(p, "Syntax error");
     }
 
-    char span[kMaxLen];
     const auto len = static_cast<size_t>(p.s - start);
-    if (len == 0 || len >= sizeof(span)) {
+    if (len == 0 || len >= kMaxLen) {
         return fail(p, "Syntax error");
     }
+
+    // Plain numeric literal: parse it here instead of handing it to
+    // eval_field. That fallback runs the whole tinyexpr engine —
+    // Engine::evaluate -> eval_internal -> preprocess — roughly 1.2 KB of
+    // stack, and it sat at the *leaf* of this parser's recursion, which is
+    // the deepest point on the stack. Four nested parens overran core 0
+    // because of it (HW 2026-08-08, faulting in preprocess's prologue).
+    // strtod is what tinyexpr would have used for these anyway.
+    if (std::isdigit(static_cast<unsigned char>(*start)) != 0 || *start == '.') {
+        char* end = nullptr;
+        const double d = std::strtod(start, &end);
+        if (end == p.s) {
+            return {static_cast<calc_t>(d)};
+        }
+    }
+
+    // Static for the same reason preprocess's buffers are: this is the leaf
+    // of the parser's recursion, so its frame is paid at maximum depth.
+    // parse_scalar_span never nests (it consumes a terminal span and calls
+    // nothing that re-enters the parser), so one copy is enough.
+    static char span[kMaxLen];
     std::memcpy(span, start, len);
     span[len] = 0;
     calc_t v = 0;
