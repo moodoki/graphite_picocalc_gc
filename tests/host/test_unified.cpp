@@ -7,6 +7,7 @@
 // they were measured at.
 
 #include <cstdio>
+#include <cstring>
 
 #include "math/unified_eval.hpp"
 
@@ -106,10 +107,193 @@ void test_program_defaults() {
     check(p.n_elem_slots == 0, "no element slots bound");
 }
 
+// ---- 5.2.3: the shunting-yard compiler -----------------------------------
+
+// Render a program as a compact RPN string so tests can assert on shape
+// rather than poking at instruction indices.
+void render(const Program& p, char* buf, size_t cap) {
+    size_t n = 0;
+    const auto put = [&](const char* s) {
+        while (*s != 0 && n + 1 < cap) {
+            buf[n++] = *s++;
+        }
+    };
+    for (int i = 0; i < p.n_code; ++i) {
+        if (i != 0 && n + 1 < cap) {
+            buf[n++] = ' ';
+        }
+        const Instr& in = p.code[i];
+        char tmp[32];
+        switch (in.op) {
+            case Op::kPushConst: {
+                const math::Complex& c = p.consts[in.b];
+                if (c.im != 0) {
+                    std::snprintf(tmp, sizeof(tmp), "%gi", c.im);
+                } else {
+                    std::snprintf(tmp, sizeof(tmp), "%g", c.re);
+                }
+                put(tmp);
+                break;
+            }
+            case Op::kPushVar:
+                std::snprintf(tmp, sizeof(tmp), "v%u", in.a);
+                put(tmp);
+                break;
+            case Op::kPushSysc:
+                std::snprintf(tmp, sizeof(tmp), "k%u", in.b);
+                put(tmp);
+                break;
+            case Op::kCall:
+                std::snprintf(tmp, sizeof(tmp), "call%u/%u", in.b, in.a);
+                put(tmp);
+                break;
+            case Op::kAdd: put("+"); break;
+            case Op::kSub: put("-"); break;
+            case Op::kMul: put("*"); break;
+            case Op::kDiv: put("/"); break;
+            case Op::kPow: put("^"); break;
+            case Op::kNeg: put("neg"); break;
+            default: put("?"); break;
+        }
+    }
+    buf[n < cap ? n : cap - 1] = 0;
+}
+
+void check_rpn(const char* src, const char* expected, const char* what) {
+    ++g_checks;
+    Program p;
+    const char* err = nullptr;
+    if (!compile(src, p, &err)) {
+        std::printf("FAIL: %s: '%s' did not compile (%s)\n", what, src,
+                    err != nullptr ? err : "?");
+        ++g_failures;
+        return;
+    }
+    char buf[256];
+    render(p, buf, sizeof(buf));
+    if (std::strcmp(buf, expected) != 0) {
+        std::printf("FAIL: %s: '%s' -> \"%s\" (expected \"%s\")\n", what, src, buf, expected);
+        ++g_failures;
+    }
+}
+
+void check_compile_error(const char* src, const char* expected, const char* what) {
+    ++g_checks;
+    Program p;
+    const char* err = nullptr;
+    if (compile(src, p, &err)) {
+        std::printf("FAIL: %s: '%s' compiled but should not have\n", what, src);
+        ++g_failures;
+        return;
+    }
+    if (err == nullptr || std::strcmp(err, expected) != 0) {
+        std::printf("FAIL: %s: '%s' -> '%s' (expected '%s')\n", what, src,
+                    err != nullptr ? err : "(null)", expected);
+        ++g_failures;
+    }
+}
+
+void test_compile_basics() {
+    check_rpn("2+3", "2 3 +", "addition");
+    check_rpn("2+3*4", "2 3 4 * +", "precedence: * over +");
+    check_rpn("(2+3)*4", "2 3 + 4 *", "parens override precedence");
+    check_rpn("2.5", "2.5", "decimal literal");
+    check_rpn(".5", "0.5", "leading-dot literal");
+    check_rpn("1e3", "1000", "exponent literal");
+}
+
+// Associativity is the part most likely to change meaning silently, and the
+// existing evaluators pin both directions: `^` is right-associative (tinyexpr
+// is built with TE_POW_FROM_RIGHT), `/` and `-` are left.
+void test_compile_associativity() {
+    check_rpn("2^3^2", "2 3 2 ^ ^", "^ is right-associative");
+    check_rpn("8/4/2", "8 4 / 2 /", "/ is left-associative");
+    check_rpn("8-4-2", "8 4 - 2 -", "- is left-associative");
+    check_rpn("2^3*4", "2 3 ^ 4 *", "^ binds tighter than *");
+}
+
+void test_compile_unary() {
+    check_rpn("-3", "3 neg", "unary minus");
+    check_rpn("--3", "3 neg neg", "double negation folds by nesting");
+    check_rpn("-3+4", "3 neg 4 +", "unary binds tighter than +");
+    check_rpn("-3*4", "3 neg 4 *", "unary binds tighter than *");
+    // Unary binds looser than ^, so -3^2 is -(3^2), matching the existing
+    // evaluators and ordinary mathematical convention.
+    check_rpn("-3^2", "3 2 ^ neg", "unary is looser than ^");
+    check_rpn("+3", "3", "unary plus is a no-op");
+}
+
+void test_compile_identifiers() {
+    check_rpn("a", "v0", "variable a is slot 0");
+    check_rpn("z", "v25", "variable z is slot 25");
+    check_rpn("theta", "v26", "theta is Variables::kTheta");
+    check_rpn("ans", "v27", "ans is Variables::kAns");
+    check_rpn("i", "1i", "i is the imaginary unit, not a variable");
+    check_rpn("2i", "2i", "imaginary shorthand");
+    check_rpn("3+2i", "3 2i +", "complex literal expression");
+    check_rpn("a+b*c", "v0 v1 v2 * +", "variables obey precedence");
+}
+
+void test_compile_calls() {
+    // sin is catalog index 0 in display order; assert the shape, not the
+    // index, by checking arity and that a call is emitted at all.
+    Program p;
+    const char* err = nullptr;
+    check(compile("sin(1)", p, &err), "sin(1) compiles");
+    check(p.n_code == 2, "sin(1) is push + call");
+    check(p.code[1].op == Op::kCall && p.code[1].a == 1, "sin(1) has arity 1");
+
+    check(compile("ncr(5,2)", p, &err), "ncr(5,2) compiles");
+    check(p.code[p.n_code - 1].op == Op::kCall && p.code[p.n_code - 1].a == 2,
+          "ncr(5,2) has arity 2");
+
+    check(compile("sin(1)+cos(2)", p, &err), "nested calls compile");
+    check(p.code[p.n_code - 1].op == Op::kAdd, "call results feed the operator");
+
+    check(compile("sin(cos(1))", p, &err), "call inside a call compiles");
+    check(p.code[p.n_code - 1].op == Op::kCall, "outer call emitted last");
+}
+
+void test_compile_errors() {
+    check_compile_error("", "Syntax error", "empty input");
+    check_compile_error("2+", "Syntax error", "trailing operator");
+    check_compile_error("(2+3", "Syntax error", "unclosed paren");
+    check_compile_error("2+3)", "Syntax error", "unbalanced close");
+    check_compile_error("nosuchfn(1)", "Syntax error", "unknown function");
+    check_compile_error("qq", "Syntax error", "unknown multi-char identifier");
+    check_compile_error("2 3", "Syntax error", "two operands, no operator");
+    check_compile_error(",", "Syntax error", "bare comma");
+}
+
+// The depth this phase buys, exercised rather than asserted. matexpr capped
+// at 3 and complexexpr at 7; both would reject these outright.
+void test_compile_depth() {
+    check_rpn("((((((((1))))))))", "1", "8 nested parens (matexpr capped at 3)");
+
+    // Deep enough to exhaust the operator stack, which must be a clean error
+    // rather than a fault — the entire point of moving depth off the call
+    // stack.
+    char deep[256];
+    size_t n = 0;
+    for (int i = 0; i < 80 && n + 2 < sizeof(deep); ++i) {
+        deep[n++] = '(';
+    }
+    deep[n++] = '1';
+    deep[n] = 0;
+    check_compile_error(deep, "Too deeply nested", "operator stack overflow is a clean error");
+}
+
 }  // namespace
 
 int main() {
     test_sizes();
+    test_compile_basics();
+    test_compile_associativity();
+    test_compile_unary();
+    test_compile_identifiers();
+    test_compile_calls();
+    test_compile_errors();
+    test_compile_depth();
     test_depth_budget();
     test_value_construction();
     test_scalar_promotion();

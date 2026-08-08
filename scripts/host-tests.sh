@@ -129,9 +129,12 @@ echo "== Compiling + linking test_analysis =="
     -o "$OUT/test_analysis"
 
 echo "== Compiling + linking test_unified =="
-"$CXX" -std=c++17 -O1 -Wall -Wextra \
-    -Isrc \
-    tests/host/test_unified.cpp src/math/complex.cpp \
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr \
+    tests/host/test_unified.cpp src/math/unified_compile.cpp \
+    src/math/complex.cpp src/math/engine.cpp src/math/functions.cpp \
+    src/math/format.cpp src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_unified"
 
 echo "== Compiling + linking test_complex =="

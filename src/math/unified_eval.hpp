@@ -160,6 +160,23 @@ struct Program {
     int n_elem_slots = 0;
 };
 
+// ---- Compiler (5.2.3) ----------------------------------------------------
+//
+// Shunting-yard, iterative: no parse recursion, so nesting costs operator-stack
+// slots rather than call frames. Emits RPN into `out`.
+//
+// Scope as of 5.2.3: numeric and imaginary literals, variables, catalog
+// constants and function calls, `+ - * / ^`, unary sign, parentheses. Matrix
+// and list literals/references arrive with their tiers (5.2.6/5.2.7), stores
+// with 5.2.8.
+//
+// `kPushVar` slots are `Variables`' own indices (0-25 = a-z, 26 = theta,
+// 27 = Ans) rather than a parallel numbering, so `Variables::is_complex(idx)`
+// can be read directly at run time.
+//
+// Returns false and sets *err to a static string on failure.
+bool compile(const char* src, Program& out, const char** err);
+
 static_assert(sizeof(Value) == 24,
               "Value is the measured 24 B (5.2.1); update the budget if it moves");
 static_assert(sizeof(Instr) == 4, "Instr is 4 B; the program array is sized on it");
