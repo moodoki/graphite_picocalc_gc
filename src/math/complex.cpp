@@ -87,6 +87,46 @@ Complex c_pow(const Complex& base, const Complex& exp) {
     if (base.im == 0.0 && exp.im == 0.0 && (base.re > 0.0 || exp.re == std::floor(exp.re))) {
         return {std::pow(base.re, exp.re), 0.0};
     }
+    // Complex base, integer exponent: binary exponentiation, not exp(ln).
+    // Same defect D46 fixed above for real bases, one branch short — and the
+    // reason it shows up so starkly here is that exp(ln) cannot produce an
+    // exact zero component. (1+i)^2 is 2i, but exp(2*ln(1+i)) returns
+    // 1.2246e-16 + 2i, that real part being exactly 2*cos(pi/2) in double.
+    // Verified identical in CPython: (1+1j)**2 is 2j, while
+    // cmath.exp(2*cmath.log(1+1j)) reproduces our old wrong answer bit for
+    // bit — CPython special-cases small integer exponents for this reason.
+    //
+    // Fixing the *value* rather than the display is deliberate: real() and
+    // ordinary arithmetic can both observe the epsilon
+    // (`(1+i)^2-2i` was nonzero), so snapping it only at format time would
+    // have printed 2i while real((1+i)^2) still returned 1.2e-16 — a worse
+    // inconsistency than the one it replaced. See decisions.md D49, which
+    // also records the alternative ("camp 2") if this is ever revisited.
+    //
+    // Cap: beyond ~100 the accumulated rounding of repeated squaring stops
+    // being obviously better than exp(ln), and the exact-zero case that
+    // motivates this does not arise at those magnitudes anyway. CPython
+    // draws the same line in the same place.
+    constexpr calc_t kMaxIntPow = 100.0;
+    if (exp.im == 0.0 && exp.re == std::floor(exp.re) && std::fabs(exp.re) <= kMaxIntPow) {
+        int n = static_cast<int>(exp.re);
+        const bool invert = n < 0;
+        if (invert) {
+            n = -n;
+        }
+        Complex acc{1.0, 0.0};
+        Complex b = base;
+        while (n > 0) {
+            if ((n & 1) != 0) {
+                acc = acc * b;
+            }
+            n >>= 1;
+            if (n > 0) {
+                b = b * b;
+            }
+        }
+        return invert ? Complex{1.0, 0.0} / acc : acc;
+    }
     return c_exp(c_ln(base) * exp);
 }
 

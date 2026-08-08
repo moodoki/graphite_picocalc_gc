@@ -18,6 +18,92 @@ Format:
 
 ---
 
+## D49: Integer powers of a complex base are computed, not approximated — and why the display-tolerance alternative was rejected
+
+**Date**: 2026-08-09
+**Status**: Accepted (bugfix)
+**Context**: Found by Phase 5.1's serial injection on its first real sweep, which
+is the point of that tooling. `(1+i)^2` displayed `1.224646799e-16 + 2i` where it
+should be `2i`. Not a display artifact: `real((1+i)^2)` returned the epsilon and
+`(1+i)^2-2i` propagated it.
+
+`c_pow` had exactly one exactness branch — real base, real exponent, `std::pow`,
+added by **D46** for the same class of defect (`10202^2` a hair off 104080804).
+A **complex** base fell through to `c_exp(c_ln(base) * exp)`, which cannot
+produce an exact zero component: `1.2246e-16` is precisely `2*cos(pi/2)` in
+double. Confirmed against CPython, which reproduces our wrong answer bit for bit
+via `cmath.exp(2*cmath.log(1+1j))` while `(1+1j)**2` gives exactly `2j` — it
+special-cases small integer exponents for this reason.
+
+The test suite did not catch it, and *why* is worth keeping:
+`test_complex.cpp:82` already asserted `(1+i)^2 == 2i`, but with `tol = 1e-9`.
+The assertion was right; the tolerance could not distinguish an exact zero from a
+1e-16 one. **A tolerance chosen for "close enough" cannot test exactness.**
+
+**Decision**: binary exponentiation for a real, integer-valued exponent of
+magnitude <= 100, mirroring D46's real-base branch. `(1+i)^2` is now exactly
+`2i` as a *value*. New tests assert with `tol = 0`, because exactness is the
+property under test.
+
+**Rationale — two architectural camps, and why camp 1.**
+
+*Camp 1, never generate the epsilon* (adopted): compute integer powers by
+repeated multiplication. What CPython and most numeric libraries do. True CAS
+systems (Mathematica, Maple, TI-Nspire CAS, HP Prime CAS) reach the same place by
+a different route — they expand `(1+i)^2` **symbolically** to `1 + 2i + i^2`, so
+no float is involved and exactness is structural.
+
+*Camp 2, suppress at display* (rejected here, recorded below): leave the value
+and widen the formatter's zero test.
+
+Camp 2 was rejected because **it does not fix the value**. `real()` and ordinary
+arithmetic both observe the component, so snapping only at format time would have
+printed `2i` while `real((1+i)^2)` still returned `1.2e-16` — a worse
+inconsistency than the original, because the display would then be lying about a
+number the user can still extract.
+
+**Camp 2, recorded for if this ever becomes an issue.** Camp 1 has a real limit:
+it only helps where an exact algorithm exists. `(1+i)^2.5`, `(1+i)^i`, and
+transcendental compositions that *should* yield an exact zero still go through
+`exp(ln)` and can still show an epsilon. No camp-1 system avoids that. If those
+paths start producing user-visible artifacts, camp 2 is the remaining lever, and
+these are the notes for doing it properly:
+
+- **The formatter is already asymmetric about zero, and that is the bug camp 2
+  would fix.** `format.cpp:184` tests `z.is_real()`, which is *tolerant*
+  (`eps = 1e-12`), so a negligible imaginary part is snapped away and `(1+i)^4`
+  printed a clean `-4` even before this fix. `format.cpp:203` tests
+  `z.re == 0.0`, which is *exact*, so a negligible real part survived. One axis
+  forgiving, the other not.
+- **Use a relative test, not an absolute one.** `is_real(1e-12)` is scale-blind:
+  for a result of magnitude 1e13 an imaginary part of 1e-11 is relatively
+  negligible but absolutely above eps, and at magnitude 1e-13 everything looks
+  real. The principled form is `|re| <= eps * |z|`.
+- **It changes behaviour, not just presentation.** A genuine `1e-15 + 2i` would
+  display as `2i`. That is the same trade the imaginary axis already makes, newly
+  applied to the real one — defensible, but it is a decision about lying to the
+  user in a documented way, not a cleanup.
+- Apply it at *display* only. Do not let a tolerance leak into `real()`,
+  `imag()`, comparisons or arithmetic, or the inconsistency simply moves.
+
+**Tradeoffs**: a cap at |n| <= 100 (CPython draws the same line); beyond it the
+`exp(ln)` path takes over and the result is correct but not bit-exact — pinned by
+a test so the fallback is not accidentally removed. Repeated squaring costs
+O(log n) multiplications, negligible on this path.
+
+**Revisit when**: an epsilon artifact appears from a path camp 1 cannot reach
+(non-integer or complex exponents, transcendental compositions). Then implement
+camp 2 per the notes above rather than re-deriving them.
+
+**User-facing documentation**: this belongs in the user docs, not only here —
+the distinction between results that are *exact by construction* and results that
+are *numerically approximated* is something a calculator user should be told
+plainly, along with the honest statement that `(1+i)^2` is exact while
+`(1+i)^2.5` is not, and why. Flagged for the `docs/site` branch's CAS/complex
+chapter.
+
+---
+
 ## D48: `matexpr` gets the depth cap it never had — and the margin it leaves makes idea F worth doing
 
 **Date**: 2026-08-08
