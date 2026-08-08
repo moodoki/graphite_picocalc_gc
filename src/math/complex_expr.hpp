@@ -45,15 +45,20 @@ struct Result {
 // the *caller* already is — hence two values rather than one constant buried
 // in the parser.
 //
-//   kMaxParseDepth        home screen / editor entry, ~1,200 B in.
-//                         7 keeps the D45 nesting ladder working to rung 6
-//                         (rung N needs N+1) and `2^2^2^2^2`; margin ~200 B.
+//   kMaxParseDepth        home screen / editor entry, ~1,240 B in. This
+//                         counts recursion levels, and the top-level call is
+//                         level 1, so 8 accepts 7 nested parens — matching
+//                         Engine's kMaxParseDepth, which counts parens
+//                         directly. Without that +1 the two number modes
+//                         disagreed by one paren, which is just confusing.
+//                         Measured worst case 3,128 of 4,096; the path could
+//                         afford 10.
 //   kMaxParseDepthNested  reached from inside list or matrix evaluation
 //                         (list_expr's complex literal and clift paths,
 //                         mat_expr's scalar spans), ~2,400 B in — only 4 fit.
 //
 // Over-cap input returns "Too deeply nested" instead of walking off the stack.
-constexpr int kMaxParseDepth = 7;
+constexpr int kMaxParseDepth = 8;
 constexpr int kMaxParseDepthNested = 4;
 
 Result evaluate(const char* input, int max_depth = kMaxParseDepth);
