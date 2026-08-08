@@ -323,6 +323,75 @@ void test_real_pow_exact() {
     check_ok("4^0.5", 2.0, 0.0, "4^0.5");
 }
 
+// Parse-nesting caps (D47). This parser costs ~368 B of stack per level and
+// core 0 has 4 KB before core 1's, so the depth that fits depends on how deep
+// the caller already is — hence two caps. Over-cap input must be a clean
+// error, never a crash.
+void test_parse_depth_cap() {
+    // Rung N of the D45 ladder needs depth N+1, so the default cap of 7
+    // carries it to rung 6 — the case D45 stress-tested. Verified above in
+    // test_real_pow_exact for rung 4; here is the boundary itself.
+    // Acceptance is the assertion here, not the arithmetic — rung 4's value
+    // is pinned in test_real_pow_exact above, and rung 5 (1.0832814e16) is
+    // past 2^53 so it is not exactly representable anyway.
+    check(math::complexexpr::evaluate("(((((2+1)^2+1)^2+1)^2+1)^2+1)^2+1").ok,
+          "nesting rung 5 within the default cap");
+    check(math::complexexpr::evaluate("((((((2+1)^2+1)^2+1)^2+1)^2+1)^2+1)^2+1").ok,
+          "nesting rung 6 within the default cap (the D45 stress case)");
+    // Right-assoc: 2^(2^(2^2)) = 2^16. One more caret would be 2^65536 = inf,
+    // which parses fine but says nothing about depth.
+    check_ok("2^2^2^2", 65536.0, 0.0, "right-assoc ^ chain within the cap");
+
+    // One past the default: a clean error, not a fault. Note this cycle has
+    // no parentheses at the deep end — a paren-count pre-scan (which is what
+    // tinyexpr gets) would miss it entirely, which is why this parser carries
+    // a real counter.
+    {
+        char deep[256];
+        std::size_t w = 0;
+        for (int i = 0; i < 30; ++i) {
+            w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "2^"));
+        }
+        w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "1"));
+        check_err(deep, "Too deeply nested", "30-deep ^ chain rejected");
+    }
+    {
+        char deep[256];
+        std::size_t w = 0;
+        for (int i = 0; i < 20; ++i) {
+            w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "("));
+        }
+        w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "1+i"));
+        for (int i = 0; i < 20; ++i) {
+            w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, ")"));
+        }
+        check_err(deep, "Too deeply nested", "20-deep paren nest rejected");
+    }
+
+    // The nested cap is tighter, because list/matrix evaluation has already
+    // spent ~2,400 B before reaching this parser. Same expression, both caps.
+    const char* five = "((((1+i))))";  // 5 levels
+    ++g_checks;
+    if (!math::complexexpr::evaluate(five, math::complexexpr::kMaxParseDepth).ok) {
+        std::printf("FAIL: %s should pass at the default cap\n", five);
+        ++g_failures;
+    }
+    ++g_checks;
+    {
+        const auto r = math::complexexpr::evaluate(five, math::complexexpr::kMaxParseDepthNested);
+        if (r.ok || r.error == nullptr || std::strcmp(r.error, "Too deeply nested") != 0) {
+            std::printf("FAIL: %s should be rejected at the nested cap -> ok=%d err=%s\n", five,
+                        r.ok ? 1 : 0, r.error != nullptr ? r.error : "(null)");
+            ++g_failures;
+        }
+    }
+
+    // Siblings must not accumulate depth — parse_term/parse_expr call
+    // parse_unary in a loop, so a long flat chain has to stay shallow.
+    check_ok("1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1", 20.0, 0.0, "flat sum stays shallow");
+    check_ok("2*2*2*2*2*2*2*2*2*2", 1024.0, 0.0, "flat product stays shallow");
+}
+
 }  // namespace
 
 int main() {
@@ -337,6 +406,7 @@ int main() {
     test_number_mode_default();
     test_angle_mode();
     test_real_pow_exact();
+    test_parse_depth_cap();
 
     std::printf("%d/%d checks passed\n", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

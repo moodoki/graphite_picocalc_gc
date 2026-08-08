@@ -68,10 +68,17 @@ draws red (correctly rejected), the graph works, three `graph recompute:` at
      to chase, not a mystery. Resolve it with
      `arm-none-eabi-addr2line -f -C -e build/pico/picocalc_graphcalc.elf <pc>`;
      a PC landing on a function's `push` prologue means stack overflow.
-   - **`math::complexexpr` is the obvious next uncapped parser** — its own
-     recursive descent, `parse_unary` at 232 B/level, no depth limit, reachable
-     from the home screen in non-REAL number mode. It did not surface this
-     session but it is the same class as the tinyexpr cap above.
+   - ~~`math::complexexpr` is the obvious next uncapped parser~~ — **capped
+     2026-08-08 (D47)**, host-verified, not yet exercised on hardware. Needed
+     *two* caps (`kMaxParseDepth = 7` at the home screen,
+     `kMaxParseDepthNested = 4` from inside list/matrix evaluation) because the
+     two entry points differ by 1.2 KB of prefix. Worth a device check that
+     ordinary a+bi expressions still evaluate.
+   - **`math::matexpr` is now the last uncapped parser, and the worst** —
+     **808 B/level** (`parse_power` alone is 416 B, holding matrix
+     temporaries), leaving only ~2 levels of headroom from the home screen.
+     Needs its own measurement pass and probably frame reduction before a cap
+     can be set that does not break ordinary matrix expressions.
    - **Then run the Phase 5 CAS on-device checklist this bug blocked** — the
      Stage 4 script further down this file (amber exact forms, DEGREE folding,
      RECT/POLAR, unchanged white decimals, Alt+Enter, reboot-reload). It has

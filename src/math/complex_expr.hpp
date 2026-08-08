@@ -40,7 +40,23 @@ struct Result {
     const char* error = nullptr;  // Static string when ok == false
 };
 
-Result evaluate(const char* input);
+// Parse-nesting caps (D47). This parser recurses ~368 B per level and core 0
+// has 4 KB before core 1's stack, so the affordable depth depends on how deep
+// the *caller* already is — hence two values rather than one constant buried
+// in the parser.
+//
+//   kMaxParseDepth        home screen / editor entry, ~1,200 B in.
+//                         7 keeps the D45 nesting ladder working to rung 6
+//                         (rung N needs N+1) and `2^2^2^2^2`; margin ~200 B.
+//   kMaxParseDepthNested  reached from inside list or matrix evaluation
+//                         (list_expr's complex literal and clift paths,
+//                         mat_expr's scalar spans), ~2,400 B in — only 4 fit.
+//
+// Over-cap input returns "Too deeply nested" instead of walking off the stack.
+constexpr int kMaxParseDepth = 7;
+constexpr int kMaxParseDepthNested = 4;
+
+Result evaluate(const char* input, int max_depth = kMaxParseDepth);
 
 // True if `s` contains the standalone identifier `i` (imaginary unit)
 // or a numeric-literal-adjacent form like `2i` — the trigger for

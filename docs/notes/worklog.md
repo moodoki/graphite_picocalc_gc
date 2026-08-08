@@ -418,7 +418,31 @@ indistinguishable lockup.
 **ZTrig in DEGREE confirmed working on the same pass**, closing the second
 item from the 2026-08-05 testdrive.
 
-**Still unverified on hardware:** the wider guards-are-live sweep (matrix ops, large-list editor, stats, the D45 nesting
+**Follow-on, same session: `math::complexexpr` capped too (D47).** Flagged
+above as the next uncapped parser, and it is — but it needed a different
+treatment. Two recursion cycles, both through `parse_unary`: paren/function
+nesting, and right-associative `^` (`parse_power` -> `parse_unary`) which has
+**no parentheses at all**, so `2^2^2^...` nests once per caret and a
+paren-depth pre-scan like tinyexpr's would miss it entirely. At 360 B/level
+one cap could not serve both entry points — the home screen enters ~1,208 B
+in, list/matrix evaluation ~2,400 B in — and a single conservative 4 would
+have broken `test_real_pow_exact`'s D45 rung-4 ladder case. So the cap belongs
+to the entry point: `kMaxParseDepth = 7` / `kMaxParseDepthNested = 4`. Home
+3,728 / list 3,840 / matrix 3,496, all of 4,096. Getting the list prefix down
+needed the same bss treatment on `listexpr::evaluate` (720 -> 280 B) and
+`eval_clift` (360 -> 176 B) — **and one of those was wrong**: making
+`eval_clift`'s `CTerm terms[]` static segfaulted `2i*l1`, because only `.sign`
+is assigned per use and the rest comes from default member initializers that
+run per call for a stack local but once for a static. `test_lists` caught it;
+reverted to the stack. `test_complex_expr` 113 -> **122**; `.bss` 209,120 ->
+209,888.
+
+**`math::matexpr` is now the last uncapped parser and the worst of the three**
+— 808 B/level, ~2 levels of headroom. Left alone: it needs its own measurement
+and probably frame reduction first.
+
+**Still unverified on hardware:** the complexexpr cap, and the wider
+guards-are-live sweep (matrix ops, large-list editor, stats, the D45 nesting
 ladder) — plus the whole Phase 5 CAS on-device checklist this bug had been
 blocking. Pico 2 not flashed. See `next-session.md`.
 

@@ -99,6 +99,17 @@ struct RangeScratch {
 };
 RangeScratch g_range;
 
+// Top-level evaluate()'s own buffers. It is the single entry point and is
+// never re-entered, and it sits *above* complexexpr::evaluate on the deepest
+// path into that parser — so this frame is part of what that parser's depth
+// cap has to be sized around (D47).
+struct EvaluateScratch {
+    char body[kMaxLen];
+    char tb[kMaxLen];
+    char args[kMaxLen];
+};
+EvaluateScratch g_top;
+
 // eval_list_into's own wrapper-argument buffers, one set per recursion
 // level. Everything else in this file is called at most once at a time;
 // these are the exception, so they are indexed by depth rather than
@@ -534,7 +545,9 @@ __attribute__((noinline)) bool eval_literal(const char* s, Array& out, Ctx& ctx)
         for (int i = 0; i < count; ++i) {
             std::memcpy(arg, starts[i], lens[i]);
             arg[lens[i]] = 0;
-            const auto r = complexexpr::evaluate(arg);
+            // Inside list evaluation, several frames deep — see
+            // kMaxParseDepthNested (D47).
+            const auto r = complexexpr::evaluate(arg, complexexpr::kMaxParseDepthNested);
             if (!r.ok) {
                 ctx.err = "Bad list element";
                 return false;
@@ -809,6 +822,11 @@ bool clift_has_list_token(const char* f, int first_op, int ops) {
 }
 
 __attribute__((noinline)) bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
+    // Deliberately NOT static, despite this being a leaf: the entries rely
+    // on CTerm's default member initializers (scalar = 1, list = nullptr)
+    // running per call — only .sign is assigned below. A static kept the
+    // previous call's accumulated scalar and a stale Array*, which
+    // test_lists caught as a segfault on `2i*l1` (D47).
     CTerm terms[kMaxCTerms];
     int nterms = 0;
 
@@ -914,7 +932,8 @@ __attribute__((noinline)) bool eval_clift(const char* rw, int first_op, Array& o
                             ctx.err = "Complex lists support only +, -, scalar * and /";
                             return false;
                         }
-                        const auto r = complexexpr::evaluate(fbuf);
+                        const auto r =
+                            complexexpr::evaluate(fbuf, complexexpr::kMaxParseDepthNested);
                         if (!r.ok) {
                             ctx.err = r.error;
                             return false;
@@ -1269,7 +1288,7 @@ int in_place_sort_form(const char* s, bool* asc) {
 
 Result evaluate(const char* input) {
     Result res;
-    char body[kMaxLen];
+    auto& body = g_top.body;
     if (!trim_into(input, body, sizeof(body))) {
         return res;  // Too long — let the engine report it
     }
@@ -1306,7 +1325,7 @@ Result evaluate(const char* input) {
             }
             if (take) {
                 *arrow = 0;
-                char tb[kMaxLen];
+                auto& tb = g_top.tb;
                 trim_into(body, tb, sizeof(tb));
                 std::memcpy(body, tb, std::strlen(tb) + 1);
             }
@@ -1396,7 +1415,7 @@ Result evaluate(const char* input) {
         }
         if (op >= 0) {
             res.kind = Kind::kError;
-            char args[kMaxLen];
+            auto& args = g_top.args;
             if (inner_len >= sizeof(args)) {
                 res.error = "Expression too long";
                 return res;

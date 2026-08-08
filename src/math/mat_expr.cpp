@@ -222,7 +222,9 @@ Value parse_scalar_span(P& p) {
     }
     // i-bearing spans ("i", "2i") and complex-valued variables don't
     // ride the real field evaluator (4D.15/4D.25).
-    const auto cr = complexexpr::evaluate(span);
+    // Inside matrix evaluation, several frames deep — see
+    // kMaxParseDepthNested (D47).
+    const auto cr = complexexpr::evaluate(span, complexexpr::kMaxParseDepthNested);
     if (!cr.ok) {
         return fail(p, "Syntax error");
     }

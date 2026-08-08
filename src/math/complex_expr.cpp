@@ -40,9 +40,25 @@ bool trim_into(const char* s, char* buf, size_t cap) {
 
 // ---- Recursive-descent evaluator ----
 
+// Parse-nesting cap. Two recursion cycles run through this parser and both
+// pass through parse_unary, which is why the guard lives there:
+//   1. paren/function nesting — parse_primary -> parse_expr -> parse_term
+//      -> parse_unary
+//   2. right-associative '^' — parse_power -> parse_unary, with no
+//      parentheses involved, so `2^2^2^...` nests once per caret.
+// Cycle 2 is why this needs a real counter and not the paren-depth scan
+// tinyexpr gets (D47's kMaxParseDepth): a string pre-scan cannot see it.
+// tinyexpr has no such cycle — its `factor` builds right-associativity
+// iteratively via an insertion pointer.
+//
+// The limit itself is the caller's, not the parser's — see kMaxParseDepth /
+// kMaxParseDepthNested in the header for the measurement.
+
 struct P {
     const char* s = nullptr;
     const char* err = nullptr;
+    int depth = 0;
+    int max_depth = kMaxParseDepth;
 };
 
 void skip_ws(P& p) {
@@ -292,7 +308,24 @@ Complex parse_power(P& p) {
     return c_pow(base, exp);
 }
 
+// RAII so every early return unwinds the count; parse_term/parse_expr call
+// parse_unary repeatedly in a loop, and those siblings must not accumulate.
+struct DepthGuard {
+    P& p;
+    explicit DepthGuard(P& q) : p(q) { ++p.depth; }
+    ~DepthGuard() { --p.depth; }
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+    DepthGuard(DepthGuard&&) = delete;
+    DepthGuard& operator=(DepthGuard&&) = delete;
+    bool too_deep() const { return p.depth > p.max_depth; }
+};
+
 Complex parse_unary(P& p) {
+    const DepthGuard guard(p);
+    if (guard.too_deep()) {
+        return fail(p, "Too deeply nested");
+    }
     skip_ws(p);
     bool neg = false;
     while (*p.s == '-' || *p.s == '+') {
@@ -382,7 +415,7 @@ bool mentions_i(const char* s) {
     return false;
 }
 
-Result evaluate(const char* input) {
+Result evaluate(const char* input, int max_depth) {
     Result res;
     char body[kMaxLen];
     if (!trim_into(input, body, sizeof(body))) {
@@ -441,6 +474,7 @@ Result evaluate(const char* input) {
 
     P p;
     p.s = processed;
+    p.max_depth = max_depth;
     const Complex v = parse_expr(p);
     if (p.err == nullptr) {
         skip_ws(p);

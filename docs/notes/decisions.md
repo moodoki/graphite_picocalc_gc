@@ -188,6 +188,62 @@ turned a second, still-unknown instance of this bug class into a PC and a
 one-line diagnosis, on the first flash. Shipping the guard without the handler
 would have produced another indistinguishable lockup.
 
+### Third parser, and why this one needed two caps
+
+Same session, immediately after: `math::complexexpr` was flagged above as the
+obvious next uncapped parser, and it is — but it does not take the same
+treatment. It has **two** recursion cycles, both routed through `parse_unary`,
+which is where the guard therefore lives:
+
+1. paren/function nesting — `parse_primary` -> `parse_expr` -> `parse_term`
+   -> `parse_unary`;
+2. right-associative `^` — `parse_power` -> `parse_unary`, **with no
+   parentheses at all**, so `2^2^2^2^...` nests once per caret.
+
+Cycle 2 is why the paren-depth pre-scan used for tinyexpr would not do here: a
+string scan cannot see it. (tinyexpr has no such cycle — its `factor` builds
+right-associativity iteratively via an insertion pointer, verified in source,
+so `kMaxParseDepth`'s proxy is sound.)
+
+The cap could not be a single number. At **360 B/level**, the affordable depth
+depends on how deep the caller already is, and the two entry points differ by
+1.2 KB: the home screen enters ~1,208 B in, while list and matrix evaluation
+reach the same parser ~2,400 B in (`eval_literal` for `{1+i,...}` elements,
+`eval_clift` for `2i*l1`, `eval_matrix_body` for scalar spans). One
+conservative value would have had to be 4 — and rung N of the D45 ladder needs
+depth N+1, so 4 would have broken `test_real_pow_exact`'s rung-4 case, which is
+a deliberate D45/D46 regression test. So the cap belongs to the *entry point*:
+`kMaxParseDepth = 7` (default) and `kMaxParseDepthNested = 4`, passed as a
+defaulted argument to `evaluate()`.
+
+Measured, all three paths:
+
+| path | prefix | cap | total | margin |
+|---|---|---|---|---|
+| home screen | 1,208 | 7 | 3,728 | 368 |
+| via `list_expr` | 2,400 | 4 | 3,840 | 256 |
+| via `mat_expr` | 2,056 | 4 | 3,496 | 600 |
+
+Getting the list prefix down to 2,400 took the same bss treatment on
+`listexpr::evaluate` (720 -> 280 B) and `eval_clift` (360 -> 176 B). **One of
+those was wrong and `test_lists` caught it**: making `eval_clift`'s
+`CTerm terms[kMaxCTerms]` static broke `2i*l1` with a segfault, because only
+`.sign` is assigned per use — `.scalar{1.0, 0.0}` and `.list = nullptr` come
+from default member initializers that run per call for a stack local but
+*once* for a static, so the second call saw the previous call's accumulated
+scalar and a stale `Array*`. Reverted to the stack; 192 B is worth paying, and
+a static silently carrying state between calls is the same class of defect this
+entry exists to remove. Worth remembering when the leaf-scratch union below is
+picked up.
+
+`test_complex_expr` 113 -> 122. Pico 1 `.bss` 209,120 -> 209,888.
+
+**Still uncapped: `math::matexpr`'s parser**, and it is the worst of the three
+at **808 B/level** (`parse_power` alone is 416 B, holding matrix temporaries)
+with only ~2 levels of headroom from the home screen. Not touched here — it
+needs its own measurement pass and probably frame reduction before a cap can be
+set that does not break ordinary matrix expressions.
+
 **Revisit when**: the frame report shows a new function over ~1 KB, or the
 Phase 6 budget gets tight enough that the leaf-scratch union is worth taking.
 Also revisit `kMaxParseDepth` if 8 ever rejects an expression someone actually
