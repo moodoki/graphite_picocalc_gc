@@ -292,6 +292,40 @@ int main() {
         }
     }
 
+    // Nested superscripts must actually step upward (HW 2026-08-08:
+    // `2^2^2^2` drew as "222^2"). render_node places the exponent flush with
+    // the node's top and the base at (node->baseline - base->baseline), so
+    // the raise a level actually achieves is node->baseline - exp->baseline.
+    // Sizing the baseline off the base cancelled that to zero as soon as the
+    // exponent was itself a superscript.
+    {
+        const NodeType kSup = NodeType::kSuperscript;
+        const render::LayoutNode* a = build("2^2");
+        expect(a != nullptr && a->type == kSup, "'2^2' is a superscript");
+        // Flat case must be unchanged by the fix.
+        expect(a != nullptr && a->baseline - a->bin.b->baseline == a->bin.a->height / 2,
+               "'2^2' raises the exponent by half the base height");
+
+        const render::LayoutNode* b = build("2^2^2");
+        expect(b != nullptr && b->type == kSup && b->bin.b->type == kSup,
+               "'2^2^2' nests right-associatively");
+        expect(b != nullptr && b->baseline - b->bin.b->baseline == b->bin.a->height / 2,
+               "'2^2^2' outer level still raises its exponent");
+        expect(b != nullptr && b->height > b->bin.b->height,
+               "'2^2^2' is taller than its own exponent");
+
+        const render::LayoutNode* c = build("2^2^2^2");
+        expect(c != nullptr && c->baseline - c->bin.b->baseline == c->bin.a->height / 2,
+               "'2^2^2^2' outer level still raises its exponent");
+        // Each level steps up by the same amount, so heights strictly grow.
+        expect(c != nullptr && c->height > c->bin.b->height &&
+                   c->bin.b->height > c->bin.b->bin.b->height,
+               "'2^2^2^2' heights grow at every level");
+        // The base must never be asked to draw above the node's top.
+        expect(c != nullptr && c->baseline >= c->bin.a->baseline,
+               "'2^2^2^2' base fits inside the node box");
+    }
+
     // Robustness: empty string
     expect(build("") == nullptr, "empty string -> nullptr");
 

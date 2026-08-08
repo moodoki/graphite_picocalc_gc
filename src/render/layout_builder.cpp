@@ -152,9 +152,21 @@ LayoutNode* make_super(LayoutNode* base, LayoutNode* exp) {
     n->bin.b = exp;
     const int raise = base->height / 2;
     n->width = base->width + exp->width;
-    const int base_bottom = raise + base->height;
+
+    // The renderer draws the exponent flush with the node's *top* and the
+    // base at (node->baseline - base->baseline), so the raise actually
+    // achieved is node->baseline - exp->baseline. Sizing the baseline off
+    // the *base* instead only works while the exponent is plain text: for a
+    // nested superscript (`2^2^2`), exp->baseline exceeds base->baseline by
+    // exactly the inner raise, cancelling it to zero — every level of a power
+    // tower landed on one line and `2^2^2^2` drew as "222^2" (HW 2026-08-08).
+    //
+    // So derive the baseline from the exponent, and keep it at least
+    // base->baseline so the base never has to draw above the node's top.
+    const int want = raise + exp->baseline;
+    n->baseline = want > base->baseline ? want : base->baseline;
+    const int base_bottom = n->baseline - base->baseline + base->height;
     n->height = exp->height > base_bottom ? exp->height : base_bottom;
-    n->baseline = raise + base->baseline;
     return n;
 }
 
