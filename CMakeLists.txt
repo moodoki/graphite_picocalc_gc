@@ -124,6 +124,7 @@ add_executable(picocalc_graphcalc
     src/math/complex.cpp
     src/math/complex_expr.cpp
     src/math/unified_compile.cpp  # Phase 5.2, not yet reachable from any screen
+    src/math/unified_vm.cpp
     src/math/seq_expr.cpp
     src/math/units.cpp
     src/math/cas/expr.cpp

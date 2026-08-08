@@ -177,6 +177,19 @@ struct Program {
 // Returns false and sets *err to a static string on failure.
 bool compile(const char* src, Program& out, const char** err);
 
+// ---- Stack machine (5.2.4) -----------------------------------------------
+//
+// Executes a compiled program. No evaluation recursion — depth is the operand
+// stack, a bss array, so over-deep input reports rather than faults.
+//
+// Scope as of 5.2.4: real and complex scalars. Matrix and list operands are
+// recognised and rejected; their tiers are 5.2.6 and 5.2.7.
+//
+// A complex result that lands exactly on the real axis is returned as real, so
+// `i^2` is -1 rather than -1+0i. That is exactness, not a tolerance: D49 made
+// integer powers of a complex base exact so this test could be `im == 0`.
+bool run(const Program& p, Value* out, const char** err);
+
 static_assert(sizeof(Value) == 24,
               "Value is the measured 24 B (5.2.1); update the budget if it moves");
 static_assert(sizeof(Instr) == 4, "Instr is 4 B; the program array is sized on it");

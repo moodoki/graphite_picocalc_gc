@@ -7,20 +7,20 @@ namespace math {
 
 namespace {
 
-const void* fp1(double (*f)(double)) {
-    return reinterpret_cast<const void*>(f);
+void* fp1(double (*f)(double)) {
+    return reinterpret_cast<void*>(f);
 }
-const void* fp2(double (*f)(double, double)) {
-    return reinterpret_cast<const void*>(f);
+void* fp2(double (*f)(double, double)) {
+    return reinterpret_cast<void*>(f);
 }
-const void* fp0(double (*f)()) {
-    return reinterpret_cast<const void*>(f);
+void* fp0(double (*f)()) {
+    return reinterpret_cast<void*>(f);
 }
-const void* fp3(double (*f)(double, double, double)) {
-    return reinterpret_cast<const void*>(f);
+void* fp3(double (*f)(double, double, double)) {
+    return reinterpret_cast<void*>(f);
 }
-const void* fp4(double (*f)(double, double, double, double)) {
-    return reinterpret_cast<const void*>(f);
+void* fp4(double (*f)(double, double, double, double)) {
+    return reinterpret_cast<void*>(f);
 }
 
 // Display order: trig, logs, combinatorics, misc. Summaries must fit

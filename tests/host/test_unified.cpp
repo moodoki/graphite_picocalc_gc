@@ -6,9 +6,12 @@
 // bss rather than spending it, and that only holds if these types stay the size
 // they were measured at.
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
+#include "math/engine.hpp"
+#include "math/types.hpp"
 #include "math/unified_eval.hpp"
 
 namespace {
@@ -283,10 +286,173 @@ void test_compile_depth() {
     check_compile_error(deep, "Too deeply nested", "operator stack overflow is a clean error");
 }
 
+// ---- 5.2.4: the stack machine --------------------------------------------
+
+bool eval(const char* src, Value* out, const char** err) {
+    Program p;
+    if (!compile(src, p, err)) {
+        return false;
+    }
+    return run(p, out, err);
+}
+
+void check_real(const char* src, double expected, const char* what, double tol = 1e-9) {
+    ++g_checks;
+    Value v;
+    const char* err = nullptr;
+    if (!eval(src, &v, &err)) {
+        std::printf("FAIL: %s: '%s' -> error %s\n", what, src, err != nullptr ? err : "?");
+        ++g_failures;
+        return;
+    }
+    if (v.kind != Kind::kReal) {
+        std::printf("FAIL: %s: '%s' -> kind %d (expected real)\n", what, src,
+                    static_cast<int>(v.kind));
+        ++g_failures;
+        return;
+    }
+    if (std::fabs(v.r - expected) > tol) {
+        std::printf("FAIL: %s: '%s' -> %.12g (expected %.12g)\n", what, src, v.r, expected);
+        ++g_failures;
+    }
+}
+
+void check_cplx(const char* src, double re, double im, const char* what, double tol = 1e-9) {
+    ++g_checks;
+    Value v;
+    const char* err = nullptr;
+    if (!eval(src, &v, &err)) {
+        std::printf("FAIL: %s: '%s' -> error %s\n", what, src, err != nullptr ? err : "?");
+        ++g_failures;
+        return;
+    }
+    const math::Complex z = v.as_complex();
+    if (std::fabs(z.re - re) > tol || std::fabs(z.im - im) > tol) {
+        std::printf("FAIL: %s: '%s' -> (%.12g,%.12g) (expected (%.12g,%.12g))\n", what, src, z.re,
+                    z.im, re, im);
+        ++g_failures;
+    }
+}
+
+void check_eval_error(const char* src, const char* expected, const char* what) {
+    ++g_checks;
+    Value v;
+    const char* err = nullptr;
+    if (eval(src, &v, &err)) {
+        std::printf("FAIL: %s: '%s' evaluated but should not have\n", what, src);
+        ++g_failures;
+        return;
+    }
+    if (err == nullptr || std::strcmp(err, expected) != 0) {
+        std::printf("FAIL: %s: '%s' -> '%s' (expected '%s')\n", what, src,
+                    err != nullptr ? err : "(null)", expected);
+        ++g_failures;
+    }
+}
+
+void test_vm_arithmetic() {
+    check_real("2+3", 5, "add");
+    check_real("2+3*4", 14, "precedence holds through evaluation");
+    check_real("(2+3)*4", 20, "parens hold through evaluation");
+    check_real("8/4/2", 1, "/ left-associative evaluates to 1, not 4");
+    check_real("2^3^2", 512, "^ right-associative evaluates to 512, not 64");
+    check_real("-3^2", -9, "unary looser than ^");
+    check_real("--3", 3, "double negation");
+    check_real("10-4-3", 3, "- left-associative");
+}
+
+// The unified evaluator must agree with the real path on ordinary arithmetic.
+// That is not a nicety: D46 was two evaluators disagreeing about sin(30), and
+// removing that class of bug is half this phase's justification.
+void test_vm_matches_real_path() {
+    math::set_angle_mode(math::AngleMode::kRadians);
+    check_real("sin(0)", 0, "sin(0)");
+    check_real("cos(0)", 1, "cos(0)");
+    check_real("ln(1)", 0, "ln(1)");
+    check_real("round(3.456,1)", 3.5, "round with 2 args");
+    check_real("ncr(5,2)", 10, "ncr");
+    check_real("min(3,7)", 3, "min");
+    check_real("fac(5)", 120, "fac");
+
+    // Angle mode reaches the catalog's own angle-aware entries.
+    math::set_angle_mode(math::AngleMode::kDegrees);
+    check_real("sin(30)", 0.5, "sin(30) in DEGREE mode");
+    check_real("cos(60)", 0.5, "cos(60) in DEGREE mode");
+    math::set_angle_mode(math::AngleMode::kRadians);
+}
+
+void test_vm_complex() {
+    check_cplx("3+2i", 3, 2, "complex literal sum");
+    check_cplx("2i*2i", -4, 0, "i squared scales");
+    check_real("i^2", -1, "i^2 collapses to real -1");
+    check_real("i^4", 1, "i^4 collapses to real 1");
+    check_cplx("(1+i)*(1+i)", 0, 2, "complex product");
+
+    // D49: integer powers of a complex base are exact, so the real axis is hit
+    // exactly and the result reports as real rather than 0+2i with an epsilon.
+    check_cplx("(1+i)^2", 0, 2, "(1+i)^2 exact");
+    check_real("(1+i)^4", -4, "(1+i)^4 collapses to real -4");
+    check_cplx("(3+4i)^2", -7, 24, "(3+4i)^2 exact");
+
+    // The angle-mode wrappers must survive into the complex tier — this is
+    // D46 itself. sin of a real-valued complex must equal the real path.
+    math::set_angle_mode(math::AngleMode::kDegrees);
+    check_cplx("sin(30+0i)", 0.5, 0, "complex sin honours DEGREE mode (D46)");
+    math::set_angle_mode(math::AngleMode::kRadians);
+}
+
+void test_vm_variables() {
+    auto& vars = math::engine().vars();
+    vars.set_real(0, 6);                        // a = 6
+    vars.set_complex(1, 1, 2);                  // b = 1+2i
+    vars.set_real(math::Variables::kAns, 100);  // ans
+    check_real("a", 6, "variable read");
+    check_real("a*2", 12, "variable in an expression");
+    check_cplx("b", 1, 2, "complex variable read via is_complex");
+    check_cplx("b+1", 2, 2, "complex variable arithmetic");
+    check_real("ans", 100, "ans");
+    vars.set_real(0, 0);
+    vars.set_real(1, 0);
+}
+
+void test_vm_constants() {
+    check_real("pi", 3.14159265358979, "pi", 1e-12);
+    check_real("e", 2.71828182845905, "e", 1e-12);
+    check_real("clight", 299792458.0, "catalog constant clight", 1e-3);
+}
+
+void test_vm_errors() {
+    // A catalog function with no complex counterpart refuses a complex
+    // argument rather than silently truncating to the real part.
+    check_eval_error("fac(1+2i)", "Non-real result", "no complex counterpart");
+
+    // Help-only catalog rows (fn == nullptr) are the list and matrix
+    // functions; they resolve at compile time but are not callable until
+    // their tiers land in 5.2.6/5.2.7.
+    check_eval_error("sum(1)", "Syntax error", "help-only catalog row is not callable");
+
+    // KNOWN GAP for 5.2.5: sqrt, abs, conj, real, imag and arg are not in
+    // catalog.cpp at all. sqrt/abs are tinyexpr *builtins* (tinyexpr.c's own
+    // table) and the rest are complex-only, living in complex_expr's kFns. The
+    // compiler resolves names against the catalog alone, so these do not
+    // compile yet. Absorbing the catalogue therefore also means absorbing the
+    // builtin table and the complex-only set — a wider surface than "the
+    // catalogue" suggested when the decision was taken.
+    check_compile_error("sqrt(4)", "Syntax error", "sqrt is a tinyexpr builtin, not catalog");
+    check_compile_error("abs(-2)", "Syntax error", "abs is a tinyexpr builtin, not catalog");
+    check_compile_error("conj(1+2i)", "Syntax error", "conj is complex-only, not catalog");
+}
+
 }  // namespace
 
 int main() {
     test_sizes();
+    test_vm_arithmetic();
+    test_vm_matches_real_path();
+    test_vm_complex();
+    test_vm_variables();
+    test_vm_constants();
+    test_vm_errors();
     test_compile_basics();
     test_compile_associativity();
     test_compile_unary();

@@ -9,8 +9,13 @@ struct FnDescriptor {
     const char* name;       // "ncr"
     const char* signature;  // "ncr(n, r)" — must itself be parseable
     const char* summary;    // "Combinations: n choose r"
-    const void* fn;         // Binding for build_lookup; nullptr = help-only
-                            // (list functions live in list_expr, not tinyexpr)
+    void* fn;               // Binding for build_lookup; nullptr = help-only
+                            // (list functions live in list_expr, not tinyexpr).
+                            // NOT const-qualified: this is a function pointer,
+                            // not a pointer to const data, and the qualifier
+                            // forced every consumer that calls it into an
+                            // unclean cast (Phase 5.2). engine.cpp passes it to
+                            // te_variable's const void* field unchanged.
     int arity;              // 0..4 (TE_FUNCTION0 + arity; te caps at 7)
 };
 
