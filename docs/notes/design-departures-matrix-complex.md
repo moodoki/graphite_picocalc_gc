@@ -224,10 +224,18 @@ This is the highest-leverage idea and also the highest-risk one:
   — generalizes: a unified tagged-`Value` evaluator must stay strictly
   home-screen-only, exactly like `evaluate_complex()` today.
   `evaluate_real()` (tinyexpr++, graphing/tables/stats) is never touched.
-- Memory: a tagged union big enough for `{real, complex, matrix-ref,
+- ~~Memory: a tagged union big enough for `{real, complex, matrix-ref,
   list-ref}` is larger per node than any of today's three narrower
-  evaluators' working types — needs a real sizing pass against Pico 1's
-  headroom before committing, same caution as C.
+  evaluators' working types~~ — **measured 2026-08-09 and wrong.** On the
+  target the union is **24 B** against `matexpr::Value`'s **32 B**
+  (`{bool; Complex; const Array*}`, which carries a full `Complex` *and* a
+  pointer without overlapping them). The union is *smaller* than what one of
+  the three already uses. Worse for this caveat: retiring the three
+  evaluators **frees ~10 KB of bss**, 8.4 KB of it `listexpr`'s string
+  scratch, which exists only because that evaluator rewrites text rather
+  than computing over values. So F is expected to *reduce* memory pressure,
+  not add to it. Full numbers in [phase5.2-spec.md](../phases/phase5.2-spec.md)
+  §5. The caution this was modelled on (idea C) may deserve the same check.
 
 Historical note (pre-2026-07-24 framing): "not recommending this now... worth
 revisiting as a refactor once/if two or more of B–E actually ship and the
