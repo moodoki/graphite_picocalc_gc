@@ -402,6 +402,38 @@ already makes, newly applied to the other one. Deferred for a decision.
 §7, option 1 territory), graph pan/zoom, the editor screens, and the
 reboot-reload *display* check.
 
+**The `(1+i)^2` bug was then fixed — D49, camp 1.** `c_pow` gained a binary
+exponentiation branch for real integer exponents of a complex base, mirroring
+D46's real-base branch. `(1+i)^2` is now exactly `2i`, **and so is the value**:
+`real((1+i)^2)` -> `0` and `(1+i)^2-2i` -> `0` on hardware, where both used to
+carry the epsilon. That is the whole argument for fixing the value rather than
+the display — a formatter-only fix would have printed `2i` while `real()` still
+returned `1.2e-16`, which is a worse lie than the original.
+
+Confirmed against CPython: `cmath.exp(2*cmath.log(1+1j))` reproduces our old
+wrong answer bit for bit, while `(1+1j)**2` is exactly `2j` — it special-cases
+small integer exponents for precisely this reason. True CAS systems reach the
+same place structurally, by expanding `(1+i)^2` symbolically so no float is
+involved.
+
+**Why the suite missed it, which is the transferable part.**
+`test_complex.cpp:82` already asserted `(1+i)^2 == 2i` — with `tol = 1e-9`,
+which cannot tell an exact zero from a 1e-16 one. The assertion was right and
+the tolerance hid the defect. **A tolerance chosen for "close enough" cannot
+test exactness.** The new `test_integer_powers()` asserts with `tol = 0`;
+`test_complex` 66 -> **98** checks.
+
+**Camp 2 recorded, not implemented** (D49 has the full notes): camp 1 only helps
+where an exact algorithm exists — `(1+i)^2.5`, `(1+i)^i` and transcendental
+compositions still go through `exp(ln)`. If those ever produce visible
+artifacts, the display-tolerance approach is the remaining lever, and D49
+records how to do it properly: fix `format_complex_impl`'s existing asymmetry
+(`format.cpp:184` tolerant `is_real()` vs `:203` exact `z.re == 0.0`), use a
+*relative* test `|re| <= eps*|z|` rather than the scale-blind absolute 1e-12,
+and keep the tolerance at display only so it never leaks into `real()`/`imag()`
+or arithmetic. **Also flagged for user-facing docs** — the exact-vs-approximate
+distinction is something a calculator user should be told plainly.
+
 ---
 
 ## 2026-08-08 — Phase 5 merged and tagged v0.2.0; Phases 5.1 and 5.2 defined

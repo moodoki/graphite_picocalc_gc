@@ -86,6 +86,53 @@ void test_elementary() {
     check_c(math::c_pow(Complex(2, 0), Complex(3, 0)), 8, 0, "2^3", 1e-8);
 }
 
+// D49: a complex base with an integer exponent must go through repeated
+// multiplication, not exp(ln), which cannot produce an exact zero component.
+// (1+i)^2 returned 1.2246e-16 + 2i on hardware — that real part being exactly
+// 2*cos(pi/2) in double.
+//
+// These assert with tol = 0 deliberately. test_elementary above already
+// checked "(1+i)^2 = 2i" and passed throughout, because 1e-9 cannot tell an
+// exact zero from a 1e-16 one — the assertion was right and the tolerance
+// hid the defect. Exactness is the property under test here, so any nonzero
+// tolerance would defeat the point.
+void test_integer_powers() {
+    const double exact = 0.0;
+
+    check_c(math::c_pow(Complex(1, 1), Complex(2, 0)), 0, 2, "(1+i)^2 exact", exact);
+    check_c(math::c_pow(Complex(1, 1), Complex(3, 0)), -2, 2, "(1+i)^3 exact", exact);
+    check_c(math::c_pow(Complex(1, 1), Complex(4, 0)), -4, 0, "(1+i)^4 exact", exact);
+    check_c(math::c_pow(Complex(3, 4), Complex(2, 0)), -7, 24, "(3+4i)^2 exact", exact);
+    check_c(math::c_pow(Complex(0, 2), Complex(2, 0)), -4, 0, "(2i)^2 exact", exact);
+
+    // Powers of i cycle exactly; these were the cases that already worked and
+    // must keep working.
+    check_c(math::c_pow(Complex(0, 1), Complex(2, 0)), -1, 0, "i^2 exact", exact);
+    check_c(math::c_pow(Complex(0, 1), Complex(3, 0)), 0, -1, "i^3 exact", exact);
+    check_c(math::c_pow(Complex(0, 1), Complex(4, 0)), 1, 0, "i^4 exact", exact);
+
+    // z^0 = 1, and negative exponents invert the same exact result:
+    // (1+i)^-2 = 1/(2i) = -i/2.
+    check_c(math::c_pow(Complex(1, 1), Complex(0, 0)), 1, 0, "(1+i)^0 exact", exact);
+    check_c(math::c_pow(Complex(1, 1), Complex(-2, 0)), 0, -0.5, "(1+i)^-2 exact", exact);
+    check_c(math::c_pow(Complex(0, 1), Complex(-1, 0)), 0, -1, "i^-1 exact", exact);
+
+    // A real base still takes the D46 std::pow branch, not this one.
+    check_c(math::c_pow(Complex(2, 0), Complex(3, 0)), 8, 0, "2^3 exact", exact);
+    check_c(math::c_pow(Complex(-2, 0), Complex(2, 0)), 4, 0, "(-2)^2 exact", exact);
+
+    // Non-integer and complex exponents still go through exp(ln) — inherently
+    // approximate, and no camp-1 system avoids that. Pinned so the fallback
+    // is not accidentally removed.
+    check_c(math::c_pow(Complex(1, 1), Complex(0.5, 0)), 1.098684113, 0.4550898606,
+            "(1+i)^0.5 approx", 1e-9);
+    check_c(math::c_pow(Complex(0, 1), Complex(0, 1)), 0.2078795764, 0, "i^i approx", 1e-9);
+
+    // Past the cap the exp(ln) path takes over; the result must still be
+    // right, just not bit-exact.
+    check_c(math::c_pow(Complex(0, 1), Complex(400, 0)), 1, 0, "i^400 beyond cap", 1e-6);
+}
+
 void test_trig() {
     // sin(i) = i*sinh(1)
     check_c(math::c_sin(Complex(0, 1)), 0, std::sinh(1.0), "sin(i)");
@@ -123,6 +170,7 @@ void test_components() {
 int main() {
     test_arithmetic();
     test_elementary();
+    test_integer_powers();
     test_trig();
     test_components();
 

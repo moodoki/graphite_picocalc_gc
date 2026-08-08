@@ -283,7 +283,17 @@ worklog's 2026-08-05 entry, `decisions.md` D45/D46.
    prose chapter under `docs-site/guide/` is still a TODO stub and
    `docs-site/reference/error-messages.md` is unwritten. Now that Phase 5 has
    closed, the open question from that session resolves: **rebase onto `main`
-   after the Phase 5 merge so the CAS chapter can be written.**
+   after the Phase 5 merge so the CAS chapter can be written.** Phase 5 is now
+   merged, so this is unblocked.
+
+   **Topic queued for that branch (D49, 2026-08-09): exact vs approximate
+   results.** Users should be told plainly which results are *exact by
+   construction* and which are *numerically approximated* — `(1+i)^2` is exactly
+   `2i` because integer powers are computed by repeated multiplication, while
+   `(1+i)^2.5` goes through `exp(ln)` and can carry a tiny error. The same
+   distinction explains why some results render as amber exact forms and others
+   as white decimals. D49 has the engineering detail; the user-facing version
+   should be the honest short explanation, not the implementation.
 3. **Phase 5.2 — F, the unified evaluator** (D37/D40/**D48**) —
    **now has a spec: [`phase5.2-spec.md`](../phases/phase5.2-spec.md)**, and a
    phase number as of 2026-08-08, so it is no longer a homeless bullet. Read the
