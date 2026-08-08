@@ -99,6 +99,11 @@ private:
     // else evaluate) and cannot drift apart. Assumes input_ is non-empty.
     void submit_input();
     bool handle_command(const char* cmd);
+    // `mode [rad|deg|real|rect|polar|float|sci|eng|fixN]` — read or set the
+    // angle/number/display modes without the MODE screen, so serial injection
+    // (Phase 5.1) can reach the DEGREE and RECT/POLAR checklists.
+    bool handle_mode_command(const char* arg);
+    void format_modes(char* buf, size_t buf_len) const;
     int visible_count() const;
     int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_
     // Draw the newest result_full_ as a horizontally-pannable one-line window

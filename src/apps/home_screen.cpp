@@ -30,6 +30,7 @@
 #include "apps/const_screen.hpp"
 #include "apps/dist_screen.hpp"
 #include "apps/files_screen.hpp"
+#include "apps/graph_model.hpp"  // save_graph_state() for the `mode` command
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
 #include "apps/infer_screen.hpp"
@@ -49,6 +50,8 @@ namespace apps {
 namespace {
 constexpr const char* kHistoryPath = "/picocalc/history.txt";
 constexpr const char* kVarsPath = "/picocalc/variables.dat";
+// Shown as the "expression" on the history line the `mode` command pushes.
+constexpr const char* kModeCommandName = "mode";
 
 // history.txt is an append-only log. Only its last kHistoryTailBytes are
 // ever loaded (the ring holds kMaxHistory=50 lines), so we (a) read from
@@ -775,9 +778,106 @@ bool HomeScreen::submit_line(const char* line, const char** result_out, const ch
 }
 
 // Typed commands (2026-07-18): lowercase-only (input is
+// Current modes as a compact, parseable triple: "<angle> <number> <display>",
+// e.g. "RAD REAL FLOAT" or "DEG RECT FIX3" (Phase 5.1). Deliberately ASCII —
+// RECT/POLAR rather than the screen's "a+bi"/"r∠θ", which carry font glyph
+// bytes that a host script would have to decode.
+void HomeScreen::format_modes(char* buf, size_t buf_len) const {
+    const char* angle = math::angle_mode() == math::AngleMode::kDegrees ? "DEG" : "RAD";
+    const char* number = "REAL";
+    if (math::number_mode() == math::NumberMode::kRectangular) {
+        number = "RECT";
+    } else if (math::number_mode() == math::NumberMode::kPolar) {
+        number = "POLAR";
+    }
+    char display[8];
+    switch (math::display_mode()) {
+        case math::DisplayMode::kFix:
+            std::snprintf(display, sizeof(display), "FIX%d", math::fix_digits());
+            break;
+        case math::DisplayMode::kSci:
+            std::snprintf(display, sizeof(display), "SCI");
+            break;
+        case math::DisplayMode::kEng:
+            std::snprintf(display, sizeof(display), "ENG");
+            break;
+        case math::DisplayMode::kFloat:
+        default:
+            std::snprintf(display, sizeof(display), "FLOAT");
+            break;
+    }
+    std::snprintf(buf, buf_len, "%s %s %s", angle, number, display);
+}
+
+// `mode [keyword]` (Phase 5.1) — read or set angle/number/display mode from
+// the home screen instead of the MODE screen's arrow-key navigation. Added
+// because serial injection (5.1) can submit lines but not drive a screen, and
+// without this the DEGREE-folding and RECT/POLAR checklists stayed hand-only
+// while everything around them became scriptable.
+//
+// Unlike every other command this one **pushes a history entry** — the new
+// mode string. A setter with no feedback is unusable over serial (commands
+// report only "-> command"), and echoing it on screen is what a user would
+// want from a mode switch anyway.
+bool HomeScreen::handle_mode_command(const char* arg) {
+    bool changed = true;
+    if (arg[0] == 0) {
+        changed = false;  // Bare `mode` reports without setting
+    } else if (std::strcmp(arg, "rad") == 0) {
+        math::set_angle_mode(math::AngleMode::kRadians);
+    } else if (std::strcmp(arg, "deg") == 0) {
+        math::set_angle_mode(math::AngleMode::kDegrees);
+    } else if (std::strcmp(arg, "real") == 0) {
+        math::set_number_mode(math::NumberMode::kReal);
+    } else if (std::strcmp(arg, "rect") == 0) {
+        math::set_number_mode(math::NumberMode::kRectangular);
+    } else if (std::strcmp(arg, "polar") == 0) {
+        math::set_number_mode(math::NumberMode::kPolar);
+    } else if (std::strcmp(arg, "float") == 0) {
+        math::set_display_mode(math::DisplayMode::kFloat);
+    } else if (std::strcmp(arg, "sci") == 0) {
+        math::set_display_mode(math::DisplayMode::kSci);
+    } else if (std::strcmp(arg, "eng") == 0) {
+        math::set_display_mode(math::DisplayMode::kEng);
+    } else if (std::strncmp(arg, "fix", 3) == 0 && arg[3] >= '0' && arg[3] <= '9' && arg[4] == 0) {
+        math::set_display_mode(math::DisplayMode::kFix);
+        math::set_fix_digits(arg[3] - '0');
+    } else {
+        push_entry(kModeCommandName, "Unknown mode", ResultKind::kError);
+        return true;
+    }
+
+    if (changed) {
+        // Mirror into graph state and persist, exactly as ModeScreen::adjust
+        // does — these live in two places and a set that skips the mirror
+        // reverts on the next MODE-screen visit or reboot.
+        graph::state().angle = math::angle_mode();
+        graph::state().number = math::number_mode();
+        graph::state().display = math::display_mode();
+        graph::state().fix_digits = math::fix_digits();
+        save_graph_state();
+    }
+
+    char modes[32];
+    format_modes(modes, sizeof(modes));
+    push_entry(kModeCommandName, modes, ResultKind::kPlain);
+    return true;
+}
+
+// Typed commands (2026-07-18): lowercase-only (input is
 // case-sensitive), matched against the trimmed line before math
-// evaluation. Commands don't enter history.
+// evaluation. Commands don't enter history — `mode` is the one
+// exception, see handle_mode_command.
 bool HomeScreen::handle_command(const char* cmd) {
+    // `mode` and `mode <keyword>` — prefix match, since this is the only
+    // command that takes an argument.
+    if (std::strncmp(cmd, kModeCommandName, 4) == 0 && (cmd[4] == 0 || cmd[4] == ' ')) {
+        const char* arg = cmd[4] == 0 ? cmd + 4 : cmd + 5;
+        while (*arg == ' ') {
+            ++arg;
+        }
+        return handle_mode_command(arg);
+    }
     if (std::strcmp(cmd, "cls") == 0) {
         // Session-level clear: hide the current scrollback, keep the
         // recall walk and history.txt intact.

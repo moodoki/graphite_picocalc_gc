@@ -362,6 +362,46 @@ does neither, and its dead-fd spin silently lost a whole test pass on 2026-08-08
 15 binaries), both boards build, lint/format clean. **Pico 1 not re-flashed** —
 the code is board-independent and swaps are batched to stage closures.
 
+**Then the tool immediately earned its keep: the Pico 2's whole outstanding
+checklist went from hand-only to scripted, in two passes.**
+
+*First pass, 53 expressions in one command.* All 21 CAS exact forms returned
+`symbolic` with correct values; all 9 "unchanged white decimals" returned
+`plain`; the D45 ladder ran rungs 1-6 (rung 6 = `1.173498585e32`, matching the
+recorded figure); matrix and list guards were clean with no new stack peak.
+**Rung 4 = `104080805`, `kind=plain` — white.** That was the single
+highest-value outstanding item in the project, the FPU-sensitive case where the
+Pico 2 could have diverged from the Pico 1: **D46's `c_pow` fix holds on
+hardware FPU.** It had needed a human reading screen colour until now.
+
+*Then 5.1.7, unplanned.* Angle and number mode were the last wall — they live on
+the MODE screen behind arrow keys, and none of the sixteen typed commands
+touched them, so the DEGREE-folding and RECT/POLAR checklists stayed hand-only
+while everything around them became scriptable. A `mode [keyword]` command fixed
+that in ~1.5 hrs. *Second pass:* `sin(30)`->`1/2`, `sin(45)`->`sqrt(2)/2`,
+`sin(60)`/`cos(30)`->`sqrt(3)/2`, `tan(60)`->`sqrt(3)` all `symbolic`;
+`sin(37)`->`0.601815023` correctly `plain`; in POLAR, `sqrt(2)` and `1/3` keep
+their exact forms while `3+4i`->`5∠0.927295218` and `sqrt(-4)`->`2∠1.570796327`
+go decimal; RECT restores `3 + 4i`. All verified on the Pico 2.
+
+**A real bug fell out of the first pass, recorded not fixed.** `(1+i)^2` returns
+`1.224646799e-16 + 2i` where it should return `2i` — `real((1+i)^2)` gives the
+epsilon and `(1+i)^2-2i` propagates it, so the value reaches the formatter, but
+the formatter is where the two axes disagree. `format_complex_impl` is
+**asymmetric about zero**: `format.cpp:184` tests `z.is_real()`, which is
+*tolerant* (`eps = 1e-12`), so a negligible imaginary part is snapped away and
+`(1+i)^4` prints a clean `-4`; `format.cpp:203` tests `z.re == 0.0`, which is
+*exact*, so a negligible real part survives. Underneath, `c_pow` still uses
+`exp(ln)` for **complex** bases — D46 fixed only the real-base case — and
+`1.2246e-16` is exactly `2*cos(pi/2)` in double. A fix means matching
+`is_real`'s tolerance on the real axis, which is a behaviour change (a genuine
+`1e-15 + 2i` would then display as `2i`) — the same trade the imaginary axis
+already makes, newly applied to the other one. Deferred for a decision.
+
+**Still not reachable by injection**: Alt+Enter (a modifier chord — Phase 5.1
+§7, option 1 territory), graph pan/zoom, the editor screens, and the
+reboot-reload *display* check.
+
 ---
 
 ## 2026-08-08 — Phase 5 merged and tagged v0.2.0; Phases 5.1 and 5.2 defined
