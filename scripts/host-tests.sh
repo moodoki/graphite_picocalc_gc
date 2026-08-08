@@ -128,6 +128,12 @@ echo "== Compiling + linking test_analysis =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_analysis"
 
+echo "== Compiling + linking test_unified =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_unified.cpp src/math/complex.cpp \
+    -o "$OUT/test_unified"
+
 echo "== Compiling + linking test_complex =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra \
     -Isrc \
@@ -230,6 +236,9 @@ echo "== Running test_cas =="
 
 echo "== Running test_stats =="
 "$OUT/test_stats"
+
+echo "== Running test_unified =="
+"$OUT/test_unified"
 
 echo "== Running test_complex =="
 "$OUT/test_complex"
