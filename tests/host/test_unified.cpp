@@ -10,7 +10,10 @@
 #include <cstdio>
 #include <cstring>
 
+#include "math/array.hpp"
 #include "math/engine.hpp"
+#include "math/lists.hpp"
+#include "math/named_lists.hpp"
 #include "math/types.hpp"
 #include "math/unified_eval.hpp"
 
@@ -51,13 +54,14 @@ void test_sizes() {
     check_eq(static_cast<long>(sizeof(Instr)) * kMaxCode, 1024, "program code bytes");
     check_eq(static_cast<long>(sizeof(math::Complex)) * kMaxConsts, 1024, "constant pool bytes");
 
-    // Program is measured, not derived: the struct pads around its three
-    // bookkeeping ints, so code+consts understates it by 16 B. The budget in
-    // the header quotes the measured figure.
-    check_eq(static_cast<long>(sizeof(Program)), 2064, "sizeof(Program)");
+    // Program is measured, not derived: the struct pads around its two
+    // bookkeeping ints, so code+consts understates it by 8 B. The budget in
+    // the header quotes the measured figure. (2,064 before 5.2.6 dropped
+    // n_elem_slots with the element-slot lift it belonged to.)
+    check_eq(static_cast<long>(sizeof(Program)), 2056, "sizeof(Program)");
 
     const long total = static_cast<long>(sizeof(Value)) * kMaxStack + sizeof(Program);
-    check_eq(total, 3600, "total evaluator bss");
+    check_eq(total, 3592, "total evaluator bss");
     check(total < 10053, "budget stays under the ~10 KB freed by retiring the three evaluators");
 }
 
@@ -107,7 +111,6 @@ void test_scalar_promotion() {
 void test_program_defaults() {
     const Program p;
     check(p.n_code == 0 && p.n_consts == 0, "empty program");
-    check(p.n_elem_slots == 0, "no element slots bound");
 }
 
 // ---- 5.2.3: the shunting-yard compiler -----------------------------------
@@ -156,6 +159,31 @@ void render(const Program& p, char* buf, size_t cap) {
             case Op::kDiv: put("/"); break;
             case Op::kPow: put("^"); break;
             case Op::kNeg: put("neg"); break;
+            case Op::kCallBi:
+                std::snprintf(tmp, sizeof(tmp), "bi%u/%u", in.b, in.a);
+                put(tmp);
+                break;
+            case Op::kCallList:
+                std::snprintf(tmp, sizeof(tmp), "lf%u/%u", in.b, in.a);
+                put(tmp);
+                break;
+            case Op::kPushList:
+                std::snprintf(tmp, sizeof(tmp), "L%u", in.b);
+                put(tmp);
+                break;
+            case Op::kPushInt:
+                std::snprintf(tmp, sizeof(tmp), "#%u", in.b);
+                put(tmp);
+                break;
+            case Op::kMakeList:
+                std::snprintf(tmp, sizeof(tmp), "mklist%u", in.a);
+                put(tmp);
+                break;
+            case Op::kJump:
+                std::snprintf(tmp, sizeof(tmp), "jmp%u", in.b);
+                put(tmp);
+                break;
+            case Op::kRet: put("ret"); break;
             default: put("?"); break;
         }
     }
@@ -427,9 +455,11 @@ void test_vm_errors() {
     check_eval_error("fac(1+2i)", "Non-real result", "no complex counterpart");
 
     // Help-only catalog rows (fn == nullptr) are the list and matrix
-    // functions; they resolve at compile time but are not callable until
-    // their tiers land in 5.2.6/5.2.7.
-    check_eval_error("sum(1)", "Syntax error", "help-only catalog row is not callable");
+    // functions. The list ones gained real bindings in 5.2.6 — `sum` now
+    // reports what is actually wrong with `sum(1)` — while the matrix ones
+    // stay uncallable until 5.2.7.
+    check_eval_error("sum(1)", "Expected a list", "a bound list function reports its own error");
+    check_eval_error("det(1)", "Syntax error", "help-only matrix row is not callable yet");
 
     check_compile_error("nosuchfn(1)", "Syntax error", "unknown name is still an error");
 }
@@ -473,6 +503,437 @@ void test_builtins() {
     check_real("exp(0)*cos(0)", 1, "builtin and catalog compose");
 }
 
+// ---- 5.2.6: the list tier -------------------------------------------------
+//
+// The behaviours mirrored here are test_lists' expression-layer checks, which
+// is the acceptance this task is written against. Where the unified evaluator
+// deliberately differs from listexpr the check says so and names 5.2.10, the
+// task that signs those widenings off — a silent difference would be exactly
+// the kind of drift this phase exists to remove.
+
+void seed_list(int slot, const double* v, int n) {
+    math::Array& a = math::lists().list(slot);
+    a.clear();
+    a.set_dtype(math::Dtype::kDouble);
+    a.resize(n);
+    if (n > 0) {
+        a.write_range(0, n, v);
+    }
+}
+
+void seed_clist(int slot, const math::Complex* v, int n) {
+    math::Array& a = math::lists().list(slot);
+    a.clear();
+    a.set_dtype(math::Dtype::kComplex);
+    a.resize(n);
+    a.write_range_c(0, n, v);
+}
+
+const math::Array* eval_list(const char* src, const char* what) {
+    Value v;
+    const char* err = nullptr;
+    if (!eval(src, &v, &err)) {
+        std::printf("FAIL: %s: '%s' -> error %s\n", what, src, err != nullptr ? err : "?");
+        ++g_failures;
+        return nullptr;
+    }
+    if (v.kind != Kind::kList) {
+        std::printf("FAIL: %s: '%s' -> kind %d (expected list)\n", what, src,
+                    static_cast<int>(v.kind));
+        ++g_failures;
+        return nullptr;
+    }
+    return v.a;
+}
+
+void check_list(const char* src, const double* expected, int n, const char* what) {
+    ++g_checks;
+    const math::Array* a = eval_list(src, what);
+    if (a == nullptr) {
+        return;
+    }
+    if (a->size() != n) {
+        std::printf("FAIL: %s: '%s' -> size %d (expected %d)\n", what, src, a->size(), n);
+        ++g_failures;
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        if (std::fabs(a->get(i) - expected[i]) > 1e-9) {
+            std::printf("FAIL: %s: '%s'[%d] -> %.12g (expected %.12g)\n", what, src, i, a->get(i),
+                        expected[i]);
+            ++g_failures;
+            return;
+        }
+    }
+}
+
+void check_clist(const char* src, const math::Complex* expected, int n, const char* what) {
+    ++g_checks;
+    const math::Array* a = eval_list(src, what);
+    if (a == nullptr) {
+        return;
+    }
+    if (a->size() != n) {
+        std::printf("FAIL: %s: '%s' -> size %d (expected %d)\n", what, src, a->size(), n);
+        ++g_failures;
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        const math::Complex z = a->cget(i);
+        if (std::fabs(z.re - expected[i].re) > 1e-9 || std::fabs(z.im - expected[i].im) > 1e-9) {
+            std::printf("FAIL: %s: '%s'[%d] -> (%.12g,%.12g) (expected (%.12g,%.12g))\n", what, src,
+                        i, z.re, z.im, expected[i].re, expected[i].im);
+            ++g_failures;
+            return;
+        }
+    }
+}
+
+void test_list_literals() {
+    const double one_two_three[] = {1, 2, 3};
+    check_list("{1,2,3}", one_two_three, 3, "brace literal");
+    check_list("{1, 2, 3}", one_two_three, 3, "spaces between elements");
+
+    // Elements are full expressions — the compiler emits them inline and
+    // kMakeList packs the operand stack, so this needs no literal parser.
+    const double pis[] = {3.141592653589793, 6.283185307179586};
+    check_list("{pi, 2*pi}", pis, 2, "literal elements are expressions");
+    const double computed[] = {3, 0, 8};
+    check_list("{1+2, sin(0), 2^3}", computed, 3, "calls and powers as elements");
+
+    ++g_checks;
+    const math::Array* empty = eval_list("{}", "empty literal");
+    if (empty != nullptr && empty->size() != 0) {
+        std::printf("FAIL: '{}' -> size %d (expected 0)\n", empty->size());
+        ++g_failures;
+    }
+
+    check_rpn("{1,2}", "1 2 mklist2", "literal compiles to a packing instruction");
+    check_compile_error("{1,2", "Syntax error", "unclosed literal");
+    check_compile_error("{1,foo}", "Syntax error", "unknown identifier in a literal");
+    check_eval_error("{l1, 2}", "Bad list element", "no lists of lists");
+}
+
+void test_list_refs() {
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+    seed_list(1, base, 3);
+
+    check_rpn("l1", "L0", "l1 is a list reference");
+    check_list("l1", base, 3, "bare reference");
+
+    const double doubled[] = {2, 4, 6};
+    check_list("l1*2", doubled, 3, "list times scalar");
+    check_list("2*l1", doubled, 3, "scalar times list");
+    check_list("l1+l1", doubled, 3, "list plus list");
+    check_list("l1+l2", doubled, 3, "two distinct lists");
+
+    const double plus_one[] = {2, 3, 4};
+    check_list("l1+{1,1,1}", plus_one, 3, "reference plus literal");
+    check_list("{1,2,3}+1", plus_one, 3, "literal plus scalar");
+    const double from_ten[] = {11, 12, 13};
+    check_list("10+{1,2,3}", from_ten, 3, "scalar on the left");
+    const double neg[] = {-1, -2, -3};
+    check_list("-l1", neg, 3, "unary minus lifts");
+
+    // Functions map over a list — one dispatch, whether the name comes from
+    // the catalogue or tinyexpr's builtin table.
+    const double squares[] = {1, 4, 9};
+    check_list("l1^2", squares, 3, "power lifts");
+    const double roots[] = {1, 1.414213562373095, 1.732050807568877};
+    check_list("sqrt(l1)", roots, 3, "builtin maps over a list");
+    const double sines[] = {0, 0, 0};
+    check_list("sin(0*l1)", sines, 3, "catalog function maps over a list");
+    const double rounded[] = {1.5, 2.5, 3.5};
+    const double halves[] = {1.46, 2.54, 3.5};
+    seed_list(2, halves, 3);
+    check_list("round(l3,1)", rounded, 3, "arity-2 catalog call with one list argument");
+
+    // Reductions inside an elementwise expression. listexpr substitutes these
+    // textually before lifting; here the RPN order does it — the reduction is
+    // simply an earlier instruction, evaluated once.
+    const double normed[] = {1.0 / 6, 2.0 / 6, 3.0 / 6};
+    check_list("l1/sum(l1)", normed, 3, "reduction inside an elementwise expression");
+
+    const double two[] = {1, 2};
+    seed_list(5, two, 2);
+    check_eval_error("l1+l6", "List length mismatch", "operand lengths must agree");
+    check_eval_error("{1,2}+{1,2,3}", "List length mismatch", "literal lengths must agree");
+
+    seed_list(4, nullptr, 0);
+    ++g_checks;
+    const math::Array* e = eval_list("l5*2", "empty list lifts to empty");
+    if (e != nullptr && e->size() != 0) {
+        std::printf("FAIL: 'l5*2' -> size %d (expected 0)\n", e->size());
+        ++g_failures;
+    }
+
+    // Named lists resolve exactly like l1-l6 (4D.13's one numbering).
+    const int slot = math::named_lists().create("pric");
+    check(slot >= 0, "named list created for the reference test");
+    if (slot >= 0) {
+        math::Array& a = math::named_lists().list(slot);
+        a.clear();
+        a.set_dtype(math::Dtype::kDouble);
+        a.resize(3);
+        a.write_range(0, 3, base);
+        check_list("pric*2", doubled, 3, "named list reference");
+        math::named_lists().remove(slot);
+    }
+}
+
+void test_list_reductions() {
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+
+    check_real("sum(l1)", 6, "sum");
+    check_real("prod(l1)", 6, "prod");
+    check_real("length(l1)", 3, "length");
+    check_real("mean(l1)", 2, "mean");
+    check_real("median(l1)", 2, "median");
+    check_real("stdev(l1)", 1, "stdev");
+    check_real("std(l1)", 1, "std alias (no catalogue row of its own)");
+    check_real("1+sum(l1)*2", 13, "reduction embeds in a scalar expression");
+    check_real("mean(l1)+sum(l1)", 8, "two reductions");
+
+    // General arguments: the reduction takes whatever the previous
+    // instructions left on the stack, so a computed list needs no special case.
+    check_real("sum(l1*2)", 12, "reduction over a computed list");
+    check_real("sum(range(1,100))", 5050, "reduction over a generator");
+    check_real("mean({1,2,3,4})", 2.5, "reduction over a literal");
+    check_real("sum(cumsum(l1))", 10, "reduction over a wrapper result");
+
+    check_eval_error("sum(2)", "Expected a list", "a reduction needs a list");
+    check_eval_error("stdev({5})", "Undefined result", "sample stdev of one element");
+}
+
+void test_list_wrappers() {
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+    const double cs[] = {1, 3, 6};
+    check_list("cumsum(l1)", cs, 3, "cumsum");
+    const double dl[] = {1, 1};
+    check_list("delta_list(l1)", dl, 2, "delta_list");
+    const double sorted[] = {1, 2, 3};
+    check_list("sort_asc({3,1,2})", sorted, 3, "sort_asc");
+    const double desc[] = {3, 2, 1};
+    check_list("sort_desc({3,1,2})", desc, 3, "sort_desc");
+    check_list("cumsum(sort_asc({3,1,2}))", cs, 3, "wrappers compose");
+    const double plus[] = {2, 4, 7, 11};
+    check_list("cumsum(range(1,4))+1", plus, 4, "wrapper result feeds an elementwise op");
+
+    // Value semantics, always: sort_asc on a bare list does NOT mutate it here.
+    // listexpr's in-place form is a commit decision and lands with the store
+    // grammar in 5.2.8 — flagged rather than silently changed.
+    const double unsorted[] = {3, 1, 2};
+    seed_list(3, unsorted, 3);
+    check_list("sort_asc(l4)", sorted, 3, "sort by value");
+    check(math::lists().list(3).get(0) == 3, "l4 unchanged: in-place sorting is 5.2.8's call");
+
+    // What the phase is for. listexpr caps this chain at kMaxRec = 3 because
+    // every level costs a call frame against core 0's 4 KB (D47); here the
+    // depth is operand-stack slots and instructions, so it just evaluates.
+    check_list("sort_asc(sort_asc(sort_asc(sort_asc({3,1,2}))))", sorted, 3,
+               "nesting past listexpr's recursion cap now evaluates");
+
+    const double r5[] = {1, 2, 3, 4, 5};
+    check_list("range(1,5)", r5, 5, "range");
+    const double down[] = {5, 4, 3, 2, 1};
+    check_list("range(5,1)", down, 5, "range steps toward hi");
+    const double halves[] = {0, 0.5, 1};
+    check_list("range(0,1,0.5)", halves, 3, "range with an explicit step");
+    const double r6[] = {2, 4, 6};
+    check_list("range(1,3)*2", r6, 3, "range inside an expression");
+    check_eval_error("range(1,2,-1)", "Bad seq range", "step points away from hi");
+    check_eval_error("range(1)", "range needs (lo, hi[, step])", "range arity");
+    check_eval_error("range(l1,2)", "Bad range argument", "range takes scalars");
+}
+
+void test_list_seq() {
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+
+    check_rpn("seq(x,x,1,2,1)", "jmp3 v23 ret #1 #23 1 2 1 lf11/5",
+              "seq compiles its body as a quoted range the top level skips");
+
+    const double squares[] = {1, 4, 9, 16, 25};
+    check_list("seq(x^2, x, 1, 5, 1)", squares, 5, "seq");
+    const double thetas[] = {2, 4};
+    check_list("seq(2*theta, theta, 1, 2, 1)", thetas, 2, "seq over theta");
+
+    // The body is ordinary code: it can call anything, including a reduction
+    // over a list. That also pins the scratch-arena rule — the body must not
+    // run while a chunk buffer is live.
+    const double scaled[] = {2, 4, 6};
+    check_list("seq(x*mean(l1), x, 1, 3, 1)", scaled, 3, "a reduction inside a seq body");
+
+    // The loop variable is restored, as listops::seq restores it.
+    math::engine().vars()['x'] = 42;
+    check_list("seq(x, x, 1, 3, 1)", base, 3, "seq over x");
+    ++g_checks;
+    if (math::engine().vars()['x'] != 42) {
+        std::printf("FAIL: seq left %g in x (expected 42)\n",
+                    static_cast<double>(math::engine().vars()['x']));
+        ++g_failures;
+    }
+
+    check_eval_error("seq(x,x,1,5)", "seq needs (expr, var, lo, hi, step)", "seq arity");
+    check_compile_error("seq(x,e,1,5,1)", "seq var must be a-z (not e/i) or theta",
+                        "seq var cannot be e");
+    check_compile_error("seq(x,i,1,5,1)", "seq var must be a-z (not e/i) or theta",
+                        "seq var cannot be i");
+    check_eval_error("seq(i*x, x, 1, 3, 1)", "Non-real result", "seq output stays real");
+}
+
+void test_complex_lists() {
+    math::set_number_mode(math::NumberMode::kRectangular);
+    const math::Complex c2[] = {math::Complex(1, 1), math::Complex(2, -1)};
+    seed_clist(0, c2, 2);
+    const double r2[] = {10, 20};
+    seed_list(1, r2, 2);
+
+    const math::Complex doubled[] = {math::Complex(2, 2), math::Complex(4, -2)};
+    check_clist("l1+l1", doubled, 2, "complex list addition");
+    const math::Complex scaled[] = {math::Complex(-2, 2), math::Complex(2, 4)};
+    check_clist("2i*l1", scaled, 2, "complex scalar times complex list");
+    const math::Complex halved[] = {math::Complex(0.5, 0.5), math::Complex(1, -0.5)};
+    check_clist("l1/2", halved, 2, "complex list divided by a scalar");
+    const math::Complex mixed[] = {math::Complex(11, 1), math::Complex(22, -1)};
+    check_clist("l1+l2", mixed, 2, "complex list plus real list");
+    const math::Complex promoted[] = {math::Complex(1, 1), math::Complex(2, 1)};
+    check_clist("{1,2}+i", promoted, 2, "a complex scalar promotes a real list");
+    const math::Complex cliteral[] = {math::Complex(1, 1), math::Complex(2, -1)};
+    check_clist("{1+i, 2-i}", cliteral, 2, "complex literal");
+
+    check_real("sum(l1)", 3, "sum of a complex list lands on the real axis");
+    check_real("mean(l1)", 1.5, "mean of a complex list");
+    // listexpr requires a complex sum/mean to BE the whole expression
+    // ("Complex sum/mean must stand alone") because it splices results back
+    // into text. A Value composes — widened, 5.2.10.
+    check_real("sum(l1)+1", 4, "a complex reduction composes (widened, 5.2.10)");
+
+    // Widened by construction: listexpr's complex lift is a narrow grammar
+    // (sums of terms, one list factor each), so these three were errors —
+    // "Complex lists support only +, -, scalar * and /", "one list per term",
+    // "Cannot divide by a list". Here they are ordinary dispatch. 5.2.10 signs
+    // them off; the values are pinned now so the widening is deliberate.
+    const math::Complex squared[] = {math::Complex(0, 2), math::Complex(3, -4)};
+    check_clist("l1*l1", squared, 2, "list times list (widened, 5.2.10)");
+    const math::Complex reciprocal[] = {math::Complex(1, -1), math::Complex(0.8, 0.4)};
+    check_clist("2/l1", reciprocal, 2, "scalar divided by a list (widened, 5.2.10)");
+    const math::Complex sines[] = {math::Complex(1.298457581415977, 0.634963914784736),
+                                   math::Complex(1.403119250622040, 0.489056259041294)};
+    check_clist("sin(l1)", sines, 2, "a function maps over a complex list (widened, 5.2.10)");
+
+    // Not widened: ordering and the moment statistics stay undefined on
+    // complex data (D37 — never silently truncate).
+    check_eval_error("prod(l1)", "Non-real list", "prod of a complex list");
+    check_eval_error("median(l1)", "Non-real list", "median of a complex list");
+    check_eval_error("stdev(l1)", "Non-real list", "stdev of a complex list");
+    check_eval_error("sort_asc(l1)", "Non-real list", "sorting a complex list");
+    check_eval_error("cumsum(l1)", "Non-real list", "cumsum of a complex list");
+    check_real("length(l1)", 2, "length works on a complex list");
+
+    const double three[] = {1, 2, 3};
+    seed_list(2, three, 3);
+    check_eval_error("l1+l3", "List length mismatch", "complex length mismatch");
+
+    // A real result set that leaves the real axis mid-list promotes the whole
+    // array rather than erroring or truncating — the list-level counterpart of
+    // sqrt(-4) being 2i.
+    const math::Complex mixed_roots[] = {math::Complex(2, 0), math::Complex(0, 1)};
+    check_clist("sqrt({4,-1})", mixed_roots, 2, "a real list promotes when an element goes complex");
+
+    math::set_number_mode(math::NumberMode::kReal);
+    seed_list(0, three, 3);
+}
+
+// The chunked path: everything above fits one 256-element chunk, so nothing
+// above would notice if the streaming were wrong.
+void test_list_chunking() {
+    ++g_checks;
+    const math::Array* big = eval_list("range(1,1000)", "1000-element generator");
+    if (big != nullptr && (big->size() != 1000 || big->get(999) != 1000 || !big->in_psram())) {
+        std::printf("FAIL: range(1,1000) -> size %d, last %g, psram %d\n", big->size(),
+                    static_cast<double>(big->get(999)), static_cast<int>(big->in_psram()));
+        ++g_failures;
+    }
+    check_real("sum(range(1,1000))", 500500, "reduction over a PSRAM-tier list");
+
+    ++g_checks;
+    const math::Array* lifted = eval_list("range(1,1000)*3", "elementwise over four chunks");
+    if (lifted != nullptr &&
+        (lifted->size() != 1000 || lifted->get(0) != 3 || lifted->get(255) != 768 ||
+         lifted->get(256) != 771 || lifted->get(999) != 3000)) {
+        std::printf("FAIL: range(1,1000)*3 -> [0]=%g [255]=%g [256]=%g [999]=%g\n",
+                    static_cast<double>(lifted->get(0)), static_cast<double>(lifted->get(255)),
+                    static_cast<double>(lifted->get(256)), static_cast<double>(lifted->get(999)));
+        ++g_failures;
+    }
+    check_real("sum(range(1,1000)*3-range(1,1000)*2)", 500500, "chunked operands stay aligned");
+
+    // Promotion after a chunk has already been written as real: the array has
+    // to be migrated, not just the staging buffer. range(300,-100,-1) turns
+    // negative at index 301, so chunk 0 is real on disk when it happens.
+    ++g_checks;
+    const math::Array* late = eval_list("sqrt(range(300,-100,-1))", "promotion across chunks");
+    if (late != nullptr) {
+        const math::Complex first = late->cget(0);
+        const math::Complex neg = late->cget(301);
+        if (late->size() != 401 || late->dtype() != math::Dtype::kComplex ||
+            std::fabs(first.re - std::sqrt(300.0)) > 1e-9 || first.im != 0 ||
+            std::fabs(neg.im - 1.0) > 1e-9 || neg.re != 0) {
+            std::printf("FAIL: sqrt(range(300,-100,-1)) -> size %d, [0]=(%.12g,%.12g), "
+                        "[301]=(%.12g,%.12g)\n",
+                        late->size(), first.re, first.im, neg.re, neg.im);
+            ++g_failures;
+        }
+    }
+}
+
+// Temporaries are recycled between instructions, so a long chain of list
+// results must not exhaust the pool — and one that genuinely holds too many
+// operands live must say so rather than corrupt anything.
+void test_list_temporaries() {
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+    const double sixfold[] = {6, 12, 18};
+    check_list("l1+l1+l1+l1+l1+l1", sixfold, 3, "a chain reuses temporaries");
+    const double stacked[] = {3, 6, 9};
+    check_list("{1,2,3}+({1,2,3}+{1,2,3})", stacked, 3, "nested literals");
+    check_eval_error("{1}+({2}+({3}+({4}+({5}+({6}+{7})))))", "Too many list terms",
+                     "too many simultaneously live list operands is a clean error");
+}
+
+// The acceptance criterion in phase5.2-spec.md §4 for this task: "compile
+// once, eval N". The program is the artifact that makes it true — parsing
+// happens once and the result is re-runnable, so per-element work is
+// instruction dispatch and nothing else. Checked directly rather than inferred
+// from timings, which a host suite cannot measure meaningfully.
+void test_program_reuse() {
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+
+    Program prog;
+    const char* err = nullptr;
+    check(compile("l1*2", prog, &err), "compiles once");
+    const int code_len = prog.n_code;
+
+    Value v;
+    check(run(prog, &v, &err) && v.kind == Kind::kList, "first run");
+    check(v.kind == Kind::kList && v.a->size() == 3 && v.a->get(2) == 6, "first run values");
+
+    // Re-run the SAME program against different data: no recompilation, and
+    // the program is not consumed or mutated by execution.
+    const double changed[] = {10, 20, 30};
+    seed_list(0, changed, 3);
+    check(run(prog, &v, &err) && v.kind == Kind::kList, "second run of the same program");
+    check(v.kind == Kind::kList && v.a->get(2) == 60, "second run tracks the new data");
+    check(prog.n_code == code_len, "execution leaves the program unchanged");
+
+    seed_list(0, base, 3);
+}
+
 }  // namespace
 
 int main() {
@@ -484,6 +945,15 @@ int main() {
     test_vm_constants();
     test_vm_errors();
     test_builtins();
+    test_list_literals();
+    test_list_refs();
+    test_list_reductions();
+    test_list_wrappers();
+    test_list_seq();
+    test_complex_lists();
+    test_list_chunking();
+    test_list_temporaries();
+    test_program_reuse();
     test_compile_basics();
     test_compile_associativity();
     test_compile_unary();

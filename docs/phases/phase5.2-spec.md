@@ -18,11 +18,14 @@ generic binary-op dispatch over a wider tag enum.
 It also **absorbs the shared function catalogue** (`catalog.hpp`), so the home
 screen no longer escapes to tinyexpr for scalar spans.
 
-**Status**: **In progress — task 5.2.1 done 2026-08-09** (sizing pass: §5;
-migration strategy: §6.1). Idea F has been a committed follow-on since
-2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a phase
-number at the same time. This is the highest-risk item on the project's list, by
-its own long-standing description.
+**Status**: **In progress — tasks 5.2.1-5.2.6 done 2026-08-09.** The evaluator
+now compiles and runs real scalars, complex scalars and lists of either, with
+the whole callable surface resolved natively; the matrix tier (5.2.7) and the
+store grammar (5.2.8) are next, and nothing is wired to a screen yet (§6.1).
+Sizing: §5. Migration strategy: §6.1. Idea F has been a committed follow-on
+since 2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a
+phase number at the same time. This is the highest-risk item on the project's
+list, by its own long-standing description.
 
 5.2.1's headline is that the sizing concern attached to this idea since 2026-07-24
 **does not survive measurement** — the tagged union is *smaller* than what
@@ -139,24 +142,52 @@ that looked independent:
 - *The list lift's performance contract.* `listexpr` today binds list names to
   scalar slots, **compiles once via tinyexpr, then evaluates per element** in
   256-element chunks against PSRAM-backed arrays (`eval_lift`,
-  `list_expr.cpp:1002`). A flat program is exactly that artifact: compile once,
-  rebind the element slots, re-run. An interpreter that re-parsed per element
-  would be $N$ times slower on a 999-element list — the easiest way to wreck
-  this phase.
+  `list_expr.cpp:1002`). A flat program keeps that: parsing happens once and
+  the per-element work is instruction dispatch. An interpreter that re-parsed
+  per element would be $N$ times slower on a 999-element list — the easiest way
+  to wreck this phase.
 
 Shape:
 
 | piece | role |
 |---|---|
 | `Value` — 24 B tagged union (§5) | operand type |
-| instruction array | push-literal / push-ref / push-element-slot / binop / unop / call(fn,arity) / index / store |
+| instruction array | push-literal / push-ref / make-list / binop / unop / call(fn,arity) / quoted-body jump / index / store |
 | operand stack | `Value[N]` in bss; N = 64 costs 1,536 B |
 | operator stack | compile-time only |
-| element slots | rebound per index by the lift, program unchanged |
+| result temporaries | `Array` handles over the existing ArrayStore |
 
 `substitute_reductions`' textual fixpoint and `eval_clift`'s separate narrow
 grammar both disappear: reductions become ordinary functions over a list
 `Value`, and complex lists fall out of the normal binop dispatch.
+
+**How the lift itself works — revised 2026-08-09 (5.2.6).** The row above used
+to read "element slots — rebound per index by the lift, program unchanged", and
+the instruction set carried a `kPushElem` for it. Building the tier retired
+that: **a program is not uniformly element-dependent.** In `l1/sum(l1)` the
+reduction is loop-invariant, so re-running the whole program per element
+recomputes an $O(N)$ reduction $N$ times — quadratic on an expression
+`listexpr` does in linear time today, because it substitutes reductions
+*before* lifting. Getting that back would need dataflow analysis to find the
+invariant subranges plus a rewritten program to hoist them.
+
+The tier instead **broadcasts at the instruction that consumes a list**: each
+elementwise op streams its operands in 256-element chunks and materialises one
+temporary `Array`. Every node is then evaluated exactly once per element by
+construction, reductions included, and nesting (`mean(l1*2)+l3`) needs no
+analysis at all. That is what §1's "the same generic binary-op dispatch over a
+wider tag enum" already described; §3's element-slot row was the mechanism it
+replaces. The cost is intermediate arrays — `sin(l1)+2*l2` streams three passes
+where today's lift streams one — drawn from the ArrayStore temporaries
+`listexpr` already pays for. **5.2.12 measures it against today's lift on
+hardware; that measurement settles whether the trade was right, not this
+paragraph.**
+
+One mechanism did survive from the element-slot idea, for the one case that
+genuinely needs deferred evaluation: `seq(expr, var, lo, hi, step)` compiles
+its body as a **quoted range** the top level jumps over, and the machine
+re-enters that range per index with the loop variable bound (saved and
+restored). It is the machine's only re-entry point and is depth-capped at 2.
 
 Rationale: every cap in §1 exists because depth lives in call frames against
 core 0's **4 KB** (`__StackBottom`–`__StackTop`, identical on both boards — the
@@ -181,11 +212,11 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | # | Task | Est. hrs | Acceptance |
 |---|------|----------|------------|
 | ~~5.2.1~~ | ~~Tagged `Value` design + sizing pass~~ **DONE 2026-08-09** | 4 | §5: union 24 B vs matexpr's 32 - go. Migration strategy §6.1 |
-| 5.2.2 | `Value`, operand stack, instruction encoding | 8 | Sizes fixed; opcode set written down; stack depth chosen and costed |
-| 5.2.3 | Shunting-yard compiler -> RPN program | 20 | Iterative, no parse recursion. Precedence matches `mat_expr.cpp:812-865` |
-| 5.2.4 | Stack machine: real + complex tiers | 16 | `test_complex_expr`'s checks pass; `m_*` angle-mode wrappers preserved (D46) |
-| 5.2.5 | Absorb catalogue, constants, variables | 10 | `pi`/`e`/`ans`/`theta`/`a-z` and all `catalog.cpp` entries resolve natively; non-real policy implemented |
-| 5.2.6 | List tier incl. the lift | 22 | `test_lists` passes; **compile-once/eval-N preserved**, 256-element chunks |
+| ~~5.2.2~~ | ~~`Value`, operand stack, instruction encoding~~ **DONE 2026-08-09** | 8 | Sizes fixed; opcode set written down; stack depth chosen and costed |
+| ~~5.2.3~~ | ~~Shunting-yard compiler -> RPN program~~ **DONE 2026-08-09** | 20 | Iterative, no parse recursion. Precedence matches `mat_expr.cpp:812-865` |
+| ~~5.2.4~~ | ~~Stack machine: real + complex tiers~~ **DONE 2026-08-09** | 16 | `test_complex_expr`'s checks pass; `m_*` angle-mode wrappers preserved (D46) |
+| ~~5.2.5~~ | ~~Absorb catalogue, constants, variables~~ **DONE 2026-08-09** (three tables, not one) | 10 | `pi`/`e`/`ans`/`theta`/`a-z` and all `catalog.cpp` entries resolve natively; non-real policy implemented |
+| ~~5.2.6~~ | ~~List tier incl. the lift~~ **DONE 2026-08-09** (broadcast, not element slots — §3) | 22 | `test_lists` passes; **compile-once/eval-N preserved**, 256-element chunks |
 | 5.2.7 | Matrix tier | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
 | 5.2.8 | Superset store grammar + commit semantics | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
 | 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs |
@@ -248,6 +279,26 @@ consume any** — the opposite of the assumption Phase 6's headroom argument was
 resting on, and worth re-checking against 6B's 48 KB MicroPython heap once the
 real numbers land.
 
+**Measured as built, through 5.2.6** (Pico 1, `.bss`):
+
+| item | bytes |
+|---|---|
+| operand stack `Value[64]` | 1,536 |
+| `Program` (code 1,024 + consts 1,024 + 8 bookkeeping) | 2,056 |
+| operator stack `OpTok[64]` | 512 |
+| list tier: 6 `Array` handles + pool flags + arena pointer | ~160 |
+| **total** | **~4.3 KB, against the 10,053 B retiring the three evaluators frees** |
+
+The list tier costs no buffers: its 256-element chunk staging overlays the
+shared compute arena (`scratch.hpp`) and its result temporaries take storage
+from the existing `ArrayStore`, which is what `listexpr`'s `g_op`/`g_temp`/
+`g_result` do today. `Program` shed 8 B in 5.2.6 with `n_elem_slots`, the field
+the superseded element-slot lift needed (§3).
+
+**Nothing is banked until 5.2.11 deletes the old evaluators**: through 5.2.6 the
+image is +4 B (the arena pointer), because the linker garbage-collects the rest
+while no screen calls `run()`.
+
 A depth of 64 is also far more generous than what the call stack affords today:
 `matexpr` is capped at **3** (D48, 84 B of margin before the leaf fix),
 `complexexpr` at 7/4, tinyexpr at 7. Lifting those caps is the user-visible
@@ -283,10 +334,16 @@ parallel route cheap:
    scripted expression list, diff the outputs.
 
 Sequence: build the evaluator behind the flag (5.2.2-5.2.3) → add the
-differential harness → bring tiers up one at a time (5.2.4-5.2.6), each gated by
-its own suite passing *differentially* → flip the default → delete the old
-evaluators and their caps (5.2.8). Deletion is what banks the bss saving, so it
-is not optional cleanup.
+differential harness → bring tiers up one at a time (5.2.4-5.2.7), each gated by
+its own suite passing *differentially* → the store grammar (5.2.8) → flip the
+default → delete the old evaluators and their caps (5.2.11). Deletion is what
+banks the bss saving, so it is not optional cleanup.
+
+**Deviation so far, recorded 2026-08-09**: the harness (5.2.9) has not been
+built yet, so 5.2.4-5.2.6 were gated by *mirrored* checks in `test_unified`
+rather than differential ones — each tier's behaviours restated against the
+old suite's expectations by hand. That is weaker, and it is why 5.2.9 must land
+before the default flips rather than after.
 
 **Where differential testing does not apply**: cases that are new by
 construction (§7's cross-tier behaviours — complex-element matrices, list⊗matrix)
@@ -324,13 +381,33 @@ into "the suite passes".
 | P5.2-4 | Does idea H (polymorphic variables, D40) become cheap once this lands? | §H notes unified storage "almost certainly means a fourth format change". Worth re-costing after, not before. |
 | P5.2-5 | Do the retired parsers' error strings need to be preserved verbatim? | Host tests assert on exact strings ("Too deeply nested", "Dim mismatch"). Changing them is a test churn cost to budget. |
 
+### Widenings found so far — the running list 5.2.10 signs off
+
+Each is a case the retired evaluator rejected and the unified one answers. They
+are pinned by value in `test_unified` already, so the widening is deliberate;
+what 5.2.10 owes each row is a TI-parity judgement.
+
+| # | Was | Now | Where it comes from |
+|---|---|---|---|
+| W1 | `sin(l1)` on a complex list → *"Complex lists support only +, -, scalar \* and /"* | maps elementwise | `eval_clift`'s narrow grammar is gone (5.2.6) |
+| W2 | `l1*l1` on complex lists → *"Complex lists: one list per term"* | elementwise product | same |
+| W3 | `2/l1` on a complex list → *"Cannot divide by a list"* | elementwise reciprocal | same |
+| W4 | `sum(l1)+1` on a complex list → *"Complex sum/mean must stand alone"* | composes | a reduction returns a `Value`, not spliced text (5.2.6) |
+| W5 | `sqrt({4,-1})` → NaN element | promotes the list to complex | scalar `sqrt(-4) = 2i` applied elementwise (5.2.6) |
+| W6 | `sort_asc(sort_asc(sort_asc(sort_asc(...))))` → *"Too deeply nested"* at 3 levels | evaluates | the cap was a call-frame budget (D47), and there are no frames now (5.2.6) |
+
+One deliberate **narrowing** is outstanding: `sort_asc(l4)` with a bare list
+argument sorts `l4` **in place** in `listexpr` and is by value here. That is a
+commit decision, not an expression one, and belongs to 5.2.8's store grammar —
+it must not ship as a silent behaviour change.
+
 ## 8. Non-goals
 
 - Touching `evaluate_real()` / tinyexpr (§2).
 - Idea H, polymorphic variables — unscheduled, revisit only if real usage demands
   it (D40, and P5.2-4 above).
 - Raising any depth cap as a standalone change. The caps exist for measured
-  reasons; they disappear when the parsers they guard do (5.2.8), not before.
+  reasons; they disappear when the parsers they guard do (5.2.11), not before.
 
 ## References
 

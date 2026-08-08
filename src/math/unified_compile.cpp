@@ -4,6 +4,7 @@
 
 #include "math/catalog.hpp"
 #include "math/engine.hpp"
+#include "math/named_lists.hpp"
 #include "math/unified_eval.hpp"
 
 // Shunting-yard compiler for the unified evaluator (Phase 5.2, task 5.2.3).
@@ -17,18 +18,26 @@ namespace math::unified {
 
 namespace {
 
-// Operator-stack entries. Function calls and parens ride the same stack so
-// that argument separation and grouping fall out of one mechanism.
-enum class Tok : uint8_t { kBinary, kUnary, kLParen, kFunc };
+// Operator-stack entries. Function calls, parens and brace literals ride the
+// same stack so that argument separation and grouping fall out of one
+// mechanism — a `{1,2,3}` literal is an n-ary call to kMakeList and needs no
+// parser of its own (contrast listexpr's split_args/whole_literal pair).
+enum class Tok : uint8_t { kBinary, kUnary, kLParen, kFunc, kBrace };
+
+// Which table `fn` indexes.
+enum class FnKind : uint8_t { kCatalog, kBuiltin, kList };
 
 struct OpTok {
     Tok tok = Tok::kBinary;
-    char ch = 0;           // '+' '-' '*' '/' '^' for kBinary/kUnary
-    uint8_t prec = 0;      // higher binds tighter
-    bool right = false;    // right-associative (only '^')
-    uint16_t fn = 0;       // catalog or builtin index, kFunc only
-    bool builtin = false;  // fn indexes the builtin table, not the catalog
-    uint8_t argc = 0;      // arguments seen so far, kFunc only
+    char ch = 0;         // '+' '-' '*' '/' '^' for kBinary/kUnary
+    uint8_t prec = 0;    // higher binds tighter
+    bool right = false;  // right-associative (only '^')
+    uint16_t fn = 0;     // table index, kFunc only
+    FnKind kind = FnKind::kCatalog;
+    uint8_t argc = 0;         // arguments seen so far, kFunc/kBrace only
+    bool quoted = false;      // first argument is a body, not a value (seq)
+    uint16_t jump_at = 0;     // the kJump that skips that body
+    uint16_t body_start = 0;  // where the body begins
 };
 
 // Precedence. Matches the existing evaluators' grammar
@@ -65,7 +74,10 @@ bool ident_char(char c) {
 // evaluate N times. A nested list expression becomes more instructions in one
 // program, not a nested compile — so nothing re-enters this. Same
 // non-reentrancy argument the engine's own preprocess buffers rest on
-// (engine.cpp:36), and it must be re-checked if 5.2.6 ever wants a sub-compile.
+// (engine.cpp:36), and it must be re-checked if a tier ever wants a
+// sub-compile. 5.2.6 was the first test of that and it held: seq's deferred
+// body is compiled inline, as a range of the same program that the machine
+// jumps over and re-enters, so the list tier added no nested compile.
 OpTok g_ops[kMaxStack];
 
 struct Compiler {
@@ -79,6 +91,8 @@ struct Compiler {
     // Shunting-yard needs to know whether the next token is an operand or an
     // operator: it is what distinguishes unary minus from subtraction.
     bool expect_operand = true;
+    // seq's second argument is a variable NAME, not its value.
+    bool expect_var_name = false;
 
     bool fail(const char* msg) {
         if (err == nullptr) {
@@ -132,8 +146,14 @@ struct Compiler {
             // Unary '+' is a no-op; only '-' emits.
             return t.ch == '-' ? emit(Op::kNeg) : true;
         }
+        if (t.tok == Tok::kBrace) {
+            return emit(Op::kMakeList, t.argc);
+        }
         if (t.tok == Tok::kFunc) {
-            return emit(t.builtin ? Op::kCallBi : Op::kCall, t.argc, t.fn);
+            const Op op = t.kind == FnKind::kBuiltin ? Op::kCallBi
+                          : t.kind == FnKind::kList  ? Op::kCallList
+                                                     : Op::kCall;
+            return emit(op, t.argc, t.fn);
         }
         switch (t.ch) {
             case '+':
@@ -157,7 +177,7 @@ struct Compiler {
     bool pop_while_tighter(int prec, bool right) {
         while (n_ops > 0) {
             const OpTok& top = ops[n_ops - 1];
-            if (top.tok == Tok::kLParen || top.tok == Tok::kFunc) {
+            if (top.tok == Tok::kLParen || top.tok == Tok::kFunc || top.tok == Tok::kBrace) {
                 break;
             }
             const bool tighter = right ? top.prec > prec : top.prec >= prec;
@@ -195,6 +215,13 @@ struct Compiler {
     // never reach the variable slots, matching complex_expr.cpp's pointed
     // errors ("e is reserved (Euler's e)").
     bool identifier(const char* name, size_t len) {
+        // l1-l6. listexpr's token_at only matches when the token is delimited
+        // on both sides, which is exactly what "the whole identifier is two
+        // characters" means here — `ln(x)` and `l10` are different identifiers
+        // and never reach this test.
+        if (len == 2 && name[0] == 'l' && name[1] >= '1' && name[1] <= '6') {
+            return emit(Op::kPushList, 0, static_cast<uint16_t>(name[1] - '1'));
+        }
         if (len == 1) {
             const char c = name[0];
             if (c == 'i') {
@@ -224,13 +251,83 @@ struct Compiler {
                 return emit(Op::kPushSysc, 0, static_cast<uint16_t>(k));
             }
         }
+
+        // Named lists (4D.13), last: NamedLists::valid_name already excludes
+        // every identifier resolved above, so the order is belt and braces.
+        if (len >= 2 && len <= static_cast<size_t>(NamedLists::kMaxName)) {
+            char nm[NamedLists::kMaxName + 1];
+            std::memcpy(nm, name, len);
+            nm[len] = 0;
+            const int idx = named_lists().find(nm);
+            if (idx >= 0) {
+                return emit(Op::kPushList, 0, static_cast<uint16_t>(kNamedRefBase + idx));
+            }
+        }
         return fail("Syntax error");
+    }
+
+    // seq's variable argument: a name, resolved to a slot at compile time and
+    // handed to the machine as a plain integer operand.
+    bool var_name_operand() {
+        skip_ws();
+        const char* start = s;
+        while (ident_char(*s)) {
+            ++s;
+        }
+        const auto len = static_cast<size_t>(s - start);
+        int slot = -1;
+        if (len == 5 && std::strncmp(start, "theta", 5) == 0) {
+            slot = Variables::kTheta;
+        } else if (len == 1 && start[0] >= 'a' && start[0] <= 'z' && start[0] != 'e' &&
+                   start[0] != 'i') {
+            slot = start[0] - 'a';
+        }
+        if (slot < 0) {
+            return fail("seq var must be a-z (not e/i) or theta");
+        }
+        return emit(Op::kPushInt, 0, static_cast<uint16_t>(slot));
+    }
+
+    // Close seq's quoted body: terminate it, point the skip past it, and push
+    // the body's address as the call's first operand. Called when the body's
+    // trailing ',' arrives — or at ')' for a malformed `seq(expr)`, so that a
+    // program which fails its arity check at run time is still well formed.
+    bool close_quoted_body(OpTok* fn) {
+        if (!emit(Op::kRet)) {
+            return false;
+        }
+        out->code[fn->jump_at].b = static_cast<uint16_t>(out->n_code);
+        fn->quoted = false;
+        return emit(Op::kPushInt, 0, fn->body_start);
     }
 
     // An identifier followed by '(' — resolved against the shared catalog,
     // which is the same table tinyexpr registers from (engine.cpp:194-200), so
     // absorbing it costs an arity dispatcher rather than sixty ports.
     bool function_call(const char* name, size_t len) {
+        // List functions first (5.2.6). The catalogue carries their names as
+        // help-only rows with no implementation, so letting it win would
+        // resolve `sum` to a row that cannot be called.
+        const int li = list_fn_index(name, len);
+        if (li >= 0) {
+            OpTok t;
+            t.tok = Tok::kFunc;
+            t.kind = FnKind::kList;
+            t.fn = static_cast<uint16_t>(li);
+            t.argc = 1;
+            if (list_fn_is_seq(li)) {
+                // Emit the skip before the body so the body is code the top
+                // level jumps over rather than executes.
+                t.quoted = true;
+                t.jump_at = static_cast<uint16_t>(out->n_code);
+                if (!emit(Op::kJump)) {
+                    return false;
+                }
+                t.body_start = static_cast<uint16_t>(out->n_code);
+            }
+            return push_op(t);
+        }
+
         int n = 0;
         const FnDescriptor* cat = catalog(&n);
         for (int k = 0; k < n; ++k) {
@@ -251,7 +348,7 @@ struct Compiler {
             OpTok t;
             t.tok = Tok::kFunc;
             t.fn = static_cast<uint16_t>(bi);
-            t.builtin = true;
+            t.kind = FnKind::kBuiltin;
             t.argc = 1;
             return push_op(t);
         }
@@ -325,6 +422,33 @@ struct Compiler {
             }
 
             if (expect_operand) {
+                if (expect_var_name) {
+                    if (!var_name_operand()) {
+                        return false;
+                    }
+                    expect_var_name = false;
+                    expect_operand = false;
+                    continue;
+                }
+                if (c == '{') {
+                    ++s;
+                    OpTok t;
+                    t.tok = Tok::kBrace;
+                    t.argc = 1;  // corrected to 0 just below when empty
+                    if (!push_op(t)) {
+                        return false;
+                    }
+                    skip_ws();
+                    if (*s == '}') {
+                        ++s;
+                        --n_ops;
+                        if (!emit(Op::kMakeList, 0)) {
+                            return false;
+                        }
+                        expect_operand = false;
+                    }
+                    continue;
+                }
                 if (c == '+' || c == '-') {
                     ++s;
                     OpTok t;
@@ -359,9 +483,12 @@ struct Compiler {
                 if (!pop_while_tighter(0, false)) {
                     return false;
                 }
-                const OpTok* t = top_op();
+                OpTok* t = top_op();
                 if (t == nullptr) {
                     return fail("Syntax error");
+                }
+                if (t->tok == Tok::kFunc && t->quoted && !close_quoted_body(t)) {
+                    return false;  // `seq(expr)` — arity fails at run time
                 }
                 const OpTok top = *t;
                 --n_ops;
@@ -375,17 +502,40 @@ struct Compiler {
                 expect_operand = false;
                 continue;
             }
+            if (c == '}') {
+                ++s;
+                if (!pop_while_tighter(0, false)) {
+                    return false;
+                }
+                const OpTok* t = top_op();
+                if (t == nullptr || t->tok != Tok::kBrace) {
+                    return fail("Syntax error");
+                }
+                const OpTok top = *t;
+                --n_ops;
+                if (!emit_op(top)) {
+                    return false;
+                }
+                expect_operand = false;
+                continue;
+            }
             if (c == ',') {
                 ++s;
                 if (!pop_while_tighter(0, false)) {
                     return false;
                 }
                 OpTok* fn = top_op();
-                if (fn == nullptr || fn->tok != Tok::kFunc) {
+                if (fn == nullptr || (fn->tok != Tok::kFunc && fn->tok != Tok::kBrace)) {
                     return fail("Syntax error");
                 }
                 if (fn->argc >= 255) {
                     return fail("Expression too complex");
+                }
+                if (fn->quoted) {
+                    if (!close_quoted_body(fn)) {
+                        return false;
+                    }
+                    expect_var_name = true;
                 }
                 ++fn->argc;
                 expect_operand = true;
@@ -417,7 +567,7 @@ struct Compiler {
         }
         while (n_ops > 0) {
             const OpTok top = ops[--n_ops];
-            if (top.tok == Tok::kLParen || top.tok == Tok::kFunc) {
+            if (top.tok == Tok::kLParen || top.tok == Tok::kFunc || top.tok == Tok::kBrace) {
                 return fail("Syntax error");  // unbalanced
             }
             if (!emit_op(top)) {
@@ -433,7 +583,6 @@ struct Compiler {
 bool compile(const char* src, Program& out, const char** err) {
     out.n_code = 0;
     out.n_consts = 0;
-    out.n_elem_slots = 0;
     if (err != nullptr) {
         *err = nullptr;
     }

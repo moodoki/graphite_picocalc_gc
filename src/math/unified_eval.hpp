@@ -29,10 +29,36 @@ class Array;
 //     construction.
 //   * The list lift's performance contract — listexpr today binds list names
 //     to scalar slots, compiles ONCE via tinyexpr, then evaluates per element
-//     in 256-element chunks against PSRAM-backed arrays. A flat program is
-//     exactly that artifact: compile once, rebind the element slots, re-run.
-//     An interpreter re-parsing per element would be N times slower on a
-//     999-element list.
+//     in 256-element chunks against PSRAM-backed arrays. A flat program keeps
+//     that: parsing happens once, and the per-element work is instruction
+//     dispatch. An interpreter re-parsing per element would be N times slower
+//     on a 999-element list.
+//
+// How the list tier actually lifts — REVISED 2026-08-09 (5.2.6). The 5.2.1
+// sketch had the whole program re-run per element with `kPushElem` slots
+// rebound each time. Building the tier showed that shape is wrong for this
+// evaluator, on correctness before performance: a program is not uniformly
+// element-dependent. In `l1/sum(l1)` the reduction is loop-invariant, so a
+// whole-program re-run recomputes an O(N) reduction N times — quadratic on
+// exactly the expression listexpr handles in linear time today (it substitutes
+// reductions before lifting). Recovering that would need dataflow analysis to
+// find the invariant subranges and a rewritten program to hoist them.
+//
+// Instead a list operand *broadcasts* at the instruction that consumes it:
+// every elementwise op streams its operands in 256-element chunks and
+// materialises one temporary Array. Each node is then evaluated exactly once
+// per element by construction, reductions included, and nesting
+// (`mean(l1*2)+l3`) falls out with no analysis. This is what
+// phase5.2-spec.md §1 describes as "the same generic binary-op dispatch over a
+// wider tag enum"; §3's element-slot row is the mechanism it replaces.
+// `kPushElem` is gone, and with it Program::n_elem_slots (-8 B).
+//
+// The cost is intermediate arrays — `sin(l1)+2*l2` streams three passes where
+// today's lift streams one. They come from the ArrayStore temporaries listexpr
+// already pays for (g_op[4], g_temp[2], g_red), and the per-element work they
+// replace is a tinyexpr tree walk per element, which is not obviously cheaper
+// than the extra streaming. 5.2.12 measures it on hardware against today's
+// lift; that measurement, not this comment, is what settles it.
 //
 // This header is task 5.2.2: the value type, the instruction encoding and the
 // sizing. The compiler is 5.2.3, the machine 5.2.4.
@@ -100,7 +126,8 @@ enum class Op : uint8_t {
     kPushSysc,   // b = catalog constant index (pi, e, clight, ...)
     kPushMat,    // a = matrix slot 0-9, or kMatAnsSlot
     kPushList,   // b = list ref (l1-l6 and named, one numbering)
-    kPushElem,   // a = element slot; the lift rebinds these per index
+    kPushInt,    // b = small literal integer — quoted arguments, see kJump
+    kMakeList,   // a = element count; pops that many scalars (5.2.6)
     kAdd,
     kSub,
     kMul,
@@ -110,6 +137,9 @@ enum class Op : uint8_t {
     kTranspose,  // postfix ^T
     kCall,       // b = catalog index, a = arity
     kCallBi,     // b = builtin index, a = arity — see builtin_index()
+    kCallList,   // b = list-function index, a = arity — see list_fn_index()
+    kJump,       // b = absolute code index; skips a quoted body (5.2.6)
+    kRet,        // ends a quoted body, handing its value back to the caller
     kIndex,      // [A](row, col) — pops col, row, matrix
     kStore,      // b = encoded target, see StoreTarget
 };
@@ -129,11 +159,17 @@ struct Instr {
 // phase5.2-spec.md §5). Everything here is bss:
 //
 //   operand stack   64 x 24 =  1,536 B
-//   Program                  =  2,064 B  (code 1,024 + consts 1,024 + 16
+//   Program                  =  2,056 B  (code 1,024 + consts 1,024 + 8
 //                                         bookkeeping; measured on target,
 //                                         not derived — the struct pads)
 //                             -------
-//                              3,600 B
+//                              3,592 B
+//
+// The list tier (5.2.6) adds ~160 B on top of that and no buffers at all: its
+// chunk staging overlays the shared compute arena (scratch.hpp, 4 B for the
+// region pointer) and its six result temporaries are Array *handles* (24 B
+// each) whose storage comes from the existing ArrayStore — exactly what
+// listexpr's g_op/g_temp/g_result are today, and what 5.2.11 deletes.
 //
 // So the phase still nets several KB back once 5.2.11 deletes the old
 // evaluators. Deletion is what banks it — it is not optional cleanup.
@@ -149,16 +185,13 @@ constexpr int kMaxConsts = 64;
 // The MatAns pseudo-slot, addressed like a matrix register beyond [A]-[J].
 constexpr uint8_t kMatAnsSlot = 10;
 
-// A compiled program. Held once and re-run per element by the list lift, which
-// is the entire reason this type exists rather than a direct interpreter.
+// A compiled program: emitted once per input, executed without any further
+// parsing. That is what the list tier's per-element work rides on.
 struct Program {
     Instr code[kMaxCode];
     Complex consts[kMaxConsts];
     int n_code = 0;
     int n_consts = 0;
-    // Element slots referenced by kPushElem, in binding order. The lift writes
-    // these per index; the program itself is unchanged between elements.
-    int n_elem_slots = 0;
 };
 
 // ---- Compiler (5.2.3) ----------------------------------------------------
@@ -166,10 +199,10 @@ struct Program {
 // Shunting-yard, iterative: no parse recursion, so nesting costs operator-stack
 // slots rather than call frames. Emits RPN into `out`.
 //
-// Scope as of 5.2.3: numeric and imaginary literals, variables, catalog
-// constants and function calls, `+ - * / ^`, unary sign, parentheses. Matrix
-// and list literals/references arrive with their tiers (5.2.6/5.2.7), stores
-// with 5.2.8.
+// Scope as of 5.2.6: numeric and imaginary literals, variables, catalog
+// constants and function calls, `+ - * / ^`, unary sign, parentheses, brace
+// list literals, `l1`-`l6` and named-list references, and the list functions.
+// Matrix literals and references arrive with 5.2.7, stores with 5.2.8.
 //
 // `kPushVar` slots are `Variables`' own indices (0-25 = a-z, 26 = theta,
 // 27 = Ans) rather than a parallel numbering, so `Variables::is_complex(idx)`
@@ -186,6 +219,19 @@ struct Program {
 int builtin_index(const char* name, size_t len);
 int builtin_arity(int idx);
 
+// List functions: the fourth table (5.2.6). sum/prod/length/mean/median/stdev
+// (plus listexpr's `std` alias) consume a list and yield a scalar;
+// cumsum/delta_list/sort_asc/sort_desc/seq/range yield a list. They are the
+// catalogue's `fn == nullptr` help-only rows — phase5.2-spec.md §2's "help-only
+// rows gain real bindings" — so they are looked up BEFORE the catalogue, which
+// carries their names but no implementation.
+//
+// `seq(expr, var, lo, hi, step)` is the one call whose first two arguments are
+// not values: the body is compiled as a quoted range (kJump/kRet) and both it
+// and the variable slot reach the machine as kPushInt operands.
+int list_fn_index(const char* name, size_t len);
+bool list_fn_is_seq(int idx);
+
 bool compile(const char* src, Program& out, const char** err);
 
 // ---- Stack machine (5.2.4) -----------------------------------------------
@@ -193,12 +239,16 @@ bool compile(const char* src, Program& out, const char** err);
 // Executes a compiled program. No evaluation recursion — depth is the operand
 // stack, a bss array, so over-deep input reports rather than faults.
 //
-// Scope as of 5.2.4: real and complex scalars. Matrix and list operands are
-// recognised and rejected; their tiers are 5.2.6 and 5.2.7.
+// Scope as of 5.2.6: real and complex scalars, and lists of either. Matrix
+// operands are recognised and rejected; that tier is 5.2.7.
 //
 // A complex result that lands exactly on the real axis is returned as real, so
 // `i^2` is -1 rather than -1+0i. That is exactness, not a tolerance: D49 made
 // integer powers of a complex base exact so this test could be `im == 0`.
+//
+// A returned list Value points at an evaluator-owned temporary that stays valid
+// until the NEXT run() — the same contract listexpr's Result::list has had
+// since Phase 3A.
 bool run(const Program& p, Value* out, const char** err);
 
 static_assert(sizeof(Value) == 24,
