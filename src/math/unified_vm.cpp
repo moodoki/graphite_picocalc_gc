@@ -6,6 +6,8 @@
 #include "math/engine.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
+#include "math/mat_expr.hpp"
+#include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/scratch.hpp"
 #include "math/stats.hpp"
@@ -18,10 +20,9 @@
 // over-deep input is a reported error rather than the hard fault matexpr's
 // depth-3 cap exists to prevent (D48).
 //
-// Scope as of 5.2.6: real and complex scalars — arithmetic, unary negation,
+// Scope as of 5.2.7: real and complex scalars — arithmetic, unary negation,
 // powers, variables, catalog constants, calls to catalog/builtin functions —
-// and lists of either. Matrix operands are recognised and rejected here; that
-// tier is 5.2.7.
+// and lists and matrices of either. Only stores are left (5.2.8).
 namespace math::unified {
 
 namespace {
@@ -200,9 +201,14 @@ constexpr int kOutSlot = kMaxBcastArgs;
 // the elementwise body reaches only functions.cpp/dist.cpp (neither touches the
 // arena), listops owns the disjoint kListops region, and stats — which does own
 // kCompute — is reached only from kCallList, its own instruction, never from
-// inside someone else's loop. **5.2.7 must re-check this**: matrix.cpp is a
-// kCompute owner too, so a matrix operation called from within a chunk loop
-// would break the invariant where a scalar one does not.
+// inside someone else's loop.
+//
+// 5.2.7 re-checked this, as the previous version of this comment asked it to:
+// matrix.cpp is a kCompute owner too, but broadcast() rejects a matrix operand
+// before the chunk loop starts, and every matrix operation runs from its own
+// instruction (kCallMat, kMakeMat, a matrix binop). So no matops call is ever
+// live inside a staging loop. **Any future tier that makes a matrix operation
+// reachable from inside broadcast() breaks this and needs its own region.**
 Complex (&g_slot)[kMaxBcastArgs + 1][kChunk] =
     *reinterpret_cast<Complex (*)[kMaxBcastArgs + 1][kChunk]>(scratch::compute_region());
 static_assert(sizeof(Complex) * (kMaxBcastArgs + 1) * kChunk <= scratch::kComputeBytes,
@@ -274,6 +280,48 @@ const ListFnDesc kListFnTable[] = {
 constexpr int kListFnCount = static_cast<int>(sizeof(kListFnTable) / sizeof(kListFnTable[0]));
 static_assert(kListFnCount == static_cast<int>(ListFn::kRange) + 1,
               "kListFnTable and ListFn must stay in step");
+
+// ---- Matrix functions (5.2.7) --------------------------------------------
+//
+// The catalogue's other help-only block, plus the vector ops that listexpr
+// carried (dot/cross/norm). They share a table because they share a dispatch:
+// `norm` is Frobenius on a matrix and Euclidean on a list, which under three
+// separate evaluators had to be two implementations in two files.
+enum class MatFn : uint8_t {
+    kDet,
+    kRank,
+    kNorm,
+    kInverse,
+    kTranspose,
+    kRref,
+    kRef,
+    kAugment,
+    kIdentity,
+    kEigenvec,
+    kDim,
+    kEigenvals,
+    kEig,
+    kList2mat,
+    kMat2list,
+    kDot,
+    kCross,
+};
+
+struct MatFnDesc {
+    const char* name;
+    uint8_t argc_min;
+    uint8_t argc_max;
+};
+
+const MatFnDesc kMatFnTable[] = {
+    {"det", 1, 1},  {"rank", 1, 1},      {"norm", 1, 1},    {"inverse", 1, 1},  {"transpose", 1, 1},
+    {"rref", 1, 1}, {"ref", 1, 1},       {"augment", 2, 2}, {"identity", 1, 1}, {"eigenvec", 1, 1},
+    {"dim", 1, 1},  {"eigenvals", 1, 1}, {"eig", 1, 1},     {"list2mat", 1, 6}, {"mat2list", 2, 7},
+    {"dot", 2, 2},  {"cross", 2, 2},
+};
+constexpr int kMatFnCount = static_cast<int>(sizeof(kMatFnTable) / sizeof(kMatFnTable[0]));
+static_assert(kMatFnCount == static_cast<int>(MatFn::kCross) + 1,
+              "kMatFnTable and MatFn must stay in step");
 
 // The element count seq/range produce, with listexpr's rules verbatim
 // (list_ops.cpp:270) — including the half-step tolerance that makes
@@ -660,7 +708,7 @@ struct Machine {
             return broadcast(ap, args, 2);
         }
         if (args[0].is_array() || args[1].is_array()) {
-            return fail("Matrix not allowed here");  // 5.2.7
+            return matrix_binary(op, args[0], args[1]);
         }
         Value out;
         return scalar_binop(op, args[0], args[1], &out) && push(out);
@@ -981,6 +1029,484 @@ struct Machine {
         return push(Value::real(v));
     }
 
+    // ---- matrix tier (5.2.7) ---------------------------------------------
+
+    // An exact real integer — indices, dimensions, matrix exponents.
+    static bool real_int(const Value& v, int* out) {
+        if (v.kind != Kind::kReal || v.r != std::floor(v.r)) {
+            return false;
+        }
+        *out = static_cast<int>(v.r);
+        return true;
+    }
+
+    // A matrix register: [A]-[J], or MatAns. MatAns still lives in matexpr —
+    // it is state (with its own persistence), not evaluator logic, and moves
+    // when that file goes in 5.2.11.
+    bool push_matrix(int slot) {
+        if (slot < 0 || slot > kMatAnsSlot) {
+            return fail("Syntax error");
+        }
+        const Array& m = slot == kMatAnsSlot ? matexpr::mat_ans() : matrices().matrix(slot);
+        if (m.size() == 0) {
+            return fail(slot == kMatAnsSlot ? "No matrix result" : "Matrix is empty");
+        }
+        // REAL mode never touches a complex matrix, even for an op with a real
+        // result, so nothing silently reads real parts (4D.25).
+        if (m.dtype() == Dtype::kComplex && number_mode() == NumberMode::kReal) {
+            return fail("Non-real result");
+        }
+        return push(Value::matrix(&m));
+    }
+
+    // `[[1,2][3,4]]` — like a list literal, the elements are already on the
+    // operand stack and the compiler counted the shape.
+    bool make_matrix(int rows, int cols) {
+        const int count = rows * cols;
+        if (count > n || rows <= 0 || cols <= 0) {
+            return fail("Syntax error");
+        }
+        const int base = n - count;
+        bool complex = false;
+        for (int i = 0; i < count; ++i) {
+            if (st[base + i].is_array()) {
+                return fail("Syntax error");  // no matrices inside a literal
+            }
+            complex = complex || st[base + i].kind == Kind::kComplex;
+        }
+        if (complex && number_mode() == NumberMode::kReal) {
+            return fail("Non-real result");
+        }
+        Array* out = alloc_temp();
+        if (out == nullptr) {
+            return false;
+        }
+        if (!out->set_dtype(complex ? Dtype::kComplex : Dtype::kDouble) ||
+            !out->resize(rows, cols)) {
+            return fail("Out of matrix memory");
+        }
+        for (int i = 0; i < count; ++i) {
+            if (complex) {
+                out->cset(i, st[base + i].as_complex());
+            } else {
+                out->set(i, st[base + i].r);
+            }
+        }
+        n = base;
+        return push(Value::matrix(out));
+    }
+
+    // `[A](row, col)`, 1-based.
+    bool index_matrix(int argc) {
+        if (argc != 2) {
+            // Pop what the group did push, so the error is the reported one.
+            if (argc <= n) {
+                n -= argc;
+            }
+            return fail("Expected (row, col)");
+        }
+        Value col;
+        Value row;
+        Value target;
+        if (!pop(&col) || !pop(&row) || !pop(&target)) {
+            return false;
+        }
+        if (target.kind != Kind::kMatrix) {
+            return fail("Syntax error");
+        }
+        int ri = 0;
+        int ci = 0;
+        if (!real_int(row, &ri) || !real_int(col, &ci)) {
+            return fail("Expected (row, col)");
+        }
+        if (ri < 1 || ri > target.a->dim(0) || ci < 1 || ci > target.a->dim(1)) {
+            return fail("Index out of range");
+        }
+        const Complex v = target.a->cget(ri - 1, ci - 1);  // promotes a real cell
+        return push(v.im == 0.0 ? Value::real(v.re) : Value::complex(v));
+    }
+
+    bool transpose_top() {
+        Value a;
+        if (!pop(&a)) {
+            return false;
+        }
+        if (a.kind != Kind::kMatrix) {
+            return fail("Expected a matrix");
+        }
+        Array* out = alloc_temp();
+        if (out == nullptr) {
+            return false;
+        }
+        if (!matops::transpose(*a.a, *out, &err)) {
+            return false;
+        }
+        return push(Value::matrix(out));
+    }
+
+    // Matrix arithmetic. Unlike lists these operators are NOT elementwise:
+    // [A]*[B] is the matrix product, which is why matexpr could never be a
+    // lift and had to be its own parser.
+    bool matrix_binary(Op op, const Value& a, const Value& b) {
+        const bool am = a.kind == Kind::kMatrix;
+        const bool bm = b.kind == Kind::kMatrix;
+        if (a.kind == Kind::kList || b.kind == Kind::kList) {
+            return fail("Dim mismatch");  // a list and a matrix have no common op
+        }
+        if (op == Op::kAdd || op == Op::kSub) {
+            if (am != bm) {
+                return fail("Dim mismatch");  // matexpr's message for matrix + scalar
+            }
+            Array* out = alloc_temp();
+            if (out == nullptr) {
+                return false;
+            }
+            const bool ok = op == Op::kAdd ? matops::add(*a.a, *b.a, *out, &err)
+                                           : matops::sub(*a.a, *b.a, *out, &err);
+            return ok && push(Value::matrix(out));
+        }
+        if (op == Op::kPow) {
+            if (!am) {
+                return fail("Bad exponent");  // scalar ^ matrix
+            }
+            int e = 0;
+            if (bm || !real_int(b, &e)) {
+                return fail("Bad matrix exponent");
+            }
+            Array* out = alloc_temp();
+            if (out == nullptr) {
+                return false;
+            }
+            return matops::power(*a.a, e, *out, &err) && push(Value::matrix(out));
+        }
+        const bool divide = op == Op::kDiv;
+        if (am && bm) {
+            if (divide) {
+                return fail("Matrix division: use ^-1");
+            }
+            Array* out = alloc_temp();
+            if (out == nullptr) {
+                return false;
+            }
+            return matops::mul(*a.a, *b.a, *out, &err) && push(Value::matrix(out));
+        }
+        if (divide && bm) {
+            return fail("Matrix division: use ^-1");  // scalar / matrix
+        }
+        const Array& m = am ? *a.a : *b.a;
+        const Complex k =
+            am ? (divide ? Complex(1.0) / b.as_complex() : b.as_complex()) : a.as_complex();
+        Array* out = alloc_temp();
+        if (out == nullptr) {
+            return false;
+        }
+        return matops::scalar_mul(m, k, *out, &err) && push(Value::matrix(out));
+    }
+
+    // Pop this call's arguments and push its result in one step, so a
+    // temporary is never unreferenced while the arguments are still needed.
+    bool finish_call(int argc, const Value& v) {
+        n -= argc;
+        return push(v);
+    }
+
+    bool eigen_list(const Array& m, int argc) {
+        Complex eig[matops::kMaxEigen];
+        int count = 0;
+        if (!matops::eigenvalues_complex(m, eig, &count, &err)) {
+            return false;
+        }
+        bool all_real = true;
+        for (int i = 0; i < count; ++i) {
+            all_real = all_real && eig[i].is_real();
+        }
+        // A complex-conjugate pair used to format as unstorable text (D30/P4-7)
+        // because "lists are real-only" — which stopped being true in 4D.24.
+        // Here it is simply a complex list. Widened, 5.2.10.
+        if (!all_real && number_mode() == NumberMode::kReal) {
+            return fail("Non-real result");
+        }
+        Array* out = alloc_temp();
+        if (out == nullptr) {
+            return false;
+        }
+        if (!out->set_dtype(all_real ? Dtype::kDouble : Dtype::kComplex) || !out->resize(count)) {
+            return fail("Out of list memory");
+        }
+        for (int i = 0; i < count; ++i) {
+            if (all_real) {
+                out->set(i, eig[i].re);
+            } else {
+                out->cset(i, eig[i]);
+            }
+        }
+        return finish_call(argc, Value::list(out));
+    }
+
+    bool list2mat(const Value* args, int argc) {
+        int rows = 0;
+        bool complex = false;
+        for (int i = 0; i < argc; ++i) {
+            if (args[i].kind != Kind::kList) {
+                return fail("list2mat takes l1-l6 args");
+            }
+            rows = args[i].a->size() > rows ? args[i].a->size() : rows;
+            complex = complex || args[i].a->dtype() == Dtype::kComplex;
+        }
+        if (rows == 0) {
+            return fail("List is empty");
+        }
+        if (rows > matops::kMaxRowElems) {
+            return fail("Matrix too large");
+        }
+        if (complex && number_mode() == NumberMode::kReal) {
+            return fail("Non-real result");
+        }
+        Array* out = alloc_temp();
+        if (out == nullptr) {
+            return false;
+        }
+        if (!out->set_dtype(complex ? Dtype::kComplex : Dtype::kDouble) ||
+            !out->resize(rows, argc)) {
+            return fail("Out of matrix memory");
+        }
+        for (int c = 0; c < argc; ++c) {
+            const Array& src = *args[c].a;
+            for (int r = 0; r < rows; ++r) {
+                const Complex v = r < src.size() ? src.cget(r) : Complex(0.0);
+                if (complex) {
+                    out->cset(r, c, v);
+                } else {
+                    out->set(r, c, v.re);
+                }
+            }
+        }
+        return finish_call(argc, Value::matrix(out));
+    }
+
+    // mat2list([A], l1, …): columns out into list targets. The targets are
+    // refs (kPushInt), not values — this WRITES them. What the home screen
+    // shows for it, and when the written lists get persisted, are commit
+    // questions that belong to 5.2.8; here the count of lists written is the
+    // value.
+    bool mat2list(const Value* args, int argc) {
+        if (args[0].kind != Kind::kMatrix) {
+            return fail("Expected a matrix");
+        }
+        const Array& m = *args[0].a;
+        const int rows = m.dim(0);
+        const int cols = m.dim(1);
+        const bool complex = m.dtype() == Dtype::kComplex;
+        int written = 0;
+        for (int i = 1; i < argc && i - 1 < cols; ++i) {
+            int ref = 0;
+            if (!real_int(args[i], &ref) || ref < 0) {
+                return fail("mat2list targets are l1-l6");
+            }
+            Array& dst = list_by_ref(ref);
+            dst.clear();
+            if (!dst.set_dtype(complex ? Dtype::kComplex : Dtype::kDouble) || !dst.resize(rows)) {
+                return fail("Out of list memory");
+            }
+            for (int r = 0; r < rows; ++r) {
+                if (complex) {
+                    dst.cset(r, m.cget(r, i - 1));
+                } else {
+                    dst.set(r, m.get(r, i - 1));
+                }
+            }
+            ++written;
+        }
+        return finish_call(argc, Value::real(written));
+    }
+
+    // dot/cross/norm — listexpr's vector ops (4D.22), real-only as they were.
+    bool vector_op(MatFn fn, const Value* args, int argc) {
+        for (int i = 0; i < argc; ++i) {
+            if (args[i].kind != Kind::kList) {
+                return fail(fn == MatFn::kDot ? "Need two lists" : "Expected a list");
+            }
+            if (args[i].a->dtype() == Dtype::kComplex) {
+                return fail("Non-real list");
+            }
+        }
+        const Array& a = *args[0].a;
+        if (fn == MatFn::kCross) {
+            const Array& b = *args[1].a;
+            if (a.size() != 3 || b.size() != 3) {
+                return fail("cross needs 3-elem lists");
+            }
+            calc_t u[3];
+            calc_t v[3];
+            a.read_range(0, 3, u);
+            b.read_range(0, 3, v);
+            Array* out = alloc_temp();
+            if (out == nullptr) {
+                return false;
+            }
+            if (!out->set_dtype(Dtype::kDouble) || !out->resize(3)) {
+                return fail("Out of list memory");
+            }
+            out->set(0, u[1] * v[2] - u[2] * v[1]);
+            out->set(1, u[2] * v[0] - u[0] * v[2]);
+            out->set(2, u[0] * v[1] - u[1] * v[0]);
+            return finish_call(argc, Value::list(out));
+        }
+        calc_t acc = 0;
+        if (fn == MatFn::kDot) {
+            const Array& b = *args[1].a;
+            if (a.size() != b.size() || a.size() == 0) {
+                return fail("Dim mismatch");
+            }
+            for (int i = 0; i < a.size(); ++i) {
+                acc += a.get(i) * b.get(i);
+            }
+        } else {
+            for (int i = 0; i < a.size(); ++i) {
+                acc += a.get(i) * a.get(i);
+            }
+            acc = std::sqrt(acc);
+        }
+        return finish_call(argc, Value::real(acc));
+    }
+
+    static const char* arity_message(MatFn fn) {
+        switch (fn) {
+            case MatFn::kAugment:
+                return "augment needs two matrices";
+            case MatFn::kDot:
+            case MatFn::kCross:
+                return "Need two lists";
+            case MatFn::kNorm:
+                return "norm takes one list";
+            case MatFn::kMat2list:
+                return "mat2list needs ([A], l1, ...)";
+            case MatFn::kList2mat:
+                return "list2mat takes l1-l6 args";
+            default:
+                return "Syntax error";
+        }
+    }
+
+    bool call_mat(const Instr& in) {
+        if (in.b >= static_cast<uint16_t>(kMatFnCount)) {
+            return fail("Syntax error");
+        }
+        const MatFnDesc& d = kMatFnTable[in.b];
+        const auto fn = static_cast<MatFn>(in.b);
+        const int argc = in.a;
+        if (argc < d.argc_min || argc > d.argc_max || argc > n) {
+            return fail(arity_message(fn));
+        }
+        // Read the arguments in place: several of these take up to seven, and
+        // a copy would be 168 B of frame on a 4 KB stack for no gain.
+        const Value* args = &st[n - argc];
+
+        switch (fn) {
+            case MatFn::kList2mat:
+                return list2mat(args, argc);
+            case MatFn::kMat2list:
+                return mat2list(args, argc);
+            case MatFn::kDot:
+            case MatFn::kCross:
+                return vector_op(fn, args, argc);
+            case MatFn::kIdentity: {
+                int size = 0;
+                if (!real_int(args[0], &size)) {
+                    return fail("Bad identity size");
+                }
+                Array* out = alloc_temp();
+                if (out == nullptr) {
+                    return false;
+                }
+                return matops::identity(size, *out, &err) && finish_call(argc, Value::matrix(out));
+            }
+            case MatFn::kNorm:
+                // The one name in both worlds: Frobenius on a matrix,
+                // Euclidean on a list.
+                if (args[0].kind == Kind::kList) {
+                    return vector_op(fn, args, argc);
+                }
+                break;
+            default:
+                break;
+        }
+
+        if (args[0].kind != Kind::kMatrix) {
+            return fail("Expected a matrix");
+        }
+        const Array& m = *args[0].a;
+
+        switch (fn) {
+            case MatFn::kDet: {
+                Complex det;
+                if (!matops::determinant(m, &det, &err)) {
+                    return false;
+                }
+                return finish_call(argc, det.im == 0.0 ? Value::real(det.re) : Value::complex(det));
+            }
+            case MatFn::kRank: {
+                int rk = 0;
+                return matops::rank(m, &rk, &err) && finish_call(argc, Value::real(rk));
+            }
+            case MatFn::kNorm: {
+                calc_t nf = 0;
+                return matops::norm_f(m, &nf, &err) && finish_call(argc, Value::real(nf));
+            }
+            case MatFn::kDim: {
+                // dim() and eigenvals() had to be whole-expression forms in
+                // matexpr ("dim/eigenvals must stand alone") because its Value
+                // could not hold a list. This one can, so they compose.
+                // Widened, 5.2.10.
+                Array* out = alloc_temp();
+                if (out == nullptr) {
+                    return false;
+                }
+                if (!out->set_dtype(Dtype::kDouble) || !out->resize(2)) {
+                    return fail("Out of list memory");
+                }
+                out->set(0, m.dim(0));
+                out->set(1, m.dim(1));
+                return finish_call(argc, Value::list(out));
+            }
+            case MatFn::kEigenvals:
+            case MatFn::kEig:
+                return eigen_list(m, argc);
+            default:
+                break;
+        }
+
+        Array* out = alloc_temp();
+        if (out == nullptr) {
+            return false;
+        }
+        bool ok = false;
+        switch (fn) {
+            case MatFn::kInverse:
+                ok = matops::inverse(m, *out, &err);
+                break;
+            case MatFn::kTranspose:
+                ok = matops::transpose(m, *out, &err);
+                break;
+            case MatFn::kRref:
+                ok = matops::rref(m, *out, &err);
+                break;
+            case MatFn::kRef:
+                ok = matops::ref(m, *out, &err);
+                break;
+            case MatFn::kEigenvec:
+                ok = matops::eigenvectors(m, *out, &err);
+                break;
+            default:  // augment
+                if (args[1].kind != Kind::kMatrix) {
+                    return fail("Expected a matrix");
+                }
+                ok = matops::augment(m, *args[1].a, *out, &err);
+                break;
+        }
+        return ok && finish_call(argc, Value::matrix(out));
+    }
+
     bool step(const Instr& in) {
         switch (in.op) {
             case Op::kPushConst: {
@@ -1028,8 +1554,13 @@ struct Machine {
                     ap.kind = Applier::Kind::kNeg;
                     return broadcast(ap, &a, 1);
                 }
-                if (a.is_array()) {
-                    return fail("Matrix not allowed here");  // 5.2.7
+                if (a.kind == Kind::kMatrix) {
+                    Array* out = alloc_temp();
+                    if (out == nullptr) {
+                        return false;
+                    }
+                    return matops::scalar_mul(*a.a, Complex(-1.0), *out, &err) &&
+                           push(Value::matrix(out));
                 }
                 Value out;
                 return scalar_neg(a, &out) && push(out);
@@ -1046,15 +1577,25 @@ struct Machine {
             }
             case Op::kMakeList:
                 return make_list(in.a);
+            case Op::kPushMat:
+                return push_matrix(in.a);
+            case Op::kMakeMat:
+                return make_matrix(in.a, in.b);
+            case Op::kIndex:
+                return index_matrix(in.a);
+            case Op::kTranspose:
+                return transpose_top();
             case Op::kCall:
                 return call(in);
             case Op::kCallBi:
                 return call_builtin(in);
             case Op::kCallList:
                 return call_list(in);
+            case Op::kCallMat:
+                return call_mat(in);
             default:
-                // kPushMat / kIndex / kTranspose / kStore arrive with their
-                // tiers; kJump / kRet are handled by the execution loop.
+                // kStore arrives with 5.2.8; kJump / kRet are handled by the
+                // execution loop.
                 return fail("Syntax error");
         }
     }
@@ -1135,6 +1676,20 @@ int list_fn_index(const char* name, size_t len) {
 
 bool list_fn_is_seq(int idx) {
     return idx == static_cast<int>(ListFn::kSeq);
+}
+
+int mat_fn_index(const char* name, size_t len) {
+    for (int i = 0; i < kMatFnCount; ++i) {
+        if (std::strlen(kMatFnTable[i].name) == len &&
+            std::strncmp(kMatFnTable[i].name, name, len) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool mat_fn_quotes_list_refs(int idx) {
+    return idx == static_cast<int>(MatFn::kMat2list);
 }
 
 bool run(const Program& p, Value* out, const char** err) {

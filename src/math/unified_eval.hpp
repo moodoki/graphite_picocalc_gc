@@ -128,6 +128,7 @@ enum class Op : uint8_t {
     kPushList,   // b = list ref (l1-l6 and named, one numbering)
     kPushInt,    // b = small literal integer — quoted arguments, see kJump
     kMakeList,   // a = element count; pops that many scalars (5.2.6)
+    kMakeMat,    // a = rows, b = cols; pops rows*cols scalars (5.2.7)
     kAdd,
     kSub,
     kMul,
@@ -138,6 +139,7 @@ enum class Op : uint8_t {
     kCall,       // b = catalog index, a = arity
     kCallBi,     // b = builtin index, a = arity — see builtin_index()
     kCallList,   // b = list-function index, a = arity — see list_fn_index()
+    kCallMat,    // b = matrix-function index, a = arity — see mat_fn_index()
     kJump,       // b = absolute code index; skips a quoted body (5.2.6)
     kRet,        // ends a quoted body, handing its value back to the caller
     kIndex,      // [A](row, col) — pops col, row, matrix
@@ -231,6 +233,17 @@ int builtin_arity(int idx);
 // and the variable slot reach the machine as kPushInt operands.
 int list_fn_index(const char* name, size_t len);
 bool list_fn_is_seq(int idx);
+
+// Matrix functions (5.2.7): the catalogue's other `fn == nullptr` block, plus
+// the vector ops. Same story as the list table and looked up right after it —
+// `norm` is in both worlds and dispatches on the argument's Kind (Frobenius
+// for a matrix, Euclidean for a list), which is the unification this phase is
+// named for rather than two functions sharing a name.
+//
+// `mat2list([A], l1, l2, …)` writes its list arguments, so they are targets,
+// not values: they compile to kPushInt refs the way seq's variable does.
+int mat_fn_index(const char* name, size_t len);
+bool mat_fn_quotes_list_refs(int idx);
 
 bool compile(const char* src, Program& out, const char** err);
 

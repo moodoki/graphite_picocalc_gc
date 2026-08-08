@@ -13,6 +13,8 @@
 #include "math/array.hpp"
 #include "math/engine.hpp"
 #include "math/lists.hpp"
+#include "math/mat_expr.hpp"
+#include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/types.hpp"
 #include "math/unified_eval.hpp"
@@ -179,6 +181,23 @@ void render(const Program& p, char* buf, size_t cap) {
                 std::snprintf(tmp, sizeof(tmp), "mklist%u", in.a);
                 put(tmp);
                 break;
+            case Op::kPushMat:
+                std::snprintf(tmp, sizeof(tmp), "M%u", in.a);
+                put(tmp);
+                break;
+            case Op::kMakeMat:
+                std::snprintf(tmp, sizeof(tmp), "mkmat%ux%u", in.a, in.b);
+                put(tmp);
+                break;
+            case Op::kIndex:
+                std::snprintf(tmp, sizeof(tmp), "idx%u", in.a);
+                put(tmp);
+                break;
+            case Op::kCallMat:
+                std::snprintf(tmp, sizeof(tmp), "mf%u/%u", in.b, in.a);
+                put(tmp);
+                break;
+            case Op::kTranspose: put("^T"); break;
             case Op::kJump:
                 std::snprintf(tmp, sizeof(tmp), "jmp%u", in.b);
                 put(tmp);
@@ -459,7 +478,7 @@ void test_vm_errors() {
     // reports what is actually wrong with `sum(1)` — while the matrix ones
     // stay uncallable until 5.2.7.
     check_eval_error("sum(1)", "Expected a list", "a bound list function reports its own error");
-    check_eval_error("det(1)", "Syntax error", "help-only matrix row is not callable yet");
+    check_eval_error("det(1)", "Expected a matrix", "and so does a bound matrix function");
 
     check_compile_error("nosuchfn(1)", "Syntax error", "unknown name is still an error");
 }
@@ -905,6 +924,319 @@ void test_list_temporaries() {
                      "too many simultaneously live list operands is a clean error");
 }
 
+// ---- 5.2.7: the matrix tier -----------------------------------------------
+//
+// Mirrors test_matrix's expression-layer checks (test_expr_basics,
+// test_expr_errors, test_matrix_literals, test_matans_token,
+// test_list_matrix_bridge, test_frobenius_norm, test_complex_expr_layer).
+// Stores are 5.2.8, so the store forms in those tests are not mirrored here.
+
+void seed_matrix(int slot, int rows, int cols, const double* v) {
+    math::Array& m = math::matrices().matrix(slot);
+    m.clear();
+    m.set_dtype(math::Dtype::kDouble);
+    m.resize(rows, cols);
+    for (int i = 0; i < rows * cols; ++i) {
+        m.set(i, v[i]);
+    }
+}
+
+void seed_cmatrix(int slot, int rows, int cols, const math::Complex* v) {
+    math::Array& m = math::matrices().matrix(slot);
+    m.clear();
+    m.set_dtype(math::Dtype::kComplex);
+    m.resize(rows, cols);
+    for (int i = 0; i < rows * cols; ++i) {
+        m.cset(i, v[i]);
+    }
+}
+
+const math::Array* eval_matrix(const char* src, const char* what) {
+    Value v;
+    const char* err = nullptr;
+    if (!eval(src, &v, &err)) {
+        std::printf("FAIL: %s: '%s' -> error %s\n", what, src, err != nullptr ? err : "?");
+        ++g_failures;
+        return nullptr;
+    }
+    if (v.kind != Kind::kMatrix) {
+        std::printf("FAIL: %s: '%s' -> kind %d (expected matrix)\n", what, src,
+                    static_cast<int>(v.kind));
+        ++g_failures;
+        return nullptr;
+    }
+    return v.a;
+}
+
+void check_matrix(const char* src, int rows, int cols, const double* expected, const char* what) {
+    ++g_checks;
+    const math::Array* m = eval_matrix(src, what);
+    if (m == nullptr) {
+        return;
+    }
+    if (m->dim(0) != rows || m->dim(1) != cols) {
+        std::printf("FAIL: %s: '%s' -> %dx%d (expected %dx%d)\n", what, src, m->dim(0), m->dim(1),
+                    rows, cols);
+        ++g_failures;
+        return;
+    }
+    for (int i = 0; i < rows * cols; ++i) {
+        if (std::fabs(m->get(i) - expected[i]) > 1e-9) {
+            std::printf("FAIL: %s: '%s'[%d] -> %.12g (expected %.12g)\n", what, src, i, m->get(i),
+                        expected[i]);
+            ++g_failures;
+            return;
+        }
+    }
+}
+
+void test_matrix_refs() {
+    const double va[4] = {1, 2, 3, 4};
+    const double vb[4] = {5, 6, 7, 8};
+    seed_matrix(0, 2, 2, va);
+    seed_matrix(1, 2, 2, vb);
+
+    check_rpn("[A]", "M0", "matrix reference");
+    check_matrix("[A]", 2, 2, va, "bare reference");
+    check_matrix("[a]", 2, 2, va, "lowercase reference");
+
+    const double vsum[4] = {6, 8, 10, 12};
+    check_matrix("[A]+[B]", 2, 2, vsum, "add");
+    const double vdiff[4] = {4, 4, 4, 4};
+    check_matrix("[B]-[A]", 2, 2, vdiff, "sub");
+    // Not elementwise: this is the matrix product, which is why matexpr could
+    // never be a lift the way listexpr is.
+    const double vprod[4] = {19, 22, 43, 50};
+    check_matrix("[A]*[B]", 2, 2, vprod, "matrix product");
+    const double vscale[4] = {2, 4, 6, 8};
+    check_matrix("2*[A]", 2, 2, vscale, "scalar times matrix");
+    check_matrix("[A]*2", 2, 2, vscale, "matrix times scalar");
+    const double vhalf[4] = {0.5, 1, 1.5, 2};
+    check_matrix("[A]/2", 2, 2, vhalf, "matrix over scalar");
+    const double vneg[4] = {-1, -2, -3, -4};
+    check_matrix("-[A]", 2, 2, vneg, "unary minus");
+
+    const double vt[4] = {1, 3, 2, 4};
+    check_matrix("[A]^T", 2, 2, vt, "postfix transpose");
+    check_matrix("transpose([A])", 2, 2, vt, "transpose()");
+    const double vsq[4] = {7, 10, 15, 22};
+    check_matrix("[A]^2", 2, 2, vsq, "integer power");
+    const double vid[4] = {1, 0, 0, 1};
+    check_matrix("[A]^-1*[A]", 2, 2, vid, "inverse via ^-1");
+    check_matrix("inverse([A])*[A]", 2, 2, vid, "inverse()");
+    const double vid3[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+    check_matrix("identity(3)", 3, 3, vid3, "identity");
+    const double vaug[8] = {1, 2, 5, 6, 3, 4, 7, 8};
+    check_matrix("augment([A],[B])", 2, 4, vaug, "augment");
+    check_matrix("rref([A])", 2, 2, vid, "rref");
+
+    const double vmix[4] = {3, 6, 9, 12};
+    check_matrix("(1+2)*[A]", 2, 2, vmix, "paren scalar times matrix");
+    check_matrix("[A]*sin(pi/2)*3", 2, 2, vmix, "catalog call inside a matrix expression");
+
+    check_real("det([A])", -2, "det");
+    check_real("det([A])*2+1", -3, "det inside a scalar expression");
+    check_real("rank([A])", 2, "rank");
+    check_real("[A](2,1)", 3, "element access");
+    check_real("[A](1,2)+[B](2,2)", 10, "element arithmetic");
+
+    // `matans` resolves to the last matrix result, which matexpr still owns —
+    // it is state with its own persistence, not evaluator logic. Nothing in
+    // this evaluator WRITES it yet: committing a result is 5.2.8's job, so
+    // here the token can only be read, and it reads empty.
+    check_rpn("matans", "M10", "matans is a matrix register beyond [A]-[J]");
+    check_eval_error("matans", "No matrix result", "no matrix result to recall yet");
+}
+
+void test_matrix_literals() {
+    const double va[4] = {1, 2, 3, 4};
+    check_rpn("[[1,2][3,4]]", "1 2 3 4 mkmat2x2", "literal compiles to a packing instruction");
+    check_matrix("[[1,2][3,4]]", 2, 2, va, "matrix literal");
+    const double vrow[3] = {5, 7, 11};
+    check_matrix("[[2+3,7,11]]", 1, 3, vrow, "one-row literal with expressions");
+    const double vsum[4] = {2, 4, 6, 8};
+    check_matrix("[[1,2][3,4]]+[[1,2][3,4]]", 2, 2, vsum, "literal arithmetic");
+    check_real("det([[1,2][3,4]])", -2, "det of a literal");
+
+    check_compile_error("[[1,2][3]]", "Dim mismatch", "ragged literal");
+    check_compile_error("[[1,2][3,4]", "Syntax error", "unterminated literal");
+    check_compile_error("[[]]", "Bad matrix literal", "empty row");
+    check_compile_error("[K]", "Syntax error", "there is no [K]");
+}
+
+void test_matrix_errors() {
+    const double va[4] = {1, 2, 3, 4};
+    const double vc[6] = {1, 2, 3, 4, 5, 6};
+    seed_matrix(0, 2, 2, va);
+    seed_matrix(1, 2, 3, vc);
+    math::matrices().matrix(9).clear();
+
+    check_eval_error("[A]+[B]", "Dim mismatch", "add dim mismatch");
+    check_eval_error("[B]*[B]", "Dim mismatch", "mul dim mismatch");
+    check_eval_error("[A]+2", "Dim mismatch", "matrix plus scalar");
+    check_eval_error("[A]/[B]", "Matrix division: use ^-1", "matrix division");
+    check_eval_error("2/[A]", "Matrix division: use ^-1", "scalar over matrix");
+    check_eval_error("[J]", "Matrix is empty", "empty slot");
+    check_eval_error("[A](3,1)", "Index out of range", "element out of range");
+    check_eval_error("[A](1)", "Expected (row, col)", "one-index element");
+    check_eval_error("sin([A])", "Matrix not allowed here", "matrix into a scalar function");
+    check_eval_error("[A]^1.5", "Bad matrix exponent", "fractional matrix power");
+    check_eval_error("[A]^[A]", "Bad matrix exponent", "matrix exponent");
+    check_eval_error("det(2)", "Expected a matrix", "det of a scalar");
+    check_compile_error("det([A]", "Syntax error", "unbalanced call");
+    check_compile_error("[A]*", "Syntax error", "trailing operator");
+}
+
+// What the phase buys, again: matexpr caps its parser at depth 3 with 84 bytes
+// of margin (D48), and these three shapes are exactly what that cap rejects —
+// including the one that hard-faulted the Pico 1. Here depth is operand-stack
+// slots, so they simply evaluate. Widened, 5.2.10.
+void test_matrix_depth() {
+    const double va[4] = {1, 2, 3, 4};
+    seed_matrix(0, 2, 2, va);
+    seed_matrix(1, 2, 2, va);
+
+    check_real("det([A]*[B]+[A])", -8, "matexpr's depth 2");
+    check_real("det([[1,2][3,4]])", -2, "matexpr's depth 3");
+    check_real("det(identity(2))", 1, "matexpr's depth 3, nested call");
+    check_real("det(([A]*([A]+[A]))+[A])", -6, "depth 4 — matexpr's hard-fault shape");
+    check_matrix("((([A])))", 2, 2, va, "depth 4 paren chain");
+    check_real("det(inverse(([A])))", -0.5, "depth 4 via nested calls");
+    check_real("det(inverse(inverse(inverse(([A])))))", -0.5, "deeper still");
+}
+
+void test_matrix_bridge() {
+    const double va[4] = {1, 2, 3, 4};
+    seed_matrix(0, 2, 2, va);
+    const double vb[6] = {1, 2, 3, 4, 5, 6};
+    seed_matrix(1, 2, 3, vb);
+
+    // dim() and eigenvals() are list-valued. matexpr had to make them
+    // whole-expression forms ("dim/eigenvals must stand alone") because its
+    // Value could not hold a list; this one can, so they compose. Widened,
+    // 5.2.10.
+    const double vdim[2] = {2, 3};
+    check_list("dim([B])", vdim, 2, "dim is a list");
+    check_real("sum(dim([B]))", 5, "dim composes into a reduction");
+    const double vdim2[2] = {4, 6};
+    check_list("dim([B])*2", vdim2, 2, "dim composes into an elementwise op");
+
+    const double vsym[4] = {2, 1, 1, 2};
+    seed_matrix(2, 2, 2, vsym);
+    const double veig[2] = {3, 1};
+    check_list("eigenvals([C])", veig, 2, "eigenvals descending");
+    check_list("eig([C])", veig, 2, "eig alias");
+    check_real("sum(eigenvals([C]))", 4, "eigenvalue sum is the trace");
+
+    // A complex-conjugate pair was unstorable display text in matexpr because
+    // "lists are real-only" — which 4D.24 changed. It is a complex list here.
+    // Widened, 5.2.10.
+    math::set_number_mode(math::NumberMode::kRectangular);
+    const double vrot[4] = {0, -1, 1, 0};
+    seed_matrix(3, 2, 2, vrot);
+    const math::Complex vpair[2] = {math::Complex(0, 1), math::Complex(0, -1)};
+    check_clist("eigenvals([D])", vpair, 2, "complex spectrum is a complex list");
+    math::set_number_mode(math::NumberMode::kReal);
+
+    // list2mat / mat2list round trip.
+    const double l1v[3] = {1, 2, 3};
+    const double l2v[2] = {4, 5};
+    seed_list(0, l1v, 3);
+    seed_list(1, l2v, 2);
+    const double vpk[6] = {1, 4, 2, 5, 3, 0};
+    check_matrix("list2mat(l1,l2)", 3, 2, vpk, "list2mat packs columns, zero-padded");
+    check_matrix("list2mat(range(1,3),l2)", 3, 2, vpk,
+                 "list2mat takes any list expression (widened, 5.2.10)");
+
+    seed_matrix(6, 3, 2, vpk);
+    check_real("mat2list([G], l3, l4)", 2, "mat2list writes two lists");
+    ++g_checks;
+    if (math::lists().list(2).size() != 3 || math::lists().list(2).get(2) != 3 ||
+        math::lists().list(3).size() != 3 || math::lists().list(3).get(1) != 5) {
+        std::printf("FAIL: mat2list column values\n");
+        ++g_failures;
+    }
+    check_compile_error("mat2list([G], x)", "mat2list targets are l1-l6", "bad mat2list target");
+    check_eval_error("mat2list([G])", "mat2list needs ([A], l1, ...)", "mat2list needs targets");
+    check_eval_error("list2mat(2)", "list2mat takes l1-l6 args", "list2mat needs lists");
+
+    // Vector ops (4D.22) — listexpr's, absorbed here because `norm` is the one
+    // name that means different things to a list and a matrix.
+    check_real("dot(l1,{4,5,6})", 32, "dot");
+    const double vx[3] = {-3, 6, -3};
+    check_list("cross(l1,{4,5,6})", vx, 3, "cross");
+    check_real("norm({3,4})", 5, "norm of a list is Euclidean");
+    const double vfro[4] = {3, 4, 0, 0};
+    seed_matrix(7, 2, 2, vfro);
+    check_real("norm([H])", 5, "norm of a matrix is Frobenius");
+    check_real("norm([H])^2", 25, "norm composes");
+    check_eval_error("dot(l1,{1,2})", "Dim mismatch", "dot needs equal lengths");
+    check_eval_error("cross({1,2},{3,4})", "cross needs 3-elem lists", "cross needs 3 elements");
+    check_eval_error("norm(l1,l1)", "norm takes one list", "norm arity");
+    check_eval_error("dot(l1)", "Need two lists", "dot arity");
+}
+
+void test_matrix_complex() {
+    math::set_number_mode(math::NumberMode::kRectangular);
+    const math::Complex va[4] = {math::Complex(1, 1), math::Complex(2, 0), math::Complex(3, 0),
+                                 math::Complex(4, -1)};
+    seed_cmatrix(0, 2, 2, va);
+    const double vb[4] = {5, 6, 7, 8};
+    seed_matrix(1, 2, 2, vb);
+
+    check_cplx("det([A])", -1, 3, "det of a complex matrix");
+    check_cplx("[A](1,1)", 1, 1, "complex element access");
+
+    ++g_checks;
+    const math::Array* scaled = eval_matrix("i*[B]", "complex scalar scales a real matrix");
+    if (scaled != nullptr &&
+        (scaled->dtype() != math::Dtype::kComplex || std::fabs(scaled->cget(0, 0).im - 5) > 1e-9)) {
+        std::printf("FAIL: i*[B] did not promote\n");
+        ++g_failures;
+    }
+    ++g_checks;
+    const math::Array* mixed = eval_matrix("[A]+[B]", "complex plus real matrix");
+    if (mixed != nullptr && std::fabs(mixed->cget(0, 0).re - 6) > 1e-9) {
+        std::printf("FAIL: [A]+[B] value\n");
+        ++g_failures;
+    }
+    const double vcl[4] = {0, 0, 0, 1};
+    ++g_checks;
+    const math::Array* clit = eval_matrix("[[i,0][0,1]]", "complex literal");
+    if (clit != nullptr && (clit->dtype() != math::Dtype::kComplex ||
+                            std::fabs(clit->cget(0, 0).im - 1) > 1e-9)) {
+        std::printf("FAIL: complex literal dtype/value\n");
+        ++g_failures;
+    }
+    (void)vcl;
+
+    check_eval_error("eigenvals([A])", "Non-real matrix", "eigenvals of a complex matrix");
+
+    // REAL mode never READS complex data, even for an operation with a real
+    // result, so nothing silently takes a real part (4D.25's rule, kept).
+    math::set_number_mode(math::NumberMode::kReal);
+    check_eval_error("[A]+[A]", "Non-real result", "REAL gates a complex register");
+    check_eval_error("det([A])", "Non-real result", "REAL gates det of a complex register");
+    check_eval_error("[[i,0][0,1]]", "Non-real result", "REAL gates a complex literal");
+    check_real("det([B])", -2, "real det still evaluates in REAL mode");
+
+    // But a complex RESULT built from real data — `i*[B]` — is not rejected
+    // here, and matexpr does reject it ("gate the result too", mat_expr.cpp).
+    // The difference is deliberate and is the same line 5.2.4 drew for scalars:
+    // `i^2` evaluates in this evaluator whatever the number mode, because
+    // rejecting a non-real result is a DISPATCH decision — the home screen is
+    // what knows about REAL-mode retry — and it lands with the commit
+    // semantics in 5.2.8. Pinned here so the gap is visible until then.
+    ++g_checks;
+    const math::Array* promoted = eval_matrix("i*[B]", "complex result in REAL mode");
+    if (promoted != nullptr && promoted->dtype() != math::Dtype::kComplex) {
+        std::printf("FAIL: i*[B] should still compute; the REAL gate is 5.2.8's\n");
+        ++g_failures;
+    }
+
+    seed_matrix(0, 2, 2, vb);
+}
+
 // The acceptance criterion in phase5.2-spec.md §4 for this task: "compile
 // once, eval N". The program is the artifact that makes it true — parsing
 // happens once and the result is re-runnable, so per-element work is
@@ -953,6 +1285,12 @@ int main() {
     test_complex_lists();
     test_list_chunking();
     test_list_temporaries();
+    test_matrix_refs();
+    test_matrix_literals();
+    test_matrix_errors();
+    test_matrix_depth();
+    test_matrix_bridge();
+    test_matrix_complex();
     test_program_reuse();
     test_compile_basics();
     test_compile_associativity();

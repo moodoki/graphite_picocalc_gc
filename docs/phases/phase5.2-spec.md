@@ -18,10 +18,12 @@ generic binary-op dispatch over a wider tag enum.
 It also **absorbs the shared function catalogue** (`catalog.hpp`), so the home
 screen no longer escapes to tinyexpr for scalar spans.
 
-**Status**: **In progress — tasks 5.2.1-5.2.6 done 2026-08-09.** The evaluator
-now compiles and runs real scalars, complex scalars and lists of either, with
-the whole callable surface resolved natively; the matrix tier (5.2.7) and the
-store grammar (5.2.8) are next, and nothing is wired to a screen yet (§6.1).
+**Status**: **In progress — tasks 5.2.1-5.2.7 done 2026-08-09.** The evaluator
+now compiles and runs every home-screen value kind — real and complex scalars,
+lists and matrices of either — with the whole callable surface resolved
+natively. **What is left is the store grammar (5.2.8), the differential harness
+(5.2.9), and the cutover (5.2.10-5.2.12); nothing is wired to a screen yet**
+(§6.1).
 Sizing: §5. Migration strategy: §6.1. Idea F has been a committed follow-on
 since 2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a
 phase number at the same time. This is the highest-risk item on the project's
@@ -217,7 +219,7 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.4~~ | ~~Stack machine: real + complex tiers~~ **DONE 2026-08-09** | 16 | `test_complex_expr`'s checks pass; `m_*` angle-mode wrappers preserved (D46) |
 | ~~5.2.5~~ | ~~Absorb catalogue, constants, variables~~ **DONE 2026-08-09** (three tables, not one) | 10 | `pi`/`e`/`ans`/`theta`/`a-z` and all `catalog.cpp` entries resolve natively; non-real policy implemented |
 | ~~5.2.6~~ | ~~List tier incl. the lift~~ **DONE 2026-08-09** (broadcast, not element slots — §3) | 22 | `test_lists` passes; **compile-once/eval-N preserved**, 256-element chunks |
-| 5.2.7 | Matrix tier | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
+| ~~5.2.7~~ | ~~Matrix tier~~ **DONE 2026-08-09** (`dim`/`eigenvals` no longer need to stand alone) | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
 | 5.2.8 | Superset store grammar + commit semantics | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
 | 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs |
 | 5.2.10 | Widened behaviours + allow-list | 10 | Each widened case has a written expectation and a TI-parity rationale |
@@ -285,7 +287,7 @@ real numbers land.
 |---|---|
 | operand stack `Value[64]` | 1,536 |
 | `Program` (code 1,024 + consts 1,024 + 8 bookkeeping) | 2,056 |
-| operator stack `OpTok[64]` | 512 |
+| operator stack `OpTok[64]` | 896 |
 | list tier: 6 `Array` handles + pool flags + arena pointer | ~160 |
 | **total** | **~4.3 KB, against the 10,053 B retiring the three evaluators frees** |
 
@@ -395,11 +397,24 @@ what 5.2.10 owes each row is a TI-parity judgement.
 | W4 | `sum(l1)+1` on a complex list → *"Complex sum/mean must stand alone"* | composes | a reduction returns a `Value`, not spliced text (5.2.6) |
 | W5 | `sqrt({4,-1})` → NaN element | promotes the list to complex | scalar `sqrt(-4) = 2i` applied elementwise (5.2.6) |
 | W6 | `sort_asc(sort_asc(sort_asc(sort_asc(...))))` → *"Too deeply nested"* at 3 levels | evaluates | the cap was a call-frame budget (D47), and there are no frames now (5.2.6) |
+| W7 | `2*dim([A])`, `sum(dim([A]))` → *"dim/eigenvals must stand alone"* | compose | `matexpr::Value` could not hold a list; this one can (5.2.7) |
+| W8 | `eigenvals` of a complex-conjugate spectrum → unstorable display text (D30/P4-7) | a complex list | "lists are real-only" stopped being true in 4D.24 (5.2.7) |
+| W9 | `det(([A]*([A]+[A]))+[A])` → *"Too deeply nested"* (depth 4) | evaluates | `matexpr`'s cap is 3 with 84 B of margin — the same call-frame budget (5.2.7) |
+| W10 | `list2mat(range(1,3), l2)` → *"list2mat takes l1-l6 args"* | takes any list expression | its arguments are values now, not tokens (5.2.7) |
+| W11 | `mat2list([A], costs)` → *"mat2list targets are l1-l6"* | named lists work as targets | one ref numbering since 4D.13 (5.2.7) |
 
-One deliberate **narrowing** is outstanding: `sort_asc(l4)` with a bare list
-argument sorts `l4` **in place** in `listexpr` and is by value here. That is a
-commit decision, not an expression one, and belongs to 5.2.8's store grammar —
-it must not ship as a silent behaviour change.
+Two deliberate **narrowings** are outstanding, both of them commit questions
+rather than expression ones, and both belong to 5.2.8's store grammar. Neither
+may ship as a silent behaviour change:
+
+- `sort_asc(l4)` with a bare list argument sorts `l4` **in place** in
+  `listexpr`; it is by value here.
+- A complex *result* built from real data (`i*[B]` in REAL mode) is rejected by
+  `matexpr` ("gate the result too") and is not rejected here. This evaluator
+  gates complex **data access** (a complex `[X]`, a complex literal) but not
+  complex results — the same line 5.2.4 drew for scalars, where `i^2` evaluates
+  whatever the number mode. Rejecting a non-real *result* needs the layer that
+  knows about REAL-mode retry, which is the dispatcher.
 
 ## 8. Non-goals
 

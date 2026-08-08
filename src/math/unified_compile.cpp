@@ -22,22 +22,29 @@ namespace {
 // same stack so that argument separation and grouping fall out of one
 // mechanism — a `{1,2,3}` literal is an n-ary call to kMakeList and needs no
 // parser of its own (contrast listexpr's split_args/whole_literal pair).
-enum class Tok : uint8_t { kBinary, kUnary, kLParen, kFunc, kBrace };
+enum class Tok : uint8_t { kBinary, kUnary, kLParen, kFunc, kBrace, kMatLit, kIndex };
 
 // Which table `fn` indexes.
-enum class FnKind : uint8_t { kCatalog, kBuiltin, kList };
+enum class FnKind : uint8_t { kCatalog, kBuiltin, kList, kMatrix };
 
+// Fields are shared between token kinds rather than unioned — the operator
+// stack is 64 entries of bss and each byte here is 64 bytes there. Which
+// kinds use which is noted per field; nothing reads a field a token did not
+// set.
 struct OpTok {
     Tok tok = Tok::kBinary;
     char ch = 0;         // '+' '-' '*' '/' '^' for kBinary/kUnary
-    uint8_t prec = 0;    // higher binds tighter
+    uint8_t prec = 0;    // higher binds tighter — or rows so far, kMatLit
     bool right = false;  // right-associative (only '^')
-    uint16_t fn = 0;     // table index, kFunc only
     FnKind kind = FnKind::kCatalog;
-    uint8_t argc = 0;         // arguments seen so far, kFunc/kBrace only
-    bool quoted = false;      // first argument is a body, not a value (seq)
-    uint16_t jump_at = 0;     // the kJump that skips that body
-    uint16_t body_start = 0;  // where the body begins
+    uint8_t argc = 0;         // args seen, kFunc/kBrace/kIndex — or columns, kMatLit
+    bool quoted = false;      // a body/ref argument is pending (seq, mat2list) —
+                              // or "currently inside a row", kMatLit
+    bool refs = false;        // the pending quoted argument is a list ref, not a body
+    uint16_t fn = 0;          // table index, kFunc — or elements so far, kMatLit
+    uint16_t jump_at = 0;     // the kJump to patch, kFunc — or the element count
+                              // at the current row's start, kMatLit
+    uint16_t body_start = 0;  // where a quoted body begins, kFunc only
 };
 
 // Precedence. Matches the existing evaluators' grammar
@@ -80,6 +87,12 @@ bool ident_char(char c) {
 // jumps over and re-enters, so the list tier added no nested compile.
 OpTok g_ops[kMaxStack];
 
+// The budget line this sits on. 8 B/entry when 5.2.3 wrote the comment above,
+// 14 B after the list and matrix tiers added their grouping state — still an
+// order of magnitude under the ~10 KB retiring the three evaluators frees, but
+// it grows 64 bytes at a time, which is why the fields are shared.
+static_assert(sizeof(g_ops) <= 1024, "operator stack is a bss budget line; keep OpTok narrow");
+
 struct Compiler {
     const char* s = nullptr;
     Program* out = nullptr;
@@ -91,8 +104,11 @@ struct Compiler {
     // Shunting-yard needs to know whether the next token is an operand or an
     // operator: it is what distinguishes unary minus from subtraction.
     bool expect_operand = true;
-    // seq's second argument is a variable NAME, not its value.
+    // seq's second argument is a variable NAME, not its value; mat2list's
+    // trailing arguments are list targets, not values. Both resolve at compile
+    // time and reach the machine as kPushInt.
     bool expect_var_name = false;
+    bool expect_list_ref = false;
 
     bool fail(const char* msg) {
         if (err == nullptr) {
@@ -149,10 +165,17 @@ struct Compiler {
         if (t.tok == Tok::kBrace) {
             return emit(Op::kMakeList, t.argc);
         }
+        if (t.tok == Tok::kMatLit) {
+            return emit(Op::kMakeMat, t.prec, t.argc);
+        }
+        if (t.tok == Tok::kIndex) {
+            return emit(Op::kIndex, t.argc);
+        }
         if (t.tok == Tok::kFunc) {
-            const Op op = t.kind == FnKind::kBuiltin ? Op::kCallBi
-                          : t.kind == FnKind::kList  ? Op::kCallList
-                                                     : Op::kCall;
+            const Op op = t.kind == FnKind::kBuiltin  ? Op::kCallBi
+                          : t.kind == FnKind::kList   ? Op::kCallList
+                          : t.kind == FnKind::kMatrix ? Op::kCallMat
+                                                      : Op::kCall;
             return emit(op, t.argc, t.fn);
         }
         switch (t.ch) {
@@ -177,8 +200,8 @@ struct Compiler {
     bool pop_while_tighter(int prec, bool right) {
         while (n_ops > 0) {
             const OpTok& top = ops[n_ops - 1];
-            if (top.tok == Tok::kLParen || top.tok == Tok::kFunc || top.tok == Tok::kBrace) {
-                break;
+            if (top.tok != Tok::kBinary && top.tok != Tok::kUnary) {
+                break;  // kLParen / kFunc / kBrace / kMatLit / kIndex all group
             }
             const bool tighter = right ? top.prec > prec : top.prec >= prec;
             if (!tighter) {
@@ -234,6 +257,10 @@ struct Compiler {
                 return emit(Op::kPushVar, static_cast<uint8_t>(c - 'a'));
             }
         }
+        // MatAns, the last matrix result as a typed token (4D.14).
+        if (len == 6 && std::strncmp(name, "matans", 6) == 0) {
+            return emit(Op::kPushMat, kMatAnsSlot);
+        }
         if (len == 5 && std::strncmp(name, "theta", 5) == 0) {
             return emit(Op::kPushVar, static_cast<uint8_t>(Variables::kTheta));
         }
@@ -288,6 +315,29 @@ struct Compiler {
         return emit(Op::kPushInt, 0, static_cast<uint16_t>(slot));
     }
 
+    // A list target: `l1`-`l6` or a named list, as a ref rather than a value.
+    bool list_ref_operand() {
+        skip_ws();
+        const char* start = s;
+        while (ident_char(*s)) {
+            ++s;
+        }
+        const auto len = static_cast<size_t>(s - start);
+        if (len == 2 && start[0] == 'l' && start[1] >= '1' && start[1] <= '6') {
+            return emit(Op::kPushInt, 0, static_cast<uint16_t>(start[1] - '1'));
+        }
+        if (len >= 2 && len <= static_cast<size_t>(NamedLists::kMaxName)) {
+            char nm[NamedLists::kMaxName + 1];
+            std::memcpy(nm, start, len);
+            nm[len] = 0;
+            const int idx = named_lists().find(nm);
+            if (idx >= 0) {
+                return emit(Op::kPushInt, 0, static_cast<uint16_t>(kNamedRefBase + idx));
+            }
+        }
+        return fail("mat2list targets are l1-l6");
+    }
+
     // Close seq's quoted body: terminate it, point the skip past it, and push
     // the body's address as the call's first operand. Called when the body's
     // trailing ',' arrives — or at ')' for a malformed `seq(expr)`, so that a
@@ -325,6 +375,20 @@ struct Compiler {
                 }
                 t.body_start = static_cast<uint16_t>(out->n_code);
             }
+            return push_op(t);
+        }
+
+        // Matrix functions and the vector ops, for the same reason.
+        const int mi = mat_fn_index(name, len);
+        if (mi >= 0) {
+            OpTok t;
+            t.tok = Tok::kFunc;
+            t.kind = FnKind::kMatrix;
+            t.fn = static_cast<uint16_t>(mi);
+            t.argc = 1;
+            // mat2list writes its list arguments, so from the second onward
+            // they are targets rather than values.
+            t.refs = mat_fn_quotes_list_refs(mi);
             return push_op(t);
         }
 
@@ -411,6 +475,41 @@ struct Compiler {
         return fail("Syntax error");
     }
 
+    // Start a matrix-literal row. Rows are tracked on the operator stack like
+    // any other grouping, so the literal needs no parser of its own.
+    bool open_row(OpTok* t) {
+        ++s;  // '['
+        skip_ws();
+        if (*s == ']') {
+            return fail("Bad matrix literal");  // "[[]]" has no elements
+        }
+        t->quoted = true;    // inside a row
+        t->jump_at = t->fn;  // where this row's elements start
+        ++t->fn;             // the element about to be compiled
+        return true;
+    }
+
+    // '[' in operand position: a matrix reference `[A]`, or a literal `[[…]]`.
+    bool open_bracket() {
+        const char c = s[1];
+        if (c == '[') {
+            ++s;  // outer '['
+            OpTok t;
+            t.tok = Tok::kMatLit;
+            if (!push_op(t)) {
+                return false;
+            }
+            return open_row(top_op());
+        }
+        const int slot = (c >= 'A' && c <= 'J') ? c - 'A' : (c >= 'a' && c <= 'j') ? c - 'a' : -1;
+        if (slot < 0 || s[2] != ']') {
+            return fail("Syntax error");
+        }
+        s += 3;
+        expect_operand = false;
+        return emit(Op::kPushMat, static_cast<uint8_t>(slot));
+    }
+
     // ---- driver ----------------------------------------------------------
 
     bool run() {
@@ -422,12 +521,20 @@ struct Compiler {
             }
 
             if (expect_operand) {
-                if (expect_var_name) {
-                    if (!var_name_operand()) {
+                if (expect_var_name || expect_list_ref) {
+                    const bool ok = expect_var_name ? var_name_operand() : list_ref_operand();
+                    if (!ok) {
                         return false;
                     }
                     expect_var_name = false;
+                    expect_list_ref = false;
                     expect_operand = false;
+                    continue;
+                }
+                if (c == '[') {
+                    if (!open_bracket()) {
+                        return false;
+                    }
                     continue;
                 }
                 if (c == '{') {
@@ -478,6 +585,70 @@ struct Compiler {
             }
 
             // Operator position.
+            if (c == ']') {
+                ++s;
+                if (!pop_while_tighter(0, false)) {
+                    return false;
+                }
+                OpTok* t = top_op();
+                if (t == nullptr || t->tok != Tok::kMatLit) {
+                    return fail("Syntax error");
+                }
+                if (t->quoted) {  // close a row
+                    const int width = t->fn - t->jump_at;
+                    if (t->prec == 0) {
+                        t->argc = static_cast<uint8_t>(width);  // first row sets the width
+                    } else if (width != t->argc) {
+                        return fail("Dim mismatch");
+                    }
+                    if (t->prec == 255) {
+                        return fail("Matrix literal too large");
+                    }
+                    ++t->prec;  // rows
+                    t->quoted = false;
+                    continue;  // next is '[' for another row, or ']' to close
+                }
+                const OpTok top = *t;
+                --n_ops;
+                if (!emit_op(top)) {
+                    return false;
+                }
+                expect_operand = false;
+                continue;
+            }
+            if (c == '[') {  // another row of the literal being built
+                OpTok* t = top_op();
+                if (t == nullptr || t->tok != Tok::kMatLit || t->quoted) {
+                    return fail("Syntax error");
+                }
+                if (!open_row(t)) {
+                    return false;
+                }
+                expect_operand = true;
+                continue;
+            }
+            if (c == '(') {  // element access: [A](row, col)
+                ++s;
+                OpTok t;
+                t.tok = Tok::kIndex;
+                t.argc = 1;
+                if (!push_op(t)) {
+                    return false;
+                }
+                expect_operand = true;
+                continue;
+            }
+            // `[A]^T` — postfix transpose, tighter than anything else, so it
+            // applies to the operand already emitted and needs no stack entry.
+            // `^-1` and `^n` stay ordinary powers and are dispatched on the
+            // base's kind at run time.
+            if (c == '^' && (s[1] == 'T' || s[1] == 't') && !ident_char(s[2])) {
+                s += 2;
+                if (!emit(Op::kTranspose)) {
+                    return false;
+                }
+                continue;
+            }
             if (c == ')') {
                 ++s;
                 if (!pop_while_tighter(0, false)) {
@@ -492,7 +663,7 @@ struct Compiler {
                 }
                 const OpTok top = *t;
                 --n_ops;
-                if (top.tok == Tok::kFunc) {
+                if (top.tok == Tok::kFunc || top.tok == Tok::kIndex) {
                     if (!emit_op(top)) {
                         return false;
                     }
@@ -525,8 +696,20 @@ struct Compiler {
                     return false;
                 }
                 OpTok* fn = top_op();
-                if (fn == nullptr || (fn->tok != Tok::kFunc && fn->tok != Tok::kBrace)) {
+                if (fn == nullptr || (fn->tok != Tok::kFunc && fn->tok != Tok::kBrace &&
+                                      fn->tok != Tok::kIndex && fn->tok != Tok::kMatLit)) {
                     return fail("Syntax error");
+                }
+                if (fn->tok == Tok::kMatLit) {  // another element in this row
+                    if (!fn->quoted) {
+                        return fail("Syntax error");
+                    }
+                    if (fn->fn >= 255) {
+                        return fail("Matrix literal too large");
+                    }
+                    ++fn->fn;
+                    expect_operand = true;
+                    continue;
                 }
                 if (fn->argc >= 255) {
                     return fail("Expression too complex");
@@ -536,6 +719,8 @@ struct Compiler {
                         return false;
                     }
                     expect_var_name = true;
+                } else if (fn->refs) {
+                    expect_list_ref = true;
                 }
                 ++fn->argc;
                 expect_operand = true;
@@ -567,7 +752,7 @@ struct Compiler {
         }
         while (n_ops > 0) {
             const OpTok top = ops[--n_ops];
-            if (top.tok == Tok::kLParen || top.tok == Tok::kFunc || top.tok == Tok::kBrace) {
+            if (top.tok != Tok::kBinary && top.tok != Tok::kUnary) {
                 return fail("Syntax error");  // unbalanced
             }
             if (!emit_op(top)) {
