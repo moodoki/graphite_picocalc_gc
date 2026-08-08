@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 include(pico_sdk_import.cmake)
 
 project(picocalc_graphcalc
-    VERSION   0.2.0
+    VERSION   0.3.0
     LANGUAGES C CXX ASM
 )
 
@@ -221,13 +221,22 @@ message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 # screen. Not derivable from git — bump it here when a phase/sub-phase
 # reaches code-complete (the session-wrapup agent's README status pass
 # covers this).
-set(PICOCALC_PHASE "5")
+set(PICOCALC_PHASE "5.1")
+
+# Serial line injection for on-device test automation (Phase 5.1). Lets a
+# host script submit whole lines to the home screen over USB serial and read
+# back the result plus its kind. Default ON: this is a personal-use dev tool
+# and the automation is worth far more than the surface it adds. Not a
+# security control — it is a calculator — but compiling it out keeps a
+# shipping build free of a path that lets the USB port drive the UI.
+option(PICOCALC_SERIAL_INJECT "Accept expression lines over USB serial (dev tooling)" ON)
 
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PICOCALC_PHASE="${PICOCALC_PHASE}"
+    $<$<BOOL:${PICOCALC_SERIAL_INJECT}>:PICOCALC_SERIAL_INJECT=1>
     # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
     # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
     # SDK default declares only 2 KB of it, so __StackBottom sat in the

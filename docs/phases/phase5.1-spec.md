@@ -13,7 +13,10 @@ into repeatable, scriptable checks.
 Explicitly **out of scope**: per-keystroke `KeyEvent` synthesis (option 1 in
 the originating wishlist entry). See §7 for the trigger that should revive it.
 
-**Status**: Specced, not started. Promoted 2026-08-08 from
+**Status**: **Code-complete and HW-verified on the Pico 2, 2026-08-09.** All six
+tasks shipped; the D48 det ladder (5.1.6) now runs unattended and reproduces its
+recorded behaviour. Pico 1 not re-flashed — the code is board-independent and
+board swaps are batched to stage closures. Originally promoted 2026-08-08 from
 [serial-injection-plan.md](../notes/serial-injection-plan.md), which was itself
 scoped from the `wishlist.md` entry raised 2026-08-05. Sequenced ahead of
 [Phase 5.2](phase5.2-spec.md) because injection is the main practical mitigation
@@ -154,7 +157,49 @@ the primitive the D48 session needed fifteen times.
 | 5.1.4 | `scripts/serial-console.py` with DTR/RTS assert and reconnect | 2 | Survives a `picotool load -f -x` reflash mid-session without losing the stream |
 | 5.1.5 | Round-trip check on the diag screen's existing key echo (`src/main.cpp:214-215`) | 0.5 | Inject → echo observed with no new firmware code on that screen |
 | 5.1.6 | Re-run the D48 det ladder unattended | 1.5 | Reproduces the recorded peaks (3,860 of 4,096 on the Pico 2) without hand typing |
-| | **Total** | **8** | |
+| 5.1.7 | `mode [keyword]` command — read/set angle, number and display mode from the home screen | 1.5 | The DEGREE-folding and RECT/POLAR checklists run unattended |
+| | **Total** | **9.5** | |
+
+**5.1.7 was added during the build, not planned.** With the rest of 5.1 working,
+angle and number mode were the only thing keeping two whole checklists
+hand-driven: they live on the MODE screen behind arrow-key navigation, and none
+of the sixteen typed commands touched them. A `mode` command removed that wall
+for ~1.5 hrs of work and made almost the entire home screen scriptable.
+
+Design notes worth keeping:
+
+- **It is the only command that pushes a history entry.** Every other command is
+  silent, but a setter with no feedback is unusable over serial — commands
+  report only `-> command` — and echoing the new mode is what a user would want
+  on screen anyway.
+- **It mirrors into `graph::state()` and calls `save_graph_state()`**, exactly as
+  `ModeScreen::adjust` does. Mode lives in two places; a setter that skips the
+  mirror looks fine until the next MODE-screen visit or reboot reverts it.
+- **Output is deliberately ASCII** — `RECT`/`POLAR`, not the screen's
+  `a+bi`/`r∠θ`, which carry font glyph bytes a host script would have to decode.
+- Grammar: `mode` reports; `mode rad|deg|real|rect|polar|float|sci|eng|fixN`
+  sets. `fixN` is one token so the 16-byte command buffer and exact-match
+  dispatch stay unchanged.
+
+**As built, 2026-08-09 — all six done.** Three things differed from the plan
+above and are worth carrying rather than quietly correcting:
+
+1. **The line cap is 128, not 256.** §3.2 cited `config::kMaxExprLen` (256), but
+   the real bound is `ui::InputLine::kCapacity` = 128, and `set_text()` is
+   `strncpy`-based so it *truncates silently*. `submit_line()` rejects at 128
+   instead; `serial-console.py` mirrors the limit so the sender reports the
+   offending text. Truncation was the dangerous failure here — it returns a
+   plausible result for an expression nobody sent.
+2. **Results contain firmware glyph bytes, not UTF-8.** `\x86` is the imaginary
+   unit, `\x87` the store arrow, `\x8c` a radical (full map:
+   `src/gfx/font.hpp:40-54`). Decoding with `errors="replace"` collapsed them
+   all to `U+FFFD`, which would have made `2i` and `2∠` compare *equal* — fatal
+   in a harness whose purpose is comparing results. The script decodes latin-1
+   (bijective over bytes) and renders via a `GLYPHS` table.
+3. **The echo carries the serialized form, not the typeset glyphs** — `sqrt(8)`
+   reports `2*sqrt(2)`, which renders on screen as `2√2`. This does not weaken
+   the `ResultKind` finding: `kind=symbolic` vs `plain` *is* the amber/white
+   answer, which was the capability §1 claimed.
 
 ## 5. Risks and mitigations
 
