@@ -195,6 +195,74 @@ int build_lookup(Variables& vars, te_variable* lookup) {
     return li;
 }
 
+// The table lives in bss, not on the caller's stack, and is built once.
+//
+// Not a speed optimization: at kLookupCount x sizeof(te_variable) this is
+// ~1.95 KB, and a stack copy in each of the three callers below pushed
+// Engine::compile's frame to 2,232 B. Core 0 has 4 KB before core 1's
+// stack top, so compiling from inside a render() (the slot editors used
+// to, per row per 16-px strip) overran into core 1 mid-DMA and hung the
+// machine — the 2026-08-05 Y=-editor lockup, D47.
+//
+// Building once is sound because the contents never change after
+// startup: a-z bind to the singleton Engine's Variables (stable
+// addresses), and constants()/catalog() return constexpr tables. The
+// `built_for` pointer only guards against a second Engine instance
+// (host tests); it is not a per-call cost. Trailing kMaxExtraVars slots
+// are compile_with's to fill.
+//
+// Safe to share across calls because te_compile reads the array only
+// while parsing (tinyexpr.c stashes it in the parse state; the built
+// tree keeps just the copied addresses) and engine compiles never nest —
+// preprocess() below is a pure string rewrite that cannot re-enter.
+te_variable g_lookup[kLookupCount + Engine::kMaxExtraVars];
+int g_lookup_len = 0;
+const Variables* g_lookup_for = nullptr;
+
+int lookup_table(Variables& vars) {
+    if (g_lookup_for != &vars) {
+        g_lookup_len = build_lookup(vars, g_lookup);
+        g_lookup_for = &vars;
+    }
+    return g_lookup_len;
+}
+
+// Parse-nesting cap, the counterpart of the stated depth caps D45 gave
+// the CAS parser. tinyexpr's parser is recursive descent — one
+// list/expr/term/factor/power/base cycle per level of parenthesis or
+// function-argument nesting — and it has no limit of its own, so the
+// depth is whatever the input says.
+//
+// Sized to the measurement, not to taste: the cycle is **200 B** per
+// level on the Pico 1, and core 0 has 4 KB before core 1's stack. The
+// tightest caller is the list-lift path
+// (evaluate_input -> listexpr::evaluate -> eval_list_into x3 ->
+// eval_lift -> compile_with), which leaves ~1,696 B for the parser —
+// eight levels. The Y= editor's own path would allow sixteen, but one
+// cap has to hold for every call site.
+//
+// This is what the 2026-08-05 Y= lockup actually needed. Its stored
+// slot held one of the 2026-08-02 nesting stress probes ("up to 20
+// nested trig calls"), and at 20 levels the parser walked off the stack
+// — silently into core 1 before stack guards, and as a hard fault in
+// `factor`'s prologue push after them. Now it is a parse error, so the
+// row just draws red and the slot stays editable.
+constexpr int kMaxParseDepth = 8;
+
+bool too_deeply_nested(const char* expr) {
+    int depth = 0;
+    for (const char* p = expr; *p != 0; ++p) {
+        if (*p == '(') {
+            if (++depth > kMaxParseDepth) {
+                return true;
+            }
+        } else if (*p == ')') {
+            --depth;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 Engine::Engine() = default;
@@ -216,12 +284,15 @@ EvalResult Engine::eval_internal(const char* expr) {
         res.error = "Non-real variable";
         return res;
     }
+    if (too_deeply_nested(processed)) {
+        res.error = "Too deeply nested";
+        return res;
+    }
 
-    te_variable lookup[kLookupCount];
-    const int li = build_lookup(vars_, lookup);
+    const int li = lookup_table(vars_);
 
     int err = 0;
-    te_expr* compiled = te_compile(processed, lookup, li, &err);
+    te_expr* compiled = te_compile(processed, g_lookup, li, &err);
     if (compiled == nullptr) {
         res.error = "Syntax error";
         return res;
@@ -240,10 +311,12 @@ void* Engine::compile(const char* expr, int sweep_slot) {
     if (sweep_slot != kNoComplexCheck && refs_complex_var(processed, sweep_slot)) {
         return nullptr;  // Non-real variable (4D.15) — same surface as a parse error
     }
-    te_variable lookup[kLookupCount];
-    const int li = build_lookup(vars_, lookup);
+    if (too_deeply_nested(processed)) {
+        return nullptr;  // Same surface as a parse error; see kMaxParseDepth
+    }
+    const int li = lookup_table(vars_);
     int err = 0;
-    return te_compile(processed, lookup, li, &err);
+    return te_compile(processed, g_lookup, li, &err);
 }
 
 void* Engine::compile_with(const char* expr, const ExtraVar* extras, int extra_count,
@@ -258,13 +331,18 @@ void* Engine::compile_with(const char* expr, const ExtraVar* extras, int extra_c
     if (sweep_slot != kNoComplexCheck && refs_complex_var(processed, sweep_slot)) {
         return nullptr;  // Non-real variable (4D.15)
     }
-    te_variable lookup[kLookupCount + kMaxExtraVars];
-    int li = build_lookup(vars_, lookup);
+    if (too_deeply_nested(processed)) {
+        return nullptr;  // Same surface as a parse error; see kMaxParseDepth
+    }
+    // The extras go in the slots reserved past the shared table's tail;
+    // they are overwritten by the next compile_with, which is fine — the
+    // array is only read during te_compile below.
+    int li = lookup_table(vars_);
     for (int i = 0; i < extra_count; ++i) {
-        lookup[li++] = {extras[i].name, extras[i].addr, TE_VARIABLE, nullptr};
+        g_lookup[li++] = {extras[i].name, extras[i].addr, TE_VARIABLE, nullptr};
     }
     int err = 0;
-    return te_compile(processed, lookup, li, &err);
+    return te_compile(processed, g_lookup, li, &err);
 }
 
 calc_t Engine::eval_compiled_raw(void* handle) {

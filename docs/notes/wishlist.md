@@ -98,6 +98,41 @@ only of features that don't yet have a home.
   white), and its own tests — comparable in size to D44. Deliberately
   deferred out of Phase 5 Stage 5 rather than grown into a hardening
   session; no design work beyond this note.
+- **Say *why* an editor field is invalid, not just colour it red** (raised
+  2026-08-08, Pico 1 testdrive). Today `SlotEditorScreen::render()` draws a
+  row white or red off a single cached bool (`valid_mask_`, D47), and
+  `field_valid()` → `Engine::compile()` throws the reason away — the engine
+  returns `nullptr` for every failure mode alike, so the UI genuinely does
+  not know whether it is a syntax error, an unknown identifier, a non-real
+  variable, or (since D47) an expression nested past `kMaxParseDepth`. The
+  trigger was exactly that ambiguity: after the D47 fix Y1 sat red with no
+  hint that the cause was nesting depth. Same gap in the list, matrix and
+  seq editors.
+  - Shape: give the compile path an out-parameter for a static reason
+    string. tinyexpr already hands back an error *offset* from
+    `te_compile`'s `int *error`, which `Engine::compile` currently discards
+    (`engine.cpp`) — that would also allow pointing at the offending
+    character, not just naming the problem.
+  - Display is the harder half on a 320x320 panel: rows are 26 px and the
+    expression text already truncates with an ellipsis before the enable
+    checkbox. Likely a status line at the bottom for the *selected* row
+    only, rather than per-row text.
+  - Note the D47 constraint: whatever this does must not put the compiler
+    back inside `render()`. The reason string has to be cached alongside
+    the valid bit, refreshed from `on_activate()`/`on_key`.
+- **Crosshair (horizontal line) in trace mode** (raised 2026-08-08, Pico 1
+  testdrive, as a question — "is trace supposed to show a horizontal line
+  too?"). It is not: `draw_trace` renders a full-height *vertical* line plus
+  a 5x5 cursor square in the slot's colour (`graph_screen.cpp:1102-1105`,
+  and the param/polar/seq path at `:1228-1231`). No decision ever specified
+  a crosshair, so this is unimplemented rather than broken. Adding the
+  horizontal arm is small — one `draw_hline` at the cursor row, skipped when
+  the point is offscreen — but worth judging on device first: the panel is
+  320 px and a full-width line may read as clutter against the grid, so a
+  short arm around the cursor, or a MODE toggle, may be better than a full
+  crosshair. TI-84 itself draws neither: it flashes a small cursor on the
+  curve with the readout at the bottom, which is closer to what this already
+  does.
 - **Copy/paste in expression editors** (raised 2026-08-02, Pico 2 testdrive):
   no way to copy text between fields — e.g. duplicating one Y= expression
   into another slot means retyping it in full on the physical keypad. No

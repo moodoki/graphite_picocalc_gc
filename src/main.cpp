@@ -16,6 +16,7 @@
 #include "pico/stdlib.h"
 
 #include "config.hpp"
+#include "platform/fault.hpp"
 #include "platform/platform.hpp"
 #include "platform/power.hpp"
 #include "platform/sd_card.hpp"
@@ -65,6 +66,11 @@ int g_bulk_fail_step = -1;
 // next boot skip the test instead of boot-looping. (Scratch 4-7 belong
 // to the boot ROM's watchdog-vector protocol; 0/1 are free.)
 constexpr uint32_t kBulkTestMarker = 0xB07DFACEu;
+
+// Hard fault on the previous boot (D47), read before anything else can
+// consume the watchdog reboot cause and reported once USB is up.
+bool g_prior_fault = false;
+uint32_t g_prior_fault_pc = 0;
 
 void run_psram_bulk_test() {
     if (watchdog_caused_reboot() && watchdog_hw->scratch[0] == kBulkTestMarker) {
@@ -318,6 +324,10 @@ DiagScreen g_diag_screen;
 int main() {
     stdio_init_all();
 
+    // Before anything else can consume the watchdog reboot cause — a
+    // fault-triggered reboot looks like any other to run_self_tests().
+    g_prior_fault = platform::take_prior_fault(&g_prior_fault_pc);
+
     g_init_status = platform::init();
     run_self_tests();
 
@@ -504,6 +514,20 @@ int main() {
                     s->invalidate_band(0, ui::kStatusBarH);
                 }
                 dirty = true;
+            }
+        }
+
+        // Previous boot ended in a hard fault (D47). Repeated on the
+        // same 30 s heartbeat as the others rather than printed once at
+        // boot — a one-shot before USB enumerates is a one-shot nobody
+        // sees, and this is exactly the line worth not missing.
+        if (g_prior_fault) {
+            static uint32_t last_fault_report_ms = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            if (now_ms > 3'000 && now_ms - last_fault_report_ms >= 30'000) {
+                last_fault_report_ms = now_ms;
+                printf("fault: previous boot hard-faulted at pc=0x%08lx\n",
+                       static_cast<unsigned long>(g_prior_fault_pc));
             }
         }
 

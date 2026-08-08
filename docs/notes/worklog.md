@@ -305,6 +305,125 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-08 — Y= editor lockup + ZTrig in DEGREE: the D45 bug class, three times over (D47). **HW-verified on the Pico 1**
+
+Both items from `testdrive-2026-08-05-observations.md`.
+
+**The Y= freeze was a core-0 stack overrun into core 1's stack.**
+`SlotEditorScreen::render()` coloured each row by calling
+`math::engine().compile()` — **inside the renderer** — and that frame measured
+**2,232 B** on the linked Pico 1 ELF, almost all of it
+`te_variable lookup[122]` (1,952 B) rebuilt on the stack every compile. Core 0
+has 4 KB before `__StackOneTop`. Strip mode renders 16-px bands and the header
+bar is exactly 16 px, so strip 0 pushed fine, then core 0 rendered strip 1
+**while core 1 was mid-DMA on strip 0**, overran into its stack and killed it;
+core 0 then blocked forever in `wait_one_ack()`, taking key polling with it.
+That is the reported "first few pixel rows of the header, then dead, every
+time, power cycle only", exactly. The graph screen survived the same stored
+expressions because `recompute_function` sits ~200 B shallower and runs
+outside `render_frame` with core 1 parked.
+
+**A second, deeper instance turned up while fixing it.** The new frame report
+(below) found `HomeScreen::evaluate_input` (872) → `listexpr::evaluate`
+(1,192) → `eval_list_into` (**2,248 and recursive**) = 4,312 B at depth 1 —
+so a plain `{1,2,3}` on the home screen was already overrunning, silently, on
+a path HW-verified since Phase 3A.
+
+Fixes, per **D47**:
+
+- **`render()` only draws.** Validity is cached in a `valid_mask_` bitfield,
+  refreshed from `on_activate()`/`on_key` — the contract `list_editor.hpp` has
+  documented since Phase 3A and the slot editors never got. Also removes ~140
+  `te_compile` calls (with mallocs) per frame.
+- **tinyexpr's binding table moved to bss**, built once (it is stable after
+  startup). `Engine::compile` **2,232 → 280 B**, `eval_internal` the same,
+  `compile_with` 2,368 → 288 — firmware-wide, so graph recompute, table, seq
+  and home eval all benefit.
+- **List path:** `noinline` on the four leaf evaluators (inlined, their
+  `kMaxLen` locals — `eval_seq`'s `arg[5][256]` worst — were charged once per
+  recursion level), non-reentrant buffers to bss, genuinely-per-level buffers
+  **depth-indexed** like the file's existing `g_temp[kMaxDepth]`, and a hard
+  `RecGuard`/`kMaxRec = 3` cap in `eval_list_into` itself (the old `ctx.depth`
+  never covered the sort or lift paths). `eval_list_into` **2,248 → 32 B**.
+- **`PICO_USE_STACK_GUARDS=1` + `PICO_STACK_SIZE=4096`** — the top deferred
+  item from the last handoff — putting an MPU trap at
+  `__StackBottom == __StackOneTop`, with a new `src/platform/fault.cpp`
+  recording the faulting PC in a watchdog scratch register and rebooting.
+  Next boot prints `fault: previous boot hard-faulted at pc=0x...` on the 30 s
+  heartbeat. Without that handler the guard would turn silent corruption into
+  an indistinguishable lockup (the SDK default handler is an infinite loop).
+- **`scripts/size-report.sh` gained a stack-frame listing** — walks prologues
+  out of the ELF and reports anything over a threshold. This is the
+  measurement that root-caused the bug and then found the list-path instance;
+  it is also the deterministic half of the guard, which on RP2040 is only a
+  32-byte MPU subregion a large frame can step over.
+
+**ZTrig now follows the Angle mode** (`zoom_trig`): DEGREE gives
+x -360..360 / Xscl 90, RADIAN unchanged at $\pm 2\pi$ / $\pi/2$. `tick_label` needs no
+change — `pi_multiple(90,…)` does not match, so degree ticks label
+numerically.
+
+**Measured** (Pico 1): Y= render path ~3,200+ and overrunning → **424 B**;
+worst home-screen list expression ~4,300+ and overrunning → **3,152 of 4,096**
+(944 B margin). Host suite green, 12 suites — `test_math` 230 → **235**
+(compile_with/compile shared-table aliasing), `test_lists` 239 → **241**
+(recursion cap). Both boards build clean; `lint.sh`/`format.sh` clean.
+
+**Cost, and it is not small:** Pico 1 `.bss` **198,836 → 209,120 (+10,284)`,
+headroom 61.8 → 51.8 KB. That comes straight out of the **Phase 6 margin** —
+with a 48 KB MicroPython heap the spare drops from ~14 KB to ~4 KB, so the
+levers in `pre-phase5-review.md` (heap 48→40 KB, ArrayStore slab cut,
+`g_chunk` fold) are now likely rather than optional. Note also that `size`'s
+total jumps a further **4,096 B that is not real**: `PICO_STACK_SIZE`
+2048 → 4096 doubles both `.stack_dummy` sections, which live in the dedicated
+`SCRATCH_X`/`SCRATCH_Y` banks and were never allocatable. **Compare `.bss`
+alone across this change, not `size`'s total.**
+
+**Flashed to the Pico 1 — and the pass found a third instance of the same
+class, which is the interesting part.** Boot was clean and the guard did not
+trip through init, but F1/F4/F5 still failed — now as "black screen, then back
+to the home screen" instead of dead keys. That is the new fault handler
+working. Serial on the next boot:
+
+```
+fault: previous boot hard-faulted at pc=0x100551da
+```
+
+→ `factor+0xa` in `tinyexpr.c`, the `push {r5, r6, r7, lr}` **prologue**
+instruction. A fault on the prologue push is unambiguous stack overflow, and
+it named the gap this session had missed: **D45 capped the CAS parser's depth;
+tinyexpr's parser never had a cap.** Its recursion costs **200 B/level**
+(measured), so depth is whatever the input says — and the input was Y1, still
+holding one of the "up to 20 nested trig calls" perf stress probes from
+`testdrive-2026-08-02`. The Y= path allows 16. Hence "every time", and hence
+F4/F5 failing too (`recompute_function` compiles the same slot).
+
+Added **`kMaxParseDepth = 8`** in `eval_internal`/`compile`/`compile_with`,
+sized to the tightest caller (the list-lift path leaves ~1,696 B → eight
+levels; the Y= path alone would allow sixteen, but one cap has to hold
+everywhere). Over-deep input is a parse error now: the row draws red and stays
+editable. `test_math` 235 → **242** (depths 9/20/40 through both `compile` and
+`evaluate`).
+
+**Verified on the Pico 1 after the reflash:** Y= opens and renders, **Y1 draws
+red** (the stress probe, correctly rejected), the graph works, and three
+consecutive `graph recompute:` lines came in at 103,163 / 103,107 / 103,019 us
+with no fault — the same path that had been faulting deterministically.
+
+The sequencing is the lesson: guard + fault reporter turned a second unknown
+instance of this bug class into a PC and a one-line diagnosis on the first
+flash. Shipping the guard *without* the handler would have produced another
+indistinguishable lockup.
+
+**ZTrig in DEGREE confirmed working on the same pass**, closing the second
+item from the 2026-08-05 testdrive.
+
+**Still unverified on hardware:** the wider guards-are-live sweep (matrix ops, large-list editor, stats, the D45 nesting
+ladder) — plus the whole Phase 5 CAS on-device checklist this bug had been
+blocking. Pico 2 not flashed. See `next-session.md`.
+
+---
+
 ## 2026-08-05 — Phase 5 Stage 5: CAS hardening (4D.22, D45) + two complex-evaluator bugfixes (D46). **PHASE 5 CLOSED, HW-verified on both boards.**
 
 Stage 5's brief was "stress testing + edge cases". The audit found a live

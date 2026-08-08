@@ -22,6 +22,11 @@ constexpr size_t kMaxLen = 256;
 constexpr int kChunk = 256;
 constexpr int kMaxLiteral = 64;  // Input line is 128 chars — plenty
 constexpr int kMaxDepth = 2;     // Wrapper nesting (cumsum(sort_asc(..)))
+// Hard cap on eval_list_into recursion, enforced in the function itself
+// (see RecGuard). Sized against core 0's stack, not against taste: the
+// worst chain is evaluate_input -> evaluate -> kMaxRec x eval_list_into
+// -> a leaf evaluator, and it has to stay inside 4 KB (D47).
+constexpr int kMaxRec = 3;
 
 Array g_result;
 Array g_temp[kMaxDepth];
@@ -56,6 +61,63 @@ calc_t (&g_outbuf)[kChunk] = *reinterpret_cast<calc_t (*)[kChunk]>(scratch::comp
                                                                    sizeof(g_op_lift));
 static_assert(sizeof(g_lift) + sizeof(g_op_lift) + sizeof(g_outbuf) <= scratch::kComputeBytes,
               "list_expr scratch exceeds shared compute region");
+
+// String scratch for the evaluators that are *not* part of the
+// recursive cycle, held in bss instead of on the stack (D47).
+//
+// Core 0 has 4 KB before it is writing into core 1's stack, and this
+// file's chain — HomeScreen::evaluate_input -> evaluate ->
+// substitute_reductions -> eval_list_into (recursive) -> a leaf
+// evaluator — was spending most of it on kMaxLen char arrays. Each
+// struct below belongs to functions that cannot be on the stack twice
+// at once (nothing they call re-enters them; see the note above
+// eval_literal), so one copy each is enough.
+struct ReduceScratch {
+    char raw[kMaxLen];
+    char arg[kMaxLen];
+    char rebuilt[kMaxLen];
+};
+ReduceScratch g_reduce;
+
+struct SeqScratch {
+    char raw[kMaxLen];
+    char arg[5][kMaxLen];
+};
+SeqScratch g_seq;
+
+struct LiteralScratch {
+    const char* starts[kMaxLiteral];
+    size_t lens[kMaxLiteral];
+    calc_t values[kMaxLiteral];
+    char arg[kMaxLen];
+};
+LiteralScratch g_literal;
+
+struct RangeScratch {
+    char raw[kMaxLen];
+    char arg[kMaxLen];
+};
+RangeScratch g_range;
+
+// eval_list_into's own wrapper-argument buffers, one set per recursion
+// level. Everything else in this file is called at most once at a time;
+// these are the exception, so they are indexed by depth rather than
+// shared — and kept out of the recursive frame, which is the one that
+// multiplies (D47).
+struct StepScratch {
+    char arg[kMaxLen];
+    char targ[kMaxLen];
+    char rw[kMaxLen];   // eval_lift's rewritten expression
+    char sub[kMaxLen];  // extract_operands' current span
+};
+StepScratch g_step[kMaxRec];
+
+// Complex-lift term/factor text (eval_clift).
+struct CliftScratch {
+    char term[kMaxLen];
+    char factor[kMaxLen];
+};
+CliftScratch g_clift;
 
 bool ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
@@ -226,9 +288,29 @@ struct Ctx {
     const char* err = nullptr;
     int depth = 0;
     int ops = 0;  // Next free lift-operand slot (monotonic, see g_op)
+    int rec = 0;  // eval_list_into recursion depth, see RecGuard
 };
 
 bool eval_list_into(const char* s, Array& out, Ctx& ctx);
+
+// Bounds eval_list_into's recursion at the function itself rather than
+// at individual call sites. `depth` above only ever covered the
+// cumsum/delta path; the sort path, and the lift path through
+// extract_operands, both recursed uncounted — so
+// sort_asc(sort_asc(sort_asc(...))) could nest as deep as the input
+// allowed. At 624 B a level against core 0's 4 KB that is a stack
+// overrun, not a slow evaluation (D47), and the depth has to be capped
+// by construction for the budget to mean anything.
+struct RecGuard {
+    Ctx& ctx;
+    explicit RecGuard(Ctx& c) : ctx(c) { ++ctx.rec; }
+    ~RecGuard() { --ctx.rec; }
+    RecGuard(const RecGuard&) = delete;
+    RecGuard& operator=(const RecGuard&) = delete;
+    RecGuard(RecGuard&&) = delete;
+    RecGuard& operator=(RecGuard&&) = delete;
+    bool too_deep() const { return ctx.rec > kMaxRec; }
+};
 
 // Reduction names: list in, scalar out. mean/median/stdev added per
 // D24 (stdev = sample Sx; "std" is an alias).
@@ -299,16 +381,16 @@ bool substitute_reductions(char* buf, size_t cap, const char** err, Complex* cva
                 if (close == nullptr) {
                     continue;  // Unbalanced — let the engine report it
                 }
-                char raw[kMaxLen];
+                char* const raw = g_reduce.raw;
                 const auto alen = static_cast<size_t>(close - (q + 1));
-                if (alen >= sizeof(raw)) {
+                if (alen >= sizeof(g_reduce.raw)) {
                     *err = "Expression too long";
                     return false;
                 }
                 std::memcpy(raw, q + 1, alen);
                 raw[alen] = 0;
-                char arg[kMaxLen];
-                if (!trim_into(raw, arg, sizeof(arg))) {
+                char* const arg = g_reduce.arg;
+                if (!trim_into(raw, arg, sizeof(g_reduce.arg))) {
                     *err = "Expression too long";
                     return false;
                 }
@@ -386,11 +468,11 @@ bool substitute_reductions(char* buf, size_t cap, const char** err, Complex* cva
                 }
                 char num[40];
                 std::snprintf(num, sizeof(num), "%.17g", static_cast<double>(v));
-                char rebuilt[kMaxLen];
-                const int wrote = std::snprintf(rebuilt, sizeof(rebuilt), "%.*s(%s)%s",
+                char* const rebuilt = g_reduce.rebuilt;
+                const int wrote = std::snprintf(rebuilt, sizeof(g_reduce.rebuilt), "%.*s(%s)%s",
                                                 static_cast<int>(p - buf), buf, num, close + 1);
                 if (wrote < 0 || wrote >= static_cast<int>(cap) ||
-                    wrote >= static_cast<int>(sizeof(rebuilt))) {
+                    wrote >= static_cast<int>(sizeof(g_reduce.rebuilt))) {
                     *err = "Expression too long";
                     return false;
                 }
@@ -403,10 +485,20 @@ bool substitute_reductions(char* buf, size_t cap, const char** err, Complex* cva
     return true;
 }
 
-bool eval_literal(const char* s, Array& out, Ctx& ctx) {
+// The four leaf evaluators below are deliberately kept out of line.
+//
+// They are called only from eval_list_into, which *recurses* (through
+// eval_lift/extract_operands, and directly on the sort/cumsum paths).
+// Inlined, each one's kMaxLen locals — eval_seq alone has arg[5][256] —
+// became part of the recursive frame and were paid again at every level:
+// eval_list_into measured 2,248 B against core 0's 4 KB total, so a
+// single home-screen list expression already overran into core 1's
+// stack. Out of line they are leaves, charged once at the deepest point
+// instead of once per level (D47). None of them re-enters the cycle.
+__attribute__((noinline)) bool eval_literal(const char* s, Array& out, Ctx& ctx) {
     const size_t len = std::strlen(s);
-    const char* starts[kMaxLiteral];
-    size_t lens[kMaxLiteral];
+    auto& starts = g_literal.starts;
+    auto& lens = g_literal.lens;
     out.clear();
     if (len == 2) {  // "{}"
         out.set_dtype(Dtype::kDouble);
@@ -422,9 +514,9 @@ bool eval_literal(const char* s, Array& out, Ctx& ctx) {
     // complex-valued variable makes the whole literal complex. This
     // pass also length-checks every element for the loops below.
     bool complex = false;
+    char* const arg = g_literal.arg;
     for (int i = 0; i < count; ++i) {
-        char arg[kMaxLen];
-        if (lens[i] >= sizeof(arg)) {
+        if (lens[i] >= sizeof(g_literal.arg)) {
             ctx.err = "Expression too long";
             return false;
         }
@@ -440,7 +532,6 @@ bool eval_literal(const char* s, Array& out, Ctx& ctx) {
             return false;
         }
         for (int i = 0; i < count; ++i) {
-            char arg[kMaxLen];
             std::memcpy(arg, starts[i], lens[i]);
             arg[lens[i]] = 0;
             const auto r = complexexpr::evaluate(arg);
@@ -454,10 +545,9 @@ bool eval_literal(const char* s, Array& out, Ctx& ctx) {
     }
 
     out.set_dtype(Dtype::kDouble);
-    calc_t values[kMaxLiteral];
+    auto& values = g_literal.values;
     for (int i = 0; i < count; ++i) {
-        char arg[kMaxLen];
-        if (lens[i] >= sizeof(arg)) {
+        if (lens[i] >= sizeof(g_literal.arg)) {
             ctx.err = "Expression too long";
             return false;
         }
@@ -476,7 +566,7 @@ bool eval_literal(const char* s, Array& out, Ctx& ctx) {
     return true;
 }
 
-bool eval_seq(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
+__attribute__((noinline)) bool eval_seq(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
     const char* starts[5];
     size_t lens[5];
     const int count = split_args(inner, inner_len, starts, lens, 5);
@@ -484,10 +574,10 @@ bool eval_seq(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
         ctx.err = "seq needs (expr, var, lo, hi, step)";
         return false;
     }
-    char arg[5][kMaxLen];
+    auto& arg = g_seq.arg;
     for (int i = 0; i < 5; ++i) {
-        char raw[kMaxLen];
-        if (lens[i] >= sizeof(raw)) {
+        char* const raw = g_seq.raw;
+        if (lens[i] >= sizeof(g_seq.raw)) {
             ctx.err = "Expression too long";
             return false;
         }
@@ -525,7 +615,8 @@ bool eval_seq(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
 
 // range(lo, hi[, step]) — inclusive endpoints, default step ±1 toward
 // hi (D24). Backed by listops::seq with the identity formula.
-bool eval_range(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
+__attribute__((noinline)) bool eval_range(const char* inner, size_t inner_len, Array& out,
+                                          Ctx& ctx) {
     const char* starts[3];
     size_t lens[3];
     const int count = split_args(inner, inner_len, starts, lens, 3);
@@ -534,16 +625,16 @@ bool eval_range(const char* inner, size_t inner_len, Array& out, Ctx& ctx) {
         return false;
     }
     calc_t vals[3] = {0, 0, 0};
+    char* const raw = g_range.raw;
+    char* const arg = g_range.arg;
     for (int i = 0; i < count; ++i) {
-        char raw[kMaxLen];
-        char arg[kMaxLen];
-        if (lens[i] >= sizeof(raw)) {
+        if (lens[i] >= sizeof(g_range.raw)) {
             ctx.err = "Expression too long";
             return false;
         }
         std::memcpy(raw, starts[i], lens[i]);
         raw[lens[i]] = 0;
-        if (!trim_into(raw, arg, sizeof(arg)) || !eval_field(arg, &vals[i])) {
+        if (!trim_into(raw, arg, sizeof(g_range.arg)) || !eval_field(arg, &vals[i])) {
             ctx.err = "Bad range argument";
             return false;
         }
@@ -633,8 +724,8 @@ bool extract_operands(const char* s, char* out, size_t cap, Ctx& ctx) {
             return false;
         }
         const auto span_len = static_cast<size_t>(span_end - p);
-        char sub[kMaxLen];
-        if (span_len >= sizeof(sub)) {
+        char* const sub = g_step[ctx.rec - 1].sub;
+        if (span_len >= sizeof(g_step[ctx.rec - 1].sub)) {
             ctx.err = "Expression too long";
             return false;
         }
@@ -717,7 +808,7 @@ bool clift_has_list_token(const char* f, int first_op, int ops) {
     return false;
 }
 
-bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
+__attribute__((noinline)) bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
     CTerm terms[kMaxCTerms];
     int nterms = 0;
 
@@ -754,9 +845,9 @@ bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
                     return false;
                 }
                 // Parse the term [term_start, i): factors at */ depth 0.
-                char termbuf[kMaxLen];
+                char* const termbuf = g_clift.term;
                 const size_t tlen = i - term_start;
-                if (tlen >= sizeof(termbuf)) {
+                if (tlen >= sizeof(g_clift.term)) {
                     ctx.err = "Expression too long";
                     return false;
                 }
@@ -794,9 +885,9 @@ bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
                         }
                         continue;
                     }
-                    char fbuf[kMaxLen];
+                    char* const fbuf = g_clift.factor;
                     const size_t flen2 = j - fstart;
-                    if (flen2 == 0 || flen2 >= sizeof(fbuf)) {
+                    if (flen2 == 0 || flen2 >= sizeof(g_clift.factor)) {
                         ctx.err = "Syntax error";
                         return false;
                     }
@@ -891,8 +982,12 @@ bool eval_clift(const char* rw, int first_op, Array& out, Ctx& ctx) {
 // (brace literals, wrapper calls) — the vector lift.
 bool eval_lift(const char* s, Array& out, Ctx& ctx) {
     const int first_op = ctx.ops;
-    char rw[kMaxLen];
-    if (!extract_operands(s, rw, sizeof(rw), ctx)) {
+    // Depth-indexed for the same reason as eval_list_into's pair above:
+    // eval_lift sits inside the recursion cycle (extract_operands calls
+    // back into eval_list_into), so a kMaxLen local here is paid per
+    // level (D47).
+    char* const rw = g_step[ctx.rec - 1].rw;
+    if (!extract_operands(s, rw, sizeof(g_step[ctx.rec - 1].rw), ctx)) {
         return false;
     }
 
@@ -1024,6 +1119,11 @@ bool whole_literal(const char* s, size_t len) {
 }
 
 bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
+    const RecGuard guard(ctx);
+    if (guard.too_deep()) {
+        ctx.err = "Too deeply nested";
+        return false;
+    }
     const size_t len = std::strlen(s);
     if (len == 0) {
         ctx.err = "Expected a list";
@@ -1063,15 +1163,20 @@ bool eval_list_into(const char* s, Array& out, Ctx& ctx) {
         if (!wrapper_form(s, name, &inner, &inner_len)) {
             continue;
         }
-        char arg[kMaxLen];
-        if (inner_len >= sizeof(arg)) {
+        // Depth-indexed, not stack-local: this is the recursive step,
+        // so a kMaxLen pair here is paid once per nesting level. ctx.rec
+        // is 1-based and bounded by kMaxRec (RecGuard), which is what
+        // makes the pool a fixed size.
+        auto& step = g_step[ctx.rec - 1];
+        char* const arg = step.arg;
+        if (inner_len >= sizeof(step.arg)) {
             ctx.err = "Expression too long";
             return false;
         }
         std::memcpy(arg, inner, inner_len);
         arg[inner_len] = 0;
-        char targ[kMaxLen];
-        if (!trim_into(arg, targ, sizeof(targ))) {
+        char* const targ = step.targ;
+        if (!trim_into(arg, targ, sizeof(step.targ))) {
             ctx.err = "Expression too long";
             return false;
         }

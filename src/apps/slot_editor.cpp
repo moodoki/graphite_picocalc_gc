@@ -38,8 +38,22 @@ bool SlotEditorScreen::field_valid(int /*i*/, const char* text) const {
     return field_compiles(text);
 }
 
+void SlotEditorScreen::refresh_valid() {
+    const int n = field_count_ < kMaxFields ? field_count_ : kMaxFields;
+    uint16_t mask = 0;
+    for (int i = 0; i < n; ++i) {
+        if (field_valid(i, field_text(i))) {
+            mask = static_cast<uint16_t>(mask | (1U << i));
+        }
+    }
+    valid_mask_ = mask;
+}
+
 void SlotEditorScreen::on_activate() {
     editing_ = false;
+    // Fields can change while this screen is off the stack; activate()
+    // runs on every push/pop/replace that surfaces it.
+    refresh_valid();
 }
 
 // Row i's band for partial redraw, including the selection fill that
@@ -56,6 +70,7 @@ void SlotEditorScreen::begin_edit() {
 void SlotEditorScreen::commit_edit() {
     set_field_text(selected_, input_.text());
     editing_ = false;
+    refresh_valid();
 }
 
 bool SlotEditorScreen::on_key(const platform::KeyEvent& ev) {
@@ -109,10 +124,12 @@ bool SlotEditorScreen::on_key(const platform::KeyEvent& ev) {
             return true;
         case Key::kSpace:
             toggle_field(selected_);
+            refresh_valid();
             invalidate_row(selected_);
             return true;
         case Key::kDel:
             clear_field(selected_);
+            refresh_valid();
             invalidate_row(selected_);
             return true;
         case Key::kF1:
@@ -136,6 +153,7 @@ bool SlotEditorScreen::on_key(const platform::KeyEvent& ev) {
             return true;
         default:
             if (field_key(selected_, ev)) {
+                refresh_valid();
                 invalidate_row(selected_);
                 return true;
             }
@@ -167,7 +185,7 @@ void SlotEditorScreen::render(gfx::Framebuffer& fb) {
             input_.render(fb, expr_x, y, platform::kScreenW - expr_x - 20, font, true);
         } else {
             const char* text = field_text(i);
-            const platform::Color color = field_valid(i, text) ? kWhite : kRed;
+            const platform::Color color = cached_valid(i) ? kWhite : kRed;
             // Truncate to the space left of the enable checkbox — long
             // expressions (stored regression models) ran beneath it
             // (HW 2026-07-19).

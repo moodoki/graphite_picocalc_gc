@@ -61,6 +61,24 @@ constexpr size_t kHistoryTailBytes = 8192;
 constexpr long kHistoryMaxBytes = 24576;  // 3x tail: compaction stays rare
 char g_hist_io[kHistoryTailBytes];
 
+// evaluate_input's per-branch string scratch, in bss rather than on its
+// stack frame (D47). Each result branch declared its own buffers and
+// GCC could not overlap them all, leaving an 872 B frame — which sits
+// underneath the whole list-expression chain (evaluate ->
+// eval_list_into, recursive), and that chain has to fit core 0's 4 KB
+// before it is writing into core 1's stack. Same reentrancy argument as
+// g_hist_io above: one HomeScreen, one Enter at a time.
+//
+// The aliases in evaluate_input are `auto&`, so they stay array
+// references and every sizeof() at the use sites keeps its old value.
+struct EvalScratch {
+    char result[128];
+    char text[120];
+    char num[64];
+    char expr[160];
+};
+EvalScratch g_eval;
+
 // Screen layout (spec section 4.4, sized for the interim 8x12 font).
 constexpr int kStatusH = 16;
 constexpr int kInputY = 268;
@@ -349,7 +367,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
         const bool allow_complex = math::number_mode() != math::NumberMode::kReal;
         const math::cas::HomeResult cr = math::cas::evaluate_home(input_.text(), allow_complex);
         if (cr.kind != math::cas::HomeKind::kNone) {
-            char result[128];
+            auto& result = g_eval.result;
             ResultKind rkind = ResultKind::kSymbolic;
             if (cr.kind == math::cas::HomeKind::kError) {
                 std::snprintf(result, sizeof(result), "%s", cr.error);
@@ -386,7 +404,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     // Inline solve() calls become numeric literals first (Phase 4A),
     // so they compose inside any downstream path. History shows the
     // original input; evaluation continues on the substituted text.
-    char expr[160];
+    auto& expr = g_eval.expr;
     std::snprintf(expr, sizeof(expr), "%s", input_.text());
     if (math::solveexpr::contains_solve(expr)) {
         const char* serr = nullptr;
@@ -432,7 +450,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     // unambiguous. Kind::kNone means "not matrix syntax".
     const auto mres = math::matexpr::evaluate(expr);
     if (mres.kind != math::matexpr::Kind::kNone) {
-        char result[128];
+        auto& result = g_eval.result;
         bool error = false;
         if (mres.kind == math::matexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", mres.error);
@@ -440,7 +458,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
         } else if (mres.kind == math::matexpr::Kind::kScalar && mres.scalar_complex) {
             // Complex scalar from a matrix expression (4D.25: det /
             // element access); matexpr already committed Ans/store.
-            char num[64];
+            auto& num = g_eval.num;
             math::format_complex(mres.cvalue, math::number_mode(), num, sizeof(num));
             if (mres.scalar.stored_var >= 0) {
                 const char name = mres.scalar.stored_var < 26
@@ -454,7 +472,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
             format_scalar_result(mres.scalar, result, sizeof(result));
             error = !mres.scalar.ok;
         } else if (mres.kind == math::matexpr::Kind::kList) {
-            char text[120];
+            auto& text = g_eval.text;
             math::listexpr::format_list(*mres.list, text, sizeof(text));
             if (mres.stored_list >= 0) {
                 std::snprintf(result, sizeof(result), "%s%cl%c", text, gfx::kGlyphStore,
@@ -465,7 +483,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
         } else if (mres.kind == math::matexpr::Kind::kText) {
             std::snprintf(result, sizeof(result), "%s", mres.text);
         } else {
-            char text[120];
+            auto& text = g_eval.text;
             if (to_frac) {
                 math::matexpr::format_matrix_frac(*mres.matrix, text, sizeof(text));
             } else {
@@ -509,7 +527,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     // "not list syntax" and falls through to the scalar engine.
     const auto lres = math::listexpr::evaluate(expr);
     if (lres.kind != math::listexpr::Kind::kNone) {
-        char result[128];
+        auto& result = g_eval.result;
         bool error = false;
         if (lres.kind == math::listexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", lres.error);
@@ -524,7 +542,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
             format_scalar_result(lres.scalar, result, sizeof(result));
             error = !lres.scalar.ok;
         } else {
-            char text[120];
+            auto& text = g_eval.text;
             math::listexpr::format_list(*lres.list, text, sizeof(text));
             if (lres.stored_list >= 0) {
                 char lname[8];
@@ -565,7 +583,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     // p/q, falling back to decimal when no tight fraction (den <= 10000)
     // exists.
     if (to_frac) {
-        char result[128];
+        auto& result = g_eval.result;
         const auto res = math::engine().evaluate(expr);
         const bool error = !res.ok;
         if (error) {
@@ -591,7 +609,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     // sqrt(-4) etc. get "Non-real result" instead, without committing
     // Ans/a store twice (math::complexexpr::evaluate never mutates
     // engine state; only this dispatch does, exactly once).
-    char result[128];
+    auto& result = g_eval.result;
     bool error = false;
     ResultKind rkind = ResultKind::kPlain;
     // Complex-valued variables force the complex path too (4D.15): in
@@ -634,7 +652,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
             if (cres.stored_var >= 0) {
                 math::engine().vars().set_complex(cres.stored_var, cres.value.re, cres.value.im);
             }
-            char num[64];
+            auto& num = g_eval.num;
             math::format_complex(cres.value, math::number_mode(), num, sizeof(num));
             if (cres.stored_var >= 0) {
                 const char name =

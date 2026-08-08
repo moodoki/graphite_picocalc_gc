@@ -85,6 +85,7 @@ target_compile_options(cephes PRIVATE -w)
 add_executable(picocalc_graphcalc
     src/main.cpp
     src/platform/display.cpp
+    src/platform/fault.cpp
     src/platform/keyboard.cpp
     src/platform/platform.cpp
     src/platform/psram.cpp
@@ -227,6 +228,18 @@ set(PICOCALC_PHASE "5")
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PICOCALC_PHASE="${PICOCALC_PHASE}"
+    # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
+    # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
+    # SDK default declares only 2 KB of it, so __StackBottom sat in the
+    # middle of the bank and 2 KB of overrun went unnoticed before core 1
+    # even started getting corrupted. 4096 (the maximum the bank allows)
+    # puts __StackBottom exactly on the boundary, and the MPU guard traps
+    # there. Caveat: on RP2040 that guard is a single 32-byte subregion,
+    # so it reliably catches gradual/recursive growth but one oversized
+    # frame can step over it — scripts/size-report.sh's frame listing is
+    # the deterministic half of this check.
+    PICO_STACK_SIZE=4096
+    PICO_USE_STACK_GUARDS=1
     PSRAM_MUTEX=1
     PSRAM_ASYNC=0
     PSRAM_PIN_CS=20

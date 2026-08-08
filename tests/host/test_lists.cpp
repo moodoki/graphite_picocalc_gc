@@ -327,6 +327,15 @@ void test_list_expr() {
     const double nested[] = {1, 3, 6};
     check_list_result("cumsum(sort_asc({3,1,2}))", nested, 3);
 
+    // Recursion cap (D47). eval_list_into is bounded at kMaxRec levels
+    // because each one costs stack and core 0 only has 4 KB before it is
+    // in core 1's. cumsum(sort_asc({...})) is exactly at the cap and must
+    // keep working (checked above). One level deeper must be a clean
+    // error, not a deeper descent — and the sort path is what to test,
+    // since it is the one the older ctx.depth counter never covered.
+    check_list_error("sort_asc(sort_asc(sort_asc(sort_asc({3,1,2}))))", "Too deeply nested");
+    check_list_error("cumsum(sort_asc(sort_asc({3,1,2})))", "Too deeply nested");
+
     const double sq[] = {1, 4, 9, 16, 25};
     check_list_result("seq(x^2, x, 1, 5, 1)", sq, 5);
     res = eval_list("seq(x^2,x,1,5,1)->l5");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include "platform/display.hpp"
 #include "ui/input_line.hpp"
@@ -16,6 +17,13 @@ namespace apps {
 //
 // Keys: UP/DOWN select; ENTER/F1 edit (ENTER commits, ESC cancels);
 // F2 toggles enable; F3 clears; F4 pushes the graph screen; ESC pops.
+//
+// Same contract as the list editor: refresh_valid() from
+// on_activate()/on_key, render() only draws. field_valid() compiles the
+// expression, and render() runs once per 16-px strip on the Pico 1 —
+// calling it from there cost ~140 compiles a frame and, far worse, put
+// Engine::compile's stack frame under the renderer, which overran core 0
+// into core 1's stack and hung the machine (D47).
 class SlotEditorScreen : public ui::Screen {
 public:
     void on_activate() override;
@@ -59,6 +67,12 @@ protected:
 
     void invalidate_row(int i);
     void begin_edit();
+    // Re-run field_valid() over every field and cache the answers.
+    // Whole-table rather than per-row: the sequence editor's commit and
+    // clear rewrite paired seed rows, so the touched index is not the
+    // only one that can change. At <= kMaxFields compiles, off the
+    // render path, precision is not worth a stale bit.
+    void refresh_valid();
 
     int selected_ = 0;
     bool editing_ = false;
@@ -67,8 +81,15 @@ protected:
 private:
     void commit_edit();
 
+    // Widest editor today is the parametric one at 2 * kParametricSlots
+    // = 12; valid_mask_ is one bit per field.
+    static constexpr int kMaxFields = 16;
+
+    bool cached_valid(int i) const { return (valid_mask_ & (1U << i)) != 0; }
+
     int field_count_;
     int row_h_;
+    uint16_t valid_mask_ = 0;
 };
 
 }  // namespace apps

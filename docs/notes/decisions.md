@@ -18,6 +18,191 @@ Format:
 
 ---
 
+## D47: Stack frames are a budget — no compiling inside render(), no kMaxLen arrays on a recursive path, and a trap where core 0 meets core 1
+
+**Date**: 2026-08-08
+**Status**: Accepted (bugfix; the Y= lockup reported 2026-08-05, plus a second
+instance of the same class found while fixing it)
+**Context**: From the bench: "the Y= function editor freezes the calculator,
+every time, on Pico 1 — only the first few pixel rows of the header render,
+then keys are dead and it needs a physical power cycle." Testing stopped there,
+so the whole Phase 5 CAS on-device checklist sat behind it.
+
+The cause is the bug class **D45** named and then explicitly warned about:
+"graph rendering, matrix ops and Phase 6's MicroPython heap may currently work
+*because* nothing traps." Core 0's stack is the 4 KB `SCRATCH_Y` bank, sitting
+directly on top of core 1's `SCRATCH_X`. Overrun does not fault; it walks
+straight into core 1's live frames, starting at its outermost one.
+
+`SlotEditorScreen::render()` coloured each row red-or-white by calling
+`field_valid()` → `math::engine().compile()` — **inside the renderer**. Frames
+measured on the linked Pico 1 ELF:
+
+| frame | bytes |
+|---|---|
+| `main` | 216 |
+| `ScreenManager::render_frame` + `Framebuffer::render_frame` | 80 |
+| `SlotEditorScreen::render` | 120 |
+| **`Engine::compile`** | **2,232** |
+| `preprocess` (peer of the parse) | 560 |
+| `te_compile` + one parser nesting level | 56 + 160 |
+
+`Engine::compile`'s 2,232 B is almost all `te_variable lookup[kLookupCount]` —
+122 entries x 16 B = 1,952 B, rebuilt on the stack on *every* compile.
+`eval_internal` and `compile_with` each carried their own copy.
+
+Every reported symptom follows. Strip mode renders in 16-px bands and the
+header bar is exactly `kStatusH` = 16, so strip 0 pushes fine; core 0 then
+renders strip 1 **while core 1 is mid-DMA on strip 0**, overruns into its
+stack, and core 1 dies. Core 0 blocks forever in `wait_one_ack()`, and since
+keys are polled on core 0, input dies with it. Every time, because the stored
+expressions are the same each boot. The graph screen survives the same
+expressions because `recompute_function` sits ~200 B shallower *and* runs
+outside `render_frame`, with core 1 parked.
+
+**Decision**: four changes, in the order they matter.
+
+1. **`render()` only draws.** `SlotEditorScreen` caches field validity in a
+   `valid_mask_` bitfield, refreshed from `on_activate()` and after each
+   mutating key. This is the contract `list_editor.hpp` has documented since
+   Phase 3A ("refresh_cells() from on_key/on_activate; render() only draws");
+   the slot editors never got it. Secondary win: ~140 `te_compile` calls
+   (each with its own mallocs) per frame, gone.
+
+2. **The tinyexpr binding table moves to bss.** It is stable after startup —
+   `a`-`z` bind to the singleton's `Variables`, and `constants()`/`catalog()`
+   return constexpr tables — so it is built once. Safe to share because
+   `te_compile` reads it only while parsing and engine compiles never nest.
+   `Engine::compile` **2,232 → 280 B**, `eval_internal` likewise,
+   `compile_with` 2,368 → 288 B, firmware-wide.
+
+3. **The same disease, worse, on the list path.** The new frame report (below)
+   immediately found it: `HomeScreen::evaluate_input` (872) →
+   `listexpr::evaluate` (1,192) → `eval_list_into` (**2,248, and recursive**)
+   = 4,312 B at recursion depth 1. A plain `{1,2,3}` on the home screen was
+   already overrunning, silently, on a path HW-verified since Phase 3A. Fixed
+   by keeping the leaf evaluators out of line (`noinline` on `eval_literal`,
+   `eval_seq`, `eval_range`, `eval_clift` — inlined, their `kMaxLen` locals,
+   `eval_seq`'s `arg[5][256]` worst of all, were charged once per level
+   instead of once), moving every non-reentrant `kMaxLen` buffer to bss, and
+   making the buffers that genuinely are per-level **depth-indexed** —
+   the pattern `g_temp[kMaxDepth]` already used in that file.
+
+4. **A hard recursion cap, and a trap.** `eval_list_into`'s recursion is now
+   bounded in the function itself (`RecGuard`, `kMaxRec = 3`) rather than at
+   individual call sites: the old `ctx.depth` only ever covered the
+   cumsum/delta path, so `sort_asc(sort_asc(sort_asc(...)))` and the lift path
+   through `extract_operands` both recursed uncounted. And
+   `PICO_USE_STACK_GUARDS=1` + `PICO_STACK_SIZE=4096` put an MPU trap exactly
+   at `__StackBottom == __StackOneTop`, with `isr_hardfault` recording the
+   faulting PC in a watchdog scratch register and rebooting, so the next boot
+   prints `fault: previous boot hard-faulted at pc=0x...`. Without that
+   handler the guard would convert silent corruption into an indistinguishable
+   lockup — the SDK's default handler is an infinite loop.
+
+**Results** (Pico 1, measured):
+
+| path | before | after |
+|---|---|---|
+| Y= editor render | ~3,200+, overrunning | **424** |
+| home-screen list expr, worst case at the cap | ~4,300+, overrunning | **3,152** of 4,096 (944 margin) |
+| `Engine::compile` frame | 2,232 | 280 |
+| `eval_list_into` frame (per level) | 2,248 | 32 |
+
+**Rationale**: shrinking `Engine::compile` alone would have fixed the Y=
+lockup, but it would have left the actual defect — a 2 KB frame under a
+renderer that runs ~20x a frame — in place for the next thing to trip over.
+Caching validity fixes the design error; hoisting the table fixes the
+firmware-wide exposure. Both were needed before the guard could be switched
+on, and the guard is what stops the next instance being another silent
+lockup.
+
+**Tradeoffs**:
+
+- **bss +10,284 B on the Pico 1** (198,836 → 209,120), trading SRAM for stack.
+  Headroom 61.8 → 51.8 KB. This eats into the **Phase 6 margin specifically**:
+  the MicroPython heap is 48 KB, so the spare drops from ~14 KB to ~4 KB. The
+  three documented levers (heap 48→40 KB, ArrayStore slab cut, `g_chunk` fold,
+  `pre-phase5-review.md`) are worth far more than this and are now more likely
+  to be needed. A reclaim pass on the new statics is possible too — the four
+  leaf scratch blocks are provably never simultaneously live and could be
+  unioned for ~2.3 KB, deliberately not done here because a wrong aliasing
+  union is the same class of bug this entry is about.
+- The reported `size` figure jumps a further **4,096 B** that is *not* real:
+  `PICO_STACK_SIZE` 2048 → 4096 doubles both `.stack_dummy` sections. Those
+  live in the dedicated `SCRATCH_X`/`SCRATCH_Y` banks and were never
+  allocatable. Compare `.bss` alone across this change, not `size`'s total.
+- `kMaxRec = 3` makes deeply nested list expressions an error. The boundary
+  case the code documents, `cumsum(sort_asc({...}))`, is exactly at the cap
+  and still works; a fourth level now says "Too deeply nested". It used to
+  corrupt core 1's stack instead.
+- **The stack guard is a tripwire, not a barrier.** On RP2040 it is a single
+  32-byte MPU subregion at `__StackBottom`
+  (`runtime_init_stack_guard.c:14-32`), so it reliably catches gradual or
+  recursive growth — the D45 and item-3 cases — but one oversized `sub sp, #N`
+  can step straight over it. `scripts/size-report.sh`'s new frame listing is
+  the deterministic half of the check: it walks prologues out of the ELF and
+  reports anything over a threshold, which is exactly the measurement that
+  root-caused this bug and found the list-path instance.
+
+### What the hardware pass added: tinyexpr had no depth cap either
+
+Flashed to the Pico 1 the same day. The boot was clean and the guard did not
+trip through init — but **F1/F4/F5 still failed**, now as "black screen, then
+back to the home screen" rather than the original dead-keys lockup. That is
+the fault handler working: serial on the next boot read
+
+```
+fault: previous boot hard-faulted at pc=0x100551da
+```
+
+which resolves to `factor+0xa` in `tinyexpr.c` — the `push {r5, r6, r7, lr}`
+**prologue** instruction. A fault on the prologue push is unambiguous stack
+overflow, and it exposed the gap this entry had missed: **D45 gave the CAS
+parser stated depth caps; tinyexpr's parser never got one.** Its recursive
+descent costs **200 B per nesting level** (measured
+`list`+`expr`+`term`+`factor`+`power`+`base`), with no limit of its own, so
+depth is whatever the input says.
+
+The input, in this case, was the user's own: `testdrive-2026-08-02` recorded
+perf stress probes of "up to 20 nested trig calls", and one was still sitting
+in Y1. The Y= path allows 16 levels. That is why the editor failed *every
+time*, and why F4/F5 failed too — `recompute_function` compiles the same slot.
+
+**`kMaxParseDepth = 8`**, checked in `eval_internal`/`compile`/`compile_with`
+after `preprocess`. Sized to the tightest caller, not to taste: the list-lift
+path (`evaluate_input` → `listexpr::evaluate` → 3x `eval_list_into` →
+`eval_lift` → `compile_with`) leaves ~1,696 B for the parser, so eight levels.
+The Y= path alone would allow sixteen, but one cap has to hold everywhere.
+Over-deep input is now a parse error — the row draws red and stays editable.
+`test_math` 235 → 242 covers depths 9/20/40 through both `compile` and
+`evaluate`.
+
+**HW-verified on the Pico 1**: Y= opens and renders, Y1 draws red (the stress
+probe, correctly rejected), the graph works, and three consecutive
+`graph recompute:` lines came in at 103,163 / 103,107 / 103,019 us with no
+fault — the same path that had been faulting deterministically.
+
+The sequencing is the lesson worth keeping: the guard plus the fault reporter
+turned a second, still-unknown instance of this bug class into a PC and a
+one-line diagnosis, on the first flash. Shipping the guard without the handler
+would have produced another indistinguishable lockup.
+
+**Revisit when**: the frame report shows a new function over ~1 KB, or the
+Phase 6 budget gets tight enough that the leaf-scratch union is worth taking.
+Also revisit `kMaxParseDepth` if 8 ever rejects an expression someone actually
+wanted — it is bounded by the list-lift prefix, so shrinking
+`listexpr::evaluate` (720 B) or `HomeScreen::evaluate_input` (568 B) buys
+levels back. **`math::complexexpr` has its own recursive-descent parser
+(`parse_unary` 232 B/level) and is still uncapped** — same class, reachable in
+non-REAL number mode; it did not surface here but it is the obvious next one.
+If core 0's 4 KB ever becomes the real constraint rather than individual
+frames, the structural move is to relocate core 1's stack out of `SCRATCH_X`
+(`multicore_launch_core1_with_stack`) and give core 0 a custom linker region —
+deliberately not attempted here.
+
+---
+
 ## D46: The complex evaluator must not disagree with the real one — DEGREE-mode trig, and exact real powers
 
 **Date**: 2026-08-05

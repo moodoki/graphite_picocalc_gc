@@ -137,11 +137,17 @@ void zoom_standard() {
 }
 
 void zoom_trig() {
-    g_window.x_min = -2.0 * kPi;
-    g_window.x_max = 2.0 * kPi;
+    // Follows the Angle mode: a radian window on a DEGREE-mode plot put
+    // two whole periods inside six pixels (HW 2026-08-05). Degrees get
+    // the direct analogue of the radian preset — two periods, ticks on
+    // the quadrantal angles. (TI's literal +-352.5 exists to land ticks
+    // on its 95-px screen; that arithmetic doesn't carry to 320 px.)
+    const bool deg = math::angle_mode() == math::AngleMode::kDegrees;
+    g_window.x_min = deg ? -360.0 : -2.0 * kPi;
+    g_window.x_max = deg ? 360.0 : 2.0 * kPi;
     g_window.y_min = -4.0;
     g_window.y_max = 4.0;
-    g_window.x_scl = kPi / 2.0;
+    g_window.x_scl = deg ? 90.0 : kPi / 2.0;
     g_window.y_scl = 1.0;
     save_window();
 }
