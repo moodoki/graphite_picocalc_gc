@@ -108,6 +108,20 @@ draws red (correctly rejected), the graph works, three `graph recompute:` at
 
 ## The next job
 
+**Sequencing, settled 2026-08-08.** Phase 5 is **merged to `main`** (merge
+commit, PR #2) and tagged **v0.2.0**. The two pieces of work that had been
+floating as homeless bullets now have phase numbers and specs, and sit in this
+order:
+
+> **Phase 5.1** ([spec](../phases/phase5.1-spec.md)) — serial line injection
+> → **Phase 5.2** ([spec](../phases/phase5.2-spec.md)) — unified evaluator
+> → **Phase 6** ([spec](../phases/phase6-spec.md)) — apps
+
+Both are *dotted* sub-phases: work that turned up rather than planned phase
+goals, per the convention now recorded in `AGENTS.md`. 5.1 comes first because
+its tooling is the main practical mitigation for 5.2's regression risk. Version
+policy: each phase is a minor bump, so 5.1 → v0.3.0, 5.2 → v0.4.0.
+
 0. **One open observation from 2026-08-08** —
    `testdrive-2026-08-08-observations.md`:
    - **`seq()` needs all five args, `range()` does not.** Not a defect (the
@@ -254,10 +268,14 @@ worklog's 2026-08-05 entry, `decisions.md` D45/D46.
    `docs-site/reference/error-messages.md` is unwritten. Now that Phase 5 has
    closed, the open question from that session resolves: **rebase onto `main`
    after the Phase 5 merge so the CAS chapter can be written.**
-3. **After Phase 5: F — the unified evaluator** (D37/D40/**D48**), deliberately
-   sequenced after CAS so a possible 4th symbolic evaluator is known before
-   unification. **Judged worth the effort 2026-08-08**, on two independent
-   arguments rather than one:
+3. **Phase 5.2 — F, the unified evaluator** (D37/D40/**D48**) —
+   **now has a spec: [`phase5.2-spec.md`](../phases/phase5.2-spec.md)**, and a
+   phase number as of 2026-08-08, so it is no longer a homeless bullet. Read the
+   spec rather than this summary before starting. Sequenced **after Phase 5.1**,
+   whose injection tooling is the main practical mitigation for 5.2's regression
+   risk, and **before Phase 6**. Deliberately after CAS so a possible 4th
+   symbolic evaluator was known before unification. **Judged worth the effort
+   2026-08-08**, on two independent arguments rather than one:
    - *Correctness* (D46): the real and complex evaluators silently disagreed
      about DEGREE-mode trig since Session 18 — the class of bug unification
      removes.

@@ -11,8 +11,10 @@ only of features that don't yet have a home.
 ## Active (unscheduled)
 
 - **Screenshot capture — serial dump (debug aid) + save-to-SD (user feature)**
-  (raised 2026-08-05, same session as serial key injection below — two uses
-  of the same underlying capability). Frame is 320x320 RGB565 (200 KB raw),
+  (raised 2026-08-05, same session as serial key injection — two uses of the
+  same underlying capability; that item has since graduated to **Phase 5.1**,
+  and note its scoping found that *this* item is **not** a prerequisite for
+  reading result colour, since `HomeScreen::ResultKind` already encodes it). Frame is 320x320 RGB565 (200 KB raw),
   identical resolution/format on both boards, but the capture path differs
   sharply by board: **Pico 2** holds a complete frame in SRAM at once
   (`frame_buf`, `src/gfx/framebuffer.cpp:17`) with a genuinely stable window
@@ -54,47 +56,6 @@ only of features that don't yet have a home.
     encoding itself is new design work.
   - No prior design work on either variant before this session; no phase
     home.
-- **Serial key injection for on-device test automation**
-  — **scoped 2026-08-08: see [`serial-injection-plan.md`](serial-injection-plan.md)**,
-  which takes the line-oriented variant (option 2 below) forward and defers
-  per-keystroke synthesis (option 1) until testing friction is genuinely
-  per-keystroke. Two findings from that scoping change the picture: the
-  screenshot item below is **not** a prerequisite, because
-  `HomeScreen::ResultKind` (`home_screen.hpp:36`) already encodes
-  white/amber/error and can simply be printed; and flashing no longer needs the
-  BOOTSEL button (`picotool load -f -x`), leaving keyboard input as the last
-  manual step in the bench loop. Original entry (raised 2026-08-05,
-  Pico 1 testdrive session — dev tooling, not a calculator feature). USB
-  serial (`stdio_usb`) is enabled and output-only today (`printf`
-  diagnostics: boot/build info, late-init timing, PSRAM/battery/die-temp
-  heartbeats, and a per-key debug echo on the diag screen,
-  `src/main.cpp:214-215`); nothing in the firmware reads stdin
-  (`getchar_timeout_us()` is unused SDK capability, not a missing
-  dependency). Idea: add a non-blocking stdin read to the core-0 main loop
-  and synthesize `platform::KeyEvent`s (`src/platform/keyboard.hpp:10-126`,
-  already board-agnostic and pre-translated — not raw STM32 scancodes) fed
-  into the same drain path real keys take (`src/main.cpp:587-611`:
-  `power::note_key()` → `ScreenManager::handle_key()`), so injected input
-  exercises APD wake tracking, the HOME intercept, and all screen logic
-  identically to a physical key. A higher-level, less timing-fragile
-  alternative: drive `HomeScreen::handle_command()`
-  (`src/apps/home_screen.cpp:676-768`) directly with whole lines + a
-  synthetic Enter, reusing the existing typed-command dispatcher
-  (`cls`/`diag`/`cas`/`plot`/...) instead of per-keystroke synthesis. The
-  diag screen's existing key-echo gives a ready-made inject→verify
-  round-trip on that one screen with no new code. Motivation: repeatedly
-  recurring pattern in this project's history of judgment calls that "need
-  a bench session" or get confirmed only "incidentally during other
-  testing" — scripted input could turn some of that hand-driven on-device
-  verification into repeatable, automatable checks (soak-testing the D45
-  stack-depth fix class, the D14 rail-settle window, nesting-depth stress
-  ladders, etc.). No prior design work in this repo; not investigated
-  before this session. Would need: a non-blocking stdin poll (none exists),
-  a small wire protocol for key/line injection (none exists), and handling
-  the same DTR/RTS quirk already documented for the *output* side
-  (`scripts/serial-capture.py:9-13`) — a plain non-interactive host write
-  likely needs DTR/RTS asserted to be reliably received. No phase home;
-  raised as an infra idea only.
 - **Inverse-trig exact forms** (raised 2026-08-05, Pico 2 Stage 5 testdrive):
   `asin(1)` shows `1.570796327` where the forward direction already shows
   `sin(pi/6)` as `1/2`. D44 built a *forward* special-angle table only
@@ -163,6 +124,18 @@ only of features that don't yet have a home.
 
 ## Graduated — now planned
 
+- **Serial key injection for on-device test automation** (raised
+  2026-08-05, Pico 1 testdrive) -> **Phase 5.1** (see
+  [phase5.1-spec.md](../phases/phase5.1-spec.md), tasks 5.1.1-5.1.6),
+  scoped 2026-08-08 to the line-oriented variant. Per-keystroke `KeyEvent`
+  synthesis stays deferred with an explicit revival trigger (that spec's
+  section 7). Two findings closed the gap between "idea" and "planned": the
+  sibling screenshot item below is **not** a prerequisite, because
+  `HomeScreen::ResultKind` (`home_screen.hpp:36`) already encodes
+  white/amber/error and can simply be printed; and flashing no longer needs
+  the BOOTSEL button (`picotool load -f -x`), leaving keyboard input as the
+  last manual step in the bench loop. Motivated by D48, whose bench work
+  needed ~15 hand round-trips to land one integer.
 - **Pi-multiple axis ticks + `▶Frac`/`▶Dec` fraction answers** (split off
   the old "Symbolic display" item) → Phase 4, sub-phase **4D** (see
   [phase4-spec.md](../phases/phase4-spec.md) §7.1, tasks 4D.2/4D.3).

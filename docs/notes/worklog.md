@@ -305,6 +305,61 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-08 — Phase 5 merged and tagged v0.2.0; Phases 5.1 and 5.2 defined
+
+**PR #2 merged to `main`** as a merge commit (`cd6a8b7`), deliberately not a
+squash: `decisions.md` and this worklog cite commit hashes directly
+(`a0939bf`, `3153868`, `b437039`, `fcc82fd`), and squash or rebase would have
+invalidated every one. Verified post-merge that all cited hashes remain
+reachable. CI was green on all four jobs; the **2,111-check host suite was run
+locally first**, because CI has no host-test job — `build.yml` runs build, lint
+and validate-docs only, a gap worth closing separately.
+
+**Tagged v0.2.0**, `CMakeLists.txt` `VERSION` 0.1.0 → 0.2.0 alongside. Version
+policy settled: **each phase is a minor bump** (Phase 4 → v0.1.0, Phase 5 →
+v0.2.0, so 5.1 → v0.3.0, 5.2 → v0.4.0). `PICOCALC_PHASE` deliberately left at
+`"5"` — it tracks the code-complete phase on the diag screen and moves only when
+5.1 is actually code-complete. No `ti-parity.md` pass: the phase-close checklist
+calls for it at the end of a phase, and Phase 5's sweep already happened at its
+close (`f472ed4`). Merging is not a phase close.
+
+**Two homeless work items got phase numbers and specs.** Both had been floating
+as bullets in `next-session.md` with "no phase home" attached:
+
+- **[Phase 5.1](../phases/phase5.1-spec.md) — serial line injection**, promoted
+  from `serial-injection-plan.md` (now a stub pointing at the spec). ~8 hrs,
+  tasks 5.1.1-5.1.6.
+- **[Phase 5.2](../phases/phase5.2-spec.md) — the unified evaluator (idea F)**,
+  new spec. Provisionally ~73 hrs, tasks 5.2.1-5.2.9, with the D48 design
+  constraint (explicit evaluation stack, not the call stack) and the §2 scope
+  boundary (four parsers become **two**, not one — `evaluate_real()`/tinyexpr is
+  never touched, per `phase4-spec.md` §5.2's performance guardrail) written in
+  rather than left to be rediscovered.
+
+5.1 is sequenced first because its tooling is the main practical mitigation for
+5.2's regression risk — a rewrite of three working evaluators against ~1,200
+host checks that pin their separate behaviours, on a surface that is largely
+on-device.
+
+**The dotted-vs-lettered naming is now a stated convention, recorded in
+`AGENTS.md`** (developer, this session): **letters** (`4A`, `6A`) are planned
+work a phase's completion depends on; **dots** (`5.1`, `5.2`) are significant
+units that *turned up*, sit outside the parent phase's goals, and don't gate it.
+Phase 5 closed and merged before either existed. Size is not the criterion —
+5.2 is ~73 hrs and still dotted, because it is a consequence of earlier phases
+rather than a new goal. Its spec records the converse too: if 5.2.1's sizing
+pass pushes it materially past estimate, promoting it to a full phase number is
+the honest move.
+
+Also updated: README (status callout, Features bullets, status table, doc
+index), `next-session.md` (a sequencing header — 5.1 → 5.2 → Phase 6 — and item
+3 repointed at the spec), `wishlist.md` (serial injection moved to
+**Graduated**), and `phase6-spec.md`'s front matter, which now notes that 5.2's
+tagged-`Value` sizing competes for the same Pico 1 headroom 6B's 48 KB
+MicroPython heap needs.
+
+---
+
 ## 2026-08-08 (later) — post-D47 group-5 bench sweep: four paths clean, `matexpr` crashes, D48 caps it. **HW-verified on the Pico 1**
 
 Ran groups 5-6 of the post-D47 plan on the Pico 1 with stack guards live,

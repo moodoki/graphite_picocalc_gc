@@ -6,7 +6,14 @@ Instructions for AI coding agents working on this project. Keep this file lean a
 
 PicoCalc Graphing Calculator — a TI-83/84-inspired graphing calculator firmware for the ClockworkPi PicoCalc. Native C++17 on the Raspberry Pi Pico SDK. Targets both Pico 1 H (RP2040) and Pico 2 H (RP2350). Solo developer, personal-use project.
 
-Phases: see `docs/phases/`. Phases 0–3 and Phase 4 (sub-phases 4A–4D) are complete and hardware-verified on both boards — a feature-complete TI-83/84+-class graphing calculator (the pre-release milestone). Next up is a pre-Phase-5 code-review/size-optimization pass, then Phase 5 (CAS). See `docs/notes/next-session.md` for the live handoff.
+Phases: see `docs/phases/`. Phases 0–4 (sub-phases 4A–4D) and Phase 5 (CAS) are complete and hardware-verified on both boards — Phase 4's completion was the pre-release milestone, a feature-complete TI-83/84+-class graphing calculator; Phase 5 added symbolic math on top. Next up is Phase 5.1 (serial line injection), then Phase 5.2 (the unified evaluator), then Phase 6 (apps). See `docs/notes/next-session.md` for the live handoff.
+
+**Sub-phase naming — two schemes, and they mean different things:**
+
+- **Letters** (`4A`, `4B`, `6A`, …) — planned work that progresses toward the parent phase's completion. The phase is not done until its lettered sub-phases are.
+- **Dots** (`5.1`, `5.2`, …) — work that *turned up* during or after the parent phase: a significant unit in its own right, but **not part of that phase's planned goals**, and not big enough to justify its own phase number. A dotted sub-phase does not gate the parent phase's completion; Phase 5 was closed before 5.1 and 5.2 existed.
+
+Task IDs follow the same split: `4D.22` for lettered, `5.1.3` for dotted. Note `§5.1` inside a spec still means a *section* reference — always write the `Phase ` prefix in prose to disambiguate.
 
 ## Build commands
 

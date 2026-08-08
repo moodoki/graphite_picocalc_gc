@@ -28,6 +28,15 @@ sub-phase 4E (MicroPython) — see
 than staying in Phase 4, and [phase4-spec.md](phase4-spec.md) for the
 sub-phase it vacated.
 
+**Two dotted sub-phases now sit ahead of this one** (2026-08-08):
+[Phase 5.1](phase5.1-spec.md) (serial line injection) and
+[Phase 5.2](phase5.2-spec.md) (the unified evaluator). Neither is a
+prerequisite in the strict sense, but two things here depend on how 5.2
+lands: its tagged-`Value` sizing pass competes for the same Pico 1 headroom
+6B's **48 KB MicroPython heap** needs (see §1.1 and Risk 6), and 6B's `calc`
+module bindings target the evaluator 5.2 would replace. Check 5.2's status
+before sizing 6B.
+
 ---
 
 ## 1. Overview and phasing within Phase 6

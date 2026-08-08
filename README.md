@@ -14,19 +14,26 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > their on-device evals on the Pico 1; the Pico 2 leg is closed as a
 > formality (board-independent logic, same precedent as earlier phases).
 > **Phase 4's completion is the project's pre-release milestone** — a
-> feature-complete TI-83/84+-class graphing calculator. **The first tagged
-> release, [v0.1.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.1.0),
-> is published** (prebuilt UF2s for both boards); CI (build, lint, docs
-> validation, release) is green on every job. **Phase 5 (symbolic CAS) is
-> complete and hardware-verified on both boards** (on the `phase-5` branch,
-> pending merge to `main`): the engine (simplify, expand, factor,
+> feature-complete TI-83/84+-class graphing calculator, tagged
+> [v0.1.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.1.0)
+> (prebuilt UF2s for both boards); CI (build, lint, docs validation, release)
+> is green on every job. **Phase 5 (symbolic CAS) is complete and
+> hardware-verified on both boards, now merged to `main` and tagged
+> [v0.2.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.2.0)**:
+> the engine (simplify, expand, factor,
 > differentiate, solve, integrate), its home-screen UI integration (inline
 > calls, F6 CAS menu, `cas` command), exact-form display (`sqrt(8)` shown as
 > `2√2`, `pi*2` as `2π`, `1/3` as a stacked fraction, `sin(pi/3)` as `√3/2`
 > — with Alt+Enter as the decimal escape), and a Stage 5 hardening pass that
 > moved the CAS passes' working arrays off a 4 KB stack they could silently
 > overrun, gave the recursion stated depth caps, and turned pool exhaustion
-> into a reported error instead of a plausible-looking wrong answer. See
+> into a reported error instead of a plausible-looking wrong answer. **Next up
+> are two dotted sub-phases** — work that turned up rather than planned phase
+> goals (see `AGENTS.md` for what the dotted-vs-lettered numbering means):
+> **Phase 5.1**, serial line injection for on-device test automation, and
+> **Phase 5.2**, the unified evaluator, which replaces the three home-screen
+> mini-evaluators with one built on an explicit evaluation stack. Both sit
+> ahead of Phase 6. See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -96,6 +103,18 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   now reported as an error rather than returning an unconverged tree that
   looks converged. See
   [docs/phases/phase5-spec.md](docs/phases/phase5-spec.md).
+- **Phases 5.1 and 5.2 (planned)**: two *dotted* sub-phases — significant
+  work that turned up rather than planned phase goals (see `AGENTS.md` for
+  the numbering convention). **5.1** adds serial line injection so a host
+  script can submit expressions to the home screen over USB and read back
+  the result and its kind, turning hand-driven bench checks into repeatable
+  ones. **5.2** is the unified evaluator: one tagged-value evaluator over an
+  explicit evaluation stack replacing the three home-screen mini-evaluators,
+  motivated by two independent findings — the real and complex evaluators
+  silently disagreeing on DEGREE-mode trig (D46), and four parsers each
+  needing a separately-discovered stack budget, three found by a crash
+  (D48). See [docs/phases/phase5.1-spec.md](docs/phases/phase5.1-spec.md)
+  and [docs/phases/phase5.2-spec.md](docs/phases/phase5.2-spec.md).
 - **Phase 6 (planned)**: non-calculator functions — an app-launcher
   framework (6A) and MicroPython as its first base app (6B), plus room
   for future apps and release engineering (docs site, versioned
@@ -265,7 +284,9 @@ There is also a built-in help browser on the device: **Home → `F5` HELP**
 - **[docs/phases/phase2-spec.md](docs/phases/phase2-spec.md)** — Phase 2 design contract (complete; retro in [docs/notes/phase2-retro.md](docs/notes/phase2-retro.md))
 - **[docs/phases/phase3-spec.md](docs/phases/phase3-spec.md)** — Phase 3 design contract (statistics; code-complete)
 - **[docs/phases/phase4-spec.md](docs/phases/phase4-spec.md)** — Phase 4 design contract, the pre-release milestone (matrix, graph analysis, complex numbers, GC completeness; complete, HW-verified on both boards)
-- **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; complete on the `phase-5` branch — engine, UI integration, exact-form display and Stage 5 hardening, HW-verified on both boards)
+- **[docs/phases/phase5-spec.md](docs/phases/phase5-spec.md)** — Phase 5 design contract (CAS: simplify, expand, factor, differentiate, solve, integrate; complete and merged — engine, UI integration, exact-form display and Stage 5 hardening, HW-verified on both boards)
+- **[docs/phases/phase5.1-spec.md](docs/phases/phase5.1-spec.md)** — Phase 5.1 design contract (serial line injection for on-device test automation; specced, not started)
+- **[docs/phases/phase5.2-spec.md](docs/phases/phase5.2-spec.md)** — Phase 5.2 design contract (unified evaluator, idea F — one tagged-value evaluator on an explicit stack; specced, not started)
 - **[docs/phases/phase6-spec.md](docs/phases/phase6-spec.md)** — Phase 6 design contract (non-calculator functions: app framework, MicroPython; specced, not started)
 - **[docs/architecture.md](docs/architecture.md)** — system architecture
 - **[docs/hardware.md](docs/hardware.md)** — hardware reference
@@ -294,7 +315,9 @@ Background research:
 | 3: Statistics | **Complete** | Lists, regression, distributions, inference, stat plots; HW-verified on Pico 1 + Pico 2 (retro: docs/notes/phase3-retro.md; Pico 1 pass via task 3D.14) |
 | 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
 | 4D: GC completeness (pre-release milestone) | **Complete** | All 9 D38 batches shipped 2026-07-26, HW-verified on Pico 1 2026-07-26/27; Pico 2 leg closed as a formality; docs/phases/phase4-spec.md §7, decisions.md D40 |
-| 5: CAS (symbolic math) | **Complete** (`phase-5` branch, pending merge) | Stages 0-5: engine, UI integration, exact-form display, hardening; HW-verified on Pico 1 + Pico 2 2026-08-05; docs/phases/phase5-spec.md (D32, D41, D42, D43, D44, D45) |
+| 5: CAS (symbolic math) | **Complete** | Stages 0-5: engine, UI integration, exact-form display, hardening; HW-verified on Pico 1 + Pico 2 2026-08-05; merged to `main` and tagged v0.2.0 2026-08-08; docs/phases/phase5-spec.md (D32, D41, D42, D43, D44, D45) |
+| 5.1: Serial line injection | Specced, not started | Dev tooling — scripted whole-line input over USB serial for on-device test automation; docs/phases/phase5.1-spec.md (D48) |
+| 5.2: Unified evaluator (idea F) | Specced, not started | Replaces matexpr/complexexpr/listexpr with one tagged-value evaluator on an explicit stack; highest-risk item on the list; docs/phases/phase5.2-spec.md (D37, D40, D46, D48) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 
 Both boards build clean and the host test suite (1300+ checks) passes. See
