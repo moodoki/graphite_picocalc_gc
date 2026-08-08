@@ -192,6 +192,106 @@ int main() {
             ++g_failures;
         }
     }
+
+    // Parse-nesting cap (D47). tinyexpr's recursive-descent parser costs
+    // ~200 B of stack per nesting level and had no limit of its own, so a
+    // deeply nested stored expression walked off core 0's 4 KB — this is
+    // the defect behind the 2026-08-05 Y=-editor lockup, whose slot held a
+    // 20-deep nesting stress probe. Must be a clean error, never a crash.
+    {
+        // Seven levels is the documented cap and has to keep working.
+        char ok_expr[64] = "sin(cos(sin(cos(sin(cos(sin(1)))))))";
+        ++g_checks;
+        void* h = math::engine().compile(ok_expr);
+        if (h == nullptr) {
+            std::printf("FAIL: 7-level nesting should compile\n");
+            ++g_failures;
+        } else {
+            math::engine().free_compiled(h);
+        }
+
+        // Build one deeper than the cap, then far deeper, from a loop so
+        // the test does not depend on hand-counting parens.
+        const int depths[] = {8, 20, 40};
+        for (const int depth : depths) {
+            char deep[512];
+            std::size_t w = 0;
+            for (int i = 0; i < depth; ++i) {
+                w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "sin("));
+            }
+            w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "1"));
+            for (int i = 0; i < depth; ++i) {
+                w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, ")"));
+            }
+            ++g_checks;
+            if (math::engine().compile(deep) != nullptr) {
+                std::printf("FAIL: %d-level nesting should be rejected\n", depth);
+                ++g_failures;
+            }
+            ++g_checks;
+            const auto res = math::engine().evaluate(deep);
+            if (res.ok || res.error == nullptr ||
+                std::strcmp(res.error, "Too deeply nested") != 0) {
+                std::printf("FAIL: evaluate(%d-level) -> ok=%d error=%s\n", depth,
+                            static_cast<int>(res.ok), res.error != nullptr ? res.error : "(null)");
+                ++g_failures;
+            }
+        }
+    }
+
+    // The binding table is shared across calls and lives in bss, not on
+    // the caller's stack (D47). compile_with appends its extras past the
+    // shared tail, so a plain compile afterwards must not see them, and
+    // extras from one compile_with must not leak into the next.
+    {
+        double l1 = 7;
+        double l2 = 11;
+        const math::Engine::ExtraVar ex1[] = {{"l1", &l1}};
+        const math::Engine::ExtraVar ex2[] = {{"l2", &l2}};
+
+        void* a = math::engine().compile_with("l1*2", ex1, 1);
+        ++g_checks;
+        if (a == nullptr || std::fabs(math::engine().eval_compiled_raw(a) - 14.0) > 1e-12) {
+            std::printf("FAIL: compile_with('l1*2') with extras\n");
+            ++g_failures;
+        }
+        math::engine().free_compiled(a);
+
+        // A plain compile must not still see l1.
+        ++g_checks;
+        void* leaked = math::engine().compile("l1*2");
+        if (leaked != nullptr) {
+            std::printf("FAIL: extras leaked into a plain compile\n");
+            ++g_failures;
+            math::engine().free_compiled(leaked);
+        }
+
+        // A second compile_with with a *different* extra must not still
+        // see the first one either.
+        void* b = math::engine().compile_with("l2*2", ex2, 1);
+        ++g_checks;
+        if (b == nullptr || std::fabs(math::engine().eval_compiled_raw(b) - 22.0) > 1e-12) {
+            std::printf("FAIL: compile_with('l2*2') after a different extras set\n");
+            ++g_failures;
+        }
+        math::engine().free_compiled(b);
+        ++g_checks;
+        void* stale = math::engine().compile_with("l1*2", ex2, 1);
+        if (stale != nullptr) {
+            std::printf("FAIL: stale extra l1 survived into the next compile_with\n");
+            ++g_failures;
+            math::engine().free_compiled(stale);
+        }
+
+        // Standard bindings still resolve after all that.
+        ++g_checks;
+        void* plain = math::engine().compile("2+3");
+        if (plain == nullptr || std::fabs(math::engine().eval_compiled_raw(plain) - 5.0) > 1e-12) {
+            std::printf("FAIL: plain compile broken after compile_with\n");
+            ++g_failures;
+        }
+        math::engine().free_compiled(plain);
+    }
     // eval_compiled leaves X bound to its last argument (the graphing
     // caller owns save/restore); a fresh store re-establishes X.
     math::engine().evaluate("42->x");

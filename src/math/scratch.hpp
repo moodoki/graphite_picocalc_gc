@@ -14,12 +14,14 @@
 // This arena collapses the mutually-exclusive buffers onto one allocation.
 // It is split into two disjoint regions by an actual concurrency edge:
 //
-//   * kCompute — list_expr | stats | infer | matops. These are mutually
-//     exclusive: none of the four calls another (verified in the
-//     pre-Phase-5 review — e.g. infer deliberately does not call stats,
-//     stats solves its 3x3 inline rather than via matops, and list_expr's
-//     per-element eval runs over already-lifted scalars). They therefore
-//     safely overlay the same bytes.
+//   * kCompute — list_expr | stats | infer | matops | cas. These are
+//     mutually exclusive: none calls another (verified in the pre-Phase-5
+//     review — e.g. infer deliberately does not call stats, stats solves its
+//     3x3 inline rather than via matops, and list_expr's per-element eval
+//     runs over already-lifted scalars). The CAS ExprPool (Phase 5,
+//     math::cas, home-screen-only) also overlays this region — a top-level
+//     CAS op holds it exclusively and never re-enters list_expr/stats/infer/
+//     matops while doing so. They therefore safely overlay the same bytes.
 //
 //   * kListops — listops (sum/prod/seq/sort/cumsum/copy...). Kept DISJOINT
 //     from kCompute because list_expr *calls* listops (see list_expr.cpp),

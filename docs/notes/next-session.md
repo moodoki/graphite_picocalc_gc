@@ -1,6 +1,411 @@
 # Start here — next session
 
-**Last session:** 2026-08-02 — **CI fix + first release, docs/infra only, no
+**Last session:** 2026-08-08 (later) — **Post-D47 group-5/6 bench sweep on the
+Pico 1, one crash found and capped (D48), and idea F promoted to worth-doing.**
+Four of five heavy paths were clean under live stack guards: idle 1,540 of
+4,096, graph redraw + zoom 2,360, and **the list/1-Var-stats/inference set never
+registered a new mark at all** — first hardware confirmation of D47's
+`eval_list_into` rework. The D45 ladder hit 3,588, which is *by design*: D45
+predicted 3,728/368 by inspection and the live mark agreed to ~140 B. Rung 4
+white in both number modes confirms D46's `c_pow` fix on hardware.
+**`matexpr` was the exception** — `det(([a]*([c]+[d]))+[d])` hard-faulted
+twice with `sp=0x20040ff8`, 8 bytes below core 0's `__StackBottom` and inside
+core 1's stack; `pc`/`lr` were garbage because the overflow corrupted exception
+stacking, so `sp` carried the whole diagnosis. It was the last uncapped parser.
+**D48** adds `kMaxParseDepth = 3` (RAII `DepthGuard` in `parse_unary`).
+**The cap took two tries and the first was instructive**: frame arithmetic said
+depth 3 cost 4,300 B and was unreachable, so it was set to 2 — which broke
+`det(identity(2))` and matrix literals in function arguments, both depth 3 and
+both already pinned by `test_matrix`. Hardware said depth 3 actually fits at
+3,940. The arithmetic was 360 B pessimistic; trusting it would have shipped a
+level too tight. **Measured before -> after**: `det([[1,2][3,4]])` 3,940 ->
+**4,012**, depth-4 crash -> "Too deeply nested". The +72 B is the guard itself
+(cycle 808 -> 832 B/level), which the static tooling predicts exactly. **So the
+margin at depth 3 is now 84 bytes — containment, not a fix.** `test_matrix`
+381 -> **397**, full suite green, both boards build, lint/format clean, `.bss`
+unchanged at 211,100. Flashed to the Pico 1 and all three checks verified.
+**Decision taken**: live with the caps; the explicit-stack parser that would
+actually lift the depth belongs to **idea F** (it retires `matexpr`, so building
+it there is throwaway work), and F should be built on an explicit,
+PSRAM-capable evaluation stack. PSRAM cannot host a call stack — PIO SPI, not
+memory mapped.
+
+**Then the Pico 2 was flashed and the cap turned out not to be enough.**
+`det([[1,2][3,4]])` and `det(identity(2))` — both depth 3, both *allowed* —
+hard-faulted there, while `det([a]*[c]+[d])` was fine. That board's reporter
+gave a **real PC** where the Pico 1's had given garbage: `parse_power` prologue
+(`mat_expr.cpp:625`) from `parse_unary`, `sp = __StackBottom + 160`. The
+discriminator is a **numeric literal at maximum depth** — `parse_scalar_span`
+put a `char span[256]` on the stack and handed it to `eval_field`, i.e. the
+whole tinyexpr engine, at the *leaf* of the recursion. **D47's bug verbatim**:
+`a0939bf` fixed exactly this in `complexexpr`, but `matexpr` has its own copy
+and never got it. Fixed the same way (strtod fast path + static buffer):
+**cycle 832 -> 600 B/level (Pico 1), 768 -> 536 (Pico 2), -232 both**, for
++256 B `.bss` (211,100 -> 211,356). Pico 2 re-verified: all five correct, no
+fault, worst case **3,860 of 4,096 (236 margin)**. `test_matrix` 397 -> **408**.
+**Two things only the Pico 2 could show**: it is *not* simply the roomier board
+(it faulted where the Pico 1 survived, despite smaller reported frames and a
+304 B lower baseline), and **`size-report.sh` does not count FP register saves**
+— zero `vpush` on the Pico 1, 19 on the Pico 2 including in `math::eval_field`.
+**Method note**: three attempts to derive a peak from frame sizes were wrong
+this session, always optimistic (360 B, then a crash, then 560 B). Static frame
+sums bound a single frame, not a peak — measure, and where a board is off the
+bench prefer **monotonic arguments** ("this can only remove stack") over
+predictions.
+
+Full detail: worklog's 2026-08-08 (later) entry, `decisions.md` **D48** (with
+its same-day amendment), `design-departures-matrix-complex.md` §F.
+
+**Previous session:** 2026-08-08 — **Both 2026-08-05 testdrive items fixed and
+HW-verified on the Pico 1, plus a separate 4-nested-paren crash the first
+fixes did *not* address (D47). Five commits, `ad7ebd6`..`3153868`.** The
+crash story is at the end of D47 and is the one worth reading: three wrong
+attributions from reasoning about frame sizes, then a crash record in
+`.uninitialized_data` that named it in one shot — `preprocess+0x12`, because
+complexexpr ran *every numeric literal* through the whole tinyexpr engine at
+the leaf of its recursion. Both items came from
+`testdrive-2026-08-05-observations.md`. The Y= freeze was a **core-0 stack
+overrun into core 1's stack**: `SlotEditorScreen::render()` called
+`math::engine().compile()` *inside the renderer*, and that frame measured
+**2,232 B** (almost all `te_variable lookup[122]`, rebuilt on the stack every
+compile) against core 0's 4 KB. Strip mode renders 16-px bands and the header
+is exactly 16 px, so strip 0 pushed, then core 0 rendered strip 1 **while core
+1 was mid-DMA on strip 0** and killed it; core 0 blocked forever in
+`wait_one_ack()`, taking key polling with it — "first few rows of the header,
+then dead, every time." Fixed by caching field validity (`render()` only
+draws, the contract `list_editor.hpp` has documented since Phase 3A) and
+moving tinyexpr's binding table to bss (`Engine::compile` **2,232 → 280 B**,
+firmware-wide). A **new stack-frame listing in `scripts/size-report.sh`** then
+found a second, worse instance: `HomeScreen::evaluate_input` →
+`listexpr::evaluate` → `eval_list_into` (**2,248 B and recursive**) = 4,312 B
+at depth 1, so a plain `{1,2,3}` was already overrunning silently on a path
+HW-verified since Phase 3A. Fixed with `noinline` leaf evaluators, buffers to
+bss, depth-indexed per-level buffers, and a hard `kMaxRec = 3` cap in
+`eval_list_into` itself (`eval_list_into` **2,248 → 32 B**). **`PICO_USE_STACK_GUARDS=1`
++ `PICO_STACK_SIZE=4096` are now on** — the top deferred item below — with a
+new `src/platform/fault.cpp` that records the faulting PC and reboots, so the
+next boot prints `fault: previous boot hard-faulted at pc=0x…` (without it the
+guard just converts silent corruption into an identical-looking lockup).
+ZTrig now follows the Angle mode (DEG: $\pm 360$, Xscl 90). Measured: Y= render
+path **424 B**, worst list expression **3,152 of 4,096** (944 margin). Host
+green, `test_math` 230→**235**, `test_lists` 239→**241**; both boards build
+clean; lint/format clean. **Cost: Pico 1 `.bss` 198,836 → 209,120 (+10,284),
+headroom 61.8 → 51.8 KB — that is out of the Phase 6 margin (see #0 below).**
+**The bench pass then found a third instance, which is the useful part.** The
+first flash booted clean but F1/F4/F5 *still* failed — as "black screen, then
+back to home" instead of dead keys, i.e. the new fault handler doing its job.
+Serial: `fault: previous boot hard-faulted at pc=0x100551da` → `factor+0xa` in
+`tinyexpr.c`, the **prologue push** — unambiguous stack overflow. **D45 capped
+the CAS parser's depth; tinyexpr's parser never had a cap**, and its recursion
+costs **200 B/level**. Y1 was still holding one of the "up to 20 nested trig
+calls" stress probes from `testdrive-2026-08-02`; the Y= path allows 16.
+Added **`kMaxParseDepth = 8`** (sized to the tightest caller — the list-lift
+path leaves ~1,696 B), so over-deep input is a parse error instead of a fault.
+`test_math` 235 → **242**. **Re-flashed and verified: Y= opens and renders, Y1
+draws red (correctly rejected), the graph works, three `graph recompute:` at
+~103.0 ms with no fault.** Full detail: worklog's 2026-08-08 entry,
+`decisions.md` **D47**.
+
+## The next job
+
+0. **One open observation from 2026-08-08** —
+   `testdrive-2026-08-08-observations.md`:
+   - **`seq()` needs all five args, `range()` does not.** Not a defect (the
+     test plan was wrong), but defaulting `step` to 1 would match `range` and
+     TI-84. Small change in `eval_seq` plus a host test.
+   - ~~`5!` / `abs(3+4i)` showing white~~ — **closed as not-a-bug.** The
+     tester had read the two entries as one expression (`5! / abs(3+4i)`) and
+     expected an improper-fraction exact form; they were separate entries,
+     the displayed values (`120`, `5`) were correct, and plain white is right
+     for real integers. No code change.
+
+1. **Flash the Pico 2 — it is the whole of what's left on the bench pass.**
+   Groups 1-4 passed 2026-08-08; **groups 5 and 6 passed on the Pico 1 later
+   the same day** (see "Last session"), so the Pico 1 leg is done. Remaining:
+   - ~~The Pico 2 has never been flashed on this branch~~ — **flashed and D48
+     verified there** (all five det checks correct, no fault, worst case 3,860
+     of 4,096). It took a **leaf fix** to get there: the cap alone still
+     hard-faulted on this board, see "Last session".
+   - **Groups 1-6 on the Pico 2 beyond the D48 checks.** It jumped straight
+     from Phase 4D-era firmware, so typeset display, a+bi, guards and the full
+     CAS script have never run there. Full framebuffer + hardware FPU, so
+     **rung 4 of the D45 ladder (white vs amber) is the highest-value single
+     item** — it is precision-sensitive and the one place the FPU could
+     genuinely diverge from the Pico 1.
+   - **`size-report.sh` misses FP register saves.** Zero `vpush` in the Pico 1
+     image, **19 in the Pico 2's**, including inside `math::eval_field` on the
+     crash path. Every Pico 2 frame figure is low by an unquantified amount —
+     teach the tool to count `vpush` before making another stack decision
+     there.
+   - **Board swaps are batched to major stage closures** — don't swap to chase
+     a number. `picotool load -f -x <uf2>` reflashes the *connected* board over
+     USB with no BOOTSEL button, so re-flashing what's attached is cheap.
+   - **Pico 1 re-measure, deferred to the next swap.** Its documented 4,012 is
+     stale since the leaf fix. Not a safety issue: the fix only ever removes
+     stack from that path, and the Pico 1 already passed at 4,012 without
+     faulting, so it can only have improved.
+   - ~~Guards-are-live sweep~~ — **done on the Pico 1.** Idle 1,540, graph
+     redraw + zoom 2,360, list/stats/inference no new mark, D45 ladder 3,588
+     (by design), `matexpr` crash found and capped (D48).
+   - ~~Phase 5 CAS on-device checklist~~ — **sampled on the Pico 1** and
+     correct as far as it went. Not exhaustively walked; the full script is
+     still in the "Stage 4" bullet further down and is worth running on the
+     Pico 2 in full.
+   - **Watch for wrong answers, not just crashes.** Several buffers became
+     `static` on a non-reentrancy argument verified by inspection, not
+     exhaustively. A wrong result from something that mixes features
+     (`solve(...)` or `convert(...)` inside a list or complex expression) is
+     the signature of that assumption being wrong.
+   - **Serial**: `python3 scripts/serial-capture.py 1800 | grep -E "stack:|fault:"`.
+     A `fault:` line now names core, PC, LR and SP; resolve the PC with
+     `arm-none-eabi-addr2line -f -C -e build/pico/picocalc_graphcalc.elf <pc>`.
+     A PC on a function's `push` prologue means stack overflow.
+   - **bss watch:** `.bss` is 211,100 on the Pico 1 (was 198,836 before this
+     session). `size`'s total also carries 4,096 B that is **not** real —
+     `PICO_STACK_SIZE` 2048->4096 doubles both `.stack_dummy` sections, which
+     live in dedicated scratch banks. Compare `.bss` alone. The Phase 6 spare
+     above the 48 KB MicroPython heap is thin; the `pre-phase5-review.md`
+     levers are now likely rather than optional.
+
+2. ~~`math::matexpr` is the last uncapped parser~~ — **capped 2026-08-08
+   (D48).** All four parsers now have depth caps. But `matexpr`'s cap sits at
+   **84 bytes of margin** at depth 3, which is containment rather than
+   headroom, and the prediction that it "would reject ordinary matrix
+   expressions" was half right: depth 3 turned out to fit on hardware, so
+   `det(identity(2))` and matrix literals in function arguments survive —
+   anything one level deeper does not. Three levers if that bites, cheapest
+   first: (a) frame reduction, `parse_power` is 388-416 B holding matrix
+   temporaries (cf. D47's `eval_list_into`, 2,248 -> 32 B), worth ~2-3x the
+   depth; (b) move core 0's stack out of the 4 KB scratch bank into main SRAM
+   via the linker script — raises the ceiling without touching frames,
+   comfortable on the Pico 2, tight on the Pico 1; (c) an explicit-stack
+   iterative parser. **(c) is deliberately assigned to idea F below, not to
+   `matexpr`** — F retires this parser, so doing it here is throwaway work.
+
+**Previous session:** 2026-08-05 — **Phase 5 Stage 5: CAS hardening (4D.22,
+D45) plus two Phase 4C bugfixes (D46). PHASE 5 IS CLOSED, HW-verified on
+both boards.** Stage 5's brief was "stress testing + edge cases"; the audit
+found a live memory-corruption bug first. `simplify_sum` and
+`simplify_product` each held four `kMaxOperands = 64` arrays on the stack —
+**1,144 B and ~1,140 B frames**, measured on the linked Pico 1 object —
+nesting through `simplify_rec` once per level of ADD-inside-POW-inside-ADD.
+Core 0 has 2 KB declared and only **4 KB before core 1's stack**
+(`__StackOneTop 0x20041000`), which runs the display service on both boards;
+no stack guards. `exact_form()` runs parse + two simplify passes on *every*
+all-integer home-screen input, so plain arithmetic reached it.
+**Reproduced on the Pico 2 — and it did not crash**: the ladder
+`(2+1)^2+1` → … out to rung 6 (~6.9 KB) returned the *correct* answer with
+46 unbroken serial heartbeats, having overrun past core 1's stack top and
+declared bottom into unused space. Silent corruption, not a fault, and
+structurally invisible to the host suite (8 MB stack). Fixed by making the
+`ExprPool` arena **two-ended** (nodes up, pass scratch down under LIFO
+mark/release — scratch can't share the node end because `simplify()` runs up
+to 50 fixed-point passes without resetting), adding **stated depth caps**
+sized to the measurement (parser 12, simplifier 8; deepest recursing frame is
+now `integrate_rec` at 172 B), **implementing Risk 2** (sticky `overflowed()`
++ `near_capacity()`, "Too complex" instead of `simplify()`'s "last good form"
+masquerading as converged), and stopping `expand()` simplifying twice.
+Largest recursive frame **1,144 B → 172 B**; Pico 1 bss **201,096 →
+198,836**; `test_cas` **272 → 368**. The new `test_stress_edge_cases()`
+immediately caught a defect in the first cut of the fix itself (`alloc_raw`
+bounded against the arena end, not the scratch end). **D46** fixed two
+Phase 4C defects found on the bench: DEGREE mode was silently ignored in
+non-REAL Number modes (`c_sin` never applied `rad()`), and `c_pow` was
+`exp(ln)`-inexact so `10202^2` rendered amber in a+bi mode but white in REAL;
+`test_complex_expr` **75 → 113**. **The Pico 1 was flashed with Phase 5 for
+the first time and passed**, including the legacy two-field `history.txt`
+migration — only testable on that board, which closes the 2026-08-03 fix's
+outstanding confirmation. `PICOCALC_PHASE` bumped to `"5"`. Full detail:
+worklog's 2026-08-05 entry, `decisions.md` D45/D46.
+
+## The next job
+
+0. **Open the `phase-5` → `main` PR** if it is not already merged. The branch
+   carries Stages 0-5 and is HW-verified on both boards; README, ti-parity §8
+   and `PICOCALC_PHASE` are all flipped to reflect a closed phase.
+1. **Three items deferred from Stage 5, recorded rather than fixed:**
+   - **`PICO_USE_STACK_GUARDS=1` + `PICO_STACK_SIZE=4096` — DONE 2026-08-08
+     (D47), soak still owed.** Landed alongside the Y=-lockup fix, since that
+     bug was this exact class. A `src/platform/fault.cpp` handler was needed
+     too: the SDK's default is an infinite loop, which would have made a
+     trapped overrun look identical to the lockup being fixed. The soak this
+     item asked for is the bench pass in "The next job" #0 at the top of this
+     file. Note the warning below came true twice — the Y= editor *and* the
+     home-screen list path were both overrunning silently.
+   - **Latent MODE clobber, confirmed by code reading, never observed.**
+     `main.cpp:432` re-runs `apps::load_graph_state()` when storage arrives
+     late (the D14 5-8 s rail settle), and `graph_persist.cpp:56` is
+     `*this = g_image.state` — a whole-struct overwrite including `.angle`.
+     So a MODE toggle made *before* storage mounts is silently reverted (its
+     own `save_graph_state()` having also failed). Repro needs a genuine cold
+     power-on plus a toggle inside that window; a bench attempt on 2026-08-05
+     could not catch it. Likely fix: have a failed `save_graph_state()` mark
+     the in-memory state dirty, and have the late `load_graph_state()` skip
+     the apply and re-save instead. Pre-existing (D14-era), not a Phase 5
+     regression.
+   - **Inverse-trig exact forms** (`asin(1)` → $\pi/2$, `atan(1)` →
+     $\pi/4$): a missing feature, not a bug. D44 built a *forward*
+     special-angle table only. Needs its own inverse table, angle-mode
+     awareness and tests — comparable in size to D44. On
+     [wishlist.md](wishlist.md).
+2. **Seeded but unfinished: the `docs/site` branch** (2026-08-03, off `main`,
+   commit `0f1e8ef`, pushed, no PR). Scaffold + generators + CI only — every
+   prose chapter under `docs-site/guide/` is still a TODO stub and
+   `docs-site/reference/error-messages.md` is unwritten. Now that Phase 5 has
+   closed, the open question from that session resolves: **rebase onto `main`
+   after the Phase 5 merge so the CAS chapter can be written.**
+3. **After Phase 5: F — the unified evaluator** (D37/D40/**D48**), deliberately
+   sequenced after CAS so a possible 4th symbolic evaluator is known before
+   unification. **Judged worth the effort 2026-08-08**, on two independent
+   arguments rather than one:
+   - *Correctness* (D46): the real and complex evaluators silently disagreed
+     about DEGREE-mode trig since Session 18 — the class of bug unification
+     removes.
+   - *Structural* (D48): **four parsers, four separately-discovered stack
+     budgets, three of them found by something crashing.** D45 capped the CAS
+     parser, D47 capped tinyexpr and complexexpr, D48 capped `matexpr` after a
+     reproducible hard fault. Each cap needed its own measurement pass against
+     core 0's 4 KB, and `matexpr`'s landed at 84 bytes of margin.
+
+   **Design constraint taken 2026-08-08: build F on an explicit evaluation
+   stack, not the call stack.** Depth then lives in an array that can be sized
+   freely and — being accessed sequentially — is genuinely PSRAM-friendly,
+   unlike a call stack (`psram.hpp` is PIO-driven SPI and not memory mapped, so
+   no stack can live there). This is what makes "much larger depth" reachable
+   at all, and it is assigned here rather than to `matexpr` because F retires
+   that parser. Note F stays home-screen-only per phase4-spec §5.2 —
+   `evaluate_real()` (tinyexpr, graphing/tables/stats) is never touched, so
+   this is four parsers -> two, not one. It is also the highest-risk item on
+   the list by its own description: a rewrite of three working, tested
+   evaluators against ~1,200 host checks that pin their separate behaviours.
+
+   Then revisit idea H (polymorphic variables, D40 — unscheduled, only if real
+   usage demands it).
+4. **D10 leg B** (no phase home): compute-parallelize
+   `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`) —
+   needs a second engine/vars context (shared `X` mutation), not just a
+   spawned task. The pipeline gives ~0 benefit on compute-bound screens; a
+   heavy graph redraw measured 1.17 s on the Pico 1. See
+   `testdrive-2026-08-02-observations.md` for a nesting-depth scaling anomaly
+   worth another look if this is picked up.
+5. **Pre-Phase-6 SRAM levers** (all still deferred, none urgent; Pico 1 bss
+   is 198,836 after Stage 5, ~2.3 KB better than before): (a) MicroPython
+   heap 48→40 KB if the ~12 KB spare gets eaten by 6A framework growth (spec
+   Risk 6); (b) ArrayStore slab cut (~12-16 KB, more with a PSRAM-fallback
+   prerequisite); (c) persistence `g_chunk` fold (~6 KB); (d) arena debug
+   owner-guard. Full write-up: `docs/notes/pre-phase5-review.md`.
+
+Mind the §8 strip-safety rule (idempotent `render()`) for any new screens
+touched during on-device passes.
+
+**Previous session:** 2026-08-03 — **Phase 5 Stage 4: exact-form (surd)
+display, source changes, host-verified.** Home-screen results with a clean
+closed form now show that form instead of a decimal — `sqrt(2)` → `√2`,
+`sqrt(8)` → `2√2`, `1/sqrt(2)` → `√2/2`, `pi*2` → `2π`, `1/3` → `1/3`
+(tasks 4D.23/4D.24, **D43**, which also resolves **P5-5 → always-on** and
+**P5-6 → yes, `pi` included**). Recognition lives in a new
+`src/math/cas/exact.cpp`, deliberately *not* in `simplify()` (which runs
+inside integrate/solve/factor/derivative loops — a `POW(NUM,1/2)` rewrite
+there is a §13 Risk 1 hazard for zero benefit); it works in
+`POW(u,1/2)` space so the existing simplifier does the factor collection
+free (`sqrt(2)*sqrt(2)`→2, `sqrt(2)+sqrt(8)`→`3√2`, `1/sqrt(2)` and
+`sqrt(1/2)` share one rationalization path). The home-screen probe
+mirrors D30: it runs *after* `engine().evaluate()` has committed
+Ans/store and can only change the displayed string. **Five gates** bound
+it — finite non-store result + no `>dec`; every literal in the parsed
+input is an integer; no variables anywhere; a whitelist grammar
+(rational coeffs + square-free `sqrt` + `pi`) that must be "interesting";
+and agreement with the numeric result to 1e-9. Gate 2 is what makes
+always-on safe (`2.5` stays `2.5`, not `5/2`; `0.1+0.2` stays `0.3`, not
+`3/10`); gate 3 is not optional (the CAS parser has no `ans`/`e`, so
+`ans` would parse as `a*n*s`). Layout builder gained a bare radicand
+(`√2` not `√(2)`, except before `^`) and implicit multiplication before a
+radical or symbol glyph (`2√2`, `2π`) — `is_call()` was relaxed to accept
+the bare shape, with an explicit anti-regression test so `sqrt(2)/2`
+still stacks as a fraction. **Behavior changes to judge on device**:
+`1/3` now renders as an amber stacked fraction (was `0.3333333333`) and
+`pi` renders as `π`; `>frac` results stay white flat text; no exact forms
+for expressions naming a variable/`Ans`, or in non-REAL number modes (a
+~6-line follow-up). Host suite green — `test_cas` **199 → 238**,
+`test_layout` **44 → 54**, 0 failures, and the 199 pre-existing CAS
+checks unchanged (the proof that staying out of `simplify.cpp` worked).
+Both boards build clean; Pico 1 bss **201,096 bytes, exactly flat**;
+lint/format clean. **Not flashed to either board yet** — folds into
+Stage 5. Full detail: worklog's 2026-08-03 "Phase 5 Stage 4" entry,
+`decisions.md` D43.
+
+**Also 2026-08-03 (parallel, separate worktree):** a **documentation
+branch `docs/site`** was seeded off `main` (commit `0f1e8ef`, pushed; no
+PR). Plain-markdown source tree under `docs-site/` with `SUMMARY.md` as
+the single nav source, driving three outputs: `scripts/gen-wiki.sh`
+(flattened GitHub-wiki tree + `_Sidebar.md`), `scripts/gen-offline.sh`
+(concatenated markdown always, plus self-contained HTML + PDF when
+pandoc is present), and `scripts/gen-doc-reference.py` (generates the
+function catalog from `src/math/catalog.cpp` and the key/syntax
+references from `src/apps/help_screen.cpp` — firmware stays the source
+of truth). CI: `validate-docs` now covers `docs-site/`, and a new
+`.github/workflows/docs.yml` validates, fails on stale generated
+reference pages, uploads the offline bundle, and has a wiki-publish job
+gated on a `WIKI_TOKEN` secret (`GITHUB_TOKEN` cannot push to wikis —
+the PAT setup is documented in `docs-site/README.md`). **Prose chapters
+are stubs** — this was a scaffold-and-generators seed only.
+
+**Two sessions ago:** 2026-08-03 — **Bugfix, source changes: home-screen
+history persistence.** Root-caused and fixed the suspected home-screen I/O
+persistence bug flagged at the end of the 2026-08-02 Stage 3 session:
+symbolic CAS results were losing their `ResultKind` on reload (always came
+back `kPlain` — plain white text instead of the typeset amber fraction),
+because `history.txt` only stored `expr<TAB>result` and `load_state`
+hardcoded `kPlain` for every reloaded line. Fixed by adding a third
+tab-separated kind column (`expr<TAB>result<TAB>S|P\n`, backward
+compatible with legacy two-field lines). While auditing the load/save path
+also found and fixed two pre-existing latent bugs (predate Phase 5): a
+head-vs-tail read bug (`load_state` read from file offset 0 despite its
+own comment claiming "tail," so a `history.txt` past 8 KB restored the
+*oldest* entries on reboot, not the newest — fixed with a new
+`Storage::file_size()` + a seek to the true tail) and unbounded file
+growth (no compaction ever existed — fixed with a new
+`HomeScreen::compact_history()`, trims to the last 8 KB once the file
+exceeds 24576 bytes). Both boards build clean; Pico 1 bss **201,096
+bytes**, flat (shared `g_hist_io` buffer replaces the old function-local
+static); `lint.sh`/`format.sh` clean; full host suite green (`test_cas`
+199 unchanged — firmware-only path); a standalone host logic check of the
+round-trip ran 600 checks, 0 failures. **D4 amended in place** (its own
+"Revisit when" clause fired) rather than a new decision number. On-device
+confirmation of history-survives-reboot is still open — folds into Stage
+5's Pico 1/Pico 2 flashing. Full detail: worklog's 2026-08-03 entry,
+`decisions.md` D4.
+
+**Three sessions ago:** 2026-08-02 — **Phase 5 (CAS) Stages 0-3: engine +
+home-screen UI integration, source changes, HW-verified on the Pico 2.**
+On the `phase-5` branch (not yet merged to `main`). Two sessions: the CAS
+engine itself — expr tree/pool, parser, serializer, simplify, differentiate,
+expand, factor, solve, integrate (`src/math/cas/`, tasks 4D.1-4D.19,
+D41: pool overlays the shared scratch `kCompute` arena, SRAM not the
+spec's sketched PSRAM) — landed host-tested-only in an earlier session
+this same day; this session wired it into the home screen (Stage 3,
+4D.4/4D.20/4D.21): an inline-call router (`diff()`/`integ()`/`factor()`/
+`expand()`/`simplify()`/`solve()`) dispatches from `HomeScreen::evaluate_input`
+(CAS is display-only, no `Ans`/store, per P5-1/P5-2), results typeset via
+`serialize` → `render::build_layout` in an accent color (**D42**: reuses
+the existing string layout builder instead of a dedicated `expr_to_layout`
+tree-walker), plus an F6 CAS menu and typed `cas` command
+(`src/apps/cas_menu.{hpp,cpp}`). A round of on-device fixes followed:
+exact `p/q` fraction display instead of decimal coefficients, right-aligned
+symbolic results, amber accent (was teal — too close to the input-line
+gray), descending-degree sum order (TI convention), and a pannable
+one-line window for results too long to fit. `test_cas` grew 153 → **199**
+checks, 0 failures; both boards build clean; Pico 1 static RAM **201,096
+bytes** (~67 KB headroom, essentially flat — the CAS pool overlays the
+existing arena); `lint.sh`/`format.sh` clean. Flashed to the Pico 2 and
+confirmed working interactively (inline ops, F6 menu, fractions, sum
+order, accent, scroll all reported "looks good") — **the Pico 1 leg for
+this branch's CAS work is still open**, see "The next job" below.
+Decisions **D41**, **D42**. `PICOCALC_PHASE` stays `"4D"` (bumping to `"5"`
+is a Stage 5 close-out task, not yet reached). Full detail: worklog's
+2026-08-02 "Phase 5 Stages 0-3" entry.
+
+**Four sessions ago:** 2026-08-02 — **CI fix + first release, docs/infra only, no
 source changes.** The GitHub Actions "Build" workflow had two red jobs (the
 board build jobs themselves always passed): Lint disagreed with local
 clang-format because CI installed Ubuntu's apt `clang-format 18` against
@@ -18,7 +423,7 @@ decision number consumed, no phase/sub-phase status change (Phase 4D stays
 closed, Phase 5 CAS is still next — see "The next job" below). Full detail:
 worklog's 2026-08-02 "CI fix" entry.
 
-**Previous session:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
+**Five sessions ago:** 2026-08-02 — **Pre-Phase-5 review pass: shared scratch
 arena (−21.8 KB SRAM) + near-zero matrix chop, HW-verified on the Pico 2.**
 Opened the pre-Phase-5 code-review/size-optimization pass. A per-symbol SRAM
 audit (new `scripts/size-report.sh`) found ~40 KB tied up in per-module
@@ -43,7 +448,7 @@ design call). Full detail: `docs/notes/pre-phase5-review.md`, worklog's
 2026-08-02 "Pre-Phase-5 review pass" entry. Commits `1073f4f` (doc de-stale),
 `5f76851` (arena), `4edba81` (chop).
 
-**Two sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
+**Six sessions ago:** 2026-08-02 — **UI-friction polish, source changes,
 HW-verified on the Pico 2 (build `0cfbe05-dev`).** Fixed the two
 UI-friction feature requests logged in the 2026-07-27 eval, plus two
 follow-ups raised during this session's on-device testing. Matrix results
@@ -63,7 +468,7 @@ suites); both boards build clean; Pico 1 bss **222,528 bytes** (was
 4D, not a new design call. Full detail: worklog's 2026-08-02 "UI-friction
 polish" entry.
 
-**Three sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
+**Seven sessions ago:** 2026-08-02 — **Phase 4D CLOSED, docs-only (D40).** Resolved
 the three-item Phase 4D close checklist carried below: the **F-evaluator
 follow-on check (D37) fired** — idea B (complex vars, 4D.15), C (complex
 lists, 4D.24), D (complex matrices, 4D.25), E (vector ops), and G
@@ -80,7 +485,7 @@ source changes this session. Full detail: worklog's 2026-08-02 "Phase 4D
 CLOSED" entry, `decisions.md` D40 (cross-refs D37,
 `design-departures-matrix-complex.md` §H).
 
-**Four sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
+**Eight sessions ago:** 2026-08-02 — **D10 leg A, source change, HW-verified on
 the Pico 2/RP2350 (`1a45763-dev`).** The dual-core display
 pipeline — core-1-offloaded panel pushes — now covers the Pico 2's
 full-framebuffer path, closing the "extend to Pico 2" half of the D10
@@ -100,7 +505,7 @@ D10 **leg B** (compute-parallelize `recompute_function`) is the one
 remaining open D10 item — see "The next job" #2. Full detail: worklog's
 2026-08-02 "D10 leg A" entry, `decisions.md` D10.
 
-**Five sessions ago:** 2026-08-02 — **feature follow-on, source changes,
+**Nine sessions ago:** 2026-08-02 — **feature follow-on, source changes,
 HW-verified on the Pico 2 (build on top of `e5f2a10-dev`).** `MatAns` now
 persists across a power cycle (**D39**): reverses the by-design-transient
 stance the bugfix session below landed the same day. Save/load reuses the
@@ -115,7 +520,7 @@ unchanged at 222,520; cold-boot survival confirmed on the Pico 2. Full
 detail: `worklog.md`'s 2026-08-02 "MatAns now persists" entry,
 `decisions.md` D39.
 
-**Six sessions ago (same day):** 2026-08-02 — **bugfix session, source
+**Ten sessions ago (same day):** 2026-08-02 — **bugfix session, source
 changes, HW-verified on the Pico 2 (`e5f2a10-dev`).** Fixed the two minor bugs found in the
 2026-07-27 eval: SEQ-mode trace (F4) now reads exact values straight from
 `math::seqexpr::value()` instead of the pixel-quantized point cache (was
@@ -139,84 +544,100 @@ now persists.** 12 new host checks (`test_seq` now 63); both boards
 rebuilt clean; `clang-format` clean. Full detail: `worklog.md`'s
 2026-08-02 bugfix entry.
 
-**Seven sessions ago (same day):** 2026-08-02 — **Pico 2 hardware session, no
-source changes** (one doc-only wishlist addition). Reflashed the Pico 2
-from the stale Session 19 build (9 builds behind) to then-HEAD (`dadc7cf`)
-and ran a hardware-observation interview. First boot showed the expected
-one-time data reset under the PCV1/PCL2/PCM2 format bumps; general UI perf
-feel was reported snappy; three `graph recompute:` serial-instrumented
-stress probes (7 functions + 8001-pt scatter = 50.8 ms; 1 function/10
-nested trig calls = 28.1 ms; 1 function/20 nested trig calls = 33.7 ms —
-notably sub-linear with nesting depth, unexplained) all stayed well under
-the ~146 ms push-budget floor, so no compute-bound stall was produced on
-this board. Display pipeline showed no tearing/flicker/stutter; APD 5-min
-dim/wake worked as expected. **One notable discrepancy** (root-caused two
-entries above, then the underlying by-design stance itself reversed in
-"Last session" — D39): `MatAns` *persisted* across a power cycle on the
-Pico 2 this session, contradicting the Pico 1 finding from 2026-07-27 —
-same code on both boards at the time, so it looked like an open
-board-to-board discrepancy until root-caused as warm-reset RAM retention
-of a transient global, not a source bug (and MatAns persistence is now the
-intended behavior on both boards regardless). Also added "no copy/paste in
-expression editors" to `wishlist.md`. This addressed "The next job" #3
-(Pico 2 perf spot-check) informally. Full detail:
-`testdrive-2026-08-02-observations.md`.
-
-The 2026-07-27 on-device eval (Batches 2-4 PASS, closing all nine D38
-batches on the Pico 1) and the 2026-07-26 Phase 4D kickoff session are
-further back than this rolling summary keeps — see `worklog.md`'s
-2026-07-27 and 2026-07-26 entries (`testdrive-2026-07-27-observations.md`,
-`decisions.md` D38) for full detail.
+The 2026-08-02 Pico 2 hardware session (informal perf spot-check — general
+UI felt snappy, `graph recompute:` stress probes up to 33.7 ms stayed well
+under the 146 ms push-budget floor; the MatAns power-cycle discrepancy it
+found was root-caused and then superseded by D39 above), the 2026-07-27
+on-device eval (Batches 2-4 PASS, closing all nine D38 batches on the
+Pico 1), and the 2026-07-26 Phase 4D kickoff session are further back than
+this rolling summary keeps — see `worklog.md`'s 2026-08-02, 2026-07-27, and
+2026-07-26 entries (`testdrive-2026-08-02-observations.md`,
+`testdrive-2026-07-27-observations.md`, `decisions.md` D38) for full
+detail.
 
 ## The next job
 
-1. **Phase 4D is CLOSED (2026-08-02, D40).** All 9 D38 batches are
-   hardware-verified on the Pico 1 (Batch 1 and Batches 5-9 on 2026-07-26,
-   Batches 2-4 on 2026-07-27); the Pico 2 leg is closed as a formality
-   (board-independent logic). The three-item close checklist is resolved
-   — see "Last session" above for the F-evaluator-check/idea-H/ti-parity
-   dispositions. The forward path from here:
-   - **Pre-Phase-5 code-review/size pass — LARGELY DONE 2026-08-02.** The
-     big win landed: a shared math scratch arena reclaimed **21.8 KB SRAM**
-     (Pico 1 bss 222,528 → **200,704**, headroom **~46 → ~68 KB**). Two
-     measurements banked with no code change: **`-Os` ruled out** for this
-     pass (−126 KB flash, 0 SRAM — keep `-O3`), and the **Phase 6
-     MicroPython budget re-verified — the arena is what makes Phase 6 fit
-     on Pico 1** (pre-arena 46.7 KB free was < the 56 KB lazy heap; now 68 KB
-     → fits with ~12 KB spare). Full write-up + the measurement tooling:
-     `docs/notes/pre-phase5-review.md`, `scripts/size-report.sh`.
-     **Remaining levers (all deferred — Phase 6 already fits, none urgent):**
-     (a) reduce the MicroPython heap 48→40 KB if the ~12 KB spare gets eaten
-     by Phase 5 CAS + 6A framework static growth (spec Risk 6); (b)
-     **ArrayStore slab cut** — ~12-16 KB safe after a device high-water-mark
-     measurement, ~24-32 KB if a **PSRAM-fallback-on-slab-exhaustion**
-     prerequisite lands first (today `slab_alloc` hard-fails); (c) fold the
-     persistence `g_chunk`s (~6 KB, minor); (d) the arena's debug
-     owner-guard (deferred, documented). Take these up only if a real
-     budget pinch appears — watch Pico 1 bss through Phase 5.
-   - **Then Phase 5 (CAS)** per D32/D33.
-   - **Then F (the unified evaluator)**, per D37/D40 — deliberately
-     sequenced after Phase 5 rather than right after 4D, so a possible
-     4th (symbolic) evaluator from CAS is known before the unification
-     pass, and so the rewrite doesn't churn code CAS is about to build on.
-   - **Then revisit idea H (polymorphic variables)**, per D40 — stays
-     unscheduled, take up only if real usage demands it by that point.
-   - (Three non-blocking follow-up items from the 2026-07-27 eval — SEQ
-     trace float noise, SEQ editor color-swatch, `MatAns` power-cycle
-     persistence — were all fixed and HW-verified 2026-08-02; see
-     worklog's 2026-08-02 entries and `decisions.md` D39.)
-   - **Two UI-friction feature requests from the 2026-07-27 eval — fixed
-     and HW-verified 2026-08-02**: matrix results now cap displayed
-     decimal digits (compact 4-sig-fig formatter, real and complex
-     cells); the constants picker was relaid into four non-overlapping
-     columns (symbol | engine id | short value | summary) and gained
-     LEFT/RIGHT description scroll. `>Frac` was also extended to work on
-     matrix results (a same-session follow-up, not from the original
-     eval). See worklog's 2026-08-02 "UI-friction polish" entry.
-   Task table: `phase4-spec.md` §8; decisions: `decisions.md` D37/D38/D40
-   (the idea A-G → task-ID map is in D37 and
-   [design-departures-matrix-complex.md](design-departures-matrix-complex.md);
-   idea H's full scope is design-departures §H).
+0. **Seeded but unfinished: the `docs/site` branch** (2026-08-03, off
+   `main`, commit `0f1e8ef`, pushed, no PR). Scaffold + generators + CI
+   only — every prose chapter under `docs-site/guide/` is still a TODO
+   stub, and `docs-site/reference/error-messages.md` is unwritten. Next
+   steps whenever it's picked up: write the getting-started and guide
+   prose (README's "Using the calculator" is the seed), create the wiki
+   `WIKI_TOKEN` PAT if wiki publishing is actually wanted (see
+   `docs-site/README.md`), and decide whether to rebase onto `main` after
+   Phase 5 merges so the CAS chapter can be written. Independent of the
+   Phase 5 work below — it does not block Stage 5.
+1. **Phase 5 (CAS) is in progress on the `phase-5` branch — Stages 0-4
+   code-complete; 0-3 HW-verified on the Pico 2 (2026-08-02), Stage 4
+   host-verified only (2026-08-03).** The engine
+   (tree/pool/parser/serializer/simplify/diff/expand/factor/solve/integrate,
+   4D.1-4D.19) and the home-screen UI integration (inline CAS calls, F6
+   menu, `cas` command, 4D.4/4D.20/4D.21) are both done and pushed; see
+   "Last session" above and worklog's 2026-08-02 "Phase 5 Stages 0-3"
+   entry. **One stage remains, per `phase5-spec.md` §11:**
+   - **Stage 4 — exact-form display (4D.23/4D.24): DONE 2026-08-03
+     (D43) + follow-ups the same day (D44). Flashed to the Pico 2, clean
+     boot confirmed; interactive confirmation still pending.** Remaining
+     on-device script, to run on both boards during Stage 5:
+     - Amber typeset exact forms: `sqrt(2)`, `sqrt(8)`, `sqrt(12)`,
+       `1/sqrt(2)`, `sqrt(1/2)`, `sqrt(2)+sqrt(8)`, `1/3`, `2/6`,
+       `1/3+1/7`, `pi`, `pi/2`, `pi*2`, `1/pi`, `1+sqrt(2)`;
+       trig `sin(pi/6)`, `sin(pi/3)`, `cos(pi/3)`, `tan(pi/6)`,
+       `tan(pi/3)`, and `sin(pi)`/`cos(pi/2)` → a clean `0`.
+     - DEGREE mode: `sin(30)`, `sin(45)`, `sin(60)`, `cos(30)`, `tan(60)`
+       fold; `sin(37)` does not.
+     - RECT/POLAR number mode: real-valued results still get exact forms;
+       genuinely complex ones stay decimal.
+     - Unchanged white decimals: `2.5`, `0.1+0.2`, `2+2`, `4/2`,
+       `sqrt(4)`, `sin(1)`, `sin(pi/5)`, `tan(pi/2)`, `1/3>dec`,
+       `5->a` then `a/3`. `1/3>frac` still works the old way.
+     - **Alt+Enter**: on a typed expression → decimal; on an empty line
+       after an amber result → re-runs it as a decimal. (Shift+Enter was
+       the first binding and does *not* work — it arrives as `kInsert`;
+       see "Last session" above.)
+     - Reboot and confirm amber forms reload amber (also covers the
+       2026-08-03 history fix).
+     - **Judgement calls while it's in hand**: whether `1/3` as a stacked
+       fraction and `pi` as `π` are welcome or intrusive. D43's "Revisit
+       when" names the escape hatch (require a `sqrt`/`pi` flag rather
+       than any flag, dropping bare rationals back to decimal).
+   - **Stage 5 — hardening + on-device verification (4D.22), not started.**
+     Stress/edge-case tests, a pool-capacity guard (abort above ~80%
+     capacity, spec Risk 2), the Risk-1 termination cycle set exercised at
+     scale (not just unit-test scale); then flash the Pico 2 again and
+     **flash the Pico 1 for the first time on this branch** (watch bss
+     headroom there specifically — the Pico 1 is the tighter budget).
+     Once Stage 5 closes: bump `PICOCALC_PHASE` `"4D"` → `"5"` in
+     `CMakeLists.txt`, do the phase-close docs pass (ti-parity.md gets its
+     CAS-section sweep at this point, README status flip), and open the
+     `phase-5` → `main` PR. **Fold in on-device confirmation of the
+     2026-08-03 history-persistence fix** (below) while the Pico 1/Pico 2
+     are on the bench for this stage anyway — it's a firmware-only path,
+     not covered by the host suite.
+   - **BUG flagged 2026-08-02, RESOLVED 2026-08-03**: the suspected
+     home-screen history I/O persistence bug was root-caused (symbolic CAS
+     results lost their `ResultKind` on reload) and fixed, along with two
+     related latent bugs (head-vs-tail read, unbounded file growth) found
+     during the investigation. See "Last session" above, worklog's
+     2026-08-03 entry, and `decisions.md` D4 (amended in place). Still
+     open: on-device confirmation that history now survives a reboot
+     correctly (see the Stage 5 bullet above) — the fix is host-logic
+     verified (600 checks) but this path itself isn't in host coverage.
+   - The pre-Phase-5 SRAM levers noted before CAS started remain relevant
+     background (all still deferred, none urgent — watch Pico 1 bss as
+     Stage 4/5 lands): (a) MicroPython heap 48→40 KB if the ~12 KB spare
+     gets eaten by CAS + 6A framework growth (spec Risk 6); (b) ArrayStore
+     slab cut (~12-16 KB, more with a PSRAM-fallback prerequisite); (c)
+     persistence `g_chunk` fold (~6 KB); (d) arena debug owner-guard. Full
+     write-up: `docs/notes/pre-phase5-review.md`.
+   - **After Phase 5 closes**: F (the unified evaluator, D37/D40 —
+     deliberately sequenced after CAS so a possible 4th symbolic evaluator
+     is known before unification), then revisit idea H (polymorphic
+     variables, D40 — unscheduled, only if real usage demands it).
+   - Phase 4D itself has been closed since 2026-08-02 (D40, all 9 D38
+     batches HW-verified) — see worklog's 2026-08-02 "Phase 4D CLOSED"
+     entry if the pre-CAS history is needed; `phase4-spec.md` §8 and
+     `decisions.md` D37/D38/D40 have the full task/decision map.
 2. **D10 follow-ups** (originally from 2026-07-25, no phase home):
    - **Extend the display pipeline to Pico 2 — DONE + HW-VERIFIED
      2026-08-02 (leg A).** `start_display_service()` now launches the
@@ -258,6 +679,37 @@ is actually scheduled.
 
 ## Key things to note — Pico 2 specific
 
+- **Both boards are flashed to `5ef025f`** (2026-08-05) — all of Phase 5
+  (Stages 0-5) plus the D46 complex-evaluator fixes. **The Pico 1's flash is
+  the first time any Phase 5 code has run on that board**, and it passed:
+  the D45 nesting ladder computes clean, CAS ops are perceptibly slower but
+  well inside budget (no FPU), and the D46 fixes hold. Pico 1 bss **198,836**
+  (was 201,096); serial healthy on both (Pico 1 psram-bulk 232/200 us vs the
+  Pico 2's 150/155, die temp ~25 C).
+- **The 2026-08-03 history-persistence fix is now confirmed on hardware.**
+  The Pico 1 was still on Phase 4D, so its `history.txt` was the legacy
+  two-field format — that board was the only place the migration path could
+  be exercised, and it migrated correctly (old lines reload plain, new
+  symbolic results reload amber). This closes the last outstanding item from
+  that session.
+- **The history-persistence fix reached hardware with the build above**,
+  but its reboot behavior has not been exercised yet — the host suite has
+  no coverage for this path (it is firmware-only, with no host UI to run
+  against real SD I/O). It is a persistence *format* change (`history.txt`
+  gained a third tab-separated kind column) but backward compatible — no
+  one-time reset, old two-field lines still parse as `kPlain`. Confirm on
+  both boards alongside the Stage 5 flash, see "The next job" #1.
+- **Firmware on the Pico 2 was reflashed on `phase-5` (2026-08-02) with
+  Phase 5 Stages 0-3** — the CAS engine + home-screen UI integration
+  (inline `diff()`/`integ()`/`factor()`/`expand()`/`simplify()`/`solve()`,
+  F6 CAS menu, `cas` command). This is the first CAS build to reach either
+  board. HW-verified: clean boot, all six inline ops, the F6 menu, exact
+  fraction display, right-aligned/descending-order/amber-accent results,
+  and the pannable long-result window all confirmed working interactively.
+  No persistence format change, no one-time reset (CAS results are
+  display-only, never written to SD). **The Pico 1 has NOT been flashed
+  with any Phase 5 code yet** — that's part of Stage 5, see "The next job"
+  #1. See "Last session" above for the full commit list.
 - **Firmware on the Pico 2 was reflashed again same-day (2026-08-02) with
   this session's UI-friction polish** (`0cfbe05-dev`) — compact matrix
   cell formatting, matrix `>Frac`, and the constants-picker relayout +

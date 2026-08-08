@@ -28,6 +28,10 @@ constexpr Color kGrayLine = Color::from_rgb(200, 200, 200);
 // (kGrayLine reads near-white on the panel — 2026-07-11 test drive).
 constexpr Color kGridLine = Color::from_rgb(60, 60, 60);
 constexpr Color kCursor = Color::from_rgb(0, 120, 215);
+// CAS symbolic results on the home screen (Phase 5): a warm amber accent that
+// reads clearly against the gray input and white numeric results (teal was too
+// close to the input color on the panel — HW 2026-08-02).
+constexpr Color kSymbolic = Color::from_rgb(255, 190, 40);
 }  // namespace colors
 
 // Low-level LCD transport. Pixel buffering and drawing primitives live in

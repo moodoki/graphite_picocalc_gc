@@ -10,6 +10,138 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Screenshot capture — serial dump (debug aid) + save-to-SD (user feature)**
+  (raised 2026-08-05, same session as serial key injection below — two uses
+  of the same underlying capability). Frame is 320x320 RGB565 (200 KB raw),
+  identical resolution/format on both boards, but the capture path differs
+  sharply by board: **Pico 2** holds a complete frame in SRAM at once
+  (`frame_buf`, `src/gfx/framebuffer.cpp:17`) with a genuinely stable window
+  to read it — right after `render()` returns and before the next frame's
+  `drain_acks()` lets core 0 overwrite it again
+  (`framebuffer.cpp:104-109`). **Pico 1 never has a full frame in SRAM at
+  all** — it renders in 16-row strips (`config::kStripHeight`, ~20
+  calls/frame) into two 10 KB ping-pong buffers; a screenshot there means
+  accumulating each finished strip (grabbed right before `submit()`, not by
+  re-entering `render()`, to respect the idempotent-`render()` strip
+  contract in `phase3-spec.md` §8) into a scratch region — SRAM doesn't have
+  200 KB of spare headroom on Pico 1, so PSRAM (not memory-mapped, only
+  `read()`/`write()` via PIO/SPI, `psram.hpp:38-39`, ~6.8 MB/s HW-measured
+  bulk throughput — ~29 ms for a full frame) is close to mandatory as the
+  accumulator there, optional on Pico 2. Both boards' core-1 display-push
+  path is `__not_in_flash_func` (RAM-resident) per D10, because running it
+  from flash while core 0's USB/TinyUSB stack is active hard-faults the chip
+  (shared XIP cache contention) — any new capture code touching the
+  display/DMA path from core 1 while USB is live must stay RAM-resident
+  too, same landmine D10 already fought.
+  - **Debug-aid variant (serial dump)**: stream the captured frame out over
+    `stdio_usb` (already enabled, output-only today — printf diagnostics
+    only, nothing reads stdin, no existing screenshot code anywhere in the
+    repo including the vendored `picocalc_diag` bring-up target). Actual
+    `stdio_usb` throughput is **undocumented/unmeasured anywhere in this
+    project** — needs a real bench number before committing to raw dump vs.
+    an encoding; given calculator screens are mostly sparse/few-color
+    (`display.hpp:20-34`'s small fixed palette), simple RLE is very likely
+    worth it over a raw 200 KB dump, but that's inference, not measured.
+    Host-side capture script would need to assert DTR/RTS the same way
+    `scripts/serial-capture.py` already does for other serial reads, or
+    output will silently drop.
+  - **User-facing variant (save to SD)**: write the captured frame to
+    storage as a file (format/encoding TBD — raw RGB565 dump, or convert to
+    a standard image format like BMP/PPM for viewing off-device without
+    custom tooling). No existing SD image-write path to build on; would
+    follow the existing `Storage`/persistence conventions used elsewhere
+    (list/matrix/graph-state files) for the write side, but the pixel
+    encoding itself is new design work.
+  - No prior design work on either variant before this session; no phase
+    home.
+- **Serial key injection for on-device test automation**
+  — **scoped 2026-08-08: see [`serial-injection-plan.md`](serial-injection-plan.md)**,
+  which takes the line-oriented variant (option 2 below) forward and defers
+  per-keystroke synthesis (option 1) until testing friction is genuinely
+  per-keystroke. Two findings from that scoping change the picture: the
+  screenshot item below is **not** a prerequisite, because
+  `HomeScreen::ResultKind` (`home_screen.hpp:36`) already encodes
+  white/amber/error and can simply be printed; and flashing no longer needs the
+  BOOTSEL button (`picotool load -f -x`), leaving keyboard input as the last
+  manual step in the bench loop. Original entry (raised 2026-08-05,
+  Pico 1 testdrive session — dev tooling, not a calculator feature). USB
+  serial (`stdio_usb`) is enabled and output-only today (`printf`
+  diagnostics: boot/build info, late-init timing, PSRAM/battery/die-temp
+  heartbeats, and a per-key debug echo on the diag screen,
+  `src/main.cpp:214-215`); nothing in the firmware reads stdin
+  (`getchar_timeout_us()` is unused SDK capability, not a missing
+  dependency). Idea: add a non-blocking stdin read to the core-0 main loop
+  and synthesize `platform::KeyEvent`s (`src/platform/keyboard.hpp:10-126`,
+  already board-agnostic and pre-translated — not raw STM32 scancodes) fed
+  into the same drain path real keys take (`src/main.cpp:587-611`:
+  `power::note_key()` → `ScreenManager::handle_key()`), so injected input
+  exercises APD wake tracking, the HOME intercept, and all screen logic
+  identically to a physical key. A higher-level, less timing-fragile
+  alternative: drive `HomeScreen::handle_command()`
+  (`src/apps/home_screen.cpp:676-768`) directly with whole lines + a
+  synthetic Enter, reusing the existing typed-command dispatcher
+  (`cls`/`diag`/`cas`/`plot`/...) instead of per-keystroke synthesis. The
+  diag screen's existing key-echo gives a ready-made inject→verify
+  round-trip on that one screen with no new code. Motivation: repeatedly
+  recurring pattern in this project's history of judgment calls that "need
+  a bench session" or get confirmed only "incidentally during other
+  testing" — scripted input could turn some of that hand-driven on-device
+  verification into repeatable, automatable checks (soak-testing the D45
+  stack-depth fix class, the D14 rail-settle window, nesting-depth stress
+  ladders, etc.). No prior design work in this repo; not investigated
+  before this session. Would need: a non-blocking stdin poll (none exists),
+  a small wire protocol for key/line injection (none exists), and handling
+  the same DTR/RTS quirk already documented for the *output* side
+  (`scripts/serial-capture.py:9-13`) — a plain non-interactive host write
+  likely needs DTR/RTS asserted to be reliably received. No phase home;
+  raised as an infra idea only.
+- **Inverse-trig exact forms** (raised 2026-08-05, Pico 2 Stage 5 testdrive):
+  `asin(1)` shows `1.570796327` where the forward direction already shows
+  `sin(pi/6)` as `1/2`. D44 built a *forward* special-angle table only
+  (`src/math/cas/exact.cpp`, 24 entries indexed in twelfths of $\pi$), so
+  nothing recognizes `asin(1)` as $\pi/2$ or `atan(1)` as $\pi/4$. The
+  symmetric completion needs its own table over the inverse arguments
+  ($0$, $\pm 1/2$, $\pm\sqrt{2}/2$, $\pm\sqrt{3}/2$, $\pm 1$ for asin/acos;
+  $0$, $\pm\sqrt{3}/3$, $\pm 1$, $\pm\sqrt{3}$ for atan), angle-mode
+  awareness (in DEGREE, `asin(1)` is a plain `90` and correctly stays
+  white), and its own tests — comparable in size to D44. Deliberately
+  deferred out of Phase 5 Stage 5 rather than grown into a hardening
+  session; no design work beyond this note.
+- **Say *why* an editor field is invalid, not just colour it red** (raised
+  2026-08-08, Pico 1 testdrive). Today `SlotEditorScreen::render()` draws a
+  row white or red off a single cached bool (`valid_mask_`, D47), and
+  `field_valid()` → `Engine::compile()` throws the reason away — the engine
+  returns `nullptr` for every failure mode alike, so the UI genuinely does
+  not know whether it is a syntax error, an unknown identifier, a non-real
+  variable, or (since D47) an expression nested past `kMaxParseDepth`. The
+  trigger was exactly that ambiguity: after the D47 fix Y1 sat red with no
+  hint that the cause was nesting depth. Same gap in the list, matrix and
+  seq editors.
+  - Shape: give the compile path an out-parameter for a static reason
+    string. tinyexpr already hands back an error *offset* from
+    `te_compile`'s `int *error`, which `Engine::compile` currently discards
+    (`engine.cpp`) — that would also allow pointing at the offending
+    character, not just naming the problem.
+  - Display is the harder half on a 320x320 panel: rows are 26 px and the
+    expression text already truncates with an ellipsis before the enable
+    checkbox. Likely a status line at the bottom for the *selected* row
+    only, rather than per-row text.
+  - Note the D47 constraint: whatever this does must not put the compiler
+    back inside `render()`. The reason string has to be cached alongside
+    the valid bit, refreshed from `on_activate()`/`on_key`.
+- **Crosshair (horizontal line) in trace mode** (raised 2026-08-08, Pico 1
+  testdrive, as a question — "is trace supposed to show a horizontal line
+  too?"). It is not: `draw_trace` renders a full-height *vertical* line plus
+  a 5x5 cursor square in the slot's colour (`graph_screen.cpp:1102-1105`,
+  and the param/polar/seq path at `:1228-1231`). No decision ever specified
+  a crosshair, so this is unimplemented rather than broken. Adding the
+  horizontal arm is small — one `draw_hline` at the cursor row, skipped when
+  the point is offscreen — but worth judging on device first: the panel is
+  320 px and a full-width line may read as clutter against the grid, so a
+  short arm around the cursor, or a MODE toggle, may be better than a full
+  crosshair. TI-84 itself draws neither: it flashes a small cursor on the
+  curve with the readout at the bottom, which is closer to what this already
+  does.
 - **Copy/paste in expression editors** (raised 2026-08-02, Pico 2 testdrive):
   no way to copy text between fields — e.g. duplicating one Y= expression
   into another slot means retyping it in full on the physical keypad. No

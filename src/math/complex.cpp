@@ -77,6 +77,16 @@ Complex c_pow(const Complex& base, const Complex& exp) {
     if (base.re == 0.0 && base.im == 0.0) {
         return {0.0, 0.0};
     }
+    // Real base, real exponent: go straight to pow(). The exp(ln) form below
+    // is correct but not exact — 10202^2 came back a hair off 104080804,
+    // which is enough to fail format_number's `x == floor(x)` integer test
+    // and print "104080805.x" where REAL mode printed "104080805". Two
+    // evaluators must not disagree about ordinary real arithmetic (D46);
+    // pow() also handles a negative base with an integer exponent, which
+    // exp(ln) cannot without going through the complex plane.
+    if (base.im == 0.0 && exp.im == 0.0 && (base.re > 0.0 || exp.re == std::floor(exp.re))) {
+        return {std::pow(base.re, exp.re), 0.0};
+    }
     return c_exp(c_ln(base) * exp);
 }
 

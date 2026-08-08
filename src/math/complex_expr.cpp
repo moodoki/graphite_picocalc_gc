@@ -1,6 +1,7 @@
 #include "math/complex_expr.hpp"
 
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 
 #include "math/engine.hpp"
@@ -40,9 +41,25 @@ bool trim_into(const char* s, char* buf, size_t cap) {
 
 // ---- Recursive-descent evaluator ----
 
+// Parse-nesting cap. Two recursion cycles run through this parser and both
+// pass through parse_unary, which is why the guard lives there:
+//   1. paren/function nesting — parse_primary -> parse_expr -> parse_term
+//      -> parse_unary
+//   2. right-associative '^' — parse_power -> parse_unary, with no
+//      parentheses involved, so `2^2^2^...` nests once per caret.
+// Cycle 2 is why this needs a real counter and not the paren-depth scan
+// tinyexpr gets (D47's kMaxParseDepth): a string pre-scan cannot see it.
+// tinyexpr has no such cycle — its `factor` builds right-associativity
+// iteratively via an insertion pointer.
+//
+// The limit itself is the caller's, not the parser's — see kMaxParseDepth /
+// kMaxParseDepthNested in the header for the measurement.
+
 struct P {
     const char* s = nullptr;
     const char* err = nullptr;
+    int depth = 0;
+    int max_depth = kMaxParseDepth;
 };
 
 void skip_ws(P& p) {
@@ -81,9 +98,49 @@ Complex do_imag(const Complex& z) {
     return {c_imag(z)};
 }
 
+// Angle-mode wrappers. complex.cpp's c_sin/c_asin/... are deliberately pure
+// math — a Complex sine must not depend on global UI state — so the DEG/RAD
+// scaling lives here at the evaluator boundary, mirroring exactly what
+// functions.cpp's rad()/deg() do for the real path. Without these the complex
+// evaluator answered every trig call in radians, so DEGREE mode was silently
+// ignored on the home screen whenever Number mode was not REAL.
+//
+// The whole complex argument is scaled, not just its real part (TI-89's
+// behavior): for a real-valued input this reduces exactly to the real path,
+// which is the property that matters — the two evaluators must not disagree
+// about sin(30).
+constexpr calc_t kDegPerRad = 180.0;
+constexpr calc_t kPiConst = 3.14159265358979323846;
+
+Complex to_radians(const Complex& z) {
+    return angle_mode() == AngleMode::kDegrees ? z * Complex(kPiConst / kDegPerRad) : z;
+}
+Complex from_radians(const Complex& z) {
+    return angle_mode() == AngleMode::kDegrees ? z * Complex(kDegPerRad / kPiConst) : z;
+}
+
+Complex m_sin(const Complex& z) {
+    return c_sin(to_radians(z));
+}
+Complex m_cos(const Complex& z) {
+    return c_cos(to_radians(z));
+}
+Complex m_tan(const Complex& z) {
+    return c_tan(to_radians(z));
+}
+Complex m_asin(const Complex& z) {
+    return from_radians(c_asin(z));
+}
+Complex m_acos(const Complex& z) {
+    return from_radians(c_acos(z));
+}
+Complex m_atan(const Complex& z) {
+    return from_radians(c_atan(z));
+}
+
 const CFn kFns[] = {
-    {"sqrt", c_sqrt}, {"exp", c_exp},   {"ln", c_ln},      {"sin", c_sin},    {"cos", c_cos},
-    {"tan", c_tan},   {"asin", c_asin}, {"acos", c_acos},  {"atan", c_atan},  {"abs", do_abs},
+    {"sqrt", c_sqrt}, {"exp", c_exp},   {"ln", c_ln},      {"sin", m_sin},    {"cos", m_cos},
+    {"tan", m_tan},   {"asin", m_asin}, {"acos", m_acos},  {"atan", m_atan},  {"abs", do_abs},
     {"arg", do_arg},  {"conj", c_conj}, {"real", do_real}, {"imag", do_imag},
 };
 
@@ -167,11 +224,31 @@ Complex parse_scalar_span(P& p) {
         return fail(p, "Syntax error");
     }
 
-    char span[kMaxLen];
     const auto len = static_cast<size_t>(p.s - start);
-    if (len == 0 || len >= sizeof(span)) {
+    if (len == 0 || len >= kMaxLen) {
         return fail(p, "Syntax error");
     }
+
+    // Plain numeric literal: parse it here instead of handing it to
+    // eval_field. That fallback runs the whole tinyexpr engine —
+    // Engine::evaluate -> eval_internal -> preprocess — roughly 1.2 KB of
+    // stack, and it sat at the *leaf* of this parser's recursion, which is
+    // the deepest point on the stack. Four nested parens overran core 0
+    // because of it (HW 2026-08-08, faulting in preprocess's prologue).
+    // strtod is what tinyexpr would have used for these anyway.
+    if (std::isdigit(static_cast<unsigned char>(*start)) != 0 || *start == '.') {
+        char* end = nullptr;
+        const double d = std::strtod(start, &end);
+        if (end == p.s) {
+            return {static_cast<calc_t>(d)};
+        }
+    }
+
+    // Static for the same reason preprocess's buffers are: this is the leaf
+    // of the parser's recursion, so its frame is paid at maximum depth.
+    // parse_scalar_span never nests (it consumes a terminal span and calls
+    // nothing that re-enters the parser), so one copy is enough.
+    static char span[kMaxLen];
     std::memcpy(span, start, len);
     span[len] = 0;
     calc_t v = 0;
@@ -252,7 +329,24 @@ Complex parse_power(P& p) {
     return c_pow(base, exp);
 }
 
+// RAII so every early return unwinds the count; parse_term/parse_expr call
+// parse_unary repeatedly in a loop, and those siblings must not accumulate.
+struct DepthGuard {
+    P& p;
+    explicit DepthGuard(P& q) : p(q) { ++p.depth; }
+    ~DepthGuard() { --p.depth; }
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+    DepthGuard(DepthGuard&&) = delete;
+    DepthGuard& operator=(DepthGuard&&) = delete;
+    bool too_deep() const { return p.depth > p.max_depth; }
+};
+
 Complex parse_unary(P& p) {
+    const DepthGuard guard(p);
+    if (guard.too_deep()) {
+        return fail(p, "Too deeply nested");
+    }
     skip_ws(p);
     bool neg = false;
     while (*p.s == '-' || *p.s == '+') {
@@ -342,7 +436,7 @@ bool mentions_i(const char* s) {
     return false;
 }
 
-Result evaluate(const char* input) {
+Result evaluate(const char* input, int max_depth) {
     Result res;
     char body[kMaxLen];
     if (!trim_into(input, body, sizeof(body))) {
@@ -401,6 +495,7 @@ Result evaluate(const char* input) {
 
     P p;
     p.s = processed;
+    p.max_depth = max_depth;
     const Complex v = parse_expr(p);
     if (p.err == nullptr) {
         skip_ws(p);

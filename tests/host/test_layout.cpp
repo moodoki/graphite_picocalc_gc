@@ -107,10 +107,12 @@ int main() {
                    n->t.text[0] == gfx::kGlyphPi && n->t.text[1] == 0,
                "'pi' is the pi glyph");
         expect(n != nullptr && n->width == 8, "'pi' width = 1 char");
+        // Stage 4: a coefficient before a symbol glyph multiplies
+        // implicitly, so "2*pi" typesets as "2pi" with no '*' node.
         auto* h = build("2*pi");
-        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 3 &&
-                   h->h.items[2]->t.text[0] == gfx::kGlyphPi,
-               "'2*pi' substitutes the glyph");
+        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 2 &&
+                   h->h.items[1]->t.text[0] == gfx::kGlyphPi,
+               "'2*pi' substitutes the glyph, no '*'");
         // Identifiers merely containing 'pi' are untouched.
         auto* s = build("pit");
         expect(s != nullptr && s->type == NodeType::kText &&
@@ -172,6 +174,46 @@ int main() {
         auto* n = build("sin(x)/2");
         expect(n != nullptr && n->type == NodeType::kFraction,
                "'sin(x)/2' is Fraction");
+    }
+
+    // Exact-form display (Phase 5 Stage 4): a single-atom radicand loses its
+    // parens, and a coefficient in front of a radical multiplies implicitly,
+    // so the CAS's "2*sqrt(2)" typesets as the handwritten "2√2".
+    {
+        auto* n = build("sqrt(2)");
+        expect(n != nullptr && n->type == NodeType::kHBox && n->h.count == 2 &&
+                   n->h.items[0]->t.text[0] == gfx::kGlyphSqrt &&
+                   n->h.items[1]->type == NodeType::kText,
+               "'sqrt(2)' is a bare radicand");
+        expect(n != nullptr && n->width == 2 * 8, "'sqrt(2)' width = 2 chars");
+
+        // A compound radicand still needs its parens — there is no vinculum.
+        auto* c = build("sqrt(2+3)");
+        expect(c != nullptr && c->type == NodeType::kHBox && c->h.count == 2 &&
+                   c->h.items[1]->type == NodeType::kParen,
+               "'sqrt(2+3)' keeps its parens");
+
+        // ... and so does a radicand followed by '^', or "√x^2" would read
+        // as sqrt(x^2).
+        auto* s = build("sqrt(x)^2");
+        expect(s != nullptr && s->type == NodeType::kSuperscript &&
+                   s->bin.a->type == NodeType::kHBox &&
+                   s->bin.a->h.items[1]->type == NodeType::kParen,
+               "'sqrt(x)^2' keeps its parens under a power");
+
+        auto* h = build("2*sqrt(2)");
+        expect(h != nullptr && h->type == NodeType::kHBox && h->h.count == 2 &&
+                   h->h.items[1]->type == NodeType::kHBox,
+               "'2*sqrt(2)' drops the '*'");
+        expect(h != nullptr && h->width == 3 * 8, "'2*sqrt(2)' width = 3 chars");
+
+        // Anti-regression for the is_call() relaxation: a bare radicand must
+        // still count as "simple" so it stacks as a fraction numerator.
+        auto* f = build("sqrt(2) / 2");
+        expect(f != nullptr && f->type == NodeType::kFraction &&
+                   f->bin.a->type == NodeType::kHBox &&
+                   f->bin.a->h.items[0]->t.text[0] == gfx::kGlyphSqrt,
+               "'sqrt(2) / 2' stacks with a radical numerator");
     }
 
     // Power in a fraction: x^2/2 stacks with a Superscript numerator.
@@ -248,6 +290,74 @@ int main() {
                        group->paren.child->width == 0,
                    "'rand()' arg list is empty");
         }
+    }
+
+    // Nested superscripts must actually step upward (HW 2026-08-08:
+    // `2^2^2^2` drew as "222^2"). render_node places the exponent flush with
+    // the node's top and the base at (node->baseline - base->baseline), so
+    // the raise a level actually achieves is node->baseline - exp->baseline.
+    // Sizing the baseline off the base cancelled that to zero as soon as the
+    // exponent was itself a superscript.
+    {
+        const NodeType kSup = NodeType::kSuperscript;
+        const render::LayoutNode* a = build("2^2");
+        expect(a != nullptr && a->type == kSup, "'2^2' is a superscript");
+        // Flat case must be unchanged by the fix.
+        expect(a != nullptr && a->baseline - a->bin.b->baseline == a->bin.a->height / 2,
+               "'2^2' raises the exponent by half the base height");
+
+        const render::LayoutNode* b = build("2^2^2");
+        expect(b != nullptr && b->type == kSup && b->bin.b->type == kSup,
+               "'2^2^2' nests right-associatively");
+        expect(b != nullptr && b->baseline - b->bin.b->baseline == b->bin.a->height / 2,
+               "'2^2^2' outer level still raises its exponent");
+        expect(b != nullptr && b->height > b->bin.b->height,
+               "'2^2^2' is taller than its own exponent");
+
+        const render::LayoutNode* c = build("2^2^2^2");
+        expect(c != nullptr && c->baseline - c->bin.b->baseline == c->bin.a->height / 2,
+               "'2^2^2^2' outer level still raises its exponent");
+        // Each level steps up by the same amount, so heights strictly grow.
+        expect(c != nullptr && c->height > c->bin.b->height &&
+                   c->bin.b->height > c->bin.b->bin.b->height,
+               "'2^2^2^2' heights grow at every level");
+        // The base must never be asked to draw above the node's top.
+        expect(c != nullptr && c->baseline >= c->bin.a->baseline,
+               "'2^2^2^2' base fits inside the node box");
+    }
+
+    // Deep nesting must terminate and degrade, never run away (HW
+    // 2026-08-08: four nested parens overran core 0's stack from inside
+    // HomeScreen::render()). The staging arrays now live at the pool's
+    // scratch end and parse_power carries a depth cap.
+    {
+        char deep[256];
+        for (int parens = 4; parens <= 60; parens += 28) {
+            std::size_t w = 0;
+            for (int i = 0; i < parens; ++i) {
+                deep[w++] = '(';
+            }
+            deep[w++] = '1';
+            deep[w++] = '+';
+            deep[w++] = '1';
+            for (int i = 0; i < parens; ++i) {
+                deep[w++] = ')';
+            }
+            deep[w] = 0;
+            const render::LayoutNode* n = build(deep);
+            expect(n != nullptr, "deep paren nest returns a tree");
+            expect(n == nullptr || n->height > 0, "deep paren nest has a real height");
+        }
+        // A '^' tower recurses through parse_power without any parentheses,
+        // so it exercises the other cycle the same guard covers.
+        std::size_t w = 0;
+        for (int i = 0; i < 40; ++i) {
+            deep[w++] = '2';
+            deep[w++] = '^';
+        }
+        deep[w++] = '2';
+        deep[w] = 0;
+        expect(build(deep) != nullptr, "deep '^' tower returns a tree");
     }
 
     // Robustness: empty string

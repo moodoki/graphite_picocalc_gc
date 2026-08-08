@@ -82,11 +82,38 @@ LayoutNode* make_text(const char* s, int len, const Metrics& m) {
 bool is_call(const LayoutNode* n) {
     // name(args): a Text name followed by a Paren. The name is normally
     // alphabetic, but sqrt renders as the single radical glyph.
-    return n->type == NodeType::kHBox && n->h.count == 2 &&
-           n->h.items[0]->type == NodeType::kText &&
-           (std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 ||
-            n->h.items[0]->t.text[0] == gfx::kGlyphSqrt) &&
+    if (n->type != NodeType::kHBox || n->h.count != 2 || n->h.items[0]->type != NodeType::kText) {
+        return false;
+    }
+    if (n->h.items[0]->t.text[0] == gfx::kGlyphSqrt) {
+        // Radicals also take the bare-radicand shape (Stage 4): "√2" is
+        // HBox[radical, Text] rather than HBox[radical, Paren]. Keeping it a
+        // "call" is what lets sqrt(2)/2 still stack as a fraction.
+        return n->h.items[1]->type == NodeType::kParen || n->h.items[1]->type == NodeType::kText;
+    }
+    return std::isalpha(static_cast<unsigned char>(n->h.items[0]->t.text[0])) != 0 &&
            n->h.items[1]->type == NodeType::kParen;
+}
+
+// A radical call, in either the parenthesized or bare-radicand shape.
+bool is_radical(const LayoutNode* n) {
+    return is_call(n) && n->h.items[0]->t.text[0] == gfx::kGlyphSqrt;
+}
+
+// A single-glyph atom that reads as a symbol rather than a value — pi,
+// theta and the other Greek letters. A coefficient multiplies these
+// implicitly ("2pi" renders as 2 followed by the glyph, no '*'), which is
+// how they are written by hand. Deliberately excludes the operator-ish
+// glyphs (store arrow, not-equal, ellipsis) and the radical, which
+// is_radical() covers in its own right.
+bool is_symbol_glyph(const LayoutNode* n) {
+    if (n == nullptr || n->type != NodeType::kText || n->t.text[0] == 0 || n->t.text[1] != 0) {
+        return false;
+    }
+    const char c = n->t.text[0];
+    return c == gfx::kGlyphPi || c == gfx::kGlyphTheta || c == gfx::kGlyphSigmaLower ||
+           c == gfx::kGlyphSigmaUpper || c == gfx::kGlyphChi || c == gfx::kGlyphMu ||
+           c == gfx::kGlyphImagI || c == gfx::kGlyphLambda;
 }
 
 bool is_simple(const LayoutNode* n) {
@@ -98,6 +125,9 @@ bool is_simple(const LayoutNode* n) {
 }
 
 LayoutNode* make_fraction(LayoutNode* num, LayoutNode* den, const Metrics& m) {
+    if (num == nullptr || den == nullptr) {
+        return num != nullptr ? num : den;
+    }
     auto* n = pool_new<LayoutNode>();
     if (n == nullptr) {
         return num;  // Degrade gracefully
@@ -116,6 +146,9 @@ LayoutNode* make_fraction(LayoutNode* num, LayoutNode* den, const Metrics& m) {
 }
 
 LayoutNode* make_super(LayoutNode* base, LayoutNode* exp) {
+    if (base == nullptr || exp == nullptr) {
+        return base != nullptr ? base : exp;
+    }
     auto* n = pool_new<LayoutNode>();
     if (n == nullptr) {
         return base;
@@ -125,13 +158,32 @@ LayoutNode* make_super(LayoutNode* base, LayoutNode* exp) {
     n->bin.b = exp;
     const int raise = base->height / 2;
     n->width = base->width + exp->width;
-    const int base_bottom = raise + base->height;
+
+    // The renderer draws the exponent flush with the node's *top* and the
+    // base at (node->baseline - base->baseline), so the raise actually
+    // achieved is node->baseline - exp->baseline. Sizing the baseline off
+    // the *base* instead only works while the exponent is plain text: for a
+    // nested superscript (`2^2^2`), exp->baseline exceeds base->baseline by
+    // exactly the inner raise, cancelling it to zero — every level of a power
+    // tower landed on one line and `2^2^2^2` drew as "222^2" (HW 2026-08-08).
+    //
+    // So derive the baseline from the exponent, and keep it at least
+    // base->baseline so the base never has to draw above the node's top.
+    const int want = raise + exp->baseline;
+    n->baseline = want > base->baseline ? want : base->baseline;
+    const int base_bottom = n->baseline - base->baseline + base->height;
     n->height = exp->height > base_bottom ? exp->height : base_bottom;
-    n->baseline = raise + base->baseline;
     return n;
 }
 
 LayoutNode* make_paren(LayoutNode* child, const Metrics& m) {
+    // A null child means the pool ran dry further down; propagate the
+    // failure rather than dereferencing it. Every make_* below takes the
+    // same line — build_layout's callers already handle a null result by
+    // falling back to plain text.
+    if (child == nullptr) {
+        return nullptr;
+    }
     auto* n = pool_new<LayoutNode>();
     if (n == nullptr) {
         return child;
@@ -160,6 +212,9 @@ LayoutNode* make_hbox(LayoutNode** items, int count) {
     int descent = 0;
     int width = 0;
     for (int i = 0; i < count && i < LayoutNode::kMaxChildren; ++i) {
+        if (items[i] == nullptr) {
+            continue;  // Pool ran dry building this child — skip, don't deref.
+        }
         n->h.items[n->h.count++] = items[i];
         ascent = std::max(items[i]->baseline, ascent);
         const int d = items[i]->height - items[i]->baseline;
@@ -174,10 +229,59 @@ LayoutNode* make_hbox(LayoutNode** items, int count) {
 
 // ---- Recursive-descent parser ----
 
+// Per-level staging for the flat runs parse_expr/parse_term collect before
+// handing them to make_hbox. These arrays used to be stack locals — 128 B
+// each, paid at every recursion level, inside a build that runs from
+// HomeScreen::render() (D47). They live at the pool's scratch end now.
+//
+// Failure is graceful by construction: cap 0 means "no staging", and both
+// callers already guard every append on `count < cap`, so the result is a
+// shorter hbox rather than a bad write.
+struct Stage {
+    std::size_t mark;
+    LayoutNode** items;
+    int cap;
+
+    Stage()
+        : mark(pool_scratch_mark()),
+          items(static_cast<LayoutNode**>(pool_scratch_alloc(
+              sizeof(LayoutNode*) * LayoutNode::kMaxChildren, alignof(LayoutNode*)))),
+          cap(items != nullptr ? LayoutNode::kMaxChildren : 0) {}
+    ~Stage() { pool_scratch_release(mark); }
+    Stage(const Stage&) = delete;
+    Stage& operator=(const Stage&) = delete;
+    Stage(Stage&&) = delete;
+    Stage& operator=(Stage&&) = delete;
+};
+
+// Hard cap on parser nesting, the backstop behind the staging move above.
+// Even at ~96 B a level (down from 376 before the staging moved into the
+// pool) the stack is finite, and build_layout is called from the deepest
+// point in the program; past this the tail renders as an ellipsis instead
+// of risking the overrun that faulted the board at four nested parens
+// (HW 2026-08-08).
+constexpr int kMaxParseDepth = 16;
+
 struct Parser {
-    const char* p;
+    const char* p = nullptr;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members) short-lived parser
     const Metrics& m;
+    int depth = 0;
+
+    // Both recursion cycles pass through parse_power, so one guard there
+    // covers both: paren/function nesting (parse_atom -> parse_expr -> ... ->
+    // parse_power) and the right-associative '^' chain (parse_power calling
+    // itself, with no parentheses involved).
+    struct Depth {
+        Parser& parser;
+        explicit Depth(Parser& q) : parser(q) { ++parser.depth; }
+        ~Depth() { --parser.depth; }
+        Depth(const Depth&) = delete;
+        Depth& operator=(const Depth&) = delete;
+        Depth(Depth&&) = delete;
+        Depth& operator=(Depth&&) = delete;
+        bool too_deep() const { return parser.depth > kMaxParseDepth; }
+    };
 
     void skip_spaces() {
         while (*p == ' ') {
@@ -248,7 +352,13 @@ struct Parser {
                 if (*p == ')') {
                     ++p;
                 }
-                LayoutNode* group = make_paren(args, m);
+                skip_spaces();
+                // Bare radicand (Stage 4): "√2", not "√(2)". Only when the
+                // argument is a single atom, and never when a '^' follows —
+                // there is no vinculum, so the parens are the only grouping
+                // and "√x^2" must not read as sqrt(x^2).
+                const bool bare = is_sqrt && args->type == NodeType::kText && *p != '^';
+                LayoutNode* group = bare ? args : make_paren(args, m);
                 LayoutNode* pair[2] = {name, group};
                 return make_hbox(pair, 2);
             }
@@ -266,6 +376,16 @@ struct Parser {
 
     // atom ('^' power)?  — right-associative superscript
     LayoutNode* parse_power() {
+        const Depth guard(*this);
+        if (guard.too_deep()) {
+            // Consume the rest so no enclosing loop can spin on unparsed
+            // input, and show an ellipsis in place of the truncated tail.
+            while (*p != 0) {
+                ++p;
+            }
+            const char ell[2] = {static_cast<char>(gfx::kGlyphEllipsis), 0};
+            return make_text(ell, 1, m);
+        }
         LayoutNode* base = parse_atom();
         skip_spaces();
         if (*p == '^') {
@@ -292,9 +412,19 @@ struct Parser {
     // power (('*'|'/') power)* — '/' builds a fraction when both sides
     // are "simple", else inline (D2).
     LayoutNode* parse_term() {
-        LayoutNode* items[LayoutNode::kMaxChildren];
-        int count = 0;
         LayoutNode* cur = parse_unary();
+        skip_spaces();
+        if (*p != '*' && *p != '/') {
+            return cur;  // Single factor — no staging needed at all.
+        }
+        // Staging is acquired lazily and only here. A deeply nested
+        // expression is one factor per level, so it now costs no scratch;
+        // reserving eagerly meant 16 levels claimed 4 KB of the 8 KB pool
+        // and starved the nodes (caught by test_layout, 2026-08-08).
+        const Stage stage;
+        LayoutNode** const items = stage.items;
+        const int cap = stage.cap;
+        int count = 0;
         while (true) {
             skip_spaces();
             const char op = *p;
@@ -306,13 +436,17 @@ struct Parser {
             if (op == '/' && is_simple(cur) && is_simple(rhs) && count == 0) {
                 cur = make_fraction(cur, rhs, m);
             } else {
-                if (count == 0) {
+                if (count == 0 && cap > 0) {
                     items[count++] = cur;
                 }
-                if (count < LayoutNode::kMaxChildren) {
+                // Implicit multiplication before a radical or a symbol glyph
+                // (Stage 4): "2*sqrt(2)" renders "2√2" and "2*pi" renders
+                // "2π", the way they are written by hand.
+                const bool implicit = op == '*' && (is_radical(rhs) || is_symbol_glyph(rhs));
+                if (!implicit && count < cap) {
                     items[count++] = make_text(op == '*' ? "*" : "/", 1, m);
                 }
-                if (count < LayoutNode::kMaxChildren) {
+                if (count < cap) {
                     items[count++] = rhs;
                 }
             }
@@ -325,9 +459,19 @@ struct Parser {
 
     // term (('+'|'-') term)*
     LayoutNode* parse_expr() {
-        LayoutNode* items[LayoutNode::kMaxChildren];
+        LayoutNode* first = parse_term();
+        skip_spaces();
+        if ((*p != '+' && *p != '-')) {
+            return first;  // Single term — no staging needed.
+        }
+        const Stage stage;
+        LayoutNode** const items = stage.items;
+        const int cap = stage.cap;
+        if (cap == 0) {
+            return first;  // Pool exhausted; show what we have.
+        }
         int count = 0;
-        items[count++] = parse_term();
+        items[count++] = first;
         while (true) {
             skip_spaces();
             const char op = *p;
@@ -335,11 +479,11 @@ struct Parser {
                 break;
             }
             ++p;
-            if (count < LayoutNode::kMaxChildren) {
+            if (count < cap) {
                 items[count++] = make_text(op == '+' ? "+" : "-", 1, m);
             }
             LayoutNode* rhs = parse_term();
-            if (count < LayoutNode::kMaxChildren) {
+            if (count < cap) {
                 items[count++] = rhs;
             }
         }

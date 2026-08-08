@@ -40,6 +40,17 @@ bool Storage::file_exists(const char* path) const {
     return f_stat(path, &info) == FR_OK && !(info.fattrib & AM_DIR);
 }
 
+long Storage::file_size(const char* path) const {
+    if (!mounted_) {
+        return -1;
+    }
+    FILINFO info;
+    if (f_stat(path, &info) != FR_OK || (info.fattrib & AM_DIR)) {
+        return -1;
+    }
+    return static_cast<long>(info.fsize);
+}
+
 int Storage::read_file(const char* path, uint8_t* buf, size_t max_len) const {
     if (!mounted_) {
         return -1;

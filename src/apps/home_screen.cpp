@@ -1,5 +1,7 @@
 #include "apps/home_screen.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -7,6 +9,9 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/cas/cas_eval.hpp"
+#include "math/cas/exact.hpp"
+#include "math/cas/serialize.hpp"
 #include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
@@ -21,6 +26,7 @@
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/calc_menu.hpp"
+#include "apps/cas_menu.hpp"
 #include "apps/const_screen.hpp"
 #include "apps/dist_screen.hpp"
 #include "apps/files_screen.hpp"
@@ -44,10 +50,61 @@ namespace {
 constexpr const char* kHistoryPath = "/picocalc/history.txt";
 constexpr const char* kVarsPath = "/picocalc/variables.dat";
 
+// history.txt is an append-only log. Only its last kHistoryTailBytes are
+// ever loaded (the ring holds kMaxHistory=50 lines), so we (a) read from
+// the tail, not the head, and (b) compact the file back down to the tail
+// once it grows past kHistoryMaxBytes — otherwise it would grow without
+// bound and, once past the read window, reboots would restore stale old
+// lines instead of the newest. g_hist_io backs both paths (single-threaded
+// UI, never reentrant) so neither carries its own multi-KB static.
+constexpr size_t kHistoryTailBytes = 8192;
+constexpr long kHistoryMaxBytes = 24576;  // 3x tail: compaction stays rare
+char g_hist_io[kHistoryTailBytes];
+
+// evaluate_input's per-branch string scratch, in bss rather than on its
+// stack frame (D47). Each result branch declared its own buffers and
+// GCC could not overlap them all, leaving an 872 B frame — which sits
+// underneath the whole list-expression chain (evaluate ->
+// eval_list_into, recursive), and that chain has to fit core 0's 4 KB
+// before it is writing into core 1's stack. Same reentrancy argument as
+// g_hist_io above: one HomeScreen, one Enter at a time.
+//
+// The aliases in evaluate_input are `auto&`, so they stay array
+// references and every sizeof() at the use sites keeps its old value.
+struct EvalScratch {
+    char result[128];
+    char text[120];
+    char num[64];
+    char expr[160];
+};
+EvalScratch g_eval;
+
 // Screen layout (spec section 4.4, sized for the interim 8x12 font).
 constexpr int kStatusH = 16;
 constexpr int kInputY = 268;
 constexpr int kSoftkeyY = 296;
+
+// Exact-form display (Phase 5 §10.1, 4D.24): a second, side-effect-free CAS
+// probe run after the numeric result is already committed, so it can only
+// ever change what is *shown* — Ans, the store target and the variables all
+// still come from the numeric value. Overwrites `result` and returns true
+// only on a recognized closed form; the decimal stands otherwise. Shared by
+// the REAL and complex dispatch branches below.
+bool apply_exact_form(const char* expr, double value, int stored_var, bool suppressed, char* result,
+                      size_t result_len) {
+    // A store line reads "num=>a"; splicing an exact form into it would mean
+    // re-implementing format_scalar_result's store branch, and the CAS parser
+    // cannot parse the "->" anyway.
+    if (suppressed || stored_var >= 0 || !std::isfinite(value)) {
+        return false;
+    }
+    char exact[48];
+    if (!math::cas::exact_form(expr, value, exact, sizeof(exact))) {
+        return false;
+    }
+    std::snprintf(result, result_len, "%s", exact);
+    return true;
+}
 }  // namespace
 
 // Dirty bands for partial redraw (5.6 part 2). The input band is the
@@ -78,14 +135,14 @@ int HomeScreen::visible_count() const {
     return since < static_cast<uint32_t>(history_count_) ? static_cast<int>(since) : history_count_;
 }
 
-void HomeScreen::push_entry(const char* expr, const char* result, bool error) {
+void HomeScreen::push_entry(const char* expr, const char* result, ResultKind kind) {
     ++entries_total_;
     Entry& e = history_[history_head_];
     std::strncpy(e.expr, expr, sizeof(e.expr) - 1);
     e.expr[sizeof(e.expr) - 1] = 0;
     std::strncpy(e.result, result, sizeof(e.result) - 1);
     e.result[sizeof(e.result) - 1] = 0;
-    e.error = error;
+    e.kind = kind;
     history_head_ = (history_head_ + 1) % kMaxHistory;
     if (history_count_ < kMaxHistory) {
         ++history_count_;
@@ -103,14 +160,76 @@ int HomeScreen::result_max_scroll() const {
     return len > win ? len - win : 0;
 }
 
-void HomeScreen::persist_history_line(const char* expr, const char* result) {
+void HomeScreen::draw_result_window(gfx::Framebuffer& fb, int y, const gfx::Font& font,
+                                    platform::Color color) const {
+    const int win = (platform::kScreenW - 8) / font.width();
+    const int maxs = result_max_scroll();
+    const int off = result_scroll_ > maxs ? maxs : (result_scroll_ < 0 ? 0 : result_scroll_);
+    const int len = static_cast<int>(std::strlen(result_full_));
+    char window[64];
+    const int w =
+        win < static_cast<int>(sizeof(window)) - 1 ? win : static_cast<int>(sizeof(window)) - 1;
+    std::strncpy(window, result_full_ + off, static_cast<size_t>(w));
+    window[w] = 0;
+    // Ellipsis markers: leading when scrolled right, trailing when the text
+    // still runs past the window (so a truncated result is legibly scrollable).
+    if (off > 0 && w > 0) {
+        window[0] = math::kEllipsisGlyph;
+    }
+    if (off + w < len && w > 0) {
+        window[w - 1] = math::kEllipsisGlyph;
+    }
+    font.draw_string(fb, 4, y, window, color);
+}
+
+void HomeScreen::persist_history_line(const char* expr, const char* result, ResultKind kind) {
     auto& fs = platform::storage();
     if (!fs.mounted()) {
         return;
     }
-    char line[256];
-    const int n = std::snprintf(line, sizeof(line), "%s\t%s\n", expr, result);
-    fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
+    // "expr<TAB>result<TAB>kind\n". The trailing kind column (Phase 5) lets
+    // symbolic CAS results reload as symbolic rather than flat plain text; a
+    // legacy two-field line (no second tab) parses back as kPlain. expr and
+    // result are both ASCII and tab-free (the CAS serializer emits no tabs),
+    // so the tabs are unambiguous delimiters. Buffer is sized so the two
+    // 127-char fields plus separators never truncate the newline away.
+    const char kmark = kind == ResultKind::kSymbolic ? 'S' : 'P';
+    char line[288];
+    const int n = std::snprintf(line, sizeof(line), "%s\t%s\t%c\n", expr, result, kmark);
+    if (n < 0) {
+        return;
+    }
+    // Clamp to what actually landed in the buffer: snprintf returns the
+    // untruncated length, so a would-be-longer line must not over-read.
+    const size_t len = std::min(static_cast<size_t>(n), sizeof(line) - 1);
+    fs.append_file(kHistoryPath, reinterpret_cast<const uint8_t*>(line), len);
+    compact_history();
+}
+
+void HomeScreen::compact_history() {
+    auto& fs = platform::storage();
+    if (!fs.mounted()) {
+        return;
+    }
+    const long fsize = fs.file_size(kHistoryPath);
+    if (fsize <= kHistoryMaxBytes) {
+        return;  // still within bounds — no rewrite
+    }
+    // Read the last kHistoryTailBytes and rewrite the file with just that
+    // (line-aligned: drop the partial leading fragment). Appends are
+    // human-paced so this rare O(file) rewrite is cheap; kMaxBytes = 3x the
+    // tail keeps it to roughly one rewrite per two tail-buffers of writes.
+    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t offset = static_cast<size_t>(fsize) - cap;
+    const int n =
+        fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
+    if (n <= 0) {
+        return;
+    }
+    g_hist_io[n] = 0;
+    char* start = std::strchr(g_hist_io, '\n');
+    start = start != nullptr ? start + 1 : g_hist_io;
+    fs.write_file(kHistoryPath, reinterpret_cast<const uint8_t*>(start), std::strlen(start));
 }
 
 namespace {
@@ -161,15 +280,30 @@ void HomeScreen::load_state() {
     }
     load_variables();
 
-    // Load the tail of the history file (plaintext "expr\tresult" lines,
-    // decision D4). 8 KB tail is at least 50 full-size lines.
-    static char tail[8192];
-    const int n = fs.read_file(kHistoryPath, reinterpret_cast<uint8_t*>(tail), sizeof(tail) - 1);
+    // Load the tail of the history file (plaintext "expr\tresult[\tkind]"
+    // lines, decision D4; the kind column is Phase 5). The last
+    // kHistoryTailBytes hold at least 50 full-size lines — the whole ring.
+    // Reading the tail (not the head) is what keeps the newest entries
+    // visible once the log has grown past one buffer.
+    const long fsize = fs.file_size(kHistoryPath);
+    if (fsize <= 0) {
+        return;
+    }
+    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t offset = static_cast<size_t>(fsize) > cap ? static_cast<size_t>(fsize) - cap : 0;
+    const int n =
+        fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
     if (n <= 0) {
         return;
     }
-    tail[n] = 0;
-    char* line = tail;
+    g_hist_io[n] = 0;
+    char* line = g_hist_io;
+    // When we started mid-file, the first (partial) line is a fragment —
+    // skip past the first newline so parsing begins on a whole line.
+    if (offset > 0) {
+        char* first_nl = std::strchr(g_hist_io, '\n');
+        line = first_nl != nullptr ? first_nl + 1 : nullptr;
+    }
     while (line != nullptr && *line != 0) {
         char* nl = std::strchr(line, '\n');
         if (nl != nullptr) {
@@ -178,7 +312,18 @@ void HomeScreen::load_state() {
         char* sep = std::strchr(line, '\t');
         if (sep != nullptr) {
             *sep = 0;
-            push_entry(line, sep + 1, false);
+            char* result = sep + 1;
+            // Optional trailing kind column (Phase 5): "result<TAB>S|P".
+            // A legacy line with no second tab reloads as kPlain.
+            ResultKind kind = ResultKind::kPlain;
+            char* ksep = std::strchr(result, '\t');
+            if (ksep != nullptr) {
+                *ksep = 0;
+                if (ksep[1] == 'S') {
+                    kind = ResultKind::kSymbolic;
+                }
+            }
+            push_entry(line, result, kind);
         }
         line = nl != nullptr ? nl + 1 : nullptr;
     }
@@ -207,20 +352,64 @@ void format_scalar_result(const math::EvalResult& res, char* out, size_t out_len
 
 }  // namespace
 
-void HomeScreen::evaluate_input() {
+void HomeScreen::evaluate_input(bool force_decimal) {
     if (input_.empty()) {
         return;
+    }
+
+    // Inline CAS (Phase 5, 4D.21): recognize a single diff()/integ()/
+    // factor()/expand()/simplify()/solve() call and route it to the symbolic
+    // engine. evaluate_home returns kNone for everything else — including
+    // solve() carrying numeric bounds/guess, which the numeric solver below
+    // owns (P5-4 shape split) — so the existing paths are untouched. CAS is
+    // display-only: it never commits Ans, a store, or variables (P5-1/P5-2).
+    {
+        const bool allow_complex = math::number_mode() != math::NumberMode::kReal;
+        const math::cas::HomeResult cr = math::cas::evaluate_home(input_.text(), allow_complex);
+        if (cr.kind != math::cas::HomeKind::kNone) {
+            auto& result = g_eval.result;
+            ResultKind rkind = ResultKind::kSymbolic;
+            if (cr.kind == math::cas::HomeKind::kError) {
+                std::snprintf(result, sizeof(result), "%s", cr.error);
+                rkind = ResultKind::kError;
+            } else if (cr.kind == math::cas::HomeKind::kSolutions) {
+                // "x = {s1, s2, ...}"
+                std::size_t w = 0;
+                w += static_cast<std::size_t>(
+                    std::snprintf(result + w, sizeof(result) - w, "%c = {", cr.var));
+                for (int i = 0; i < cr.count && w < sizeof(result) - 1; ++i) {
+                    if (i > 0 && w < sizeof(result) - 1) {
+                        result[w++] = ',';
+                    }
+                    w += math::cas::expr_to_string(cr.solutions[i], result + w, sizeof(result) - w);
+                }
+                if (w < sizeof(result) - 1) {
+                    result[w++] = '}';
+                }
+                result[w] = 0;
+            } else {  // kExpr
+                math::cas::expr_to_string(cr.result, result, sizeof(result));
+            }
+            push_entry(input_.text(), result, rkind);
+            if (rkind != ResultKind::kError) {
+                persist_history_line(input_.text(), result, rkind);
+            }
+            input_.clear();
+            hist_nav_ = -1;
+            pending_[0] = 0;
+            return;
+        }
     }
 
     // Inline solve() calls become numeric literals first (Phase 4A),
     // so they compose inside any downstream path. History shows the
     // original input; evaluation continues on the substituted text.
-    char expr[160];
+    auto& expr = g_eval.expr;
     std::snprintf(expr, sizeof(expr), "%s", input_.text());
     if (math::solveexpr::contains_solve(expr)) {
         const char* serr = nullptr;
         if (!math::solveexpr::substitute(expr, sizeof(expr), &serr)) {
-            push_entry(input_.text(), serr, true);
+            push_entry(input_.text(), serr, ResultKind::kError);
             input_.clear();
             hist_nav_ = -1;
             pending_[0] = 0;
@@ -232,7 +421,7 @@ void HomeScreen::evaluate_input() {
     if (math::unitexpr::contains_convert(expr)) {
         const char* uerr = nullptr;
         if (!math::unitexpr::substitute(expr, sizeof(expr), &uerr)) {
-            push_entry(input_.text(), uerr, true);
+            push_entry(input_.text(), uerr, ResultKind::kError);
             input_.clear();
             hist_nav_ = -1;
             pending_[0] = 0;
@@ -245,6 +434,7 @@ void HomeScreen::evaluate_input() {
     // further down, per result kind (scalar in the scalar path, matrix in
     // the matrix path). >dec is the default display.
     bool to_frac = false;
+    bool to_dec = force_decimal;
     {
         const size_t elen = std::strlen(expr);
         if (elen > 5 && std::strcmp(expr + elen - 5, ">frac") == 0) {
@@ -252,6 +442,7 @@ void HomeScreen::evaluate_input() {
             to_frac = true;
         } else if (elen > 4 && std::strcmp(expr + elen - 4, ">dec") == 0) {
             expr[elen - 4] = 0;  // Decimal is the default display
+            to_dec = true;       // ... and suppresses the exact-form probe (4D.24)
         }
     }
 
@@ -259,7 +450,7 @@ void HomeScreen::evaluate_input() {
     // unambiguous. Kind::kNone means "not matrix syntax".
     const auto mres = math::matexpr::evaluate(expr);
     if (mres.kind != math::matexpr::Kind::kNone) {
-        char result[128];
+        auto& result = g_eval.result;
         bool error = false;
         if (mres.kind == math::matexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", mres.error);
@@ -267,7 +458,7 @@ void HomeScreen::evaluate_input() {
         } else if (mres.kind == math::matexpr::Kind::kScalar && mres.scalar_complex) {
             // Complex scalar from a matrix expression (4D.25: det /
             // element access); matexpr already committed Ans/store.
-            char num[64];
+            auto& num = g_eval.num;
             math::format_complex(mres.cvalue, math::number_mode(), num, sizeof(num));
             if (mres.scalar.stored_var >= 0) {
                 const char name = mres.scalar.stored_var < 26
@@ -281,7 +472,7 @@ void HomeScreen::evaluate_input() {
             format_scalar_result(mres.scalar, result, sizeof(result));
             error = !mres.scalar.ok;
         } else if (mres.kind == math::matexpr::Kind::kList) {
-            char text[120];
+            auto& text = g_eval.text;
             math::listexpr::format_list(*mres.list, text, sizeof(text));
             if (mres.stored_list >= 0) {
                 std::snprintf(result, sizeof(result), "%s%cl%c", text, gfx::kGlyphStore,
@@ -292,7 +483,7 @@ void HomeScreen::evaluate_input() {
         } else if (mres.kind == math::matexpr::Kind::kText) {
             std::snprintf(result, sizeof(result), "%s", mres.text);
         } else {
-            char text[120];
+            auto& text = g_eval.text;
             if (to_frac) {
                 math::matexpr::format_matrix_frac(*mres.matrix, text, sizeof(text));
             } else {
@@ -305,9 +496,9 @@ void HomeScreen::evaluate_input() {
                 std::snprintf(result, sizeof(result), "%s", text);
             }
         }
-        push_entry(input_.text(), result, error);
+        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
-            persist_history_line(input_.text(), result);
+            persist_history_line(input_.text(), result, ResultKind::kPlain);
             save_variables();
             if (mres.kind == math::matexpr::Kind::kMatrix) {
                 // MatAns changed — persist it so it survives a reboot
@@ -336,7 +527,7 @@ void HomeScreen::evaluate_input() {
     // "not list syntax" and falls through to the scalar engine.
     const auto lres = math::listexpr::evaluate(expr);
     if (lres.kind != math::listexpr::Kind::kNone) {
-        char result[128];
+        auto& result = g_eval.result;
         bool error = false;
         if (lres.kind == math::listexpr::Kind::kError) {
             std::snprintf(result, sizeof(result), "%s", lres.error);
@@ -351,7 +542,7 @@ void HomeScreen::evaluate_input() {
             format_scalar_result(lres.scalar, result, sizeof(result));
             error = !lres.scalar.ok;
         } else {
-            char text[120];
+            auto& text = g_eval.text;
             math::listexpr::format_list(*lres.list, text, sizeof(text));
             if (lres.stored_list >= 0) {
                 char lname[8];
@@ -361,9 +552,9 @@ void HomeScreen::evaluate_input() {
                 std::snprintf(result, sizeof(result), "%s", text);
             }
         }
-        push_entry(input_.text(), result, error);
+        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
-            persist_history_line(input_.text(), result);
+            persist_history_line(input_.text(), result, ResultKind::kPlain);
             save_variables();
             if (lres.names_modified) {  // A named list was created (4D.13)
                 math::named_lists().save_index(platform::storage());
@@ -392,7 +583,7 @@ void HomeScreen::evaluate_input() {
     // p/q, falling back to decimal when no tight fraction (den <= 10000)
     // exists.
     if (to_frac) {
-        char result[128];
+        auto& result = g_eval.result;
         const auto res = math::engine().evaluate(expr);
         const bool error = !res.ok;
         if (error) {
@@ -400,9 +591,9 @@ void HomeScreen::evaluate_input() {
         } else if (!math::frac::format_fraction(res.value, 10000, result, sizeof(result))) {
             math::format_number(res.value, result, sizeof(result));
         }
-        push_entry(input_.text(), result, error);
+        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
         if (!error) {
-            persist_history_line(input_.text(), result);
+            persist_history_line(input_.text(), result, ResultKind::kPlain);
             save_variables();
         }
         input_.clear();
@@ -418,8 +609,9 @@ void HomeScreen::evaluate_input() {
     // sqrt(-4) etc. get "Non-real result" instead, without committing
     // Ans/a store twice (math::complexexpr::evaluate never mutates
     // engine state; only this dispatch does, exactly once).
-    char result[128];
+    auto& result = g_eval.result;
     bool error = false;
+    ResultKind rkind = ResultKind::kPlain;
     // Complex-valued variables force the complex path too (4D.15): in
     // REAL mode that yields the pointed "Non-real result" error below;
     // in RECT/POLAR the reference resolves normally.
@@ -444,6 +636,15 @@ void HomeScreen::evaluate_input() {
             r.value = cres.value.re;
             r.stored_var = cres.stored_var;
             format_scalar_result(r, result, sizeof(result));
+            // A real-valued result reached through the complex path still
+            // gets exact-form display (RECT/POLAR modes, or a REAL-mode
+            // expression that merely mentions `i`). Genuinely complex values
+            // fall to the branch below and stay decimal — the CAS reserves
+            // `i` as a variable, which the probe's no-variables gate rejects.
+            if (apply_exact_form(expr, cres.value.re, cres.stored_var, to_dec, result,
+                                 sizeof(result))) {
+                rkind = ResultKind::kSymbolic;
+            }
         } else {
             // Complex commit (4D.15): Ans and the store target hold the
             // full value; real-only readers error on them (D37).
@@ -451,7 +652,7 @@ void HomeScreen::evaluate_input() {
             if (cres.stored_var >= 0) {
                 math::engine().vars().set_complex(cres.stored_var, cres.value.re, cres.value.im);
             }
-            char num[64];
+            auto& num = g_eval.num;
             math::format_complex(cres.value, math::number_mode(), num, sizeof(num));
             if (cres.stored_var >= 0) {
                 const char name =
@@ -470,12 +671,16 @@ void HomeScreen::evaluate_input() {
             const auto res = math::engine().evaluate(expr);
             format_scalar_result(res, result, sizeof(result));
             error = !res.ok;
+            if (!error &&
+                apply_exact_form(expr, res.value, res.stored_var, to_dec, result, sizeof(result))) {
+                rkind = ResultKind::kSymbolic;
+            }
         }
     }
 
-    push_entry(input_.text(), result, error);
+    push_entry(input_.text(), result, error ? ResultKind::kError : rkind);
     if (!error) {
-        persist_history_line(input_.text(), result);
+        persist_history_line(input_.text(), result, rkind);
         save_variables();
     }
     input_.clear();
@@ -563,6 +768,11 @@ bool HomeScreen::handle_command(const char* cmd) {
         ui::screen_manager().push(&const_screen());
         return true;
     }
+    // CAS operations menu (Phase 5); also on the F6 softkey.
+    if (std::strcmp(cmd, "cas") == 0) {
+        ui::screen_manager().push(&cas_menu());
+        return true;
+    }
     // Device settings: brightness/backlight/auto-power-down (4D.19-20).
     if (std::strcmp(cmd, "settings") == 0 || std::strcmp(cmd, "setup") == 0) {
         ui::screen_manager().push(&settings_screen());
@@ -589,6 +799,31 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
     }
     switch (ev.key) {
         case Key::kEnter:
+            // Alt+Enter = "show me the decimal" (Phase 5 Stage 4). Alt, not
+            // Shift: the STM32 translates Shift+Enter into its own scan code
+            // (0xD1 -> kInsert) rather than reporting Enter with shift_held,
+            // so a Shift binding here would never fire and would also squat
+            // on a real key. Alt passes through with its flag intact, the
+            // same way Alt+UP/DOWN already scrolls the history view.
+            //
+            // With an expression entered it evaluates with the exact-form
+            // probe suppressed, exactly as a trailing `>dec` would. With the
+            // input empty it re-runs the newest history entry that came back
+            // as an exact form, so an amber sqrt(2) becomes 1.414213562
+            // without retyping it. Commands (cls, help, ...) are unaffected:
+            // they only match on the plain-Enter path below.
+            if (ev.alt_held) {
+                if (input_.empty()) {
+                    const Entry* last = entry_from_newest(0);
+                    if (last == nullptr || last->kind != ResultKind::kSymbolic) {
+                        return true;
+                    }
+                    input_.set_text(last->expr);
+                }
+                evaluate_input(true);
+                invalidate(0, kSoftkeyY);
+                return true;
+            }
             if (!input_.empty()) {
                 // Trimmed command match first (cls, help, ...).
                 char cmd[16];
@@ -702,6 +937,9 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kF5:
             ui::screen_manager().push(&graph_screen());
             return true;
+        case Key::kF6:  // CAS menu (Phase 5; F6 = Shift+F1 on the unit)
+            ui::screen_manager().push(&cas_menu());
+            return true;
         default:
             if (input_.on_key(ev)) {
                 invalidate_input();
@@ -721,8 +959,8 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
     ui::draw_status_bar(fb, "HOME");
 
     // History: newest at the bottom. Expressions render as 2D typeset
-    // math (task 3.6); results stay as plain right-aligned text (a
-    // number or error string is already display-ready).
+    // math (task 3.6); numeric/error results stay as plain text, while CAS
+    // symbolic results are typeset in the accent color (Phase 5, 4D.21).
     const render::Metrics metrics{font.width(), font.height()};
     const int visible = visible_count();  // cls hides older entries
     int y = kInputY - 4;
@@ -731,40 +969,60 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         if (e == nullptr) {
             break;
         }
-        // Expression layout first: the entry's full height must be
-        // known *before* drawing, or a tall pretty-printed expression
-        // ends up rendered across the status bar (HW 2026-07-18).
+        const bool symbolic = e->kind == ResultKind::kSymbolic;
+        const platform::Color rcolor = e->kind == ResultKind::kError ? kRed
+                                       : symbolic                    ? kSymbolic
+                                                                     : kWhite;
+
+        // Expression layout first: the entry's full height must be known
+        // *before* drawing, or a tall pretty-printed entry ends up rendered
+        // across the status bar (HW 2026-07-18).
         render::LayoutNode const* root = render::build_layout(e->expr, metrics);
         const int eh = root != nullptr ? root->height : lh;
-        if (y - lh - (eh + 2) < kStatusH) {
+
+        // A long newest result (plain or symbolic) is shown as a one-line
+        // pannable window with ellipses (LEFT/RIGHT scroll) rather than a
+        // clipped/overflowing typeset form. Otherwise a symbolic result is
+        // typeset 2D; plain results are single text lines.
+        const bool pan = n == 0 && result_max_scroll() > 0;
+
+        // Result height. A typeset symbolic result has its own height; the pan
+        // window and plain text are one line. Building the result layout resets
+        // the shared pool, so the expression tree is rebuilt before rendering.
+        int rh = lh;
+        if (symbolic && !pan) {
+            const char* rtext = n == 0 ? result_full_ : e->result;
+            render::LayoutNode const* rroot = render::build_layout(rtext, metrics);
+            rh = rroot != nullptr ? rroot->height : lh;
+            root = nullptr;  // invalidated by the reset in the build above
+        }
+        if (y - rh - (eh + 2) < kStatusH) {
             break;
         }
 
-        // Result line (plain text). The newest result can overflow the
-        // display; when it does, LEFT/RIGHT pan a left-anchored window
-        // across the full text (testdrive 2026-07-20). Everything else
-        // stays right-aligned and truncated.
-        y -= lh;
-        if (n == 0 && result_max_scroll() > 0) {
-            const int win = (platform::kScreenW - 8) / font.width();
-            int off = result_scroll_;
-            const int maxs = result_max_scroll();
-            off = off > maxs ? maxs : (off < 0 ? 0 : off);
-            char window[64];
-            const int w = win < static_cast<int>(sizeof(window)) - 1
-                              ? win
-                              : static_cast<int>(sizeof(window)) - 1;
-            std::strncpy(window, result_full_ + off, static_cast<size_t>(w));
-            window[w] = 0;
-            font.draw_string(fb, 4, y, window, e->error ? kRed : kWhite);
+        // Result line at the bottom of the entry block.
+        y -= rh;
+        if (pan) {
+            draw_result_window(fb, y, font, rcolor);
+        } else if (symbolic) {
+            const char* rtext = n == 0 ? result_full_ : e->result;
+            render::LayoutNode const* rr = render::build_layout(rtext, metrics);
+            const int rw = rr != nullptr ? rr->width : 0;
+            // Right-align like numeric results so a symbolic answer reads as a
+            // result, not another input line; left-anchor if it's too wide.
+            const int rx = std::max(platform::kScreenW - rw - 4, 4);
+            render::render_node(rr, fb, rx, y, font, rcolor);
         } else {
             const int rx = platform::kScreenW - font.text_width(e->result) - 4;
-            font.draw_string(fb, rx, y, e->result, e->error ? kRed : kWhite);
+            font.draw_string(fb, rx, y, e->result, rcolor);
         }
 
-        // Expression line(s), rendered immediately (the pool is reset
-        // on the next build).
+        // Expression line(s) above the result. A symbolic entry's result
+        // build reset the pool, so rebuild; otherwise `root` is still valid.
         y -= eh + 2;
+        if (root == nullptr) {
+            root = render::build_layout(e->expr, metrics);
+        }
         render::render_node(root, fb, 4, y, font, kGrayLine);
         y -= 2;
     }
@@ -796,7 +1054,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         default:
             break;
     }
-    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", ""};
+    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", "CAS"};
     ui::draw_softkeys(fb, keys);
 }
 

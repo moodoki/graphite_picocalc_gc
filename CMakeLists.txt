@@ -85,6 +85,7 @@ target_compile_options(cephes PRIVATE -w)
 add_executable(picocalc_graphcalc
     src/main.cpp
     src/platform/display.cpp
+    src/platform/fault.cpp
     src/platform/keyboard.cpp
     src/platform/platform.cpp
     src/platform/psram.cpp
@@ -124,6 +125,18 @@ add_executable(picocalc_graphcalc
     src/math/complex_expr.cpp
     src/math/seq_expr.cpp
     src/math/units.cpp
+    src/math/cas/expr.cpp
+    src/math/cas/parser.cpp
+    src/math/cas/serialize.cpp
+    src/math/cas/simplify.cpp
+    src/math/cas/derivative.cpp
+    src/math/cas/expand.cpp
+    src/math/cas/poly.cpp
+    src/math/cas/solve.cpp
+    src/math/cas/factor.cpp
+    src/math/cas/integrate.cpp
+    src/math/cas/cas_eval.cpp
+    src/math/cas/exact.cpp
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -147,6 +160,7 @@ add_executable(picocalc_graphcalc
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/calc_menu.cpp
+    src/apps/cas_menu.cpp
     src/apps/matrix_editor.cpp
     src/apps/solver_screen.cpp
     src/apps/stats_screen.cpp
@@ -207,13 +221,25 @@ message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 # screen. Not derivable from git — bump it here when a phase/sub-phase
 # reaches code-complete (the session-wrapup agent's README status pass
 # covers this).
-set(PICOCALC_PHASE "4D")
+set(PICOCALC_PHASE "5")
 
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PICOCALC_PHASE="${PICOCALC_PHASE}"
+    # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
+    # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
+    # SDK default declares only 2 KB of it, so __StackBottom sat in the
+    # middle of the bank and 2 KB of overrun went unnoticed before core 1
+    # even started getting corrupted. 4096 (the maximum the bank allows)
+    # puts __StackBottom exactly on the boundary, and the MPU guard traps
+    # there. Caveat: on RP2040 that guard is a single 32-byte subregion,
+    # so it reliably catches gradual/recursive growth but one oversized
+    # frame can step over it — scripts/size-report.sh's frame listing is
+    # the deterministic half of this check.
+    PICO_STACK_SIZE=4096
+    PICO_USE_STACK_GUARDS=1
     PSRAM_MUTEX=1
     PSRAM_ASYNC=0
     PSRAM_PIN_CS=20

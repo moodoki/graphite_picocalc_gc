@@ -64,6 +64,64 @@ struct Result {
     const char* error = nullptr;  // kError (static string)
 };
 
+// Parse-nesting cap (D48). Like complexexpr's kMaxParseDepth this counts
+// recursion levels rather than parens — a string pre-scan cannot see the
+// function-argument re-entry (`det(<expr>)`) that costs a level here.
+//
+// The cycle is parse_expr -> parse_term -> parse_unary -> parse_power, and
+// parse_primary/parse_matrix_fn/parse_matrix_literal/parse_scalar_span are
+// all inlined into it. Depth 1 is the top-level call; each nested paren,
+// function argument (parse_matrix_fn) or matrix-literal element
+// (parse_matrix_literal) costs one more, since all three re-enter parse_expr.
+//
+// High-water marks against core 0's 4 KB. "leaf fix" = parse_scalar_span's
+// strtod fast path + static span buffer, in the same commit as this cap.
+//
+//   Pico 1, uncapped            det([[1,2][3,4]])  d3  3,940  (156 margin)
+//                               det(([a]*([c]+[d]))+[d]) d4  HARD FAULT
+//   Pico 1, capped              det([[1,2][3,4]])  d3  4,012  ( 84 margin)
+//                               d4  "Too deeply nested", no fault
+//   Pico 2, capped, no leaf fix det([[1,2][3,4]])  d3  HARD FAULT
+//                               (parse_power prologue, sp = __StackBottom+160)
+//   Pico 2, capped + leaf fix   worst of five      3,860  (236 margin), correct
+//
+// The 3,940 -> 4,012 pair is the same input before and after the cap, so the
+// +72 B is the guard's own cost (P gained `depth`, each level carries a
+// DepthGuard: cycle 808 -> 832 B/level).
+//
+// **The Pico 2 crash is why the leaf fix exists.** det([[1,2][3,4]]) and
+// det(identity(2)) died at depth 3 while det([a]*[c]+[d]) was fine — the
+// difference is a numeric literal *at maximum depth*, which parse_scalar_span
+// was handing to eval_field, i.e. the whole tinyexpr engine at the deepest
+// point of the recursion. D47's a0939bf fixed exactly this in complexexpr;
+// matexpr has its own copy of that function and never got it. Removing it
+// took the cycle to 600 B/level (Pico 1) and 536 (Pico 2), -232 either way,
+// for +256 B of .bss. See the comment at parse_scalar_span.
+//
+// 3 is forced from both sides. Below it, shipped behaviour breaks —
+// det(identity(2)) and matrix literals inside a function argument are both
+// depth 3 and are pinned by test_matrix. Above it, depth 4 faulted.
+//
+// !! Margins are thin on both boards and the numbers above are not
+// predictions — every attempt this session to derive a peak from frame sizes
+// was wrong (by 360 B, then 560 B, always optimistic). Static frame sums are
+// an upper bound on a *single* frame, not a usable model of a peak. Measure.
+//
+// The Pico 1 has not been re-measured since the leaf fix (board swaps are
+// batched to stage closures). It does not need to be for safety: the leaf fix
+// only ever *removes* stack from this path — literals bypass eval_field, every
+// other span takes the same route minus a 256 B buffer — and the Pico 1 was
+// already passing at 4,012 without faulting, so it can only improve. Only the
+// 4,012 figure is stale, not the safety case.
+//
+// Still containment, not headroom. Real fixes: idea F, the unified evaluator,
+// which retires this parser outright and should be built on an explicit
+// evaluation stack; or moving core 0's stack out of its 4 KB scratch bank.
+//
+// One production entry point (home_screen.cpp) means one constant, unlike
+// complexexpr's split kMaxParseDepth/kMaxParseDepthNested.
+constexpr int kMaxParseDepth = 3;
+
 Result evaluate(const char* input);
 
 // The last matrix result ("MatAns") — empty until a matrix expression

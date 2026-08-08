@@ -31,10 +31,14 @@ public:
 private:
     static constexpr int kMaxHistory = 50;
 
+    // Result-line rendering kind (Phase 5): plain numeric text, an error
+    // (red), or a CAS symbolic result (typeset in the accent color).
+    enum class ResultKind : uint8_t { kPlain, kError, kSymbolic };
+
     struct Entry {
         char expr[96];
         char result[48];  // Wide enough for a short list "{...}>l1"
-        bool error;
+        ResultKind kind;
     };
 
     Entry history_[kMaxHistory] = {};
@@ -69,12 +73,21 @@ private:
     void invalidate_input();
     void invalidate_history();
 
-    void evaluate_input();
+    // force_decimal suppresses the exact-form probe for this evaluation, the
+    // same way a trailing `>dec` does — Alt+Enter's "show me the decimal".
+    void evaluate_input(bool force_decimal = false);
     bool handle_command(const char* cmd);
     int visible_count() const;
     int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_
-    void push_entry(const char* expr, const char* result, bool error);
-    void persist_history_line(const char* expr, const char* result);
+    // Draw the newest result_full_ as a horizontally-pannable one-line window
+    // with leading/trailing ellipses when clipped (LEFT/RIGHT pan it).
+    void draw_result_window(gfx::Framebuffer& fb, int y, const gfx::Font& font,
+                            platform::Color color) const;
+    void push_entry(const char* expr, const char* result, ResultKind kind);
+    void persist_history_line(const char* expr, const char* result, ResultKind kind);
+    // Trim history.txt back to its tail once it grows past the cap, so the
+    // append-only log stays bounded and reboots keep restoring newest lines.
+    void compact_history();
     void save_variables();
     void load_variables();
 

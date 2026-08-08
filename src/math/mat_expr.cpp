@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "math/complex_expr.hpp"
@@ -128,6 +129,7 @@ struct P {
     const char* s = nullptr;  // Cursor
     const char* err = nullptr;
     int temps = 0;  // Next free g_temp slot
+    int depth = 0;  // Parse recursion level (D48) — see kMaxParseDepth
 };
 
 void skip_ws(P& p) {
@@ -207,11 +209,39 @@ Value parse_scalar_span(P& p) {
         return fail(p, "Syntax error");
     }
 
-    char span[kMaxLen];
     const auto len = static_cast<size_t>(p.s - start);
-    if (len == 0 || len >= sizeof(span)) {
+    if (len == 0 || len >= kMaxLen) {
         return fail(p, "Syntax error");
     }
+
+    // Plain numeric literal: parse it here instead of handing it to
+    // eval_field. That fallback runs the whole tinyexpr engine —
+    // Engine::compile/compile_with (280/288 B) plus its own recursive parser —
+    // and it sits at the *leaf* of this parser's recursion, i.e. at maximum
+    // stack depth. Same defect D47 fixed in complexexpr (a0939bf); matexpr has
+    // its own copy of this function and never got it. It cost the Pico 2 a
+    // hard fault on 2026-08-08: det([[1,2][3,4]]) and det(identity(2)) both
+    // crashed at depth 3 in parse_power's prologue, while det([a]*[c]+[d]) —
+    // matrix references only, no literal at depth — was fine. strtod is what
+    // tinyexpr would have used for these anyway.
+    //
+    // "2i" shorthand falls through correctly: strtod stops at the 'i', so
+    // `end` lands before p.s and the complex path below takes it.
+    if (std::isdigit(static_cast<unsigned char>(*start)) != 0 || *start == '.') {
+        char* end = nullptr;
+        const double d = std::strtod(start, &end);
+        if (end == p.s) {
+            Value v;
+            v.s = Complex(static_cast<calc_t>(d));
+            return v;
+        }
+    }
+
+    // Static for the same reason as complexexpr's: this is the leaf of the
+    // parser's recursion, so its frame is paid at maximum depth.
+    // parse_scalar_span never nests — it consumes a terminal span, and neither
+    // eval_field nor complexexpr::evaluate re-enters this parser.
+    static char span[kMaxLen];
     std::memcpy(span, start, len);
     span[len] = 0;
     Value v;
@@ -222,7 +252,9 @@ Value parse_scalar_span(P& p) {
     }
     // i-bearing spans ("i", "2i") and complex-valued variables don't
     // ride the real field evaluator (4D.15/4D.25).
-    const auto cr = complexexpr::evaluate(span);
+    // Inside matrix evaluation, several frames deep — see
+    // kMaxParseDepthNested (D47).
+    const auto cr = complexexpr::evaluate(span, complexexpr::kMaxParseDepthNested);
     if (!cr.ok) {
         return fail(p, "Syntax error");
     }
@@ -684,7 +716,28 @@ Value parse_power(P& p) {
     return v;
 }
 
+// RAII so every early return unwinds the count; parse_term/parse_expr call
+// parse_unary repeatedly in a loop, and those siblings must not accumulate
+// (the same reason complexexpr's guard is shaped this way).
+struct DepthGuard {
+    P& p;
+    explicit DepthGuard(P& q) : p(q) { ++p.depth; }
+    ~DepthGuard() { --p.depth; }
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+    DepthGuard(DepthGuard&&) = delete;
+    DepthGuard& operator=(DepthGuard&&) = delete;
+    bool too_deep() const { return p.depth > kMaxParseDepth; }
+};
+
 Value parse_unary(P& p) {
+    // One guard per cycle of parse_expr -> parse_term -> parse_unary ->
+    // parse_power, placed here because it is the single point every level
+    // passes through exactly once (D48).
+    const DepthGuard guard(p);
+    if (guard.too_deep()) {
+        return fail(p, "Too deeply nested");
+    }
     skip_ws(p);
     bool neg = false;
     while (*p.s == '-' || *p.s == '+') {
