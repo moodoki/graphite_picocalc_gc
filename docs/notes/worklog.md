@@ -305,6 +305,83 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-08 (later) — post-D47 group-5 bench sweep: four paths clean, `matexpr` crashes, D48 caps it. **HW-verified on the Pico 1**
+
+Ran groups 5-6 of the post-D47 plan on the Pico 1 with stack guards live,
+watching `stack: peak` on serial rather than the screen — the whole point of
+D45's warning that some paths may have been working *because* nothing trapped.
+
+**Four of five paths were clean**, and two of those are results in their own
+right. Idle baseline 1,540 of 4,096; graph redraw with several slots plus
+pan/zoom 2,360. **The list editor, 1-Var stats and inference on a large list
+never registered a new high-water mark at all** — that path was D47's worst
+offender (`eval_list_into`, 2,248 B and recursive, 4,312 B at depth 1), so its
+silence is the first hardware confirmation of the `noinline` + bss +
+depth-indexed-buffer rework. **The D45 ladder in REAL and a+bi reached 3,588,
+which is by design**: D45 predicted 3,728 with 368 margin for the home-screen
+entry at cap 7, so a static model derived by inspection agreed with a live
+high-water mark to within ~140 B. Rung 6 computing correctly is also correct —
+rung N needs depth N+1 and the cap is 7 — and rung 4 rendering white in *both*
+number modes confirms D46's `c_pow` fix holding on hardware.
+
+**Matrix was not clean.** `det(([a]*([c]+[d]))+[d])` hard-faulted, twice.
+`pc`/`lr` in the fault record were garbage (both `??` under addr2line) because
+the overflow corrupted exception stacking, but `sp=0x20040ff8` settled it
+alone: 8 bytes below core 0's `__StackBottom`, i.e. inside core 1's stack.
+`matexpr` was the last uncapped parser. **D48** adds `kMaxParseDepth = 3` with
+an RAII `DepthGuard` in `parse_unary`.
+
+**The cap took two attempts, and the first one was wrong in an instructive
+way.** Frame arithmetic (1,028 prefix + 848 entry + 808/level) predicted depth
+3 at 4,300 B — unreachable — so the cap was set to 2. That broke two shipped
+behaviours `test_matrix` already pinned: `det(identity(2))` and matrix literals
+inside a function argument are both depth 3, since `parse_matrix_fn` and
+`parse_matrix_literal` each re-enter `parse_expr`. Probing on hardware showed
+depth 3 actually fits at **3,940 of 4,096** — the arithmetic was 360 B
+pessimistic, the four frames are not all live at once. Had it been trusted, the
+cap would have shipped a level too tight. Same lesson as D47's three wrong
+attributions: measure the board, don't reason about frames.
+
+**Measured, before -> after**: `det([[1,2][3,4]])` (depth 3) 3,940 -> **4,012**;
+`det(identity(2))` (depth 3) 3,540; `det(([a]*([c]+[d]))+[d])` (depth 4) **hard
+fault -> "Too deeply nested"**. The +72 B is the guard's own cost and is exactly
+what the static tooling predicts (cycle 808 -> 832 B/level, +24 over three
+levels) — the two methods agree precisely here. **So the fix trades a reachable
+crash for an 84-byte margin**: strictly better than faulting, and not
+comfortable. Recorded as containment, not a fix.
+
+Pico 2 checked statically: identical 4 KB stack layout (the RP2350's extra SRAM
+does not reach the stack, which sits in a 4 KB scratch bank on both chips) and
+frames only ~8% cheaper, worth ~290 B against the ~768 B another level costs.
+One constant serves both boards. PSRAM cannot host a stack at all — PIO-driven
+SPI, not memory mapped (`psram.hpp` hands out offsets, not pointers).
+
+**Decision taken (D48, and folded into idea F):** live with the caps; the
+explicit-stack iterative parser that would actually lift the depth belongs to
+**F, the unified evaluator**, which retires `matexpr` outright — building it
+here would be thrown away. F now has two independent arguments rather than one:
+D46's correctness case, and four parsers with four separately-discovered stack
+budgets, three found by a crash. F should be built on an explicit,
+PSRAM-capable evaluation stack from the start.
+
+`test_matrix` 381 -> **397**; full host suite green (13 binaries); both boards
+build clean; lint/format clean; **`.bss` unchanged at 211,100** (the cap lives
+in the stack-local `P`). Flashed to the Pico 1 and all three checks verified.
+
+**Also this session**: the `5!` / `abs(3+4i)` item from
+`testdrive-2026-08-08-observations.md` closed as **not a bug** — the tester had
+read two separate entries as one expression and expected an improper-fraction
+exact form; the displayed values were correct and plain white is right for real
+integers. And the graph screen has **no pan**, confirmed in source
+(`graph_screen.cpp:1307` binds all four arrows only when `trace_.active`);
+logged as a feature request with an implementation sketch, not fixed.
+
+**Not done**: the Pico 2 was not flashed at all — it has neither D48 nor any of
+groups 5-6, and its 84-byte-equivalent margin is a projection, not a
+measurement.
+
+---
+
 ## 2026-08-08 — Y= editor lockup + ZTrig in DEGREE: the D45 bug class, three times over (D47). **HW-verified on the Pico 1**
 
 Both items from `testdrive-2026-08-05-observations.md`.

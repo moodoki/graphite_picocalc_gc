@@ -64,6 +64,53 @@ struct Result {
     const char* error = nullptr;  // kError (static string)
 };
 
+// Parse-nesting cap (D48). Like complexexpr's kMaxParseDepth this counts
+// recursion levels rather than parens — a string pre-scan cannot see the
+// function-argument re-entry (`det(<expr>)`) that costs a level here.
+//
+// The cycle is parse_expr -> parse_term -> parse_unary -> parse_power, and
+// parse_primary/parse_matrix_fn/parse_matrix_literal/parse_scalar_span are
+// all inlined into it. Depth 1 is the top-level call; each nested paren,
+// function argument (parse_matrix_fn) or matrix-literal element
+// (parse_matrix_literal) costs one more, since all three re-enter parse_expr.
+//
+// Measured on the Pico 1, high-water marks against core 0's 4 KB:
+//
+//   BEFORE this cap
+//     depth 2  det([A]*[B]+[C])              3,492 of 4,096   (604 margin)
+//     depth 3  det([[1,2][3,4]])             3,940 of 4,096   (156 margin)
+//     depth 4  det(([a]*([c]+[d]))+[d])      hard fault, sp below __StackBottom
+//   AFTER
+//     depth 3  det([[1,2][3,4]])             4,012 of 4,096   ( 84 margin)
+//     depth 3  det(identity(2))              3,540 of 4,096
+//     depth 4  det(([a]*([c]+[d]))+[d])      "Too deeply nested", no fault
+//
+// The 3,940 -> 4,012 pair is the same input before and after, so the +72 B
+// is the guard's own cost, not a difference between expressions. The matrix
+// literal is the heavier of the two depth-3 shapes.
+//
+// So ~448 B/level in practice — the static frame sum (808) overestimates,
+// the four functions are not all live at once. These are measurements, not
+// arithmetic: the depth-4 figure is the crash that prompted D48.
+//
+// 3 is forced from both sides. Below it, shipped behaviour breaks —
+// det(identity(2)) and matrix literals inside a function argument are both
+// depth 3 and are pinned by test_matrix. Above it, depth 4 faults.
+//
+// !! The depth-3 margin is 84 B, and the guard is *why* it is 84 and not
+// 156: P gained `depth` and every level carries a DepthGuard, ~72 B across
+// three levels. This cap converts a reachable hard fault into an error
+// message, which is strictly better, but it is containment and it made the
+// surviving margin worse. Depth 3 is not safe to build on. Frame reduction
+// is now required, not optional — parse_power alone is 416 B holding matrix
+// temporaries, cf. D47's eval_list_into (2,248 -> 32 B) — or idea F, the
+// unified evaluator, which retires this parser outright.
+// **Re-measure on hardware before growing anything on this path.**
+//
+// One production entry point (home_screen.cpp) means one constant, unlike
+// complexexpr's split kMaxParseDepth/kMaxParseDepthNested.
+constexpr int kMaxParseDepth = 3;
+
 Result evaluate(const char* input);
 
 // The last matrix result ("MatAns") — empty until a matrix expression

@@ -128,6 +128,7 @@ struct P {
     const char* s = nullptr;  // Cursor
     const char* err = nullptr;
     int temps = 0;  // Next free g_temp slot
+    int depth = 0;  // Parse recursion level (D48) — see kMaxParseDepth
 };
 
 void skip_ws(P& p) {
@@ -686,7 +687,28 @@ Value parse_power(P& p) {
     return v;
 }
 
+// RAII so every early return unwinds the count; parse_term/parse_expr call
+// parse_unary repeatedly in a loop, and those siblings must not accumulate
+// (the same reason complexexpr's guard is shaped this way).
+struct DepthGuard {
+    P& p;
+    explicit DepthGuard(P& q) : p(q) { ++p.depth; }
+    ~DepthGuard() { --p.depth; }
+    DepthGuard(const DepthGuard&) = delete;
+    DepthGuard& operator=(const DepthGuard&) = delete;
+    DepthGuard(DepthGuard&&) = delete;
+    DepthGuard& operator=(DepthGuard&&) = delete;
+    bool too_deep() const { return p.depth > kMaxParseDepth; }
+};
+
 Value parse_unary(P& p) {
+    // One guard per cycle of parse_expr -> parse_term -> parse_unary ->
+    // parse_power, placed here because it is the single point every level
+    // passes through exactly once (D48).
+    const DepthGuard guard(p);
+    if (guard.too_deep()) {
+        return fail(p, "Too deeply nested");
+    }
     skip_ws(p);
     bool neg = false;
     while (*p.s == '-' || *p.s == '+') {

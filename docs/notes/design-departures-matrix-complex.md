@@ -178,6 +178,29 @@ in 4D, this idea's own trigger condition below is expected to fire once
 4D closes — treated as the de facto next architecture pass, though not
 yet given its own phase/week slot the way A-E/G now have.
 
+**Update (2026-08-08, D48): F is now judged worth the effort, and it gains
+a design constraint it did not have before — build it on an explicit
+evaluation stack, not the call stack.** Two independent arguments now point
+here rather than one. The correctness argument is D46: the real and complex
+evaluators had silently disagreed about DEGREE-mode trig since Session 18,
+which is the class of bug unification removes. The structural argument is
+this session's: **four parsers, four separately-discovered stack budgets,
+three of them found by something crashing** — D45 capped the CAS parser,
+D47 capped tinyexpr and complexexpr, and D48 capped `matexpr` only after a
+reproducible hard fault (`sp` below `__StackBottom`, into core 1's stack).
+Each cap was sized by its own measurement pass against core 0's 4 KB.
+
+`matexpr`'s cap landed at depth 3 with **84 bytes of margin** — containment,
+not headroom. The way out is an iterative parser whose depth lives in an
+explicit operand/operator stack rather than in call frames, because that
+array can be sized freely and, being accessed sequentially, is genuinely
+PSRAM-friendly (unlike a call stack: `psram.hpp` is PIO-driven SPI and not
+memory mapped, so no stack can live there). **That rewrite belongs to F, not
+to `matexpr`** — F retires `matexpr` outright, so building it there would be
+thrown away. Decided 2026-08-08: live with the caps until F, and give F an
+explicit, PSRAM-capable evaluation stack from the start rather than letting
+it inherit a fourth frame budget.
+
 Everything above is a bilateral patch (complex+variables, complex+lists,
 complex+matrices, list+matrix). The pattern suggests the actual seamless
 answer is architectural: replace `matexpr`, `complexexpr`, and `listexpr`

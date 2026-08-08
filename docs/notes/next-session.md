@@ -1,6 +1,37 @@
 # Start here — next session
 
-**Last session:** 2026-08-08 — **Both 2026-08-05 testdrive items fixed and
+**Last session:** 2026-08-08 (later) — **Post-D47 group-5/6 bench sweep on the
+Pico 1, one crash found and capped (D48), and idea F promoted to worth-doing.**
+Four of five heavy paths were clean under live stack guards: idle 1,540 of
+4,096, graph redraw + zoom 2,360, and **the list/1-Var-stats/inference set never
+registered a new mark at all** — first hardware confirmation of D47's
+`eval_list_into` rework. The D45 ladder hit 3,588, which is *by design*: D45
+predicted 3,728/368 by inspection and the live mark agreed to ~140 B. Rung 4
+white in both number modes confirms D46's `c_pow` fix on hardware.
+**`matexpr` was the exception** — `det(([a]*([c]+[d]))+[d])` hard-faulted
+twice with `sp=0x20040ff8`, 8 bytes below core 0's `__StackBottom` and inside
+core 1's stack; `pc`/`lr` were garbage because the overflow corrupted exception
+stacking, so `sp` carried the whole diagnosis. It was the last uncapped parser.
+**D48** adds `kMaxParseDepth = 3` (RAII `DepthGuard` in `parse_unary`).
+**The cap took two tries and the first was instructive**: frame arithmetic said
+depth 3 cost 4,300 B and was unreachable, so it was set to 2 — which broke
+`det(identity(2))` and matrix literals in function arguments, both depth 3 and
+both already pinned by `test_matrix`. Hardware said depth 3 actually fits at
+3,940. The arithmetic was 360 B pessimistic; trusting it would have shipped a
+level too tight. **Measured before -> after**: `det([[1,2][3,4]])` 3,940 ->
+**4,012**, depth-4 crash -> "Too deeply nested". The +72 B is the guard itself
+(cycle 808 -> 832 B/level), which the static tooling predicts exactly. **So the
+margin at depth 3 is now 84 bytes — containment, not a fix.** `test_matrix`
+381 -> **397**, full suite green, both boards build, lint/format clean, `.bss`
+unchanged at 211,100. Flashed to the Pico 1 and all three checks verified.
+**Decision taken**: live with the caps; the explicit-stack parser that would
+actually lift the depth belongs to **idea F** (it retires `matexpr`, so building
+it there is throwaway work), and F should be built on an explicit,
+PSRAM-capable evaluation stack. PSRAM cannot host a call stack — PIO SPI, not
+memory mapped. Full detail: worklog's 2026-08-08 (later) entry, `decisions.md`
+**D48**, `design-departures-matrix-complex.md` §F.
+
+**Previous session:** 2026-08-08 — **Both 2026-08-05 testdrive items fixed and
 HW-verified on the Pico 1, plus a separate 4-nested-paren crash the first
 fixes did *not* address (D47). Five commits, `ad7ebd6`..`3153868`.** The
 crash story is at the end of D47 and is the one worth reading: three wrong
@@ -52,36 +83,35 @@ draws red (correctly rejected), the graph works, three `graph recompute:` at
 
 ## The next job
 
-0. **Two observations from 2026-08-08, recorded not fixed** —
+0. **One open observation from 2026-08-08** —
    `testdrive-2026-08-08-observations.md`:
-   - **`5!` and `abs(3+4i)` in a+bi mode**: "shows white values rather than
-     120/5" (verbatim). Ambiguous — either the results are wrong, or they are
-     right and plain-white where amber was expected. **Reproduce before
-     changing anything**; the two readings need different fixes. Host says
-     both values are correct, which favours the display reading. `5!` takes
-     `parse_scalar_span`'s eval_field fallback and `abs()` does not, so if
-     only one misbehaves that localises it at once.
    - **`seq()` needs all five args, `range()` does not.** Not a defect (the
      test plan was wrong), but defaulting `step` to 1 would match `range` and
      TI-84. Small change in `eval_seq` plus a host test.
+   - ~~`5!` / `abs(3+4i)` showing white~~ — **closed as not-a-bug.** The
+     tester had read the two entries as one expression (`5! / abs(3+4i)`) and
+     expected an improper-fraction exact form; they were separate entries,
+     the displayed values (`120`, `5`) were correct, and plain white is right
+     for real integers. No code change.
 
-1. **Finish the bench pass on the Pico 1, then flash the Pico 2.** Groups 1-4
-   of the post-D47 plan (typeset display, the three slot editors, list
-   expressions, a+bi/numeric literals) passed on 2026-08-08. Remaining:
-   - **Guards-are-live sweep.** D45 warned some paths may have been working
-     *because* nothing trapped, and guards are on now: heavy graph redraw
-     (several enabled slots, pan/zoom), matrix ops (`det`, `[A]^-1`, `rref`,
-     `eigenvals`), list editor with a large list, 1-Var stats on a big list,
-     inference, and the D45 ladder in both REAL and a+bi. Watch
-     `stack: peak N of 4096` on serial more than the screen — anything above
-     ~3,300 is worth investigating.
-   - **The Phase 5 CAS on-device checklist — still never run.** It is what
-     the original Y= lockup blocked and the reason this branch exists. Script
-     is in the "Stage 4" bullet further down: amber exact forms, DEGREE
-     folding, RECT/POLAR, unchanged white decimals, Alt+Enter, reboot-reload.
-   - **Pico 2 not flashed at all this session.** Hardware FPU and a full
-     framebuffer, so frames and the render path both differ — worth repeating
-     the typeset-display, a+bi and guards groups there.
+1. **Flash the Pico 2 — it is the whole of what's left on the bench pass.**
+   Groups 1-4 passed 2026-08-08; **groups 5 and 6 passed on the Pico 1 later
+   the same day** (see "Last session"), so the Pico 1 leg is done. Remaining:
+   - **The Pico 2 has never been flashed on this branch.** It has neither D48
+     nor any of groups 1-6. Its stack layout is identical (4 KB core 0, core 1
+     immediately below) and its `matexpr` frames are only ~8% cheaper, so the
+     **84-byte depth-3 margin there is a projection, not a measurement** —
+     re-measure it. Repeat the typeset-display, a+bi, guards and CAS groups.
+   - **D48 on the Pico 2 specifically**: `det(([a]*([c]+[d]))+[d])` must say
+     "Too deeply nested"; `det([[1,2][3,4]])` -> -2 and `det(identity(2))` -> 1
+     must still compute; watch the peak on both.
+   - ~~Guards-are-live sweep~~ — **done on the Pico 1.** Idle 1,540, graph
+     redraw + zoom 2,360, list/stats/inference no new mark, D45 ladder 3,588
+     (by design), `matexpr` crash found and capped (D48).
+   - ~~Phase 5 CAS on-device checklist~~ — **sampled on the Pico 1** and
+     correct as far as it went. Not exhaustively walked; the full script is
+     still in the "Stage 4" bullet further down and is worth running on the
+     Pico 2 in full.
    - **Watch for wrong answers, not just crashes.** Several buffers became
      `static` on a non-reentrancy argument verified by inspection, not
      exhaustively. A wrong result from something that mixes features
@@ -98,11 +128,20 @@ draws red (correctly rejected), the graph works, three `graph recompute:` at
      above the 48 KB MicroPython heap is thin; the `pre-phase5-review.md`
      levers are now likely rather than optional.
 
-2. **`math::matexpr` is the last uncapped parser, and the worst** —
-   **808 B/level** (`parse_power` alone is 416 B, holding matrix temporaries),
-   ~2 levels of headroom from the home screen. Needs its own measurement pass
-   and probably frame reduction before a cap can be set that would not reject
-   ordinary matrix expressions.
+2. ~~`math::matexpr` is the last uncapped parser~~ — **capped 2026-08-08
+   (D48).** All four parsers now have depth caps. But `matexpr`'s cap sits at
+   **84 bytes of margin** at depth 3, which is containment rather than
+   headroom, and the prediction that it "would reject ordinary matrix
+   expressions" was half right: depth 3 turned out to fit on hardware, so
+   `det(identity(2))` and matrix literals in function arguments survive —
+   anything one level deeper does not. Three levers if that bites, cheapest
+   first: (a) frame reduction, `parse_power` is 388-416 B holding matrix
+   temporaries (cf. D47's `eval_list_into`, 2,248 -> 32 B), worth ~2-3x the
+   depth; (b) move core 0's stack out of the 4 KB scratch bank into main SRAM
+   via the linker script — raises the ceiling without touching frames,
+   comfortable on the Pico 2, tight on the Pico 1; (c) an explicit-stack
+   iterative parser. **(c) is deliberately assigned to idea F below, not to
+   `matexpr`** — F retires this parser, so doing it here is throwaway work.
 
 **Previous session:** 2026-08-05 — **Phase 5 Stage 5: CAS hardening (4D.22,
 D45) plus two Phase 4C bugfixes (D46). PHASE 5 IS CLOSED, HW-verified on
@@ -176,12 +215,33 @@ worklog's 2026-08-05 entry, `decisions.md` D45/D46.
    `docs-site/reference/error-messages.md` is unwritten. Now that Phase 5 has
    closed, the open question from that session resolves: **rebase onto `main`
    after the Phase 5 merge so the CAS chapter can be written.**
-3. **After Phase 5: F — the unified evaluator** (D37/D40), deliberately
+3. **After Phase 5: F — the unified evaluator** (D37/D40/**D48**), deliberately
    sequenced after CAS so a possible 4th symbolic evaluator is known before
-   unification. D46 is direct evidence for it: the real and complex
-   evaluators had silently disagreed about DEGREE-mode trig since Session 18,
-   which is exactly the class of bug unification removes. Then revisit idea H
-   (polymorphic variables, D40 — unscheduled, only if real usage demands it).
+   unification. **Judged worth the effort 2026-08-08**, on two independent
+   arguments rather than one:
+   - *Correctness* (D46): the real and complex evaluators silently disagreed
+     about DEGREE-mode trig since Session 18 — the class of bug unification
+     removes.
+   - *Structural* (D48): **four parsers, four separately-discovered stack
+     budgets, three of them found by something crashing.** D45 capped the CAS
+     parser, D47 capped tinyexpr and complexexpr, D48 capped `matexpr` after a
+     reproducible hard fault. Each cap needed its own measurement pass against
+     core 0's 4 KB, and `matexpr`'s landed at 84 bytes of margin.
+
+   **Design constraint taken 2026-08-08: build F on an explicit evaluation
+   stack, not the call stack.** Depth then lives in an array that can be sized
+   freely and — being accessed sequentially — is genuinely PSRAM-friendly,
+   unlike a call stack (`psram.hpp` is PIO-driven SPI and not memory mapped, so
+   no stack can live there). This is what makes "much larger depth" reachable
+   at all, and it is assigned here rather than to `matexpr` because F retires
+   that parser. Note F stays home-screen-only per phase4-spec §5.2 —
+   `evaluate_real()` (tinyexpr, graphing/tables/stats) is never touched, so
+   this is four parsers -> two, not one. It is also the highest-risk item on
+   the list by its own description: a rewrite of three working, tested
+   evaluators against ~1,200 host checks that pin their separate behaviours.
+
+   Then revisit idea H (polymorphic variables, D40 — unscheduled, only if real
+   usage demands it).
 4. **D10 leg B** (no phase home): compute-parallelize
    `GraphScreen::recompute_function` (`src/apps/graph_screen.cpp:313`) —
    needs a second engine/vars context (shared `X` mutation), not just a

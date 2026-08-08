@@ -18,6 +18,102 @@ Format:
 
 ---
 
+## D48: `matexpr` gets the depth cap it never had — and the margin it leaves makes idea F worth doing
+
+**Date**: 2026-08-08
+**Status**: Accepted (bugfix; containment, with a named follow-up)
+**Context**: The post-D47 group-5 bench sweep on the Pico 1 (stack guards live)
+walked every heavy path with `stack: peak` on serial. Four of five were clean —
+idle 1,540, graph redraw + zoom 2,360, and the list editor / 1-Var stats /
+inference set never registered a new high-water mark at all (the first hardware
+confirmation of D47's `eval_list_into` rework). The D45 ladder in both REAL and
+a+bi reached 3,588, which turned out to be *by design*: D45's static prediction
+for the home-screen entry at cap 7 was 3,728 with 368 margin, so the live mark
+agreed with frame arithmetic derived by inspection to within ~140 B.
+
+Matrix was not clean. `det(([a]*([c]+[d]))+[d])` hard-faulted, reproducibly.
+The fault record's `pc`/`lr` were garbage (both resolve to `??`) because the
+overflow corrupted exception stacking, but `sp=0x20040ff8` named it alone: 8
+bytes below core 0's `__StackBottom` (`0x20041000`), i.e. SP had crossed its own
+floor into core 1's stack. `matexpr` was the last parser with no depth cap —
+D45 capped the CAS parser, D47 capped tinyexpr and complexexpr, and three of
+those four were found by something crashing.
+
+**Decision**: `kMaxParseDepth = 3` in `mat_expr.hpp`, enforced by an RAII
+`DepthGuard` in `parse_unary` — the single point every level of the
+`parse_expr -> parse_term -> parse_unary -> parse_power` cycle passes through
+exactly once. RAII because `parse_term`/`parse_expr` call `parse_unary` in a
+loop and siblings must not accumulate; three host tests pin that specifically,
+since a naive increment-without-unwind passes every depth test and breaks flat
+expressions. One production entry point (`home_screen.cpp`) means one constant,
+unlike complexexpr's split cap.
+
+**Rationale**: 3 is forced from both sides, and only measurement found the
+boundary. A first attempt at 2 — derived from frame arithmetic (1,028 prefix +
+848 entry + 808/level, predicting depth 3 at 4,300 and therefore unreachable) —
+broke two shipped behaviours that `test_matrix` already pinned:
+`det(identity(2))` and matrix literals inside a function argument are both
+depth 3, because `parse_matrix_fn` and `parse_matrix_literal` each re-enter
+`parse_expr`. On hardware depth 3 turned out to *fit*: 3,940 of 4,096. The
+arithmetic was 360 B pessimistic — the four frames are not all live at once —
+and had it been trusted, the cap would have shipped one level too tight.
+Repeating D47's lesson exactly: measure, don't reason about frame sizes.
+
+Measured on the Pico 1 (`stack: peak` high-water marks, 4,096 total):
+
+| | before | after |
+|---|---|---|
+| `det([A]*[B]+[C])` (depth 2) | 3,492 | — |
+| `det([[1,2][3,4]])` (depth 3) | 3,940 | **4,012** |
+| `det(identity(2))` (depth 3) | — | 3,540 |
+| `det(([a]*([c]+[d]))+[d])` (depth 4) | **hard fault** | "Too deeply nested" |
+
+**Tradeoffs**: The guard costs stack. `P` gained `depth` and every level carries
+a `DepthGuard`: the Pico 1 cycle went 808 -> 832 B/level, +24 B/level, which
+over three levels is the +72 B seen live (3,940 -> 4,012). The static tooling
+and the hardware mark agree exactly here, which is worth noting after a session
+in which frame arithmetic was wrong twice. **So the fix converted a reachable
+hard fault into an error message while shrinking the surviving margin from 156 B
+to 84 B.** That is strictly better than faulting and it is not comfortable:
+depth 3 is now something to defend, not build on. Expressions a user could
+reasonably write (`det(([A]+[B])*[C])` is depth 3 and fine; anything one level
+deeper) are now rejected.
+
+The Pico 2 is not better off. Same 4 KB core-0 stack (`0x20081000`-`0x20082000`)
+with core 1 immediately below, identical layout to the Pico 1 — the RP2350's
+extra SRAM does not reach the stack, which lives in a 4 KB scratch bank on both
+chips. Its frames are ~8% cheaper (cycle 768 vs 832), worth ~290 B of headroom
+at depth 3 against the ~768 B a whole extra level costs. So one constant serves
+both boards; no board-conditional cap.
+
+**PSRAM cannot help.** It is 8 MB of PIO-driven SPI and *not memory mapped*
+(`psram.hpp`: `alloc()` returns offsets, access goes through `read()`/`write()`),
+so there is no address a stack could target — on either board, since both use
+the PIO driver rather than the RP2350's native QMI mapping. At ~200 us/KB it
+would be unusable for a call stack regardless.
+
+**Revisit when**: depth 3 proves too restrictive in real use, or anything on
+this path grows a frame. Three levers, cheapest first: (a) frame reduction —
+`parse_power` alone is 388-416 B holding matrix temporaries, cf. D47's
+`eval_list_into` at 2,248 -> 32 B, worth maybe 2-3x the depth; (b) move core 0's
+stack out of the scratch bank into main SRAM via the linker script — raises the
+ceiling without touching frames, comfortable on the Pico 2 and tight on the
+Pico 1's ~52 KB headroom, a whole-firmware change of the same class as
+`PICO_USE_STACK_GUARDS`; (c) an explicit-stack iterative parser, whose depth is
+bounded by an array rather than by frames — and that array *is* PSRAM-friendly,
+being accessed sequentially rather than as a call stack.
+
+**(c) belongs to idea F, not to `matexpr`** (decision 2026-08-08): the unified
+evaluator retires this parser outright, so building an explicit-stack rewrite
+here would be thrown away. F's case is now two independent arguments, not one —
+D46's correctness argument (the real and complex evaluators silently disagreed
+about DEGREE-mode trig since Session 18) and this session's structural one (four
+parsers, four separately-discovered depth budgets, three of them found by a
+crash). F should be designed with an explicit, PSRAM-capable evaluation stack
+from the start rather than inheriting a fourth frame budget.
+
+---
+
 ## D47: Stack frames are a budget — no compiling inside render(), no kMaxLen arrays on a recursive path, and a trap where core 0 meets core 1
 
 **Date**: 2026-08-08

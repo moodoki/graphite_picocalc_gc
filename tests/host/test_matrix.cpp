@@ -703,6 +703,47 @@ void test_expr_errors() {
     check_mat_error("det(identity(2))+", "Syntax error", "trailing plus");
 }
 
+// D48: matexpr recurses 808 B/level against core 0's 4 KB, so depth 3 walks
+// off the stack. Hardware measured depth 2 at a 3,492 B high-water mark and
+// det(([a]*([c]+[d]))+[d]) (depth 4) hard-faulted with SP below
+// __StackBottom. These pin both sides of kMaxParseDepth = 2.
+void test_expr_depth_cap() {
+    using namespace math;
+    const double va[4] = {1, 2, 3, 4};
+    check(fill(matrices().matrix(0), 2, 2, va), "depth fill [A]");
+    check(fill(matrices().matrix(1), 2, 2, va), "depth fill [B]");
+    check(fill(matrices().matrix(2), 2, 2, va), "depth fill [C]");
+
+    // Depth 1-3 evaluate. The depth-3 cases are the ones that force the cap
+    // to 3: both are shipped behaviour, and both measured 3,940 of 4,096.
+    const double vsum[4] = {2, 4, 6, 8};
+    const double va2[4] = {1, 2, 3, 4};
+    check_mat_scalar("det([A])", -2.0, "depth 1 accepted");
+    check_mat_scalar("det([A]*[B]+[C])", -8.0, "depth 2 accepted");
+    check_mat_result("([A]+[B])", 2, 2, vsum, "depth 2 via paren accepted");
+    check_mat_scalar("det([[1,2][3,4]])", -2.0, "depth 3: literal in function arg");
+    check_mat_scalar("det(identity(2))", 1.0, "depth 3: nested function call");
+    check_mat_result("(([A]))", 2, 2, va2, "depth 3 via parens accepted");
+    check_mat_scalar("det(([A]+[A])*[A])", 16.0, "depth 3 via paren in arg");
+
+    // Depth 4 is rejected rather than faulting — this is the shape that
+    // hard-faulted on the Pico 1 with sp below __StackBottom.
+    check_mat_error("det(([A]*([A]+[A]))+[A])", "Too deeply nested",
+                    "depth 4 rejected (the HW crash shape)");
+    check_mat_error("((([A])))", "Too deeply nested", "depth 4 paren chain rejected");
+    check_mat_error("det(inverse(([A])))", "Too deeply nested",
+                    "depth 4 via nested function calls");
+
+    // The guard is RAII precisely so siblings do not accumulate: parse_term
+    // and parse_expr call parse_unary in a loop, and a flat expression of any
+    // length stays at depth 1. This is the regression that a naive
+    // increment-without-unwind would break.
+    check_mat_scalar("det([A])+det([A])+det([A])+det([A])+det([A])+det([A])", -12.0,
+                     "flat sibling chain not accumulated");
+    check_mat_scalar("det([A])*2+det([B])*2+det([C])*2", -12.0, "flat mixed-operator chain");
+    check_mat_scalar("---det([A])", 2.0, "unary sign chain not accumulated");
+}
+
 void test_format_matrix() {
     using namespace math;
     Array m;
@@ -1147,6 +1188,7 @@ int main() {
     test_expr_basics();
     test_expr_store();
     test_expr_errors();
+    test_expr_depth_cap();
     test_format_matrix();
     test_store();
     test_complex_matops();
