@@ -54,7 +54,16 @@ only of features that don't yet have a home.
     encoding itself is new design work.
   - No prior design work on either variant before this session; no phase
     home.
-- **Serial key injection for on-device test automation** (raised 2026-08-05,
+- **Serial key injection for on-device test automation**
+  — **scoped 2026-08-08: see [`serial-injection-plan.md`](serial-injection-plan.md)**,
+  which takes the line-oriented variant (option 2 below) forward and defers
+  per-keystroke synthesis (option 1) until testing friction is genuinely
+  per-keystroke. Two findings from that scoping change the picture: the
+  screenshot item below is **not** a prerequisite, because
+  `HomeScreen::ResultKind` (`home_screen.hpp:36`) already encodes
+  white/amber/error and can simply be printed; and flashing no longer needs the
+  BOOTSEL button (`picotool load -f -x`), leaving keyboard input as the last
+  manual step in the bench loop. Original entry (raised 2026-08-05,
   Pico 1 testdrive session — dev tooling, not a calculator feature). USB
   serial (`stdio_usb`) is enabled and output-only today (`printf`
   diagnostics: boot/build info, late-init timing, PSRAM/battery/die-temp
