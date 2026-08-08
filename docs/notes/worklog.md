@@ -305,6 +305,65 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-09 — Phase 5.1 built: serial line injection. **HW-verified on the Pico 2**
+
+All six tasks (5.1.1-5.1.6) in one session, on branch `phase-5.1`.
+
+**The correctness hinge was 5.1.1**, the `submit_line()` extraction. The Enter
+body (trim -> `handle_command()` -> else `evaluate_input()`) moved verbatim into
+`HomeScreen::submit_input()`, called by both the key handler and the new
+`submit_line()`. One copy, so a typed Enter and an injected line cannot drift —
+that is the entire reason an injected result can be trusted as equivalent. The
+spec's warning proved right: calling `handle_command()` directly, as the
+original wishlist entry suggested, would have skipped math evaluation and
+reported success on `cls` while returning nothing for `2+2`.
+
+**Three things differed from the spec, all found while building:**
+
+1. **The line cap is 128, not 256.** The spec cited `config::kMaxExprLen`; the
+   real bound is `ui::InputLine::kCapacity` = 128, and `set_text()` is
+   `strncpy`-based, so it **truncates silently**. `submit_line()` now rejects at
+   128. Truncation is the dangerous failure for a harness — it returns a
+   plausible answer to an expression nobody sent.
+2. **Results carry firmware glyph bytes, not UTF-8** — `\x86` imaginary unit,
+   `\x87` store arrow, `\x8c` radical (`src/gfx/font.hpp:40-54`). The first cut
+   of the host script decoded with `errors="replace"`, which collapsed every one
+   to `U+FFFD` and would have made `2i` and `2∠` **compare equal**. Fixed to
+   decode latin-1 (bijective over bytes) with a `GLYPHS` render table.
+3. **The echo reports the serialized form**, not the typeset glyphs: `sqrt(8)`
+   comes back `2*sqrt(2)`, which renders on screen as `2√2`. This does not
+   weaken the `ResultKind` finding — `kind=symbolic` vs `plain` **is** the
+   amber/white answer, which was the capability claimed.
+
+**5.1.6 is the payoff.** The D48 det ladder — the sequence that cost ~15 manual
+round-trips two days ago — now runs from a file in one command:
+
+```
+det([A])                   = -2
+det([A]*[B]+[C])           = -8
+det([[1,2][3,4]])          = -2                  stack: peak 3708 of 4096
+det(identity(2))           = 1
+det(([A]*([B]+[C]))+[C])   = Too deeply nested   [error]
+```
+
+Matrix setup (`[[1,2][3,4]]->[A]` ...) went over the same channel. Also verified:
+`kind=error` on a syntax error, `(command)` on `cls`, over-long lines rejected
+before transmission, and pop-to-home (inject `diag`, then `6*7` -> 42).
+
+Firmware side is a non-blocking `getchar_timeout_us(0)` loop in the core-0 main
+loop behind `PICOCALC_SERIAL_INJECT` (CMake option, default ON), with a
+**static** line buffer — core 0's stack is 4 KB and D47/D48 were both about
+buffers on it. Bounded at 512 chars/frame, the same reflex as the key drain's
+`kMaxEventsPerFrame`. Host side is `scripts/serial-console.py`, which asserts
+DTR/RTS on the **write** path and reconnects across reboots — `serial-capture.py`
+does neither, and its dead-fd spin silently lost a whole test pass on 2026-08-08.
+
+`PICOCALC_PHASE` bumped `"5"` -> `"5.1"`. Host suite green (2,111 checks across
+15 binaries), both boards build, lint/format clean. **Pico 1 not re-flashed** —
+the code is board-independent and swaps are batched to stage closures.
+
+---
+
 ## 2026-08-08 — Phase 5 merged and tagged v0.2.0; Phases 5.1 and 5.2 defined
 
 **PR #2 merged to `main`** as a merge commit (`cd6a8b7`), deliberately not a

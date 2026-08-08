@@ -13,7 +13,10 @@ into repeatable, scriptable checks.
 Explicitly **out of scope**: per-keystroke `KeyEvent` synthesis (option 1 in
 the originating wishlist entry). See §7 for the trigger that should revive it.
 
-**Status**: Specced, not started. Promoted 2026-08-08 from
+**Status**: **Code-complete and HW-verified on the Pico 2, 2026-08-09.** All six
+tasks shipped; the D48 det ladder (5.1.6) now runs unattended and reproduces its
+recorded behaviour. Pico 1 not re-flashed — the code is board-independent and
+board swaps are batched to stage closures. Originally promoted 2026-08-08 from
 [serial-injection-plan.md](../notes/serial-injection-plan.md), which was itself
 scoped from the `wishlist.md` entry raised 2026-08-05. Sequenced ahead of
 [Phase 5.2](phase5.2-spec.md) because injection is the main practical mitigation
@@ -155,6 +158,26 @@ the primitive the D48 session needed fifteen times.
 | 5.1.5 | Round-trip check on the diag screen's existing key echo (`src/main.cpp:214-215`) | 0.5 | Inject → echo observed with no new firmware code on that screen |
 | 5.1.6 | Re-run the D48 det ladder unattended | 1.5 | Reproduces the recorded peaks (3,860 of 4,096 on the Pico 2) without hand typing |
 | | **Total** | **8** | |
+
+**As built, 2026-08-09 — all six done.** Three things differed from the plan
+above and are worth carrying rather than quietly correcting:
+
+1. **The line cap is 128, not 256.** §3.2 cited `config::kMaxExprLen` (256), but
+   the real bound is `ui::InputLine::kCapacity` = 128, and `set_text()` is
+   `strncpy`-based so it *truncates silently*. `submit_line()` rejects at 128
+   instead; `serial-console.py` mirrors the limit so the sender reports the
+   offending text. Truncation was the dangerous failure here — it returns a
+   plausible result for an expression nobody sent.
+2. **Results contain firmware glyph bytes, not UTF-8.** `\x86` is the imaginary
+   unit, `\x87` the store arrow, `\x8c` a radical (full map:
+   `src/gfx/font.hpp:40-54`). Decoding with `errors="replace"` collapsed them
+   all to `U+FFFD`, which would have made `2i` and `2∠` compare *equal* — fatal
+   in a harness whose purpose is comparing results. The script decodes latin-1
+   (bijective over bytes) and renders via a `GLYPHS` table.
+3. **The echo carries the serialized form, not the typeset glyphs** — `sqrt(8)`
+   reports `2*sqrt(2)`, which renders on screen as `2√2`. This does not weaken
+   the `ResultKind` finding: `kind=symbolic` vs `plain` *is* the amber/white
+   answer, which was the capability §1 claimed.
 
 ## 5. Risks and mitigations
 

@@ -688,6 +688,92 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     pending_[0] = 0;
 }
 
+// The plain-Enter body (Phase 5.1, task 5.1.1). Extracted verbatim from
+// on_key's kEnter case so that a typed Enter and an injected line run the
+// identical sequence — trim, command match, else evaluate. Keeping one copy
+// is the whole reason an injected result can be trusted as equivalent to a
+// typed one; two copies would drift.
+void HomeScreen::submit_input() {
+    // Trimmed command match first (cls, help, ...).
+    char cmd[16];
+    const char* t = input_.text();
+    while (*t == ' ') {
+        ++t;
+    }
+    size_t len = std::strlen(t);
+    while (len > 0 && t[len - 1] == ' ') {
+        --len;
+    }
+    if (len > 0 && len < sizeof(cmd)) {
+        std::memcpy(cmd, t, len);
+        cmd[len] = 0;
+        if (handle_command(cmd)) {
+            input_.clear();
+            hist_nav_ = -1;
+            pending_[0] = 0;
+            invalidate(0, kSoftkeyY);
+            return;
+        }
+    }
+    evaluate_input();
+    invalidate(0, kSoftkeyY);  // History + input + status bar
+}
+
+bool HomeScreen::submit_line(const char* line, const char** result_out, const char** kind_out) {
+    if (result_out != nullptr) {
+        *result_out = nullptr;
+    }
+    if (kind_out != nullptr) {
+        *kind_out = nullptr;
+    }
+    if (line == nullptr) {
+        return false;
+    }
+    // Reject rather than truncate. set_text() is strncpy-based and would
+    // silently clip at kCapacity, evaluating an expression the caller never
+    // sent — the failure mode that matters most for an automated harness,
+    // since it looks like a result rather than an error.
+    if (std::strlen(line) >= ui::InputLine::kCapacity) {
+        return false;
+    }
+    input_.set_text(line);
+    if (input_.empty()) {
+        return false;
+    }
+
+    // Commands push no history entry; compare the counter rather than
+    // inspecting the newest entry, which would otherwise report the
+    // *previous* line's result as if it were this one's.
+    const uint32_t before = entries_total_;
+    submit_input();
+    if (entries_total_ == before) {
+        return true;  // Dispatched as a typed command
+    }
+
+    const Entry* e = entry_from_newest(0);
+    if (e == nullptr) {
+        return true;
+    }
+    if (result_out != nullptr) {
+        *result_out = e->result;
+    }
+    if (kind_out != nullptr) {
+        switch (e->kind) {
+            case ResultKind::kSymbolic:
+                *kind_out = "symbolic";
+                break;
+            case ResultKind::kError:
+                *kind_out = "error";
+                break;
+            case ResultKind::kPlain:
+            default:
+                *kind_out = "plain";
+                break;
+        }
+    }
+    return true;
+}
+
 // Typed commands (2026-07-18): lowercase-only (input is
 // case-sensitive), matched against the trimmed line before math
 // evaluation. Commands don't enter history.
@@ -825,29 +911,7 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
                 return true;
             }
             if (!input_.empty()) {
-                // Trimmed command match first (cls, help, ...).
-                char cmd[16];
-                const char* t = input_.text();
-                while (*t == ' ') {
-                    ++t;
-                }
-                size_t len = std::strlen(t);
-                while (len > 0 && t[len - 1] == ' ') {
-                    --len;
-                }
-                if (len > 0 && len < sizeof(cmd)) {
-                    std::memcpy(cmd, t, len);
-                    cmd[len] = 0;
-                    if (handle_command(cmd)) {
-                        input_.clear();
-                        hist_nav_ = -1;
-                        pending_[0] = 0;
-                        invalidate(0, kSoftkeyY);
-                        return true;
-                    }
-                }
-                evaluate_input();
-                invalidate(0, kSoftkeyY);  // History + input + status bar
+                submit_input();
             }
             return true;
         case Key::kUp:

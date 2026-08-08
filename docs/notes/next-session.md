@@ -113,9 +113,25 @@ commit, PR #2) and tagged **v0.2.0**. The two pieces of work that had been
 floating as homeless bullets now have phase numbers and specs, and sit in this
 order:
 
-> **Phase 5.1** ([spec](../phases/phase5.1-spec.md)) — serial line injection
+> ~~**Phase 5.1**~~ ([spec](../phases/phase5.1-spec.md)) — serial line
+> injection, **DONE 2026-08-09**, HW-verified on the Pico 2
 > → **Phase 5.2** ([spec](../phases/phase5.2-spec.md)) — unified evaluator
 > → **Phase 6** ([spec](../phases/phase6-spec.md)) — apps
+
+**Phase 5.1 shipped on branch `phase-5.1`** (not merged). Use it: bench checks
+that used to need "type this, read me the peak" are now one command —
+
+```bash
+python3 scripts/serial-console.py 'sqrt(8)' 'det([[1,2][3,4]])'
+python3 scripts/serial-console.py -f my-ladder.txt     # one expression per line
+python3 scripts/serial-console.py --watch 300          # tail stack:/fault: only
+```
+
+It prints `= <result>  [plain|symbolic|error]`, so **`kind` answers the
+amber-vs-white question that previously needed a human at the screen** — which
+makes the Pico 2's outstanding rung-4 check scriptable. `picotool load -f -x
+build/pico2/picocalc_graphcalc.uf2` reflashes the connected board with no
+BOOTSEL button.
 
 Both are *dotted* sub-phases: work that turned up rather than planned phase
 goals, per the convention now recorded in `AGENTS.md`. 5.1 comes first because

@@ -23,6 +23,7 @@
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
 #include "ui/chrome.hpp"
+#include "ui/input_line.hpp"  // kCapacity bounds the serial-injection buffer
 #include "ui/screen_manager.hpp"
 #include "math/functions.hpp"
 #include "math/lists.hpp"
@@ -643,6 +644,78 @@ int main() {
         // Soft-sleep APD (4D.19): inactivity timer + the paced STM32
         // backlight write queue live in power::tick().
         platform::power::tick();
+
+#if PICOCALC_SERIAL_INJECT
+        // Serial line injection (Phase 5.1, tasks 5.1.2/5.1.3). Nothing else
+        // in the firmware reads stdin, so any byte arriving here is a host
+        // script submitting an expression to the home screen.
+        //
+        // The buffer is static (bss): this runs on core 0, whose whole stack
+        // is 4 KB, and D47/D48 were both about buffers sitting on it. One
+        // copy is safe because only this loop touches it.
+        {
+            static char inject_buf[ui::InputLine::kCapacity];
+            static size_t inject_len = 0;
+            static bool inject_overflow = false;
+
+            // Bound the work per frame so a chattering host cannot starve
+            // rendering, the same reflex as the key drain's kMaxEventsPerFrame.
+            constexpr int kMaxInjectCharsPerFrame = 512;
+            for (int i = 0; i < kMaxInjectCharsPerFrame; ++i) {
+                const int c = getchar_timeout_us(0);
+                if (c < 0) {
+                    break;  // Nothing waiting — non-blocking
+                }
+                if (c == '\r') {
+                    continue;
+                }
+                if (c != '\n') {
+                    if (inject_len + 1 < sizeof(inject_buf)) {
+                        inject_buf[inject_len++] = static_cast<char>(c);
+                    } else {
+                        inject_overflow = true;  // Report, never truncate
+                    }
+                    continue;
+                }
+
+                inject_buf[inject_len] = 0;
+                const size_t line_len = inject_len;
+                inject_len = 0;
+                const bool was_overflow = inject_overflow;
+                inject_overflow = false;
+
+                if (was_overflow) {
+                    printf("inject: error line too long (max %u)\n",
+                           static_cast<unsigned>(sizeof(inject_buf) - 1));
+                    continue;
+                }
+                if (line_len == 0) {
+                    continue;  // Bare newline — keepalive, not a submission
+                }
+
+                // Injection targets the home screen. Popping is deterministic
+                // and is what a user would do; erroring out instead would
+                // strand an unattended script on whatever screen was open.
+                if (mgr.current() != &apps::home_screen()) {
+                    mgr.pop_to_root();
+                    printf("inject: popped to home\n");
+                }
+
+                const char* result = nullptr;
+                const char* kind = nullptr;
+                if (!apps::home_screen().submit_line(inject_buf, &result, &kind)) {
+                    printf("inject: error rejected \"%s\"\n", inject_buf);
+                } else if (result == nullptr) {
+                    // Dispatched as a typed command (cls, diag, ...), which
+                    // pushes no history entry to report.
+                    printf("inject: \"%s\" -> command\n", inject_buf);
+                } else {
+                    printf("inject: \"%s\" -> \"%s\" kind=%s\n", inject_buf, result, kind);
+                }
+                dirty = true;
+            }
+        }
+#endif
 
         constexpr int kMaxEventsPerFrame = 16;
         constexpr uint64_t kDrainBudgetUs = 250'000;

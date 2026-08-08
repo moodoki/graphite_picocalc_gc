@@ -316,7 +316,7 @@ Background research:
 | 4A–4C: Matrix + graph analysis + complex numbers | **Complete** | HW-verified on Pico 1 + Pico 2 (D28/D29/D30) |
 | 4D: GC completeness (pre-release milestone) | **Complete** | All 9 D38 batches shipped 2026-07-26, HW-verified on Pico 1 2026-07-26/27; Pico 2 leg closed as a formality; docs/phases/phase4-spec.md §7, decisions.md D40 |
 | 5: CAS (symbolic math) | **Complete** | Stages 0-5: engine, UI integration, exact-form display, hardening; HW-verified on Pico 1 + Pico 2 2026-08-05; merged to `main` and tagged v0.2.0 2026-08-08; docs/phases/phase5-spec.md (D32, D41, D42, D43, D44, D45) |
-| 5.1: Serial line injection | Specced, not started | Dev tooling — scripted whole-line input over USB serial for on-device test automation; docs/phases/phase5.1-spec.md (D48) |
+| 5.1: Serial line injection | **Complete** | Dev tooling — `scripts/serial-console.py` submits expressions over USB serial and reads back result + kind; HW-verified on Pico 2 2026-08-09 (the D48 det ladder now runs unattended); docs/phases/phase5.1-spec.md (D48) |
 | 5.2: Unified evaluator (idea F) | Specced, not started | Replaces matexpr/complexexpr/listexpr with one tagged-value evaluator on an explicit stack; highest-risk item on the list; docs/phases/phase5.2-spec.md (D37, D40, D46, D48) |
 | 6: Non-calculator functions (app framework + MicroPython) | Specced, not started | docs/phases/phase6-spec.md (D33) |
 

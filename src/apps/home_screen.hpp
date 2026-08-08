@@ -28,6 +28,24 @@ public:
     // the selected constant's identifier, 4D.17).
     void insert_text(const char* s);
 
+    // Submit `line` as if it had been typed at the input line and Enter
+    // pressed — the *same* code path, not a parallel one (Phase 5.1,
+    // task 5.1.1). Serial injection uses this; sharing submit_input() with
+    // the Enter key is what makes an injected result trustworthy as
+    // equivalent to a typed one.
+    //
+    // Returns false, having done nothing, when `line` is null, empty once
+    // trimmed, or longer than the input line holds — set_text() truncates
+    // silently (strncpy, ui::InputLine::kCapacity), and a truncated
+    // expression would evaluate to something the caller never sent.
+    //
+    // When non-null, *result_out and *kind_out receive the newest history
+    // entry's result text and a static kind name ("plain" | "symbolic" |
+    // "error"). Both are set to nullptr if the line dispatched as a typed
+    // command (cls, diag, ...), which pushes no history entry.
+    bool submit_line(const char* line, const char** result_out = nullptr,
+                     const char** kind_out = nullptr);
+
 private:
     static constexpr int kMaxHistory = 50;
 
@@ -76,6 +94,10 @@ private:
     // force_decimal suppresses the exact-form probe for this evaluation, the
     // same way a trailing `>dec` does — Alt+Enter's "show me the decimal".
     void evaluate_input(bool force_decimal = false);
+    // The plain-Enter body, factored out so the key handler and
+    // submit_line() run the identical sequence (trim -> command match ->
+    // else evaluate) and cannot drift apart. Assumes input_ is non-empty.
+    void submit_input();
     bool handle_command(const char* cmd);
     int visible_count() const;
     int result_max_scroll() const;  // Max LEFT/RIGHT pan offset for result_full_
