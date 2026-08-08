@@ -441,8 +441,36 @@ reverted to the stack. `test_complex_expr` 113 -> **122**; `.bss` 209,120 ->
 — 808 B/level, ~2 levels of headroom. Left alone: it needs its own measurement
 and probably frame reduction first.
 
-**Still unverified on hardware:** the complexexpr cap, and the wider
-guards-are-live sweep (matrix ops, large-list editor, stats, the D45 nesting
+**Then the bench showed the Y= fix had not fixed the *other* crash**: four
+nested parens hard-faulted, in every number mode. Three attributions were
+wrong before the right instrument existed — matexpr (ruled out by reading),
+`build_layout` in `render()` (real defect, wrong culprit: the measured
++376 B/level step was complexexpr's 368, not the layout parser's 476, and
+cutting layout to 96 B/level moved the peak not at all), and complexexpr's
+depth. A **crash record in `.uninitialized_data`** finally settled it:
+`sp` 32 B below `__StackBottom` (a clean guard trap) and `pc` =
+`preprocess+0x12`. **The leaf, not the recursion**: `parse_scalar_span` ran
+every numeric literal through `eval_field` -> the whole tinyexpr engine
+(~1,220 B) at the deepest point of a 360 B/level recursion, and the
+home screen runs complexexpr as a probe on *every* input, hence
+mode-independence. Fixed with a `strtod` fast path plus statics for the leaf
+buffers: `preprocess` 560 -> 48, `Engine::evaluate` 316 -> 64,
+`eval_internal` 280 -> 32, per level 360 -> 240, leaf 1,220 -> 208; worst
+case 3,128 of 4,096. Re-deriving the caps also caught `kMaxParseDepth = 8`
+overshooting the list-lift budget; both parsers now stop at 7 parens, equal
+across number modes. Two byproducts kept: the fault handler drops to BOOTSEL
+after 3 consecutive faults (a first cut of `paint_stack()` wrote into the
+guard region and boot-looped the board, recoverable only with the physical
+button), and a stack high-water mark on the serial heartbeat.
+
+**HW-verified on the Pico 1** (`3153868`): Y= opens, ZTrig DEG correct,
+`2^2^2^2` renders as a stepped tower, four-plus nested parens evaluate,
+7 parens is the limit in both modes with a clean "Too deeply nested", and
+test-plan groups 1-4 (typeset display, list expressions, a+bi and numeric
+literals) all reported correct. Two observations logged, not fixed —
+`testdrive-2026-08-08-observations.md`.
+
+**Still unverified on hardware:** the wider guards-are-live sweep (matrix ops, large-list editor, stats, the D45 nesting
 ladder) — plus the whole Phase 5 CAS on-device checklist this bug had been
 blocking. Pico 2 not flashed. See `next-session.md`.
 

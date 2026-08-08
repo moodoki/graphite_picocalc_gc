@@ -1,8 +1,13 @@
 # Start here — next session
 
 **Last session:** 2026-08-08 — **Both 2026-08-05 testdrive items fixed and
-HW-verified on the Pico 1; the D45 bug class found three times over (D47).**
-Both items came from
+HW-verified on the Pico 1, plus a separate 4-nested-paren crash the first
+fixes did *not* address (D47). Five commits, `ad7ebd6`..`3153868`.** The
+crash story is at the end of D47 and is the one worth reading: three wrong
+attributions from reasoning about frame sizes, then a crash record in
+`.uninitialized_data` that named it in one shot — `preprocess+0x12`, because
+complexexpr ran *every numeric literal* through the whole tinyexpr engine at
+the leaf of its recursion. Both items came from
 `testdrive-2026-08-05-observations.md`. The Y= freeze was a **core-0 stack
 overrun into core 1's stack**: `SlotEditorScreen::render()` called
 `math::engine().compile()` *inside the renderer*, and that frame measured
@@ -47,50 +52,57 @@ draws red (correctly rejected), the graph works, three `graph recompute:` at
 
 ## The next job
 
-0. **Finish the bench pass on the Pico 1, then flash the Pico 2.** The Y=
-   lockup itself is done. What is still unverified:
-   - ~~ZTrig in DEGREE~~ — **confirmed working 2026-08-08.** The RADIAN
-     preset ($\pm 2\pi$, $\pi/2$ ticks) was not re-checked for regression.
-   - ~~Y1 holds a rejected expression~~ — **confirmed 2026-08-08: it is the
-     long nested stress probe**, so the red row is correct behaviour and
-     `kMaxParseDepth = 8` stands. `DEL` on the row clears it whenever the
-     board is next in hand.
-   - The rest of the editors: **param, polar and seq** — seq's validity check
-     is the heaviest, and none has been opened on this build.
-   - **List expressions on the home screen**: `{1,2,3}`, `sum(l1)`,
-     `cumsum(sort_asc({3,1,2}))` (exactly at the new cap — must work), a named
-     list, `seq(x,x,1,5)`. One level deeper should say "Too deeply nested"
-     rather than misbehave.
-   - **Everything the guards newly cover**: heavy graph redraw, matrix ops,
-     list editor with a large list, stats, inference, the D45 nesting ladder
-     `(2+1)^2+1` out to rung 6.
-   - **Watch serial for `fault:`** — any line means a real overrun with the PC
-     to chase, not a mystery. Resolve it with
-     `arm-none-eabi-addr2line -f -C -e build/pico/picocalc_graphcalc.elf <pc>`;
-     a PC landing on a function's `push` prologue means stack overflow.
-   - ~~`math::complexexpr` is the obvious next uncapped parser~~ — **capped
-     2026-08-08 (D47)**, host-verified, not yet exercised on hardware. Needed
-     *two* caps (`kMaxParseDepth = 7` at the home screen,
-     `kMaxParseDepthNested = 4` from inside list/matrix evaluation) because the
-     two entry points differ by 1.2 KB of prefix. Worth a device check that
-     ordinary a+bi expressions still evaluate.
-   - **`math::matexpr` is now the last uncapped parser, and the worst** —
-     **808 B/level** (`parse_power` alone is 416 B, holding matrix
-     temporaries), leaving only ~2 levels of headroom from the home screen.
-     Needs its own measurement pass and probably frame reduction before a cap
-     can be set that does not break ordinary matrix expressions.
-   - **Then run the Phase 5 CAS on-device checklist this bug blocked** — the
-     Stage 4 script further down this file (amber exact forms, DEGREE folding,
-     RECT/POLAR, unchanged white decimals, Alt+Enter, reboot-reload). It has
-     never been run.
-   - **bss watch:** `.bss` is now 209,120 on the Pico 1. `size`'s total also
-     jumped 4,096 B that is **not** real — `PICO_STACK_SIZE` 2048→4096 doubles
-     both `.stack_dummy` sections, which live in the dedicated scratch banks.
-     Compare `.bss` alone. The Phase 6 spare is down to ~4 KB above the 48 KB
-     MicroPython heap, so the `pre-phase5-review.md` levers (heap 48→40 KB,
-     ArrayStore slab cut, `g_chunk` fold) are now likely rather than optional;
-     a ~2.3 KB reclaim is also available by unioning D47's four leaf-scratch
-     blocks, deliberately not taken in that session.
+0. **Two observations from 2026-08-08, recorded not fixed** —
+   `testdrive-2026-08-08-observations.md`:
+   - **`5!` and `abs(3+4i)` in a+bi mode**: "shows white values rather than
+     120/5" (verbatim). Ambiguous — either the results are wrong, or they are
+     right and plain-white where amber was expected. **Reproduce before
+     changing anything**; the two readings need different fixes. Host says
+     both values are correct, which favours the display reading. `5!` takes
+     `parse_scalar_span`'s eval_field fallback and `abs()` does not, so if
+     only one misbehaves that localises it at once.
+   - **`seq()` needs all five args, `range()` does not.** Not a defect (the
+     test plan was wrong), but defaulting `step` to 1 would match `range` and
+     TI-84. Small change in `eval_seq` plus a host test.
+
+1. **Finish the bench pass on the Pico 1, then flash the Pico 2.** Groups 1-4
+   of the post-D47 plan (typeset display, the three slot editors, list
+   expressions, a+bi/numeric literals) passed on 2026-08-08. Remaining:
+   - **Guards-are-live sweep.** D45 warned some paths may have been working
+     *because* nothing trapped, and guards are on now: heavy graph redraw
+     (several enabled slots, pan/zoom), matrix ops (`det`, `[A]^-1`, `rref`,
+     `eigenvals`), list editor with a large list, 1-Var stats on a big list,
+     inference, and the D45 ladder in both REAL and a+bi. Watch
+     `stack: peak N of 4096` on serial more than the screen — anything above
+     ~3,300 is worth investigating.
+   - **The Phase 5 CAS on-device checklist — still never run.** It is what
+     the original Y= lockup blocked and the reason this branch exists. Script
+     is in the "Stage 4" bullet further down: amber exact forms, DEGREE
+     folding, RECT/POLAR, unchanged white decimals, Alt+Enter, reboot-reload.
+   - **Pico 2 not flashed at all this session.** Hardware FPU and a full
+     framebuffer, so frames and the render path both differ — worth repeating
+     the typeset-display, a+bi and guards groups there.
+   - **Watch for wrong answers, not just crashes.** Several buffers became
+     `static` on a non-reentrancy argument verified by inspection, not
+     exhaustively. A wrong result from something that mixes features
+     (`solve(...)` or `convert(...)` inside a list or complex expression) is
+     the signature of that assumption being wrong.
+   - **Serial**: `python3 scripts/serial-capture.py 1800 | grep -E "stack:|fault:"`.
+     A `fault:` line now names core, PC, LR and SP; resolve the PC with
+     `arm-none-eabi-addr2line -f -C -e build/pico/picocalc_graphcalc.elf <pc>`.
+     A PC on a function's `push` prologue means stack overflow.
+   - **bss watch:** `.bss` is 211,100 on the Pico 1 (was 198,836 before this
+     session). `size`'s total also carries 4,096 B that is **not** real —
+     `PICO_STACK_SIZE` 2048->4096 doubles both `.stack_dummy` sections, which
+     live in dedicated scratch banks. Compare `.bss` alone. The Phase 6 spare
+     above the 48 KB MicroPython heap is thin; the `pre-phase5-review.md`
+     levers are now likely rather than optional.
+
+2. **`math::matexpr` is the last uncapped parser, and the worst** —
+   **808 B/level** (`parse_power` alone is 416 B, holding matrix temporaries),
+   ~2 levels of headroom from the home screen. Needs its own measurement pass
+   and probably frame reduction before a cap can be set that would not reject
+   ordinary matrix expressions.
 
 **Previous session:** 2026-08-05 — **Phase 5 Stage 5: CAS hardening (4D.22,
 D45) plus two Phase 4C bugfixes (D46). PHASE 5 IS CLOSED, HW-verified on

@@ -244,10 +244,89 @@ with only ~2 levels of headroom from the home screen. Not touched here — it
 needs its own measurement pass and probably frame reduction before a cap can be
 set that does not break ordinary matrix expressions.
 
+### The actual root cause of the 4-paren crash, and three wrong answers first
+
+Everything above fixes real defects, but **none of it fixed the crash the
+bench kept reporting**: four nested parens hard-faulted the board, in every
+number mode. Recording the sequence because the *method* was the problem.
+
+Three wrong attributions, each from reasoning about static frame sizes
+instead of measuring:
+
+1. **`matexpr`** — ruled out by reading: it early-outs at `mat_expr.cpp:918`
+   when the input has no matrix token, so it never sees `((((1+1))))`.
+2. **`build_layout` inside `HomeScreen::render()`** — real, and the
+   measured +376 B steps seemed to confirm it. But the step was
+   complexexpr's 368 B/level, not the layout parser's 476. Cutting the
+   layout path from 376 to 96 B/level moved the observed peak *not at all*,
+   which is what exposed the mistake.
+3. **complexexpr's recursion depth** — the cap was too generous, but depth
+   was not what overflowed.
+
+What settled it was building the right instrument, several rounds later than
+it should have been: a **crash record in `.uninitialized_data`** holding the
+whole exception frame. It survives the warm reset the handler triggers, where
+two packed watchdog scratch words could only report "implausible" — and
+implausible was exactly what these faults were. With the full frame:
+
+```
+fault: core 0  pc=0x10004f6e lr=0x20041490 sp=0x20040fe0
+```
+
+`sp` is 32 bytes below `__StackBottom` — one exception frame — so the guard
+trapped cleanly, and `pc` resolves to `preprocess+0x12`, `engine.cpp:28`: the
+prologue allocating `char tmp[256]` in a 560 B frame.
+
+**The cause was the leaf, not the recursion.** `HomeScreen::evaluate_input`
+runs `complexexpr::evaluate` as a probe on *every* input (to turn a NaN into
+"Non-real result"), which is why this reproduced in REAL mode too. And
+`parse_scalar_span` handled **every numeric literal** by copying it into a
+buffer and calling `eval_field` — which runs the entire tinyexpr engine:
+`Engine::evaluate` -> `eval_internal` -> `preprocess`, ~1,220 B. That sat at
+the *leaf* of a 360 B/level recursion, i.e. at maximum stack depth.
+`((((1+1))))` came to ~1,200 prefix + 4x360 + ~1,500 leaf, over 4,096. Three
+parens fit; four did not.
+
+Fixed by parsing plain numeric literals with `strtod` (which is what tinyexpr
+would have used anyway) and moving the fat leaf buffers to statics — all
+non-reentrant by inspection: `preprocess`'s `tmp`/`rebuilt`,
+`Engine::evaluate`'s `body`, `eval_internal`'s `processed`,
+`parse_scalar_span`'s `span`.
+
+| frame | before | after |
+|---|---|---|
+| `preprocess` | 560 | 48 |
+| `Engine::evaluate` | 316 | 64 |
+| `eval_internal` | 280 | 32 |
+| complexexpr per level | 360 | 240 |
+| `eval_field` leaf | ~1,220 | 208 |
+
+Worst case at the cap is now **3,128 of 4,096**, 968 B margin. HW-verified.
+
+**Two things worth keeping from this.** First, the earlier garbage fault PCs
+(`0xe6fd6f2e`, `0x998c9015`) were not noise: at 376 B/level a single
+`sub sp, #N` leaps clean over the 32-byte guard window, so core 0 silently
+killed core 1 instead of trapping, and the "PC" was core 1's corrupted return
+address. The layout fix shrinking frames to 96 B/level is *why* the crash
+finally trapped cleanly and named itself — an accidental but real benefit.
+Second, the guard's own failure mode bit hard: a first cut of `paint_stack()`
+wrote into the guarded 32 bytes, faulted on its first store, and boot-looped
+the board past USB enumeration — unrecoverable without the physical BOOTSEL
+button. Hence `kFaultsBeforeBootsel`: three consecutive faults now call
+`reset_usb_boot()` so a boot-looping image parks itself in BOOTSEL.
+
+Re-deriving both caps against the new frames also caught `kMaxParseDepth = 8`
+overshooting its tightest caller (the list-lift path affords 7). Both parsers
+now stop at **7 parens** — Engine counts parens, complexexpr counts recursion
+levels where the top-level call is level 1, so its constant is 8 for the same
+user-visible limit.
+
 **Revisit when**: the frame report shows a new function over ~1 KB, or the
 Phase 6 budget gets tight enough that the leaf-scratch union is worth taking.
-Also revisit `kMaxParseDepth` if 8 ever rejects an expression someone actually
-wanted — it is bounded by the list-lift prefix, so shrinking
+Also revisit the parse caps if 7 parens ever rejects an expression someone
+actually wanted — the home path alone affords 13 (Engine) and 10
+(complexexpr); the binding constraint is the list-lift chain, which enters
+~1,100 B deeper — it is bounded by the list-lift prefix, so shrinking
 `listexpr::evaluate` (720 B) or `HomeScreen::evaluate_input` (568 B) buys
 levels back. **`math::complexexpr` has its own recursive-descent parser
 (`parse_unary` 232 B/level) and is still uncapped** — same class, reachable in
