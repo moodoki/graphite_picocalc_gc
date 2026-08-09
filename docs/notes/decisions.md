@@ -163,13 +163,70 @@ concurrency hypothesis and probably a cheaper one to answer.
 all, which makes this lower-severity than the entry above implies — but nobody
 should treat that as established on 30 samples of one shape.
 
+### Investigation, 2026-08-09 (later): three locations eliminated, and it will not reproduce
+
+An attempt to close this outright. It did not succeed, but it moved the question
+a long way and the negative results are the useful part.
+
+**The fix is causal — the control that had never been run.** Reverting
+`format_list` to per-element reads on the current tree brings the fault straight
+back: **7/30 and 2/30**, with the *same* corrupt value. Block reads genuinely
+prevent it; the earlier 0-in-144 was not luck or drift.
+
+**Three of the four candidate locations are ruled out**, using folds a
+single-element error cannot hide (`sum(x)-expected`, never `sum(x)` alone — the
+mistake this entry already records):
+
+| candidate | test | result |
+|---|---|---|
+| the write path | `sum((l1*1)-l1)`, `(l1/1)`, `(l1+0)`, all 999 elements | **0/30 nonzero** |
+| the failing expression's stored data | `sum((l1/499500)*499500-l1)` | **0/30**, stable to the digit |
+| bulk read | `read_range` control in-firmware | **0/8000** |
+
+So the fault is in the **per-element read**, and nowhere else in the chain.
+
+**But it does not reproduce under direct instrumentation.** A temporary
+firmware diagnostic (`psramdiag`, six variants: settled reads, immediately after
+a bulk write, interleaved with writes elsewhere, spaced with a delay,
+`format_list` itself on a locally allocated array, and a bulk control) ran
+**40,000+ per-element PSRAM reads with zero failures** — including after driving
+heavy 999-element streaming first, to reproduce the state the real failure
+follows. Against roughly **2%** in the real path. **That is a ~1000x rate
+discrepancy, so the trigger is contextual rather than a random per-read fault**,
+and any theory that predicts a uniform per-read error rate is wrong. That
+includes the DMA/SPI-contention hypothesis above, which now looks unlikely.
+
+**The signature was misread the first time, and the correction matters.** This
+entry earlier described a partial transfer — "the low 4 bytes did not land". That
+came from comparing the bit patterns of the *derived numerator* (2.0 against
+2.0000018), which is a computed quantity, not the value the read returned.
+Comparing what was actually read — 4.004004004e-6 against 4.004007642e-6 — gives
+a **single-bit flip at mantissa bit ~32** (2^-20 relative), not a partial
+transfer. And the displayed values carry only 10 significant figures, so the low
+mantissa bytes are not recoverable from them at all: the earlier byte-lane
+reasoning was built on digits that were never there.
+
+**What is left, and it is now a narrow question.** The only difference not
+eliminated is **the array itself**: the diagnostic allocated a local
+`math::Array`, while the real case formats an evaluator temporary from the pool —
+a different PSRAM region, reached by a different allocation path. The next step
+is to log the failing temporary's `psram_addr_` and compare it against an
+address that reads cleanly, rather than to test the driver again.
+
+**Revisit when**: someone picks this up. Start from the address hypothesis, not
+from concurrency — 40,000 clean reads argue against the latter. The diagnostic
+was deliberately not committed (it is a throwaway that hangs a `psramdiag`
+command off `handle_command` under `PICOCALC_EVAL_PROBE`); rebuilding it is an
+hour, and the six variants above are the ones worth keeping.
+
 **Tradeoffs**: leaving it unfixed means a user can see a wrong digit in a long
 list on a Pico 1 — cosmetic, since the value is right and anything computed from
 it is right, but indistinguishable from a real arithmetic bug to whoever sees it.
 
-**Revisit when**: the concurrency hypothesis is tested. The cheapest test is to
-suspend the core-1 display service around a long run of per-element PSRAM reads
-and see whether the corruption stops.
+~~**Revisit when**: the concurrency hypothesis is tested…~~ — **superseded by the
+2026-08-09 investigation below**, which ran 40,000 per-element reads clean and
+makes a concurrency explanation unlikely. Start from the address hypothesis
+instead.
 
 ## D52: Phase 5.2 on-device verification — §9's measurement method did not survive contact with the hardware
 
