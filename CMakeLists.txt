@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 include(pico_sdk_import.cmake)
 
 project(picocalc_graphcalc
-    VERSION   0.3.2
+    VERSION   0.4.0
     LANGUAGES C CXX ASM
 )
 
@@ -222,7 +222,7 @@ message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 # screen. Not derivable from git — bump it here when a phase/sub-phase
 # reaches code-complete (the session-wrapup agent's README status pass
 # covers this).
-set(PICOCALC_PHASE "5.1")
+set(PICOCALC_PHASE "5.2")
 
 # Serial line injection for on-device test automation (Phase 5.1). Lets a
 # host script submit whole lines to the home screen over USB serial and read

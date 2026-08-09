@@ -27,13 +27,13 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
 > — with Alt+Enter as the decimal escape), and a Stage 5 hardening pass that
 > moved the CAS passes' working arrays off a 4 KB stack they could silently
 > overrun, gave the recursion stated depth caps, and turned pool exhaustion
-> into a reported error instead of a plausible-looking wrong answer. **Next up
-> are two dotted sub-phases** — work that turned up rather than planned phase
-> goals (see `AGENTS.md` for what the dotted-vs-lettered numbering means):
-> **Phase 5.1**, serial line injection for on-device test automation, and
-> **Phase 5.2**, the unified evaluator, which replaces the three home-screen
-> mini-evaluators with one built on an explicit evaluation stack. Both sit
-> ahead of Phase 6. See
+> into a reported error instead of a plausible-looking wrong answer. **Two
+> dotted sub-phases follow it** — work that turned up rather than planned phase
+> goals (see `AGENTS.md` for what the dotted-vs-lettered numbering means) — and
+> **both are now complete and hardware-verified on both boards**: **Phase 5.1**,
+> serial line injection for on-device test automation, and **Phase 5.2**, the
+> unified evaluator, which replaces the three home-screen mini-evaluators with
+> one built on an explicit evaluation stack. **Phase 6 (apps) is next.** See
 > [`docs/notes/next-session.md`](docs/notes/next-session.md) for the current
 > handoff and [`docs/notes/worklog.md`](docs/notes/worklog.md) for history.
 
@@ -86,7 +86,7 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   feature-complete as a graphing calculator, independent of CAS or
   programmability. See
   [docs/phases/phase4-spec.md](docs/phases/phase4-spec.md).
-- **Phase 5 (complete, `phase-5` branch pending merge)**: symbolic math
+- **Phase 5 (complete, merged, tagged [v0.2.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.2.0))**: symbolic math
   (CAS) — simplify, expand, factor, differentiate, solve (complex-aware),
   and a bounded form of symbolic integration, HW-verified on both boards
   and reachable inline from the home screen (`diff()`, `integ()`,
@@ -108,8 +108,8 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   numbering convention). **5.1 (complete, HW-verified)** adds serial line
   injection so a host script can submit expressions to the home screen over
   USB and read back the result and its kind, turning hand-driven bench
-  checks into repeatable ones. **5.2 (code-complete, HW-verified on both
-  boards)** is the unified evaluator: one tagged-value evaluator — a
+  checks into repeatable ones. **5.2 (complete, HW-verified on both boards)**
+  is the unified evaluator: one tagged-value evaluator — a
   shunting-yard compiler emitting a flat RPN program, run by a stack machine
   — replacing the three home-screen mini-evaluators, motivated by two
   independent findings: the real and complex evaluators silently disagreeing
