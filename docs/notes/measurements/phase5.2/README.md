@@ -248,6 +248,39 @@ the baseline (D53), so this run records the variation rather than rejecting the
 row — the defect is display-only and does not touch evaluation time.
 `distinct_displays` in the JSON carries it.
 
+## Footprint: flash is a regression, RAM is not
+
+Measured in **shipping configuration** — both trees built with the probe off,
+which is what the boards actually run:
+
+| | v0.3.2 | phase-5.2 | delta |
+|---|---|---|---|
+| text, Pico 1 | 459,744 | 461,704 | **+1,960 B** |
+| text, Pico 2 | 445,936 | 449,256 | **+3,320 B** |
+| `.bss`, Pico 1 | 215,856 | 210,764 | **-5,092 B** |
+| `.bss`, Pico 2 | 399,536 | 394,444 | **-5,092 B** |
+
+**Flash is the phase's third regression** and was missing from the first version
+of this record, which reported only the RAM win. It is board-dependent — the
+Pico 2 pays 1.7x what the Pico 1 does for the same source change — and it is
+**above the +1,500 B the spec projected**, on both boards.
+
+**Neither figure matches the phase's own projection**, and in opposite
+directions: `-6,888 B` of bss was claimed against `-5,092` measured, and
+`+1,500 B` of text against `+1,960`/`+3,320`. v0.3.2 differs from the branch
+point only by D51, a parse-time fix with no static data, so the baseline choice
+does not explain either gap. Both are recorded as measured rather than
+reconciled to the projection — **find out which figure counted what before
+quoting either.**
+
+Both measured columns **include D53's fix** (+268 B of bss for the block buffer),
+which is a bugfix that happened to land inside the phase rather than part of it.
+Subtract it if you want the evaluator's own RAM delta: **-5,360 B**.
+
+The RAM win is still the phase's headline and still real. It is just not free,
+and "several KB of bss back" should be quoted alongside "~2-3 KB of flash spent",
+not instead of it.
+
 ## Non-latency results from the same pass
 
 | | baseline | 5.2 |

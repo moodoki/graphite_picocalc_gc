@@ -261,13 +261,22 @@ moving depth off the call stack makes it free, and the falsifiable form is that
 
 **Before/after on the same boards**: paren nesting 16 -> 62+, matrix nesting
 **3 -> 14+**, worst stack peak **3,972 -> 2,344** (Pico 2) and **hard fault ->
-3,068** (Pico 1). `.bss` **-5,360 B** (Pico 1), **-5,348 B** (Pico 2).
+3,068** (Pico 1).
 
-**The `.bss` figure does not match the phase's own claim of -6,888 B** and is
-recorded as measured rather than reconciled to it. v0.3.2 differs from the branch
-point only by D51, which has no static data, so the baseline choice does not
-explain a ~1.5 KB gap. Whoever picks this up should find out which figure counted
-what before quoting either.
+**Footprint, in shipping configuration (probe off), and flash is the phase's
+third regression**: `.bss` **-5,092 B on both boards**, text **+1,960 B (Pico 1)
+/ +3,320 B (Pico 2)**. The first version of this entry reported only the RAM win,
+which was not the whole picture. Flash is board-dependent — the Pico 2 pays 1.7x
+the Pico 1 for the same source — and is **above the +1,500 B projected**. Both
+columns include D53's fix (+268 B bss); the evaluator's own RAM delta is
+**-5,360 B**.
+
+**Neither footprint figure matches the phase's own projection, and they miss in
+opposite directions** — `-6,888 B` of bss claimed against `-5,092` measured,
+`+1,500 B` of text against `+1,960`/`+3,320`. Both are recorded as measured
+rather than reconciled. v0.3.2 differs from the branch point only by D51, which
+has no static data, so the baseline choice explains neither gap. Whoever picks
+this up should find out which figure counted what before quoting either.
 
 **Two things §9 asked for that this pass did not deliver**: `.bss` "confirmed on
 the board" has no mechanism — the diag screen reports PSRAM, die temp, SD and

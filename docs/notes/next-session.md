@@ -154,6 +154,14 @@ sharpened along the way — it is **not** "slower on lists and matrices":
 - **Matrices are not a regression category.** `det`'s overhead is +0.19 ms at
   10x10, 20x20 and 30x30 alike — a fixed `Program` compile cost, constant across
   27x the work. M5's +15-30% is a small-matrix artifact.
+- **Flash is the third regression**, and it was missing from the first write-up:
+  text **+1,960 B (Pico 1) / +3,320 B (Pico 2)** in shipping configuration,
+  against a projected +1,500. `.bss` is **-5,092 B** on both boards, against a
+  projected -6,888. Both miss the projection, in opposite directions, and the
+  baseline choice explains neither — recorded as measured, not reconciled.
+- **One thing documented but NOT attributed**: matrix nesting costs ~104 B/level
+  of call stack, where scalar/paren/unary nesting costs nothing. Input length and
+  the CAS probe were ruled out; the mechanism is still unknown.
 
 **And M6 answered a question that was not being asked of it.** The baseline it
 beats, `listops::seq`, **compiles once and evaluates many** — the graphing shape.
