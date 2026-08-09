@@ -22,7 +22,7 @@ Builds use **Ninja**, not Make. `CMAKE_GENERATOR=Ninja` is set in the developer'
 ```bash
 # Required environment (this host — see docs/dev-environment.md):
 export PICO_SDK_PATH="$PWD/pico-sdk"   # SDK 2.2.0, checked out in-repo
-export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi"
+export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.3.rel1/arm-none-eabi"  # path carries the version
 
 # Configure (once, or after CMakeLists.txt changes)
 cmake -G Ninja -DPICO_BOARD=pico  -B build/pico -S .

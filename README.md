@@ -155,9 +155,10 @@ git clone <this-repo>
 cd picocalc_gc
 git clone -b 2.2.0 --recurse-submodules https://github.com/raspberrypi/pico-sdk.git
 
-# 3. Set environment (adjust the toolchain version to what's installed)
+# 3. Set environment (the toolchain path carries its version — check yours with
+#    ls -d /Applications/ArmGNUToolchain/*/arm-none-eabi | sort -V | tail -1)
 export PICO_SDK_PATH="$PWD/pico-sdk"
-export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi"
+export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.3.rel1/arm-none-eabi"
 
 # 4. Build
 ./scripts/build-all.sh

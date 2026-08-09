@@ -39,12 +39,28 @@ echo 'export PATH="$(brew --prefix llvm)/bin:$PATH"' >> ~/.zshrc
 
 ### 2. ARM GNU Toolchain
 
-**Installed on this host**: ARM GNU Toolchain **15.2.rel1** via the Homebrew cask `gcc-arm-embedded` (verified working 2026-07-08). The cask is a repackaging of ARM's official Apple Silicon installer and includes newlib.
+**Installed on this host**: ARM GNU Toolchain **15.3.rel1** via the Homebrew cask `gcc-arm-embedded` (15.2.rel1 verified working 2026-07-08; upgraded in place by the cask since). The cask is a repackaging of ARM's official Apple Silicon installer and includes newlib.
 
 ```bash
 brew install --cask gcc-arm-embedded
-# → /Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi/
+# → /Applications/ArmGNUToolchain/15.3.rel1/arm-none-eabi/
 ```
+
+> **The install path carries the version, so it moves on every upgrade** — and a
+> stale `PICO_TOOLCHAIN_PATH` does not fail cleanly. CMake reconfigures from a
+> cached compiler path and reports "not a full path to an existing compiler
+> tool"; `scripts/lint.sh` loses the toolchain's system include paths and buries
+> the real output under hundreds of bogus `'cstddef' file not found` errors.
+> `lint.sh` and `size-report.sh` now discover the newest installed toolchain when
+> `PICO_TOOLCHAIN_PATH` is unset, but the exported value below and any existing
+> `build/` cache still need updating by hand. To find the current one:
+>
+> ```bash
+> ls -d /Applications/ArmGNUToolchain/*/arm-none-eabi | sort -V | tail -1
+> ```
+>
+> After an upgrade, delete `build/pico` and `build/pico2` and reconfigure — the
+> old compiler path is in `CMakeCache.txt`.
 
 > **Warning — do not use the Homebrew *formula* `arm-none-eabi-gcc`.** It ships **without newlib** and every link fails with `cannot read spec file 'nosys.specs'` (confirmed on this host with formula version 16.1.0, 2026-07-08). If it's installed and linked at `/opt/homebrew/bin/arm-none-eabi-gcc`, either uninstall it or make sure `PICO_TOOLCHAIN_PATH` points at the ArmGNUToolchain install so the SDK never picks the formula's compiler off PATH.
 
@@ -54,7 +70,7 @@ Verify:
 
 ```bash
 /Applications/ArmGNUToolchain/*/arm-none-eabi/bin/arm-none-eabi-gcc --version
-# arm-none-eabi-gcc (Arm GNU Toolchain 15.2.Rel1 ...) 15.2.1
+# arm-none-eabi-gcc (Arm GNU Toolchain 15.3.Rel1 ...) 15.3.1
 ```
 
 ### 3. Pico SDK and picotool
@@ -79,8 +95,9 @@ Add to `~/.zshrc`:
 # Pico SDK (vendored in-repo)
 export PICO_SDK_PATH="/Volumes/code/picocalc_gc/pico-sdk"
 
-# ARM toolchain (ArmGNUToolchain cask — adjust if the version changes)
-export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi"
+# ARM toolchain (ArmGNUToolchain cask — the path carries the version, so
+# re-check it after every upgrade; see the warning above)
+export PICO_TOOLCHAIN_PATH="/Applications/ArmGNUToolchain/15.3.rel1/arm-none-eabi"
 
 # Default to Ninja for CMake generators
 export CMAKE_GENERATOR="Ninja"
@@ -169,6 +186,20 @@ Toolchain not on PATH or `PICO_TOOLCHAIN_PATH` not set correctly. Verify:
 echo $PICO_TOOLCHAIN_PATH
 ls $PICO_TOOLCHAIN_PATH/bin/arm-none-eabi-gcc
 ```
+
+### `CMAKE_C_COMPILER ... is not a full path to an existing compiler tool`
+
+The toolchain was upgraded and its version-stamped path moved, but `PICO_TOOLCHAIN_PATH` — or an existing `build/*/CMakeCache.txt`, which caches the absolute compiler path — still names the old one. Exporting the new path is **not** enough on its own; the cache wins. Fix:
+
+```bash
+ls -d /Applications/ArmGNUToolchain/*/arm-none-eabi | sort -V | tail -1   # current install
+export PICO_TOOLCHAIN_PATH="<that path>"
+rm -rf build/pico build/pico2 && ./scripts/build-all.sh                   # cache holds the old path
+```
+
+### `scripts/lint.sh` reports hundreds of `'cstddef' file not found`
+
+Same root cause, different symptom: clang-tidy replays the cross-compile commands but needs the toolchain's own system include paths, and a stale `PICO_TOOLCHAIN_PATH` silently drops them. Every TU then "fails" for reasons unrelated to the code. `lint.sh` discovers the newest installed toolchain when the variable is unset and now exits with an error rather than a warning when it finds none — but an *explicitly set, wrong* value still overrides it. Fix as above.
 
 ### clangd shows red squiggles on Pico SDK includes
 
