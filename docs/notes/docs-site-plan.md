@@ -158,3 +158,22 @@ Nothing here blocks earlier phases, though, and the `getting-started/` +
 early `guide/` chapters (chapters 1–13, everything already shipped) could
 reasonably be drafted earlier as a low-priority background task if there's
 appetite — there's no dependency forcing it to wait.
+
+## 2026-08-10 — audience split widened to four facets
+
+Ahead of making the repo public, the two-audience split above (user site,
+developer docs kept in-repo) was reconsidered and widened to four:
+**user guide**, **developer guide**, **study guide** (the algorithms —
+shunting-yard compiler, expression parser, CAS passes, memory on a
+microcontroller), and an **app developer guide** for MicroPython apps once
+Phase 6B ships.
+
+The pipeline shape settled on 2026-08-03 needs no change to carry them —
+`SUMMARY.md` is still the only nav source and the wiki flattener already
+handles arbitrary directories. See
+[docs-facets-plan.md](docs-facets-plan.md) for the structure, the study
+guide's chapter list, and the sequencing.
+
+This plan's "don't republish the developer docs verbatim" rule survives the
+widening unchanged, and now applies to the study guide too: it *draws on*
+`decisions.md`, it does not mirror it.
