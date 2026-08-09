@@ -121,6 +121,65 @@ the change register's own table. Timing it would average ~250 unrelated
 expressions and mean nothing. It ran clean on both boards (31 inputs, 36 lines,
 no faults).
 
+## Follow-up, same day: what actually drives the two regressions
+
+M1-M6 answered §9's questions but could not separate "is a list" from "how many
+passes" — M2 is the only multi-source broadcast in that corpus. A second run on
+the Pico 1 (`X-base-pico1.json`, `X-new-pico1.json`, same probe, same protocol)
+holds the data size fixed at 999 elements and varies **operation count**, then
+holds matrix arithmetic fixed and varies **size**.
+
+#### Lists: operation count, not "listness"
+
+| # | input | baseline | 5.2 | delta |
+|---|---|---|---|---|
+| L1 | `2*l1` — 1 source, 1 op | 10.854 | **10.071** | -0.783 (-7.2%) |
+| L2 | `sin(l1)` — 1 source, 1 op | 22.405 | **21.808** | -0.597 (-2.7%) |
+| L3 | `l1+l2` — 2 sources, 1 op | 11.931 | **10.412** | -1.519 (-12.7%) |
+| L4 | `sin(l1)+l2` — 2 sources, 2 ops | 26.119 | **30.622** | +4.503 (+17.2%) |
+| L5 | `sin(l1)+2*l2` — 2 sources, 3 ops | 28.552 | **38.789** | +10.237 (+35.9%) |
+
+**Producing a list is not the cost.** L3 builds a 999-element list from two
+sources and is 12.7% *faster*. Source count is not it either. **The crossover is
+between one operation and two.**
+
+The mechanism is visible in the arithmetic: in 5.2 the passes are **additive**.
+L4 ≈ L2 (21.8) + L3 (10.4) ≈ 32, measured 30.6. The baseline **fused** them — L4
+at 26.1 is barely above `sin(l1)` alone at 22.4, so each extra operation was
+nearly free. That is §3's trade quantified: **one streaming pass per operation
+where `listexpr` paid one per expression.**
+
+#### Matrices: a fixed compile tax that amortises away
+
+| input | 10x10 | 20x20 | 30x30 |
+|---|---|---|---|
+| `det` delta | +0.192 ms (+21.7%) | +0.192 ms (+3.4%) | +0.191 ms (+1.6%) |
+| `*` delta | +0.295 ms (+21.9%) | +0.365 ms (+4.4%) | +0.348 ms (+2.0%) |
+
+`det`'s overhead is **constant to within 1 microsecond across a 27x increase in
+work**. It is the cost of compiling a `Program`, wholly independent of matrix
+size. **M5's +15-30% is a small-matrix artifact** — a 6x6 `det` is only ~0.5-0.9 ms,
+so a fixed 0.19 ms reads as a large percentage. Matrices are not a category of
+regression; they pay a sub-millisecond entry fee that vanishes into the
+arithmetic as soon as the matrix is non-trivial.
+
+#### What this means for the M2/M6 judgement
+
+The honest one-line summary of this phase's performance is **"faster except when
+chaining two or more operations over a list"** — not "slower on lists and
+matrices". Three of the four original list rows were already faster, and the
+matrix rows are a fixed cost rather than a scaling one.
+
+If M2 is ever worth attacking, the target is **fusing adjacent element-wise
+operations into one pass**, which is exactly what `listexpr` did structurally and
+the flat RPN program gave up. Nothing here suggests the tagged-`Value` design or
+the stack machine is the problem.
+
+**Caveat on the baseline rows**: L4 and L5 vary in their *displayed* answer on
+the baseline (D53), so this run records the variation rather than rejecting the
+row — the defect is display-only and does not touch evaluation time.
+`distinct_displays` in the JSON carries it.
+
 ## Non-latency results from the same pass
 
 | | baseline | 5.2 |
