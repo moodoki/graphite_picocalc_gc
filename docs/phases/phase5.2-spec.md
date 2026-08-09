@@ -18,15 +18,17 @@ generic binary-op dispatch over a wider tag enum.
 It also **absorbs the shared function catalogue** (`catalog.hpp`), so the home
 screen no longer escapes to tinyexpr for scalar spans.
 
-**Status**: **In progress — tasks 5.2.1-5.2.9 done 2026-08-09.** The evaluator
-now compiles and runs every home-screen value kind — real and complex scalars,
-lists and matrices of either — with the whole callable surface resolved
-natively, and it commits its own results: one store grammar, one flag
-convention, and a probe mode that writes nothing. It is checked *differentially*
-against the pipeline it replaces: **494 of 518 comparisons agree exactly, and
-every divergence carries a row in the
-[change register](../notes/unified-evaluator-changes.md)**. **What is left is
-the cutover (5.2.10-5.2.12); nothing is wired to a screen yet** (§6.1).
+**Status**: **In progress — tasks 5.2.1-5.2.10 done 2026-08-09. The home screen
+runs on it.** The evaluator compiles and runs every home-screen value kind —
+real and complex scalars, lists and matrices of either — resolves the whole
+callable surface natively, commits its own results, and is now the default
+(`PICOCALC_UNIFIED_EVAL=ON`). It is checked *differentially* against the
+pipeline it replaces, values, committed state and **displayed strings**: **494
+of 518 comparisons agree exactly, and every divergence carries a signed-off row
+in the [change register](../notes/unified-evaluator-changes.md)**. The flip
+already returns **6,720 B of bss** — the linker drops `listexpr`'s string
+scratch the moment no screen calls it. **What is left is the deletion (5.2.11)
+and on-device verification (5.2.12).**
 Sizing: §5. Migration strategy: §6.1. Idea F has been a committed follow-on
 since 2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a
 phase number at the same time. This is the highest-risk item on the project's
@@ -235,7 +237,7 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.7~~ | ~~Matrix tier~~ **DONE 2026-08-09** (`dim`/`eigenvals` no longer need to stand alone) | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
 | ~~5.2.8~~ | ~~Superset store grammar + commit semantics~~ **DONE 2026-08-09** (both outstanding narrowings closed) | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
 | ~~5.2.9~~ | ~~Differential harness~~ **DONE 2026-08-09** (494/518 agree; 3 real bugs found) | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs; the [change register](../notes/unified-evaluator-changes.md) is its allow-list |
-| 5.2.10 | Widened behaviours + allow-list | 10 | Every register row signed off with a TI-parity rationale; the register's D-rows (display strings, REAL-mode probe sequencing) discharged |
+| ~~5.2.10~~ | ~~Widened behaviours + allow-list~~ **DONE 2026-08-09** (default flipped; bss -6,720 already) | 10 | Every register row signed off with a TI-parity rationale; the register's D-rows (display strings, REAL-mode probe sequencing) discharged |
 | 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
 | 5.2.12 | On-device verification, both boards | 12 | Stack peak, bss delta, serial-injection differential, and **§9's A/B latency measurement against the v0.3.1 release binary** |
 | | **Total** | **150** | |
@@ -319,11 +321,22 @@ the superseded element-slot lift needed (§3), and took them back in 5.2.8 for
 the pending `-> name` store target — which is text, not a ref, precisely so the
 registry entry is created when the store *commits*.
 
-**Nothing is banked until 5.2.11 deletes the old evaluators**: measured `.bss`
-is **217,396 B before and after 5.2.8**, and identical again at 5.2.6, because
-the linker garbage-collects the whole evaluator while no screen calls `run()`.
-The figures in this section are therefore the sizes of the types, not of the
-image; the image number that matters is the one 5.2.11 produces.
+**Where the saving actually lands — measured 2026-08-09 at the 5.2.10 flip, and
+not where this section predicted.** Through 5.2.9 `.bss` was **217,396 B**,
+unchanged from 5.2.6, because the linker garbage-collects an evaluator no screen
+calls. Flipping the default moved it to **210,676 B**: the same collector now
+drops `listexpr`'s ~8.4 KB of string scratch, because nothing calls
+`listexpr::evaluate` any more. Text went the other way, +4,216 B.
+
+| build | text | bss |
+|---|---|---|
+| `PICOCALC_UNIFIED_EVAL=OFF` | 461,852 | 217,396 |
+| `PICOCALC_UNIFIED_EVAL=ON` | 466,068 | **210,676** |
+
+So "deletion is what banks it" was **half right**: `--gc-sections` banks the bss
+as soon as the call sites go, and what 5.2.11 still has to bank is the *text* —
+the ~28 KB of code in the three files, which stays linked while `format_list`,
+`format_matrix` and `mat_ans` are still called out of them.
 
 A depth of 64 is also far more generous than what the call stack affords today:
 `matexpr` is capped at **3** (D48, 84 B of margin before the leaf fix),

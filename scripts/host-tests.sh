@@ -150,6 +150,7 @@ echo "== Compiling + linking test_differential =="
     src/math/array.cpp src/math/scratch.cpp src/math/lists.cpp \
     src/math/list_ops.cpp src/math/named_lists.cpp src/math/stats.cpp \
     src/math/matrix.cpp src/math/mat_expr.cpp src/math/list_expr.cpp \
+    src/math/unified_home.cpp \
     src/math/frac.cpp src/math/complex.cpp src/math/complex_expr.cpp \
     src/math/engine.cpp src/math/functions.cpp \
     src/math/format.cpp src/math/catalog.cpp src/math/dist.cpp \

@@ -38,7 +38,10 @@
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/types.hpp"
+#include "math/format.hpp"
+#include "math/frac.hpp"
 #include "math/unified_eval.hpp"
+#include "math/unified_home.hpp"
 
 namespace {
 
@@ -281,6 +284,12 @@ struct Outcome {
     char msg[96] = {};  // error text, or the kText display payload
     math::Complex scalar;
     ArraySnap arr;
+    // What the screen would print, minus the store glyph — added in 5.2.10,
+    // when the formatting moved into a translation unit the host can link.
+    // Until then this harness could compare values but not what a user sees,
+    // and "the value is right" is not the same claim as "the line is right".
+    char disp[192] = {};
+    char store[8] = {};
 };
 
 const char* kind_name(OKind k) {
@@ -302,6 +311,29 @@ void set_error(Outcome* o, const char* msg) {
 void set_scalar(Outcome* o, const math::Complex& z) {
     o->kind = z.im == 0.0 ? OKind::kReal : OKind::kComplex;
     o->scalar = z;
+}
+
+// The old pipeline's display rules, replicated from
+// HomeScreen::evaluate_input's four rendering branches (home_screen.cpp:456-556
+// as it stood before 5.2.10). Only the glue is replicated — format_number,
+// format_complex, format_list and format_matrix are the real ones, called
+// directly, so this compares formatting rather than reimplementing it.
+void legacy_scalar_disp(Outcome* o, const math::Complex& z, bool complex_form) {
+    if (complex_form) {
+        math::format_complex(z, math::number_mode(), o->disp, sizeof(o->disp));
+    } else {
+        math::format_number(z.re, o->disp, sizeof(o->disp));
+    }
+}
+
+void var_label(char* buf, size_t cap, int slot) {
+    if (slot < 0) {
+        buf[0] = 0;
+    } else if (slot == math::Variables::kTheta) {
+        std::snprintf(buf, cap, "theta");
+    } else {
+        std::snprintf(buf, cap, "%c", static_cast<char>('a' + slot));
+    }
 }
 
 // ---- the old pipeline ----------------------------------------------------
@@ -326,23 +358,39 @@ void run_legacy(const char* expr, Outcome* out) {
             case math::matexpr::Kind::kScalar:
                 if (!mres.scalar.ok) {
                     set_error(out, mres.scalar.error);
-                } else if (mres.scalar_complex) {
+                    return;
+                }
+                if (mres.scalar_complex) {
                     set_scalar(out, mres.cvalue);
+                    legacy_scalar_disp(out, mres.cvalue, true);
                 } else {
                     set_scalar(out, math::Complex(mres.scalar.value, 0));
+                    legacy_scalar_disp(out, math::Complex(mres.scalar.value, 0), false);
                 }
+                var_label(out->store, sizeof(out->store), mres.scalar.stored_var);
                 return;
             case math::matexpr::Kind::kList:
                 out->kind = OKind::kList;
                 snap_array(*mres.list, &out->arr, false);
+                math::listexpr::format_list(*mres.list, out->disp, sizeof(out->disp));
+                if (mres.stored_list >= 0) {
+                    std::snprintf(out->store, sizeof(out->store), "l%c",
+                                  static_cast<char>('1' + mres.stored_list));
+                }
                 return;
             case math::matexpr::Kind::kText:
                 out->kind = OKind::kText;
                 std::snprintf(out->msg, sizeof(out->msg), "%s", mres.text);
+                std::snprintf(out->disp, sizeof(out->disp), "%s", mres.text);
                 return;
             default:
                 out->kind = OKind::kMatrix;
                 snap_array(*mres.matrix, &out->arr, true);
+                math::matexpr::format_matrix(*mres.matrix, out->disp, sizeof(out->disp));
+                if (mres.stored_matrix >= 0) {
+                    std::snprintf(out->store, sizeof(out->store), "[%c]",
+                                  static_cast<char>('A' + mres.stored_matrix));
+                }
                 return;
         }
     }
@@ -359,15 +407,23 @@ void run_legacy(const char* expr, Outcome* out) {
                     math::engine().vars().set_complex(math::Variables::kAns, lres.cvalue.re,
                                                       lres.cvalue.im);
                     set_scalar(out, lres.cvalue);
+                    legacy_scalar_disp(out, lres.cvalue, true);
                 } else if (!lres.scalar.ok) {
                     set_error(out, lres.scalar.error);
                 } else {
                     set_scalar(out, math::Complex(lres.scalar.value, 0));
+                    legacy_scalar_disp(out, math::Complex(lres.scalar.value, 0), false);
+                    var_label(out->store, sizeof(out->store), lres.scalar.stored_var);
                 }
                 return;
             default:
                 out->kind = OKind::kList;
                 snap_array(*lres.list, &out->arr, false);
+                math::listexpr::format_list(*lres.list, out->disp, sizeof(out->disp));
+                if (lres.stored_list >= 0) {
+                    math::list_ref_name(lres.stored_list, out->store,
+                                        static_cast<int>(sizeof(out->store)));
+                }
                 return;
         }
     }
@@ -398,6 +454,8 @@ void run_legacy(const char* expr, Outcome* out) {
             }
         }
         set_scalar(out, cres.value);
+        legacy_scalar_disp(out, cres.value, !cres.value.is_real());
+        var_label(out->store, sizeof(out->store), cres.stored_var);
         return;
     }
 
@@ -412,37 +470,66 @@ void run_legacy(const char* expr, Outcome* out) {
         return;
     }
     set_scalar(out, math::Complex(res.value, 0));
+    legacy_scalar_disp(out, math::Complex(res.value, 0), false);
+    var_label(out->store, sizeof(out->store), res.stored_var);
 }
 
 // ---- the new pipeline ----------------------------------------------------
 
 Program g_prog;  // 2 KB; file scope for the same reason the evaluator's are
 
+// The whole dispatcher, as the screen calls it (5.2.10) — not just run().
+// Comparing evaluate_home against the old cascade is what makes the flip
+// checkable: it covers the formatting and the store echo, which are the parts
+// no host test could reach while they lived in home_screen.cpp.
 void run_unified(const char* expr, Outcome* out) {
-    const char* err = nullptr;
-    if (!compile(expr, g_prog, &err)) {
-        set_error(out, err);
-        return;
-    }
+    // The PROBE runs first, and the order matters: evaluate_home commits, so a
+    // probe taken afterwards would read the state the commit just wrote and
+    // report `ans+1` as 44. That is what kProbe is for — a second look at the
+    // same input from the same state, which is exactly 5.2.8's contract.
     Value v;
-    Commit c;
-    if (!run(g_prog, &v, &err, Mode::kCommit, &c)) {
-        set_error(out, err);
+    const char* perr = nullptr;
+    const bool probed = compile(expr, g_prog, &perr) && run(g_prog, &v, &perr, Mode::kProbe);
+    // Snapshot the probe's value NOW. A list or matrix Value names an evaluator
+    // temporary, and the next run() clears the whole pool — that is the
+    // documented lifetime (valid until the next run), and evaluate_home below
+    // is the next run.
+    Outcome probe_val;
+    if (probed) {
+        switch (v.kind) {
+            case Kind::kList:
+                probe_val.kind = OKind::kList;
+                snap_array(*v.a, &probe_val.arr, false);
+                break;
+            case Kind::kMatrix:
+                probe_val.kind = OKind::kMatrix;
+                snap_array(*v.a, &probe_val.arr, true);
+                break;
+            default:
+                set_scalar(&probe_val, v.as_complex());
+                break;
+        }
+    }
+
+    const HomeResult r = evaluate_home(expr, /*to_frac=*/false);
+    std::snprintf(out->store, sizeof(out->store), "%s", r.store_label);
+    if (r.kind == HomeKind::kError) {
+        set_error(out, r.error);
         return;
     }
-    switch (v.kind) {
-        case Kind::kList:
-            out->kind = OKind::kList;
-            snap_array(*v.a, &out->arr, false);
-            return;
-        case Kind::kMatrix:
-            out->kind = OKind::kMatrix;
-            snap_array(*v.a, &out->arr, true);
-            return;
-        default:
-            set_scalar(out, v.as_complex());
-            return;
+    std::snprintf(out->disp, sizeof(out->disp), "%s", r.text);
+    if (r.kind == HomeKind::kText) {
+        out->kind = OKind::kText;
+        std::snprintf(out->msg, sizeof(out->msg), "%s", r.text);
+        return;
     }
+    if (!probed) {
+        set_error(out, perr);
+        return;
+    }
+    out->kind = probe_val.kind;
+    out->scalar = probe_val.scalar;
+    out->arr = probe_val.arr;
 }
 
 // ---- the allow-list ------------------------------------------------------
@@ -593,8 +680,10 @@ void compare_one(const char* expr) {
                 break;
         }
     }
+    const bool same_disp = std::strcmp(legacy.disp, unified.disp) == 0 &&
+                           std::strcmp(legacy.store, unified.store) == 0;
     const char* state = world_diff(g_after_legacy, g_after_unified);
-    const bool diverged = !same_kind || !same_value || state != nullptr;
+    const bool diverged = !same_kind || !same_value || !same_disp || state != nullptr;
 
     const int allow = allow_index(expr);
     if (diverged) {
@@ -624,6 +713,11 @@ void compare_one(const char* expr) {
             std::printf(" %dx%d", unified.arr.rows, unified.arr.cols);
         }
         std::printf("\n");
+        if (!same_disp) {
+            std::printf("    shown: \"%s\"%s%s vs \"%s\"%s%s\n", legacy.disp,
+                        legacy.store[0] != 0 ? "=>" : "", legacy.store, unified.disp,
+                        unified.store[0] != 0 ? "=>" : "", unified.store);
+        }
         if (state != nullptr) {
             std::printf("    state: %s\n", state);
         }

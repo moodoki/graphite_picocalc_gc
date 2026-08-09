@@ -1568,14 +1568,19 @@ struct Machine {
         return kNamedRefBase + made;
     }
 
-    bool store_list(int ref, const Value& v) {
+    // `announce` is false for the implicit in-place sort: the ref still needs
+    // persisting, but Commit::list is what the screen echoes and no store was
+    // typed. Same split listexpr makes between stored_list and lists_mask.
+    bool store_list(int ref, const Value& v, bool announce) {
         Array& dst = list_by_ref(ref);
         // `l1 -> l1` and the in-place sort's implicit store both land here with
         // the value already in the destination.
         if (v.a != &dst && !listops::copy(*v.a, dst)) {
             return fail("Out of list memory");
         }
-        cm.list = static_cast<int16_t>(ref);
+        if (announce) {
+            cm.list = static_cast<int16_t>(ref);
+        }
         cm.lists_mask |= 1U << ref;
         return push(Value::list(&dst));
     }
@@ -1644,10 +1649,12 @@ struct Machine {
                 if (ref < 0) {
                     return fail("Too many named lists");
                 }
-                return store_list(ref, v);
+                return store_list(ref, v, true);
             }
+            case StoreKind::kListInPlace:
+                return store_list(in.b, v, false);
             default:
-                return store_list(in.b, v);
+                return store_list(in.b, v, true);
         }
     }
 

@@ -123,8 +123,9 @@ add_executable(picocalc_graphcalc
     src/math/solve_expr.cpp
     src/math/complex.cpp
     src/math/complex_expr.cpp
-    src/math/unified_compile.cpp  # Phase 5.2, not yet reachable from any screen
+    src/math/unified_compile.cpp
     src/math/unified_vm.cpp
+    src/math/unified_home.cpp
     src/math/seq_expr.cpp
     src/math/units.cpp
     src/math/cas/expr.cpp
@@ -233,12 +234,20 @@ set(PICOCALC_PHASE "5.1")
 # shipping build free of a path that lets the USB port drive the UI.
 option(PICOCALC_SERIAL_INJECT "Accept expression lines over USB serial (dev tooling)" ON)
 
+# The unified evaluator (Phase 5.2, idea F): one evaluator over a tagged Value
+# in place of matexpr + complexexpr + listexpr on the home screen. Default ON
+# from task 5.2.10 — the flip §6.1 sequences between the store grammar and the
+# deletion of the old evaluators. OFF still builds and runs the old cascade,
+# which is what makes an A/B comparison possible until 5.2.11 removes it.
+option(PICOCALC_UNIFIED_EVAL "Use the Phase 5.2 unified home-screen evaluator" ON)
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PICOCALC_PHASE="${PICOCALC_PHASE}"
     $<$<BOOL:${PICOCALC_SERIAL_INJECT}>:PICOCALC_SERIAL_INJECT=1>
+    $<$<BOOL:${PICOCALC_UNIFIED_EVAL}>:PICOCALC_UNIFIED_EVAL=1>
     # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
     # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
     # SDK default declares only 2 KB of it, so __StackBottom sat in the

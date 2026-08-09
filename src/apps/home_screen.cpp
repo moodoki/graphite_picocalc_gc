@@ -22,6 +22,7 @@
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/solve_expr.hpp"
+#include "math/unified_home.hpp"
 #include "math/units.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
@@ -449,6 +450,69 @@ void HomeScreen::evaluate_input(bool force_decimal) {
         }
     }
 
+#if PICOCALC_UNIFIED_EVAL
+    // One evaluator (Phase 5.2, task 5.2.10). This replaces the matexpr ->
+    // listexpr -> scalar cascade that stood here, its REAL-mode probe, and its
+    // four result-rendering branches. What is left is display and persistence:
+    // the evaluation, the commits and the formatting all happen in one call,
+    // and `commit` says exactly what changed.
+    //
+    // The REAL-mode probe is GONE, which is the clearest single sign the split
+    // was the problem rather than a workaround. It existed because tinyexpr
+    // cannot see complex values, so REAL mode had to run complexexpr first
+    // purely to ask "would this be non-real?" — two evaluations, two string
+    // scans (mentions_i, refs_complex_var), one answer. One evaluator answers
+    // it in one run, because the gate is inside the commit (D30, 5.2.8).
+    {
+        auto& result = g_eval.result;
+        const math::unified::HomeResult ures = math::unified::evaluate_home(expr, to_frac);
+        const bool error = ures.kind == math::unified::HomeKind::kError;
+        ResultKind rkind = ResultKind::kPlain;
+        if (error) {
+            std::snprintf(result, sizeof(result), "%s", ures.error);
+        } else if (ures.store_label[0] != 0) {
+            std::snprintf(result, sizeof(result), "%s%c%s", ures.text, gfx::kGlyphStore,
+                          ures.store_label);
+        } else {
+            std::snprintf(result, sizeof(result), "%s", ures.text);
+        }
+        if (!error && ures.exact_form_ok &&
+            apply_exact_form(expr, ures.scalar_value, -1, to_dec, result, sizeof(result))) {
+            rkind = ResultKind::kSymbolic;
+        }
+        push_entry(input_.text(), result, error ? ResultKind::kError : rkind);
+        if (!error) {
+            persist_history_line(input_.text(), result, rkind);
+            save_variables();
+            const math::unified::Commit& c = ures.commit;
+            if (c.mat_ans) {
+                math::matexpr::save_ans(platform::storage());
+            }
+            if (c.matrix >= 0) {
+                math::matrices().save(platform::storage(), c.matrix);
+            }
+            if (c.names_modified) {
+                math::named_lists().save_index(platform::storage());
+            }
+            // Every ref written, not just the store target — an in-place sort
+            // and mat2list both write without one (the D35 gap, 4D.13).
+            for (int r = 0; r < math::kNamedRefBase + math::NamedLists::kMax; ++r) {
+                if ((c.lists_mask & (1U << r)) == 0) {
+                    continue;
+                }
+                if (r < math::kNamedRefBase) {
+                    math::lists().save(platform::storage(), r);
+                } else {
+                    math::named_lists().save(platform::storage(), r - math::kNamedRefBase);
+                }
+            }
+        }
+        input_.clear();
+        hist_nav_ = -1;
+        pending_[0] = 0;
+        return;
+    }
+#else
     // Matrix expressions (Phase 4A) get next crack — [X] tokens are
     // unambiguous. Kind::kNone means "not matrix syntax".
     const auto mres = math::matexpr::evaluate(expr);
@@ -689,6 +753,7 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     input_.clear();
     hist_nav_ = -1;
     pending_[0] = 0;
+#endif
 }
 
 // The plain-Enter body (Phase 5.1, task 5.1.1). Extracted verbatim from

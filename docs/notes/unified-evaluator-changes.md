@@ -1,8 +1,9 @@
 # Unified evaluator — behaviour change register (Phase 5.2)
 
-**Last updated**: 2026-08-09 (through task 5.2.8)
-**Status**: living document, accumulated as each tier lands. **5.2.10 signs off
-every row**; the finished register is a byproduct deliverable at 5.2 closure.
+**Last updated**: 2026-08-09 (through task 5.2.10)
+**Status**: **every row signed off (§2.5, task 5.2.10)**; the register keeps
+accumulating if the cutover finds more. The finished document is a byproduct
+deliverable at 5.2 closure.
 
 **Purpose.** Phase 5.2 replaces three home-screen evaluators
 (`math::matexpr`, `math::complexexpr`, `math::listexpr`) with one. Where the
@@ -35,10 +36,14 @@ column rather than prose:
    **This register is exactly its allow-list** (`differential_allow.inc`, one
    row per id): a divergence with no row fails, and a row that never diverges
    fails too. Adding a row is a decision recorded here, not a way to quiet the
-   test.
+   test. Since 5.2.10 it compares the whole dispatcher — `evaluate_home`
+   against the old cascade — so **what the screen prints** is compared too, not
+   only the value behind it.
 3. **On device (5.2.12)** — the `Input` column *is* the serial-injection replay
    script. Sent to a firmware built with the old pipeline and one with the
    unified evaluator, the observed diff must equal this table, row for row.
+   Since 5.2.10 the host harness also compares the **display strings and store
+   echoes**, so the on-device pass confirms rather than discovers.
    (§4 of this file, and phase5.2-spec.md §9 for the timing pass that rides
    along with it.)
 
@@ -90,10 +95,14 @@ is a TI-parity judgement, not a re-test — they are pinned already.
 | W16 | `{1}+{2}+{3}+{4}+{5}` | *"Too many list terms"* | evaluates | `listexpr`'s `kMaxOperands` term cap. The temp pool still bounds this, but it bounds *live* temporaries rather than terms in the input (5.2.6) | `test_differential` |
 | W14 | a non-finite scalar result on the matrix path, e.g. `det([A])/0` | *"Undefined result"* | returns `inf`, committed to Ans | the engine and `complexexpr` already commit `inf`/`nan`; gating only the matrix path was the odd one out (5.2.8) | — see N/D below |
 
-**W14 is the one widening nobody asked for.** It is listed as a widening because
-it accepts what was rejected, but the old behaviour was arguably better. Making
-it uniform is a display decision across all four kinds and belongs to 5.2.10
-(D3) — not to a single tier quietly keeping or dropping a gate.
+**W14 is the one widening nobody asked for**, and the one row the 5.2.10
+sign-off nearly rejected. It is a widening because it accepts what was rejected,
+but the old behaviour was arguably better. **Kept** (§2.5): adopting `matexpr`'s
+gate everywhere would change the *scalar* path — the one users hit constantly —
+in a phase whose whole claim is that it does not change answers, and
+`format.cpp:82` has printed `Inf`/`NaN` deliberately since Phase 1. Matching
+TI's `ERR:DIVIDE BY 0` is a display decision for all four kinds at once, outside
+this phase.
 
 ### Fixes
 
@@ -225,6 +234,48 @@ been prevented structurally.
 | D5 | The differential allow-list wiring: this register, machine-read | 5.2.9 |
 
 ---
+
+## 2.5 Sign-off (task 5.2.10, 2026-08-09)
+
+Every row above, with the TI-parity judgement §4 of the task list asked for.
+The reference machines are the TI-83/84+ family and, where the 84+ has no
+equivalent, the TI-Nspire CX II CAS — the same two
+[ti-parity.md](ti-parity.md) uses.
+
+| rows | verdict | TI-parity rationale |
+|---|---|---|
+| W1-W5 | **keep** | Parity-positive. A TI-84 in `a+bi` mode holds complex lists and maps functions over them elementwise; `sqrt({4,-1})` gives `{2, i}` there. `listexpr`'s "complex lists support only +, -, scalar * and /" was our limitation, not TI's. |
+| W6, W9, W16 | **keep** | Parity-positive. TI has no per-expression nesting or term caps — it runs out of memory, it does not refuse depth 4. These three caps were call-frame budgets (D47/D48) and had no user-facing justification. |
+| W7 | **keep** | Parity-positive. `dim(` on a TI returns a list that composes like any other. "must stand alone" was a consequence of `matexpr::Value` not holding a list. |
+| W8 | **keep** | Parity-positive against the Nspire, which returns eigenvalues as a list including complex ones. The 84+ has no `eigVl(`. Unstorable display text was a 4C-era workaround for real-only lists, and 4D.24 removed the premise. |
+| W10, W11 | **keep** | Departure, superset. TI's `List►matr(` takes list *names*; ours takes any list-valued expression and any list target. Strictly more, and it costs no TI behaviour. |
+| W12, W13 | **keep** | Parity-positive. TI's STO► accepts any target whose type matches the value; which targets exist does not depend on how the expression was parsed. |
+| W14 | **keep, noted** | **Departure, and pre-existing.** TI raises `ERR:DIVIDE BY 0` and stores nothing; we display `Inf`/`NaN` and commit them — and have on the scalar path since Phase 1 (`format.cpp:82` handles both deliberately). What changed is only that the matrix path stopped being the one place that errored instead. **Uniformity is the win being claimed here, not TI parity**; matching TI would mean changing all four kinds, which is a display decision outside this phase. |
+| W15 | **keep** | Parity-positive. `conj(`, `real(`, `imag(` are available on a TI regardless of mode. Ours were reachable only when the expression already looked complex. |
+| F1 | **keep** | **Parity-restoring.** A TI-84 computes `(-2)^2 = 4`. We were wrong on one of two paths. |
+| G1-G3 | **keep** | Parity-neutral to positive. TI treats STO► as a terminal operator: it ends the expression, it does not chain, and a bad target is a pointed error rather than a syntax error from the expression parser. |
+| G4 | **keep** | Parity-positive; see W6. |
+| G5, G7 | **keep** | Invisible to a user. Mechanism only — the same names, arities and values, reached without an escape hatch. |
+| G6 | **keep** | Parity-positive. TI's `norm(` takes both a list and a matrix and means the right thing for each; ours needed two implementations in two files to do the same. |
+| E1-E8 | **keep** | Parity-neutral. TI's strings (`ERR:SYNTAX`, `ERR:DATA TYPE`) are nothing like ours in either version, so parity cannot be the criterion. Provenance is, and it is applied row by row: a string that states a decision survives verbatim, one that fell out of a parser accident does not. |
+| P1-P7 | **keep** | Parity unchanged by construction — these are the rows that did *not* move. |
+| D1-D5 | **discharged** | See below. |
+
+**No row was rejected.** That is worth stating rather than leaving implicit: the
+sign-off was a real pass — W14 nearly went the other way, and it is kept only
+because the alternative (adopting `matexpr`'s "Undefined result" everywhere)
+would have changed the scalar path, which is the one users hit constantly, in a
+phase whose whole claim is that it does not change answers.
+
+### The deferred rows, discharged
+
+| # | Owed | Outcome |
+|---|---|---|
+| D1 | `mat2list`'s *"Done (n lists)"* | **Discharged.** Reconstructed in `unified_home.cpp` from `Commit::lists_mask`, exactly as 5.2.8 promised. `real result + non-empty mask` identifies `mat2list` uniquely — an in-place sort and a list store both yield lists — so the evaluator needed no special case plumbed through it. |
+| D2 | the `num⇒a` store echo, and exact-form interaction | **Discharged.** `evaluate_home` returns a store *label* and the screen composes the glyph, because `math` must not include `gfx`. Exact-form suppression on a store is now one flag (`exact_form_ok`) instead of three conditions re-derived at the call site. |
+| D3 | *"Undefined result"* for non-finite results | **Decided: not adopted** — see W14. |
+| D4 | REAL-mode retry / probe sequencing | **Discharged by deletion.** The probe is gone. It existed because tinyexpr cannot see complex values, so REAL mode ran `complexexpr` first purely to ask "would this be non-real?" — two evaluations and two string scans (`mentions_i`, `refs_complex_var`) for one answer. One evaluator answers it in one run, because the gate is inside the commit. |
+| D5 | the differential allow-list, machine-read | **Done in 5.2.9** (`differential_allow.inc`). |
 
 ## 3. Coverage — what is NOT in this register
 

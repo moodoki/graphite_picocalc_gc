@@ -201,10 +201,11 @@ void render(const Program& p, char* buf, size_t cap) {
             case Op::kTranspose: put("^T"); break;
             case Op::kStore: {
                 const auto kind = static_cast<StoreKind>(in.a);
-                const char tag = kind == StoreKind::kVar       ? 'v'
-                                 : kind == StoreKind::kList    ? 'l'
-                                 : kind == StoreKind::kNewList ? 'n'
-                                                               : 'm';
+                const char tag = kind == StoreKind::kVar          ? 'v'
+                                 : kind == StoreKind::kList       ? 'l'
+                                 : kind == StoreKind::kNewList    ? 'n'
+                                 : kind == StoreKind::kListInPlace ? 's'  // sorts back
+                                                                  : 'm';
                 std::snprintf(tmp, sizeof(tmp), ">%c%u", tag, in.b);
                 put(tmp);
                 break;
@@ -1542,7 +1543,7 @@ void test_store_in_place_sort() {
     const double jumbled[] = {3, 1, 2};
     seed_list(3, jumbled, 3);
 
-    check_rpn("sort_asc(l4)", "L3 lf9/1 >l3", "a bare-argument sort stores back");
+    check_rpn("sort_asc(l4)", "L3 lf9/1 >s3", "a bare-argument sort stores back");
     check_rpn("sort_asc(l4+0)", "L3 0 + lf9/1", "a compound argument stays by value");
     check_rpn("sort_asc(l4)*1", "L3 lf9/1 1 *", "and so does a sort inside an expression");
 

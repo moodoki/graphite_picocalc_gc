@@ -170,6 +170,13 @@ enum class StoreKind : uint8_t {
                // time, so a program that fails to evaluate leaves no stray
                // empty list behind (listexpr's rule since 4D.13)
     kMatrix,   // index = matrix slot 0-9
+    // `sort_asc(l4)`'s implicit store back to its own argument (5.2.8). Writes
+    // and reports the ref in lists_mask exactly like kList, but does NOT set
+    // Commit::list: the user typed no store, so the screen must echo none.
+    // listexpr draws the same line — a bare in-place sort leaves stored_list at
+    // -1 and sets only the mask. 5.2.10's differential run found this by
+    // showing `{1,2,3}=>l1` where the screen prints `{1,2,3}`.
+    kListInPlace,
 };
 
 // Longest storable named list. Must match NamedLists::kMaxName, asserted where

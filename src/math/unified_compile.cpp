@@ -636,7 +636,7 @@ struct Compiler {
             !list_fn_is_sort(call.b)) {
             return true;
         }
-        return emit(Op::kStore, static_cast<uint8_t>(StoreKind::kList), src.b);
+        return emit(Op::kStore, static_cast<uint8_t>(StoreKind::kListInPlace), src.b);
     }
 
     // mat2list writes its list arguments, which makes it a statement rather
