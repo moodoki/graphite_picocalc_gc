@@ -1,6 +1,27 @@
 # Start here — next session
 
-**Last session:** 2026-08-09 (later) — **Phase 5.2 tasks 5.2.6-5.2.11: the
+**Last session:** 2026-08-09 (later still) — **tinyexpr's unary-minus/`^` bug
+fixed at the source (D51), shipped as v0.3.2 on `main`, HW-verified on the
+Pico 2, and merged back into this branch.** Not 5.2 work: D50 had split it out,
+and it landed on the shipping baseline so it is in the firmware whether or not
+5.2 closes. `(-2)^2` was **-4** on every path `evaluate_real()` serves — home
+screen in REAL mode, graphing, tables, stats, solver — and patching the vendored
+parser turned up a **second** defect nothing had recorded: `2^-3^2` returned
+**512**, because the right-associative insertion loop re-based a negated
+exponent. Neither was pinned, because `(-2)^3` = -8 and `(0-2)^2` = 4 are right
+*by accident*. Verified by flashing the pre-fix and post-fix builds to the same
+Pico 2 and replaying one corpus through Phase 5.1's serial injection — 14 rows
+flip, the must-not-move half is byte-identical. **`mode real` first, or the pass
+is meaningless**: in `a+bi` the answer comes from `complexexpr`, which was
+already right. text **-104 B**, `.bss` flat; `test_math` 242 → 272,
+`test_graph` 72 → 74.
+
+**For 5.2 this closes soak row #2 and removes a caveat rather than adding one**
+— `Y1=(-2)^X` now plots 4 at X=2, so the home-vs-graph inconsistency the phase
+was going to ship never existed. Full detail: `decisions.md` **D51** (and D50's
+same-day amendment), worklog's **2026-08-09 (later still)** entry.
+
+**Previous session:** 2026-08-09 (later) — **Phase 5.2 tasks 5.2.6-5.2.11: the
 unified evaluator now IS the home screen, and the three it replaces are
 deleted.** 3,903 lines gone, four parsers down to two, three of four depth caps
 retired with the parsers that needed them. `det(([A]*([A]+[A]))+[A])` — the
@@ -27,7 +48,7 @@ reversing them changes nothing observable.
 | # | Decision | Where | Cost to change now |
 |---|---|---|---|
 | 1 | **`1/0` shows `Inf`, not "Undefined result"** — `matexpr`'s gate was dropped rather than generalised. The 5.2.10 sign-off nearly went the other way. TI raises `ERR:DIVIDE BY 0`. | register W14, §2.5 | Small — one check in `run()`. But it would change the *scalar* path, which every user hits. |
-| 2 | **`(-2)^2` will read 4 on the home screen and still plot as -4** until tinyexpr's `factor()` is patched (D50 split it out as a separate bugfix). | register F1, D50, wishlist | Small — ~5 lines in the vendored parser, parse-time only. Pulling it in *before* 5.2.12 would let one hardware pass verify both. **The most tempting one to reconsider.** |
+| 2 | ~~**`(-2)^2` will read 4 on the home screen and still plot as -4**~~ — **CLOSED 2026-08-09 (D51), shipped as v0.3.2 and HW-verified.** tinyexpr was patched, so it reads 4 *and* plots 4. The estimate was wrong in a useful direction: "~5 lines" became a `factor()` rewrite, because the source also held `2^-3^2` = 512, which no register row covers. | register F1, D50 amendment, D51 | **Nothing to change** — it was taken, not deferred. |
 | 3 | **`mat2list` may not compose or be stored** — `matexpr`'s rule, restored after 5.2.7 briefly dropped it, because it writes lists the operand stack may still hold by reference. | register P5, spec §6.2 | Small — delete `check_statement_forms()`. But then `l1 * mat2list([A], l1)` has an order-dependent answer. |
 | 4 | **A bare `sort_asc(l1)` echoes no store target** (matches `listexpr`); an explicit `-> l5` echoes one. | `StoreKind::kListInPlace` | Trivial — one flag. |
 | 5 | **`1->a->b` is "Bad store target"**, not a syntax error from inside tinyexpr; the *first* arrow ends the expression, where the old parsers took the rightmost. | register G1/G3 | Small, but the old behaviour was an accident rather than a choice. |
@@ -46,12 +67,16 @@ which is what caught the complex-list read gate.
 1. **Stack peak** per input — the whole point of moving depth off the call
    stack. The comparison is last session's `matexpr` figures: 4,012 of 4,096 on
    the Pico 1 at depth 3, 3,860 on the Pico 2 after the leaf fix.
-2. **The A/B latency pass, §9's M1-M7.** Baseline is the **v0.3.1 release
-   `.uf2`** — no rebuild needed, and its injection block is byte-identical to
-   today's, so one script parses both. Timing is host-side round-trip
-   (the released binary predates any firmware elapsed field). **M5 is the
-   control**: it should not move, and if it does the other rows are not
-   measuring the evaluator.
+2. **The A/B latency pass, §9's M1-M7.** Baseline is now the **v0.3.2 release
+   `.uf2`**, not the v0.3.1 the spec names — v0.3.2 is what this branch actually
+   forks from, and it is the same three evaluators plus D51's parse-time fix, so
+   it isolates the evaluator change more cleanly than v0.3.1 does. Either works
+   (the fix cannot move a per-sample number), but prefer the one that differs by
+   exactly the thing under test. No rebuild needed, and the injection block is
+   still byte-identical, so one script parses both. Timing is host-side
+   round-trip (the released binaries predate any firmware elapsed field).
+   **M5 is the control**: it should not move, and if it does the other rows are
+   not measuring the evaluator.
 3. **The register replay** — its `Input` column is the script; the observed diff
    must equal the table.
 4. `.bss` delta confirmed on the board, not only from `size`.

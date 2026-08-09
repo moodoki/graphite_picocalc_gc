@@ -445,56 +445,79 @@ static te_expr *power(state *s) {
 }
 
 #ifdef TE_POW_FROM_RIGHT
+/* PicoCalc local fix (D51) -- see drivers/README.md, "Local modifications".
+ *
+ * Upstream reads <factor> = <power> {"^" <power>}, then strips any negate node
+ * off the top of the first <power> and re-applies it after the chain. By the
+ * time <power> has returned, `-2` and `(-2)` are the SAME node -- the
+ * parentheses are gone -- so the negation of `(-2)^2` was hoisted out of the
+ * power and the answer came back -4. (Upstream issue #52 reports the same
+ * defect as `(-1)^0 == -1`.) The insertion loop had the matching bug on the
+ * right: it took `insertion->parameters[1]` as the base of the next `^`, so a
+ * negated exponent was re-based and `2^-3^2` built `2^((-3)^2)`.
+ *
+ * Both are one mistake -- letting a negation and a `^` swap places -- so the
+ * grammar is restated to scan the sign HERE, at each level, and the chain is
+ * built through an insertion point so the sign always stays OUTSIDE the
+ * sub-chain it introduced:
+ *
+ *     -2^2    ->  -(2^2)      = -4    (TI convention, unchanged)
+ *     (-2)^2  ->  (-2)^2      =  4    (was -4)
+ *     2^-3^2  ->  2^(-(3^2))         (was 2^((-3)^2) = 512)
+ *     2^2^3   ->  2^(2^3)     = 256  (right-associative, unchanged)
+ *
+ * Iterative rather than recursive on purpose: a `^` chain carries no
+ * parentheses, and math::Engine's only depth guard (too_deeply_nested,
+ * src/math/engine.cpp) counts parentheses -- a frame per caret would be
+ * unbounded against core 0's 4 KB stack. This keeps factor()'s frame flat.
+ */
 static te_expr *factor(state *s) {
-    /* <factor>    =    <power> {"^" <power>} */
-    te_expr *ret = power(s);
-    CHECK_NULL(ret);
+    /* <factor>    =    {("-" | "+")} <base> {"^" <factor>} */
+    te_expr *ret = 0;
+    te_expr *insertion = 0; /* pow node awaiting its exponent, 0 at the root */
 
-    int neg = 0;
+    for (;;) {
+        int neg = 0;
+        while (s->type == TOK_INFIX && (s->function == add || s->function == sub)) {
+            if (s->function == sub) neg = !neg;
+            next_token(s);
+        }
 
-    if (ret->type == (TE_FUNCTION1 | TE_FLAG_PURE) && ret->function == negate) {
-        te_expr *se = ret->parameters[0];
-        free(ret);
-        ret = se;
-        neg = 1;
-    }
+        te_expr *operand = base(s);
+        CHECK_NULL(operand, te_free(ret));
 
-    te_expr *insertion = 0;
+        te_expr *power_node = 0;
 
-    while (s->type == TOK_INFIX && (s->function == pow)) {
-        te_fun2 t = s->function;
-        next_token(s);
+        if (s->type == TOK_INFIX && (s->function == pow)) {
+            te_fun2 t = s->function;
+            next_token(s);
+
+            /* parameters[1] is filled by the next iteration; new_expr zeroes
+               it, and te_free skips NULL, so a partial tree frees cleanly. */
+            power_node = NEW_EXPR(TE_FUNCTION2 | TE_FLAG_PURE, operand, 0);
+            CHECK_NULL(power_node, te_free(operand), te_free(ret));
+
+            power_node->function = t;
+            operand = power_node;
+        }
+
+        if (neg) {
+            te_expr *prev = operand;
+            operand = NEW_EXPR(TE_FUNCTION1 | TE_FLAG_PURE, prev);
+            CHECK_NULL(operand, te_free(prev), te_free(ret));
+
+            operand->function = negate;
+        }
 
         if (insertion) {
-            /* Make exponentiation go right-to-left. */
-            te_expr *p = power(s);
-            CHECK_NULL(p, te_free(ret));
-
-            te_expr *insert = NEW_EXPR(TE_FUNCTION2 | TE_FLAG_PURE, insertion->parameters[1], p);
-            CHECK_NULL(insert, te_free(p), te_free(ret));
-
-            insert->function = t;
-            insertion->parameters[1] = insert;
-            insertion = insert;
+            insertion->parameters[1] = operand;
         } else {
-            te_expr *p = power(s);
-            CHECK_NULL(p, te_free(ret));
-
-            te_expr *prev = ret;
-            ret = NEW_EXPR(TE_FUNCTION2 | TE_FLAG_PURE, ret, p);
-            CHECK_NULL(ret, te_free(p), te_free(prev));
-
-            ret->function = t;
-            insertion = ret;
+            ret = operand;
         }
-    }
 
-    if (neg) {
-        te_expr *prev = ret;
-        ret = NEW_EXPR(TE_FUNCTION1 | TE_FLAG_PURE, ret);
-        CHECK_NULL(ret, te_free(prev));
+        if (!power_node) break;
 
-        ret->function = negate;
+        insertion = power_node;
     }
 
     return ret;

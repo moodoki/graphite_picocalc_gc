@@ -10,19 +10,6 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
-- **Fix tinyexpr's `(-2)^2 = -4`** (found 2026-08-09 by Phase 5.2's differential
-  harness; **D50**, spec P5.2-6). `factor()` in the `TE_POW_FROM_RIGHT` build
-  hoists a negation out of a power without knowing whether parentheses closed
-  it, so `(-2)` and `-2` are the same node by the time it runs. The two shipped
-  evaluators therefore **disagree on this input today** — `-4` from tinyexpr,
-  `4` from `complexexpr` — and which one you get depends on the number mode.
-  Phase 5.2 fixes the home screen; only patching the vendored parser fixes
-  graphing, tables and the solver. ~5 lines, parse-time only, no hot-loop cost.
-  Deliberately *not* folded into 5.2: it is a bugfix that stands alone and is
-  not gated on that phase. Listed here so it survives 5.2's closure — see
-  [unified-evaluator-changes.md](unified-evaluator-changes.md) F1 for the
-  mechanism and the reproduction.
-
 - **Replace tinyexpr with the unified evaluator on the numeric path too**
   (raised 2026-08-09, **D50**, spec P5.2-7). Would make it four parsers → *one*,
   fix the above everywhere, remove tinyexpr's depth-7 parse cap from graphing
@@ -202,6 +189,20 @@ only of features that don't yet have a home.
   committed — listed there rather than shipped.
 
 ## Completed / Closed
+
+- **Fix tinyexpr's `(-2)^2 = -4`** (listed here 2026-08-09 after Phase 5.2's
+  differential harness found it; **D50** scoped it out of that phase) →
+  **shipped the same day as D51**, on `main`, released as **v0.3.2**,
+  HW-verified on the Pico 2. It never spent a session on this list, which is
+  the point: it was a bugfix that stood alone and was not gated on 5.2.
+  **The estimate here was wrong in a useful direction** — "~5 lines,
+  parse-time only" turned into a rewrite of `factor()`, because patching at
+  the source exposed a **second** defect in the same function (`2^-3^2`
+  returned 512: the right-associative insertion loop re-based a negated
+  exponent). 5.2 covers neither that one nor graphing; only the vendored
+  parser does. See D51 and `drivers/README.md` "Local modifications" — this
+  is the project's first local fix to a vendored driver, so a re-vendor must
+  re-apply it.
 
 - **Coarsen too-dense grid lines** (usage feedback 2026-07-25) → **shipped
   same day**, no phase/D-number (small, localized fix). When `Xscl`/`Yscl`

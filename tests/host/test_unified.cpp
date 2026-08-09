@@ -592,7 +592,7 @@ void test_builtins() {
     check_real("exp(0)*cos(0)", 1, "builtin and catalog compose");
 
     // F1, evaluated rather than just compiled.
-    check_real("(-2)^2", 4, "(-2)^2 is 4 (register F1; tinyexpr says -4)");
+    check_real("(-2)^2", 4, "(-2)^2 is 4 (register F1; tinyexpr agrees since D51)");
     check_real("(-2)^3", -8, "and (-2)^3 is -8, which both agree on");
 }
 

@@ -116,7 +116,15 @@ this phase.
 
 | # | Input | Today | Unified | Origin | Pinned by |
 |---|---|---|---|---|---|
-| F1 | `(-2)^2` | **-4** on the real path, **4** on the complex path — the two shipped evaluators disagree | **4** | tinyexpr's `factor()` cannot tell `-2^2` from `(-2)^2`; the unified compiler keeps grouping (5.2.9) | `test_compile_unary`, `test_builtins` |
+| F1 | `(-2)^2` | **-4** on the real path, **4** on the complex path — the two shipped evaluators disagreed | **4** | tinyexpr's `factor()` could not tell `-2^2` from `(-2)^2`; the unified compiler keeps grouping (5.2.9) | `test_compile_unary`, `test_builtins` |
+
+> **Closed 2026-08-09 by D51, and it is the one row that stopped being a
+> divergence.** The vendored parser was patched on `main` and released as
+> **v0.3.2**, so tinyexpr now answers `4` too. The row stays because it is the
+> record of what the harness found, and because it is the reason the parser got
+> looked at — but read it in the past tense: as of v0.3.2 the unified evaluator
+> **agrees** with `evaluate_real()` here rather than correcting it. Two claims
+> below are superseded and marked in place.
 
 **F1 in full**, because it is the second instance of the bug class that
 justified this phase and it was found by the harness on its first run.
@@ -147,17 +155,34 @@ The unified evaluator has no such case: parentheses close an operand in the
 shunting-yard, so `(-2)` is a finished value before `^` is applied. It agrees
 with `complexexpr`, with the pinned test, and with the arithmetic.
 
-**This does not reach graphing.** `evaluate_real()` is tinyexpr and §2 of the
-spec makes it out of scope, so on 5.2 alone the home screen answers `4` while
-`Y1=(-2)^X` still plots the tinyexpr reading — a home-screen disagreement traded
-for a home-vs-graph one.
+~~**This does not reach graphing.**~~ **Superseded — it does now.**
+`evaluate_real()` is tinyexpr and §2 of the spec keeps it out of *this phase's*
+scope, so on 5.2 alone the home screen would have answered `4` while
+`Y1=(-2)^X` still plotted the tinyexpr reading — a home-screen disagreement
+traded for a home-vs-graph one. **D51 patched the parser instead, so neither
+inconsistency ships.** `Y1=(-2)^X` plots `4` at X=2.
 
 **Decided 2026-08-09 (D50): the parser gets patched, as a separate bugfix
 outside this phase.** Split out rather than folded in because at the source it
-fixes graphing too, and because it is not gated on 5.2 — roughly five lines,
-parse-time only. Until it lands, the row above is the honest description of what
-ships. Whether the unified evaluator should replace tinyexpr *outright* is the
-larger question and is deferred past 5.2 closure (spec P5.2-7).
+fixes graphing too, and because it is not gated on 5.2. **Done the same day
+(D51), released as v0.3.2, HW-verified on the Pico 2** — so the row above is now
+history rather than a description of what ships.
+
+Two things that split turned up, worth keeping:
+
+- **"Roughly five lines" was wrong**, and usefully so. Patching at the source
+  exposed a **second** defect in the same function — `2^-3^2` returned 512
+  because the right-associative insertion loop re-based a negated exponent —
+  which **no 5.2 row covers**, because the unified evaluator gets that case right
+  and the harness had nothing to disagree with. Looking at the parser is what
+  found it.
+- **The fix is deliberately iterative**, not a recursive `factor()`. A `^` chain
+  carries no parentheses, so `Engine`'s paren-count depth guard cannot bound it —
+  the same constraint that shaped this phase's own stack machine (D48).
+
+Whether the unified evaluator should replace tinyexpr *outright* is the larger
+question and is unaffected: still deferred past 5.2 closure (spec P5.2-7), still
+waiting on §9's M1.
 
 ### Narrowings
 

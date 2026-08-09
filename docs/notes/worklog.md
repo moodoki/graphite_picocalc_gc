@@ -305,6 +305,84 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-09 (later still) — tinyexpr's unary minus binds to its own operand (D51). **HW-verified on the Pico 2**
+
+Bugfix on `fix/tinyexpr-pow-negation`, off `main`. **Deliberately not part of Phase
+5.2**: the unified evaluator fixes `(-2)^2` on the home screen only and has no
+hardware verification yet (5.2.12), while patching the vendored parser fixes it on
+**graphing, tables, stats and the solver** too and is not gated on that phase.
+D50 had already scoped this out; this is the shipping half of that decision.
+
+**Two defects, one mistake** — both in `drivers/tinyexpr/tinyexpr.c`'s
+`TE_POW_FROM_RIGHT` `factor()`, both from letting a negation and a `^` swap places:
+
+- **B1**: `factor()` stripped any `negate` node off the first `<power>` and
+  re-applied it after the `^` chain. Once the parentheses are gone, `-2` and
+  `(-2)` are the *same node*, so `(-2)^2` compiled as `-(2^2)`. Upstream reports
+  the same defect as [#52](https://github.com/codeplea/tinyexpr/issues/52),
+  `(-1)^0 == -1`.
+- **B2**, found while probing the blast radius of B1 and not previously recorded:
+  the right-associative insertion loop took `insertion->parameters[1]` as the base
+  of the next `^`, descending *through* a negate node, so `2^-3^2` built
+  `2^((-3)^2)` = 512 instead of `2^(-(3^2))`.
+
+**Why nothing caught them.** `(-2)^3` = -8 and `(0-2)^2` = 4 are right *by
+accident* — an odd exponent absorbs the misplaced sign, and the second spelling
+never reaches the hoist. The suite had sampled the accidents. A 42-expression
+probe run against the unified evaluator is what separated them.
+
+**The fix scans the sign in `factor()` at each level** and builds the chain
+through an insertion point, so a negation always stays outside the sub-chain it
+introduced. **Iterative on purpose**: the obvious recursive `factor()` is shorter
+but costs a frame per caret, and a `^` chain has no parentheses, so
+`too_deeply_nested()` (`engine.cpp:262`, a paren-count pre-scan capped at 7)
+cannot bound it — that is D45/D47/D48's failure mode, and a bugfix is a bad place
+to reintroduce it. A 500-caret chain parses fine; malformed input
+(`2^`, `(-2)^`, `2^-3^`, `((-2)^2`) errors cleanly under ASan/UBSan.
+
+**Measured before/after on the same Pico 2**, flashing each build and replaying
+one corpus through Phase 5.1's serial injection — the first time that tooling has
+been used to *prove* a fix rather than find one. REAL mode, i.e. the tinyexpr
+path: `(-2)^2` **-4 → 4**, `(-1)^0` **-1 → 1**, `sqrt((-2)^2)` **NaN → 2**,
+`(-3)^2+1` **-8 → 10**, `2^-3^2` **512 → 1/512**; 14 rows flip and the
+"must not move" half (`-2^2`, `-3^2`, `2^3^2`, `2^2^3`, `(0-2)^2`, `-2^2^2`,
+`3--2`) is byte-identical. **The board must be in REAL mode for this to mean
+anything** — the first pass ran in `a+bi`, where `complexexpr` answers and was
+already correct; that pass proved nothing and was re-run.
+
+**The compiled path is covered too**: `seq((-2)^n,n,1,4,1)` goes
+`{-2,-4,-8,-16}` → `{-2,4,-8,16}` while `seq(-2^n,…)` stays `{-2,-4,-8,-16}`.
+That is `Engine::compile`/`eval_compiled` — the same API graphing and tables use —
+and the two expressions are now distinguishable, which they were not.
+
+**Costs**: `text` **459,848 → 459,744 (-104 B)**, `.bss` **flat at 215,856**
+(Pico 1) — parse-time only, and the new `factor()` is slightly smaller than the
+one it replaces. `test_math` **242 → 272**, `test_graph` **72 → 74**; all 15 host
+suites green and every pre-existing check passes unchanged under the new parser.
+Both boards build clean; lint/format clean.
+
+**Two answers get worse-looking and are right to**: `(-2)^0.5` was `-1.4142`
+(i.e. `-(2^0.5)`, not a root of -2) and `(-8)^(1/3)` was `-2` — the one place the
+bug produced something useful. Both are NaN now, matching TI's `ERR:NONREAL ANS`
+in REAL mode. On the home screen neither changes (the mode probe already said
+"Non-real result"); on graphing the points go undefined. There is no `cbrt` in the
+catalog, so REAL mode has no spelling for a negative cube root — noted in D51 so a
+bench session does not file it as a regression.
+
+**One improvement not asked for**: `exact.cpp`'s gate 5 requires the CAS and
+numeric results to agree to 1e-9, so exact forms were being silently suppressed on
+these inputs. `1/(-2)^2` displayed `-0.25`; it now displays an amber `1/4`.
+
+**Environment note, not a code change**: the host's ArmGNUToolchain moved to
+**15.3.rel1**, while `docs/dev-environment.md:83` and `scripts/lint.sh`'s fallback
+still name `15.2.rel1`. With the stale path, `lint.sh` silently loses the
+toolchain's system include paths and reports a wall of bogus
+`'cstddef' file not found` / `misc-const-correctness` errors across `src/`. Export
+`PICO_TOOLCHAIN_PATH=/Applications/ArmGNUToolchain/15.3.rel1/arm-none-eabi` and it
+passes. Left for a separate de-stale commit.
+
+Full detail: `decisions.md` **D51**, `drivers/README.md` "Local modifications".
+
 ## 2026-08-09 (later) — Phase 5.2 tasks 5.2.6-5.2.11: the unified evaluator replaces the three home-screen evaluators. **All HW-PENDING**
 
 Six tasks in one session, ending with `matexpr`, `complexexpr` and `listexpr`

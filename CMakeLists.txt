@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 include(pico_sdk_import.cmake)
 
 project(picocalc_graphcalc
-    VERSION   0.3.1
+    VERSION   0.3.2
     LANGUAGES C CXX ASM
 )
 
