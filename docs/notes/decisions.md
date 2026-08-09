@@ -18,6 +18,115 @@ Format:
 
 ---
 
+## D51: tinyexpr's unary minus binds to its own operand — the `(-2)^2` fix ships ahead of the unified evaluator, not with it
+
+**Date**: 2026-08-09
+**Status**: Accepted (bugfix)
+**Context**: Phase 5.2's differential harness found that the two shipped
+home-screen evaluators disagree about `(-2)^2` — **-4** from tinyexpr, **4** from
+`complexexpr` — so today's answer depends on the number mode. **D50** (on branch
+`phase-5.2`, not yet merged) scoped the fix out of that phase deliberately,
+because the defect is upstream in the vendored parser and patching it *there*
+fixes graphing, tables, stats and the solver as well, where 5.2 alone fixes only
+the home screen.
+
+That is also why it ships first. The unified evaluator has no hardware
+verification yet (5.2.12 is the only task left in that phase) and may not land on
+schedule; a wrong arithmetic answer in `evaluate_real()` should not be gated on
+it. This is the third instance of the same disagreement class after **D46** and
+**D50**, and the first one fixed at the source.
+
+**Two defects, one mistake.** Both are in `drivers/tinyexpr/tinyexpr.c`'s
+`#ifdef TE_POW_FROM_RIGHT` build of `factor()` — the branch we compile
+(`CMakeLists.txt:62`) — and both come from letting a negation and a `^` swap
+places.
+
+*B1 — a parenthesised negation was hoisted out of the power.* `factor()` called
+`power()` (which scans leading signs), then stripped any `negate` node off the
+top and re-applied it after the `^` chain. By then `-2` and `(-2)` are the **same
+node**: the parentheses are gone, so nothing distinguishes the negation the user
+grouped from the one they did not. Upstream reports the same defect as
+[issue #52](https://github.com/codeplea/tinyexpr/issues/52), `(-1)^0 == -1`.
+
+*B2 — a negated exponent was re-based.* The right-associative insertion loop took
+`insertion->parameters[1]` as the base of the next `^`. When that slot held a
+`negate` node it descended *through* the negation, so `2^-3^2` built
+`2^((-3)^2)` = 512 instead of `2^(-(3^2))` = 0.001953125.
+
+**Neither was pinned by a test, and the reason is worth keeping.** `(-2)^3` = -8
+and `(0-2)^2` = 4 come out right *by accident* — an odd exponent absorbs the
+misplaced sign, and the second spelling never reaches the hoist. The suite
+happened to sample the accidents.
+
+**Decision**: restate the grammar so the sign is scanned in `factor()` at each
+level, and build the chain through an insertion point so a negation always stays
+**outside** the sub-chain it introduced:
+
+```
+<factor> = {("-" | "+")} <base> {"^" <factor>}
+
+-2^2    ->  -(2^2)      = -4    (TI convention, unchanged)
+(-2)^2  ->  (-2)^2      =  4    (was -4)
+2^-3^2  ->  2^(-(3^2))          (was 2^((-3)^2) = 512)
+2^2^3   ->  2^(2^3)     = 256   (right-associative, unchanged)
+```
+
+**Rationale — why iterative and not recursive.** The short fix is to make
+`factor()` recurse on `^`, which is four lines and obviously correct. It was
+rejected: it costs a stack frame per caret, and a `^` chain carries **no
+parentheses**, so `Engine`'s only depth guard — `too_deeply_nested()`
+(`engine.cpp:262`), a paren-count pre-scan capped at 7 — cannot see it. `2^2^2^…`
+would recurse unbounded against core 0's 4 KB. That is D45/D47/D48's failure mode
+exactly, and this project has now paid for it four times; a bugfix is not the
+place to reintroduce it. The insertion-point form keeps `factor()`'s frame flat,
+and a 500-caret chain parses without incident.
+
+**This is a local fix to a vendored driver**, the first one, so `drivers/README.md`
+gains the "Local modifications" section its own policy has been reserving. A
+re-vendor must re-apply it; upstream #52 is open.
+
+**Verified before/after on the same Pico 2**, by flashing each build and
+replaying one 32-expression corpus through Phase 5.1's serial injection —
+which is what that tooling was built for. In REAL mode (the tinyexpr path),
+14 rows flip and every "must not move" row is byte-identical:
+
+| Input | before | after |
+|---|---|---|
+| `(-2)^2` | -4 | **4** |
+| `(-1)^0` | -1 | **1** |
+| `sqrt((-2)^2)` | NaN | **2** |
+| `(-3)^2+1` | -8 | **10** |
+| `2^-3^2` | 512 | **1/512** |
+| `-2^2`, `-3^2`, `2^3^2`, `2^2^3`, `(0-2)^2`, `-2^2^2`, `3--2` | | *unchanged* |
+
+`seq((-2)^n,n,1,4,1)` covers the **compiled** path — the same
+`Engine::compile`/`eval_compiled` API graphing and tables use — and goes
+`{-2,-4,-8,-16}` → `{-2,4,-8,16}`, while `seq(-2^n,…)` stays `{-2,-4,-8,-16}`.
+The two are now distinguishable, which they were not.
+
+**Tradeoffs**: two inputs lose a plausible-looking answer, and both are the bug's
+other half rather than a new regression.
+
+- `(-2)^0.5` was `-1.4142` — that is `-(2^0.5)`, not a root of -2. It is NaN now,
+  which is what a real evaluator has to say. On the home screen nothing changes
+  (the REAL-mode gate already answered "Non-real result", because the mode probe
+  runs `complexexpr`); on graphing the point simply goes undefined.
+- `(-8)^(1/3)` was `-2`, the real cube root, arrived at by accident. It is NaN
+  now. TI-84 agrees (`ERR:NONREAL ANS` in REAL mode) and `a+bi` mode still gives
+  the principal complex root, but there is **no `cbrt` in the catalog**, so REAL
+  mode has no spelling for a negative cube root. Recorded here so a bench session
+  does not rediscover it as a regression.
+
+A third effect is an improvement worth naming: `exact.cpp`'s gate 5 requires the
+CAS result and the numeric result to agree to 1e-9. They disagreed on these
+inputs, so exact forms were silently suppressed — `1/(-2)^2` displayed `-0.25`
+where it now displays an amber `1/4`.
+
+**Revisit when**: upstream tinyexpr fixes #52 and we re-vendor — port their fix
+if it is equivalent, keep ours if it is not. The larger question, whether the
+unified evaluator should replace tinyexpr on the numeric path outright, is
+unaffected and stays where D50 left it: after 5.2 closes, with §9's M1 measured.
+
 ## D49: Integer powers of a complex base are computed, not approximated — and why the display-tolerance alternative was rejected
 
 **Date**: 2026-08-09

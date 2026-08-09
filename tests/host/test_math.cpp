@@ -51,6 +51,18 @@ void check_error(const char* expr) {
     }
 }
 
+// A real-valued expression with no real answer: the engine returns NaN rather
+// than an error (format.cpp prints it), and NaN is the point of the check.
+void check_nan(const char* expr) {
+    ++g_checks;
+    const auto r = math::engine().evaluate(expr);
+    if (!r.ok || !std::isnan(r.value)) {
+        std::printf("FAIL: '%s' -> %s%.12g (expected nan)\n", expr,
+                    r.ok ? "" : "error: ", r.ok ? r.value : 0.0);
+        ++g_failures;
+    }
+}
+
 void check_fmt(double x, const char* expected) {
     ++g_checks;
     char buf[40];
@@ -91,6 +103,56 @@ int main() {
     check_near("pi", 3.14159265358979, 1e-10);
     check_error("2+");
     check_error("(2+3");
+
+    // ---- unary minus vs '^' (D51) ----
+    // tinyexpr's TE_POW_FROM_RIGHT factor() used to hoist a negation out of a
+    // power without knowing whether parentheses had closed it, and to re-base a
+    // negated exponent inside the right-associative chain. Both halves are
+    // pinned here: the negation must bind to whatever the user parenthesised,
+    // and it must stay looser than '^' when they did not.
+
+    // A parenthesised negation is part of the base.
+    check_near("(-2)^2", 4);
+    check_near("(-2)^3", -8);  // agreed even with the bug: odd exponent
+    check_near("(-2)^4", 16);
+    check_near("(-1)^0", 1);  // upstream issue #52
+    check_near("((-2))^2", 4);
+    check_near("(-2.5)^2", 6.25);
+    check_near("(-2)^(-2)", 0.25);
+    check_near("(-3)^2+1", 10);
+    check_near("3*(-2)^2", 12);
+    check_near("1/(-2)^2", 0.25);
+    check_near("sqrt((-2)^2)", 2);
+    check_near("(-2)^2+(-3)^2", 13);
+    check_near("(-(-2))^2", 4);
+
+    // A bare leading minus is not, and stays looser than '^' (TI convention).
+    check_near("-2^2", -4);
+    check_near("-2^3", -8);
+    check_near("-(2)^2", -4);
+    check_near("-5^2", -25);
+    check_near("-2^2^2", -16);
+    check_near("-2^-2", -0.25);
+    check_near("-2^2*3", -12);
+    check_near("(0-2)^2", 4);  // the same value, spelled past the old bug
+    check_near("+2^2", 4);
+    check_near("-+2^2", -4);
+
+    // A negated exponent keeps its sign outside the sub-chain it introduced.
+    check_near("2^-3^2", 0.001953125);  // 2^-(3^2), not 2^((-3)^2) = 512
+    check_near("2^(-2)^2", 16);         // parenthesised: the base really is -2
+    check_near("(-2)^2^3", 256);
+
+    // Right-associativity itself is unchanged.
+    check_near("2^2^3", 256);
+    check_near("2^-2", 0.25);
+
+    // The bug's other half: these produced plausible-looking wrong answers
+    // (-1.4142 and -2) because the negation was applied after the power. A
+    // real evaluator has no answer here, which is what TI reports as
+    // ERR:NONREAL ANS. In a+bi mode the home screen gives the complex root.
+    check_nan("(-2)^0.5");
+    check_nan("(-8)^(1/3)");
 
     // ---- 2.2 extended functions ----
     check_near("ncr(10,3)", 120);
