@@ -10,6 +10,33 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Re-vendor tinyexpr from upstream `master`, and drop our local `factor()`
+  fix** (raised 2026-08-09 while checking whether D51 was worth reporting
+  upstream — it was not, because it was already fixed there). The project was
+  dormant for years and then landed **22 commits on 2026-08-05**, four days
+  before ours. `drivers/README.md`'s policy already decides the direction —
+  "port their fix if it is equivalent" — and it **is** equivalent: their
+  [`1e2ba48`](https://github.com/codeplea/tinyexpr/commit/1e2ba481) fixes both
+  defects D51 fixes, by a different route, and our 46-case corpus passes on
+  `master` with 0 failures. Carrying a private fork of a fix that exists
+  upstream is the thing to stop doing. **But `master` is not a drop-in**, which
+  is why this is a wishlist item and not a chore:
+  - It merged the **logic branch**, so `!` is now prefix logical-not. We use
+    `!` as *postfix factorial*. `Engine::preprocess` rewrites every `!` to
+    `fac(...)` before the parser sees one, so nothing breaks today — but that
+    containment stops being incidental and starts being load-bearing, and `!=`
+    would acquire a meaning.
+  - [`a851f2b`](https://github.com/codeplea/tinyexpr/commit/a851f2be) **"Limit
+    parser recursion depth, fixes #136" is D47's bug, fixed upstream** — inside
+    the parser, counting what actually recurses, where our `kMaxParseDepth = 7`
+    is a paren-count pre-scan bolted on outside it (`engine.cpp`). Adopting
+    theirs could retire ours, which is the real prize here.
+  - Also locale-independent number parsing, `unsigned char` ctype fixes, ARMCC
+    support, and an upstream CI workflow.
+  - Sequencing note: this touches the evaluator that **Phase 5.2's §9 A/B
+    measurement uses as its baseline**, so do it either before that measurement
+    or well after — not between the two halves of it.
+
 - **Screenshot capture — serial dump (debug aid) + save-to-SD (user feature)**
   (raised 2026-08-05, same session as serial key injection — two uses of the
   same underlying capability; that item has since graduated to **Phase 5.1**,
