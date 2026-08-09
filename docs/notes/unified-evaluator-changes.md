@@ -178,8 +178,10 @@ Stated so an empty region reads as "checked" rather than "not looked at":
 ## 4. Replaying the register on hardware
 
 The `Input` column is the script. With serial injection (Phase 5.1) and two
-firmware builds — one on the old pipeline, one on the unified evaluator — each
-row is one line in, one `inject:` echo out, on both builds:
+firmware images — the **v0.3.1 release `.uf2`** for the old pipeline (tagged
+2026-08-08, all of Phase 5.1 and none of 5.2, and its injection block is
+byte-identical to today's) and a current build for the unified evaluator — each
+row is one line in, one `inject:` echo out, on both:
 
 ```
 inject: "<expr>" -> "<result>" kind=plain|symbolic|error

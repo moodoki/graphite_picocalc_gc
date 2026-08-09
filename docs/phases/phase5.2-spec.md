@@ -224,8 +224,8 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.8~~ | ~~Superset store grammar + commit semantics~~ **DONE 2026-08-09** (both outstanding narrowings closed) | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
 | 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs; the [change register](../notes/unified-evaluator-changes.md) is its allow-list |
 | 5.2.10 | Widened behaviours + allow-list | 10 | Every register row signed off with a TI-parity rationale; the register's D-rows (display strings, REAL-mode probe sequencing) discharged |
-| 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it. **Not before §9's A/B pass**, which needs both pipelines buildable |
-| 5.2.12 | On-device verification, both boards | 12 | Stack peak, bss delta, serial-injection differential, and **§9's A/B latency measurement against the old pipeline** |
+| 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
+| 5.2.12 | On-device verification, both boards | 12 | Stack peak, bss delta, serial-injection differential, and **§9's A/B latency measurement against the v0.3.1 release binary** |
 | | **Total** | **150** | |
 
 **On the estimate.** This is roughly double the 73 hrs written before the
@@ -238,7 +238,9 @@ have been considered rather than ignored.
 **146 → 150, 2026-08-09**: 5.2.12 gains 4 hrs for §9's A/B latency pass against
 the old pipeline. The phase replaces the home screen's evaluator, so "is it
 faster or slower than what it replaces" needs a measurement rather than an
-argument — and §3 has been promising exactly that measurement since 5.2.6.
+argument — and §3 has been promising exactly that measurement since 5.2.6. The
+4 hrs is the timing harness and the analysis; obtaining the baseline costs
+nothing, because it is the v0.3.1 release `.uf2` (§9).
 
 ## 5. Sizing — DONE 2026-08-09 (task 5.2.1). The premise was wrong.
 
@@ -470,20 +472,37 @@ design says so explicitly — the broadcast rewrite trades extra streaming passe
 for once-per-element evaluation, and "5.2.12 measures it on hardware; that
 measurement, not this comment, is what settles it".
 
-**Sequencing, and it is a real constraint.** The comparison needs *both*
-pipelines buildable from one tree, which is true only during the flag window —
-after 5.2.10 flips the default and **before 5.2.11 deletes the old evaluators**.
-So the A/B pass is taken in that window and 5.2.12 confirms the shipped build's
-numbers against it. Left until after 5.2.11, the baseline would have to come
-from a checked-out older commit, which is a different binary in more ways than
-the one being measured.
+**The baseline is a released binary, not a rebuild** (decided 2026-08-09). The
+**v0.3.1** release carries `picocalc_graphcalc-pico.uf2` and
+`picocalc_graphcalc-pico2.uf2`, and it is the right baseline by construction:
+tagged 2026-08-08 at `48881a9`, it contains all of Phase 5.1 — serial injection
+and the 5.1.7 `mode` command — and **none** of Phase 5.2. So the old pipeline
+stays flashable indefinitely and there is **no ordering constraint on 5.2.11**;
+an earlier draft of this section claimed one, on the assumption that both
+pipelines had to be buildable from one tree. They do not. Nothing else needs
+keeping either — the repository holds no compiled artifacts, and it does not
+need to.
+
+Checked rather than assumed: v0.3.1's injection block is **byte-identical** to
+today's (`src/main.cpp`, the whole `inject:` region), and `stack: peak` is at
+`main.cpp:549` there. One host script parses both builds with no conditionals.
 
 **Method.** One script, three outputs, riding the mechanism Phase 5.1 already
 built: serial injection auto-echoes `inject: "<expr>" -> "<result>" kind=…`, and
-`stack: peak` prints on any new high-water mark (`main.cpp:713`, `main.cpp:545`).
-Add an elapsed field to the inject echo and the same script yields results,
-stack peaks and timings for both builds in one pass. Median of N repetitions per
-line; the first run of each line is discarded (cold caches, PSRAM wake).
+`stack: peak` prints on any new high-water mark (`main.cpp:713`, `main.cpp:549`).
+
+**Timing is measured host-side**, as the round trip from writing the line to
+reading its echo. That follows directly from the baseline being pre-built: a
+firmware-side elapsed field cannot exist in a binary released before it was
+written. A host round trip includes USB latency and render-loop scheduling,
+which is why it is only usable as a *difference* — the same overhead sits on
+both sides, so enough repetitions cancel it. Median of N per line; discard each
+line's first run (cold caches, PSRAM wake).
+
+A firmware-side elapsed field is still worth adding to the new build, not as the
+A/B number but to **bound** it: the gap between the two says how much of the
+round trip was never evaluation. Without it a small M1 delta cannot be
+distinguished from USB jitter.
 
 **What to measure**, chosen so each line isolates one claim:
 
@@ -493,16 +512,29 @@ line; the first run of each line is discarded (cold caches, PSRAM wake).
 | M2 | `sin(l1)+2*l2` at 999 elements | **The lift.** Three streaming passes here against `listexpr`'s one. §3's open trade. |
 | M3 | `l1/sum(l1)` at 999 elements | **The correctness half of the same trade** — the loop-invariant reduction the element-slot design would have recomputed N times. Expected to favour the new evaluator; if it does not, the reasoning in §3 is wrong. |
 | M4 | a 256-element list, and a 257-element one | **Chunk-boundary cost**, against the same pair on the old lift. |
-| M5 | `det([A])`, `[A]*[B]` at 6x6 | **Matrix ops**, which should be unchanged — the same `matops` underneath, reached differently. A difference here means dispatch overhead, not arithmetic. |
+| M5 | `det([A])`, `[A]*[B]` at 6x6 | **Matrix ops**, which should be unchanged — the same `matops` underneath, reached differently. A difference here means dispatch overhead, not arithmetic. It doubles as the **control** (see below). |
 | M6 | `seq(x^2, x, 1, 200, 1)` | **Quoted-body re-entry**, the machine's only nesting, against `listexpr`'s per-element tinyexpr compile. |
 | M7 | the register's replay script end to end | **Aggregate**, and the differential pass at the same time. |
 
-**What counts as a pass.** M1 within noise of today or better; M5 unchanged; M2
-is the one genuinely open question and a regression there is a finding to record
-and cost, not automatically a blocker — the phase's case rests on correctness
-and ~10 KB of bss, and §3 already commits to reporting the number either way.
-Both boards, because the RP2350's cache and the RP2040's lack of one have
-diverged before (D14, the 4D.38 batch).
+**M5 is the control**, and it is what makes a released baseline sound. v0.3.1 is
+a whole different commit, so any delta in principle includes everything else
+that changed between it and the 5.2 build — not only the evaluator. M5 is the
+row that should not move: same `matops`, same arithmetic, reached through a
+different dispatcher. **If M5 moves, the other rows are not measuring the
+evaluator**, and the run needs a closer baseline before its numbers mean
+anything. That check costs one row and replaces an ordering constraint on a
+whole task.
+
+Comparing against a *shipped* build is also the more meaningful comparison, not
+merely the cheaper one: it is what users have against what they will get.
+
+**What counts as a pass.** M1 within noise of today or better; M5 unchanged
+(else see above); M2 is the one genuinely open question and a regression there
+is a finding to record and cost, not automatically a blocker — the phase's case
+rests on correctness and ~10 KB of bss, and §3 already commits to reporting the
+number either way. Both boards, because the RP2350's cache and the RP2040's lack
+of one have diverged before (D14, the 4D.38 batch), and both `.uf2`s are in the
+v0.3.1 release.
 
 **Also in the same session**, unchanged from the task row: stack peak per input
 (the whole point of moving depth off the call stack), the bss delta 5.2.11
