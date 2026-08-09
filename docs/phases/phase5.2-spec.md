@@ -18,12 +18,13 @@ generic binary-op dispatch over a wider tag enum.
 It also **absorbs the shared function catalogue** (`catalog.hpp`), so the home
 screen no longer escapes to tinyexpr for scalar spans.
 
-**Status**: **In progress — tasks 5.2.1-5.2.7 done 2026-08-09.** The evaluator
+**Status**: **In progress — tasks 5.2.1-5.2.8 done 2026-08-09.** The evaluator
 now compiles and runs every home-screen value kind — real and complex scalars,
 lists and matrices of either — with the whole callable surface resolved
-natively. **What is left is the store grammar (5.2.8), the differential harness
-(5.2.9), and the cutover (5.2.10-5.2.12); nothing is wired to a screen yet**
-(§6.1).
+natively, and it commits its own results: one store grammar, one flag
+convention, and a probe mode that writes nothing. **What is left is the
+differential harness (5.2.9) and the cutover (5.2.10-5.2.12); nothing is wired
+to a screen yet** (§6.1).
 Sizing: §5. Migration strategy: §6.1. Idea F has been a committed follow-on
 since 2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a
 phase number at the same time. This is the highest-risk item on the project's
@@ -220,7 +221,7 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.5~~ | ~~Absorb catalogue, constants, variables~~ **DONE 2026-08-09** (three tables, not one) | 10 | `pi`/`e`/`ans`/`theta`/`a-z` and all `catalog.cpp` entries resolve natively; non-real policy implemented |
 | ~~5.2.6~~ | ~~List tier incl. the lift~~ **DONE 2026-08-09** (broadcast, not element slots — §3) | 22 | `test_lists` passes; **compile-once/eval-N preserved**, 256-element chunks |
 | ~~5.2.7~~ | ~~Matrix tier~~ **DONE 2026-08-09** (`dim`/`eigenvals` no longer need to stand alone) | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
-| 5.2.8 | Superset store grammar + commit semantics | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
+| ~~5.2.8~~ | ~~Superset store grammar + commit semantics~~ **DONE 2026-08-09** (both outstanding narrowings closed) | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
 | 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs |
 | 5.2.10 | Widened behaviours + allow-list | 10 | Each widened case has a written expectation and a TI-parity rationale |
 | 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
@@ -281,12 +282,12 @@ consume any** — the opposite of the assumption Phase 6's headroom argument was
 resting on, and worth re-checking against 6B's 48 KB MicroPython heap once the
 real numbers land.
 
-**Measured as built, through 5.2.6** (Pico 1, `.bss`):
+**Measured as built, through 5.2.8** (Pico 1, `.bss`):
 
 | item | bytes |
 |---|---|
 | operand stack `Value[64]` | 1,536 |
-| `Program` (code 1,024 + consts 1,024 + 8 bookkeeping) | 2,056 |
+| `Program` (code 1,024 + consts 1,024 + 16 bookkeeping and the pending store name) | 2,064 |
 | operator stack `OpTok[64]` | 896 |
 | list tier: 6 `Array` handles + pool flags + arena pointer | ~160 |
 | **total** | **~4.3 KB, against the 10,053 B retiring the three evaluators frees** |
@@ -295,11 +296,15 @@ The list tier costs no buffers: its 256-element chunk staging overlays the
 shared compute arena (`scratch.hpp`) and its result temporaries take storage
 from the existing `ArrayStore`, which is what `listexpr`'s `g_op`/`g_temp`/
 `g_result` do today. `Program` shed 8 B in 5.2.6 with `n_elem_slots`, the field
-the superseded element-slot lift needed (§3).
+the superseded element-slot lift needed (§3), and took them back in 5.2.8 for
+the pending `-> name` store target — which is text, not a ref, precisely so the
+registry entry is created when the store *commits*.
 
-**Nothing is banked until 5.2.11 deletes the old evaluators**: through 5.2.6 the
-image is +4 B (the arena pointer), because the linker garbage-collects the rest
-while no screen calls `run()`.
+**Nothing is banked until 5.2.11 deletes the old evaluators**: measured `.bss`
+is **217,396 B before and after 5.2.8**, and identical again at 5.2.6, because
+the linker garbage-collects the whole evaluator while no screen calls `run()`.
+The figures in this section are therefore the sizes of the types, not of the
+image; the image number that matters is the one 5.2.11 produces.
 
 A depth of 64 is also far more generous than what the call stack affords today:
 `matexpr` is capped at **3** (D48, 84 B of margin before the leaf fix),
@@ -369,9 +374,38 @@ into "the suite passes".
   non-reentrancy arguments verified by inspection. A unified evaluator changes
   the reentrancy assumptions those rest on. *Mitigation*: re-audit every `static`
   buffer on the home-screen path as part of 5.2.8, not as an afterthought.
+  **Done 2026-08-09 — §6.2.**
 - **Scope creep into `evaluate_real()`.** *Mitigation*: §2 is a hard boundary;
   any proposal to touch the graphing path is a separate decision requiring its
   own performance measurement.
+
+### 6.2 The `static`-buffer audit — done 2026-08-09 (5.2.8)
+
+Every `static` buffer reachable from a home-screen Enter, and what the unified
+evaluator does to the argument it rests on:
+
+| owner | buffers | verdict |
+|---|---|---|
+| `engine.cpp` | `preprocess::tmp`, `eval_internal::processed`, `Engine::evaluate::body`, `rebuilt`, `names[26][2]` | **Unreachable.** The unified evaluator calls `engine()` only for `vars()` — the variable store, never the parser. Absorbing the catalogue (5.2.5) removed the `eval_field` escape that made these reachable from three evaluators at once. |
+| `complex_expr.cpp`, `mat_expr.cpp` | `parse_scalar_span::span` (both), `parse_matrix_literal::vals` | **Unreachable** — inside the parsers being retired. |
+| `list_expr.cpp` | `s_va`/`s_vb` (the vector ops) | **Unreachable**; `dot`/`cross`/`norm` were reimplemented over the temp pool in 5.2.7. |
+| `home_screen.cpp` | `g_eval`, `g_hist_io` | Unchanged. Dispatcher-owned display and IO scratch, one Enter at a time. |
+| unified evaluator | `g_ops`, `g_stack`, `g_temps`, the arena overlay | Non-reentrant **by design**, and the design is what makes it safe: one program, no nested compile, no evaluation recursion. |
+
+The audit found one real problem, and it was not a buffer. **`mat2list` writes
+list slots the operand stack may still be holding by reference**:
+`l1 * mat2list([A], l1)` reads l1's *new* contents, because a `Value` names the
+slot rather than a snapshot. Unification is what made this reachable —
+`matexpr` forbade the composition outright ("mat2list must stand alone") and
+5.2.7 dropped the restriction along with the whole-expression parsing it was
+tangled in. It is back, now as a shape rule on the compiled program: a call that
+writes its arguments must be the last instruction and cannot be stored. The
+in-place sort needs no such rule because it only writes when it *is* the whole
+program.
+
+Stated as an invariant so a later change cannot quietly break it: **`kStore`
+executes with exactly one value on the operand stack**, and the machine asserts
+it. A store emitted inside a quoted body would violate it.
 
 ## 7. Open questions
 
@@ -381,7 +415,7 @@ into "the suite passes".
 | P5.2-2 | What *new* cross-tier behaviours become reachable, and are they all wanted? | Unification makes complex-element matrices and list⊗matrix ops fall out for free. Some may be undesirable or need TI-parity checks before being exposed. |
 | P5.2-3 | Does the explicit stack live in bss or the CAS arena? | The CAS `ExprPool` is already two-ended with LIFO scratch (D45) and may be the natural home rather than a second allocator. |
 | P5.2-4 | Does idea H (polymorphic variables, D40) become cheap once this lands? | §H notes unified storage "almost certainly means a fourth format change". Worth re-costing after, not before. |
-| P5.2-5 | Do the retired parsers' error strings need to be preserved verbatim? | Host tests assert on exact strings ("Too deeply nested", "Dim mismatch"). Changing them is a test churn cost to budget. |
+| P5.2-5 | Do the retired parsers' error strings need to be preserved verbatim? | Host tests assert on exact strings ("Too deeply nested", "Dim mismatch"). Changing them is a test churn cost to budget. **Partly answered 2026-08-09 (5.2.8)**: the criterion is provenance — a string that states a decision is kept verbatim ("e is reserved (Euler's e)"), a string that fell out of a parser accident is replaced. Both store-grammar cases are listed below. |
 
 ### Widenings found so far — the running list 5.2.10 signs off
 
@@ -402,19 +436,52 @@ what 5.2.10 owes each row is a TI-parity judgement.
 | W9 | `det(([A]*([A]+[A]))+[A])` → *"Too deeply nested"* (depth 4) | evaluates | `matexpr`'s cap is 3 with 84 B of margin — the same call-frame budget (5.2.7) |
 | W10 | `list2mat(range(1,3), l2)` → *"list2mat takes l1-l6 args"* | takes any list expression | its arguments are values now, not tokens (5.2.7) |
 | W11 | `mat2list([A], costs)` → *"mat2list targets are l1-l6"* | named lists work as targets | one ref numbering since 4D.13 (5.2.7) |
+| W12 | `l1 -> a` → *"Syntax error"* from whichever parser claimed the line | *"Store target mismatch"* | one store grammar instead of four rightmost-`->` searches (5.2.8) |
+| W13 | `<matrix expr> -> name` → no such form; matrices stored only to `[A]`-`[J]` and lists only from `listexpr` | every value kind reaches every target it fits | the target grammar stopped being per-evaluator (5.2.8) |
 
-Two deliberate **narrowings** are outstanding, both of them commit questions
-rather than expression ones, and both belong to 5.2.8's store grammar. Neither
-may ship as a silent behaviour change:
+**Both narrowings 5.2.7 left open are closed** (5.2.8), neither silently:
 
-- `sort_asc(l4)` with a bare list argument sorts `l4` **in place** in
-  `listexpr`; it is by value here.
-- A complex *result* built from real data (`i*[B]` in REAL mode) is rejected by
-  `matexpr` ("gate the result too") and is not rejected here. This evaluator
-  gates complex **data access** (a complex `[X]`, a complex literal) but not
-  complex results — the same line 5.2.4 drew for scalars, where `i^2` evaluates
-  whatever the number mode. Rejecting a non-real *result* needs the layer that
-  knows about REAL-mode retry, which is the dispatcher.
+- `sort_asc(l4)` with a bare list argument sorts `l4` **in place** again. The
+  expression tier still evaluates it by value; the in-place half is recovered as
+  an *implicit store* back to the same ref, emitted only when the whole program
+  is `push-ref; sort`. That is where it belongs — `listexpr`'s in-place form was
+  always a statement, and statements are what the store grammar covers.
+  `sort_asc(l4) -> l5` writes both refs, as `list_expr.cpp:1387` does.
+- A complex *result* built from real data (`i*[B]` in REAL mode) is rejected
+  again, and the layering question that held it up has an answer: **the gate is
+  on the mode, not on the layer.** `Mode::kCommit` refuses a non-real result
+  ("Non-real result", D30); `Mode::kProbe` computes it and writes nothing. The
+  three retired evaluators split this three ways — `matexpr` and `listexpr`
+  gated because they wrote their own slots, `complexexpr` never gated because
+  its caller committed for it — and the split was always about who owned the
+  commit, not about what the value was. One evaluator owns both now.
+  Intermediates are still never gated: `i^2` is `-1` and `abs(3+4i)` is `5` in
+  any mode.
+
+One deliberate narrowing is **added**, from §6.2's audit: `mat2list` may not
+compose or be stored ("mat2list must stand alone"), which restores `matexpr`'s
+rule for the reason `matexpr` had it.
+
+Two divergences in error *strings*, which is the concrete part of P5.2-5's
+answer. Both are cases where the old text came from a parser accident rather
+than a decision, and both are pinned in `test_unified`:
+
+- `1->a->b` and `1->a+2` reported *"Syntax error"* from inside tinyexpr, because
+  the rightmost-arrow search silently left the arrow in the body. Both are
+  *"Bad store target"* now.
+- `2->l1` keeps `listexpr`'s *"Store target needs a list"*; every other kind
+  mismatch keeps `matexpr`'s *"Store target mismatch"*. Two strings, each for
+  the input it is pointed about, rather than one generic one.
+
+What 5.2.8 deliberately did **not** take is the *display* strings —
+`mat2list`'s "Done (n lists)" and the `num⇒a` store echo are formatting, and the
+evaluator now hands a dispatcher everything they need (the count as the value,
+`Commit::lists_mask`, `Commit::var`). They belong with the dispatcher in 5.2.10.
+
+`matexpr`'s *"Undefined result"* for a non-finite scalar is **not** carried over:
+the engine and `complexexpr` both commit `inf`/`nan` to Ans today, so gating it
+here would change the majority behaviour rather than preserve it. If that is
+wanted it is a display decision for 5.2.10, applied to all four kinds at once.
 
 ## 8. Non-goals
 

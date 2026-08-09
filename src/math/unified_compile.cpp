@@ -110,6 +110,11 @@ struct Compiler {
     bool expect_var_name = false;
     bool expect_list_ref = false;
 
+    // The store suffix, if one was seen (5.2.8). Emitted after the expression's
+    // own code, so it pops the finished value.
+    StoreKind store_kind = StoreKind::kNone;
+    uint16_t store_index = 0;
+
     bool fail(const char* msg) {
         if (err == nullptr) {
             err = msg;
@@ -510,6 +515,141 @@ struct Compiler {
         return emit(Op::kPushMat, static_cast<uint8_t>(slot));
     }
 
+    // ---- the store suffix (5.2.8) ----------------------------------------
+
+    // Record the target and require it to be the end of the input. The old
+    // parsers each searched for the RIGHTMOST "->" and re-trimmed the body
+    // around it, which quietly makes `1->a->b` mean `(1->a) -> b` and then
+    // fails inside tinyexpr. Here the first arrow ends the expression, so a
+    // second one is a pointed error instead of a syntax error from three
+    // layers down.
+    bool take_target(StoreKind kind, int index) {
+        skip_ws();
+        if (*s != 0) {
+            return fail("Bad store target");
+        }
+        store_kind = kind;
+        store_index = static_cast<uint16_t>(index);
+        return true;
+    }
+
+    // The five forms, in one place: `-> a`, `-> theta`, `-> l1`-`l6`,
+    // `-> name` (existing or new) and `-> [A]`-`[J]`. Whether the *value*
+    // suits the target is a run-time check — the compiler does not know the
+    // kind of what it just compiled.
+    bool store_target() {
+        skip_ws();
+        if (*s == '[') {
+            const char c = s[1];
+            const int slot = (c >= 'A' && c <= 'J')   ? c - 'A'
+                             : (c >= 'a' && c <= 'j') ? c - 'a'
+                                                      : -1;
+            if (slot < 0 || s[2] != ']') {
+                return fail("Bad store target");
+            }
+            s += 3;
+            return take_target(StoreKind::kMatrix, slot);
+        }
+        const char* start = s;
+        while (ident_char(*s)) {
+            ++s;
+        }
+        const auto len = static_cast<size_t>(s - start);
+        if (len == 0) {
+            return fail("Bad store target");
+        }
+        // The pointed reserved-word errors, verbatim (engine.cpp:426-443,
+        // complex_expr.cpp:410-424). They are the most-seen strings in this
+        // grammar and the case fold they replaced was a silent wrong answer.
+        if (len == 1 && start[0] >= 'A' && start[0] <= 'Z') {
+            return fail("Variables are lowercase a-z");
+        }
+        if (len == 1 && start[0] == 'e') {
+            return fail("e is reserved (Euler's e)");
+        }
+        if (len == 1 && start[0] == 'i') {
+            return fail("i is reserved (imaginary unit)");
+        }
+        if (len == 1 && start[0] >= 'a' && start[0] <= 'z') {
+            return take_target(StoreKind::kVar, start[0] - 'a');
+        }
+        if (len == 5 && std::strncmp(start, "theta", 5) == 0) {
+            return take_target(StoreKind::kVar, Variables::kTheta);
+        }
+        if (len == 2 && start[0] == 'l' && start[1] >= '1' && start[1] <= '6') {
+            return take_target(StoreKind::kList, start[1] - '1');
+        }
+        static_assert(kMaxStoreName == NamedLists::kMaxName,
+                      "Program::new_list must hold any storable list name");
+        if (len >= 2 && len <= static_cast<size_t>(kMaxStoreName)) {
+            char nm[kMaxStoreName + 1];
+            std::memcpy(nm, start, len);
+            nm[len] = 0;
+            const int idx = named_lists().find(nm);
+            if (idx >= 0) {
+                return take_target(StoreKind::kList, kNamedRefBase + idx);
+            }
+            // A name that could exist but does not: the registry entry is
+            // created at commit time, so a program that fails to evaluate
+            // leaves nothing behind (list_expr.cpp:1301).
+            if (!NamedLists::valid_name(nm)) {
+                return fail("Bad store target");
+            }
+            if (!take_target(StoreKind::kNewList, 0)) {
+                return false;
+            }
+            std::memcpy(out->new_list, nm, len + 1);
+            return true;
+        }
+        return fail("Bad store target");
+    }
+
+    // `sort_asc(l4)` sorts l4 IN PLACE in listexpr — a bare list argument makes
+    // the call a statement rather than an expression. The expression tier
+    // evaluates it by value (5.2.6, where this was deferred as "a commit
+    // decision, not an expression one"), so the in-place half is recovered
+    // here, in the one place that writes: the exact two-instruction program
+    // `push-ref; sort` gets an implicit store back to the same ref. Anything
+    // compound (`sort_asc(l1+1)`, `sort_asc(l1)*2`) is more than two
+    // instructions and stays by value — which is listexpr's rule too.
+    bool emit_in_place_sort() {
+        if (out->n_code != 2) {
+            return true;
+        }
+        const Instr& src = out->code[0];
+        const Instr& call = out->code[1];
+        if (src.op != Op::kPushList || call.op != Op::kCallList || call.a != 1 ||
+            !list_fn_is_sort(call.b)) {
+            return true;
+        }
+        return emit(Op::kStore, static_cast<uint8_t>(StoreKind::kList), src.b);
+    }
+
+    // mat2list writes its list arguments, which makes it a statement rather
+    // than an expression — and unification is what made that distinction
+    // load-bearing. Inside an expression, one term can rewrite a list another
+    // term is holding: `l1 * mat2list([A], l1)` would multiply by l1's NEW
+    // contents, because the operand stack holds the slot by reference. matexpr
+    // forbade the composition ("mat2list must stand alone", mat_expr.cpp:1009)
+    // and it stays forbidden for that reason, stated here as a shape rule on
+    // the compiled program: the call must be its last instruction, and its
+    // result cannot be stored.
+    //
+    // The in-place sort above is the same kind of statement and needs no rule,
+    // because it only writes when it IS the whole program.
+    bool check_statement_forms() {
+        for (int i = 0; i < out->n_code; ++i) {
+            const Instr& in = out->code[i];
+            if (in.op != Op::kCallMat || !mat_fn_quotes_list_refs(in.b)) {
+                continue;
+            }
+            if (i != out->n_code - 1 || store_kind != StoreKind::kNone) {
+                return fail("mat2list must stand alone");
+            }
+        }
+        return true;
+    }
+
     // ---- driver ----------------------------------------------------------
 
     bool run() {
@@ -585,6 +725,15 @@ struct Compiler {
             }
 
             // Operator position.
+            // The store arrow, before '-' is read as subtraction. It ends the
+            // expression: everything after it is the target.
+            if (c == '-' && s[1] == '>') {
+                s += 2;
+                if (!store_target()) {
+                    return false;
+                }
+                break;
+            }
             if (c == ']') {
                 ++s;
                 if (!pop_while_tighter(0, false)) {
@@ -759,6 +908,19 @@ struct Compiler {
                 return false;
             }
         }
+        if (!check_statement_forms()) {
+            return false;
+        }
+        // Both stores come after the whole expression, and in this order: the
+        // implicit sort target is the list the expression names, the explicit
+        // one is where the result goes. `sort_asc(l4) -> l5` writes both, which
+        // is what listexpr does (list_expr.cpp:1361-1395).
+        if (!emit_in_place_sort()) {
+            return false;
+        }
+        if (store_kind != StoreKind::kNone) {
+            return emit(Op::kStore, static_cast<uint8_t>(store_kind), store_index);
+        }
         return true;
     }
 };
@@ -768,6 +930,7 @@ struct Compiler {
 bool compile(const char* src, Program& out, const char** err) {
     out.n_code = 0;
     out.n_consts = 0;
+    out.new_list[0] = 0;
     if (err != nullptr) {
         *err = nullptr;
     }

@@ -56,14 +56,15 @@ void test_sizes() {
     check_eq(static_cast<long>(sizeof(Instr)) * kMaxCode, 1024, "program code bytes");
     check_eq(static_cast<long>(sizeof(math::Complex)) * kMaxConsts, 1024, "constant pool bytes");
 
-    // Program is measured, not derived: the struct pads around its two
-    // bookkeeping ints, so code+consts understates it by 8 B. The budget in
-    // the header quotes the measured figure. (2,064 before 5.2.6 dropped
-    // n_elem_slots with the element-slot lift it belonged to.)
-    check_eq(static_cast<long>(sizeof(Program)), 2056, "sizeof(Program)");
+    // Program is measured, not derived: the struct pads around its bookkeeping
+    // fields, so code+consts understates it by 16 B. The budget in the header
+    // quotes the measured figure. It has moved twice — 2,064 before 5.2.6
+    // dropped n_elem_slots with the element-slot lift it belonged to, and back
+    // to 2,064 when 5.2.8 added the pending `-> name` store target.
+    check_eq(static_cast<long>(sizeof(Program)), 2064, "sizeof(Program)");
 
     const long total = static_cast<long>(sizeof(Value)) * kMaxStack + sizeof(Program);
-    check_eq(total, 3592, "total evaluator bss");
+    check_eq(total, 3600, "total evaluator bss");
     check(total < 10053, "budget stays under the ~10 KB freed by retiring the three evaluators");
 }
 
@@ -198,6 +199,16 @@ void render(const Program& p, char* buf, size_t cap) {
                 put(tmp);
                 break;
             case Op::kTranspose: put("^T"); break;
+            case Op::kStore: {
+                const auto kind = static_cast<StoreKind>(in.a);
+                const char tag = kind == StoreKind::kVar       ? 'v'
+                                 : kind == StoreKind::kList    ? 'l'
+                                 : kind == StoreKind::kNewList ? 'n'
+                                                               : 'm';
+                std::snprintf(tmp, sizeof(tmp), ">%c%u", tag, in.b);
+                put(tmp);
+                break;
+            }
             case Op::kJump:
                 std::snprintf(tmp, sizeof(tmp), "jmp%u", in.b);
                 put(tmp);
@@ -335,12 +346,18 @@ void test_compile_depth() {
 
 // ---- 5.2.4: the stack machine --------------------------------------------
 
-bool eval(const char* src, Value* out, const char** err) {
+// Everything here evaluates in kProbe mode unless a check asks otherwise: a
+// probe computes the value and writes nothing, so hundreds of checks run in any
+// order without Ans, a store or a sorted list leaking from one into the next.
+// The store tests (5.2.8) opt into kCommit and assert on what was written —
+// which is also the contract 5.2.9's differential harness needs.
+bool eval(const char* src, Value* out, const char** err, Mode mode = Mode::kProbe,
+          Commit* commit = nullptr) {
     Program p;
     if (!compile(src, p, err)) {
         return false;
     }
-    return run(p, out, err);
+    return run(p, out, err, mode, commit);
 }
 
 void check_real(const char* src, double expected, const char* what, double tol = 1e-9) {
@@ -387,6 +404,35 @@ void check_eval_error(const char* src, const char* expected, const char* what) {
     const char* err = nullptr;
     if (eval(src, &v, &err)) {
         std::printf("FAIL: %s: '%s' evaluated but should not have\n", what, src);
+        ++g_failures;
+        return;
+    }
+    if (err == nullptr || std::strcmp(err, expected) != 0) {
+        std::printf("FAIL: %s: '%s' -> '%s' (expected '%s')\n", what, src,
+                    err != nullptr ? err : "(null)", expected);
+        ++g_failures;
+    }
+}
+
+// A kCommit run: the value comes back in *v and what was written in *c.
+bool commit_eval(const char* src, Value* v, Commit* c, const char* what) {
+    ++g_checks;
+    const char* err = nullptr;
+    if (!eval(src, v, &err, Mode::kCommit, c)) {
+        std::printf("FAIL: %s: '%s' -> error %s\n", what, src, err != nullptr ? err : "?");
+        ++g_failures;
+        return false;
+    }
+    return true;
+}
+
+void check_commit_error(const char* src, const char* expected, const char* what) {
+    ++g_checks;
+    Value v;
+    Commit c;
+    const char* err = nullptr;
+    if (eval(src, &v, &err, Mode::kCommit, &c)) {
+        std::printf("FAIL: %s: '%s' committed but should not have\n", what, src);
         ++g_failures;
         return;
     }
@@ -1149,7 +1195,14 @@ void test_matrix_bridge() {
                  "list2mat takes any list expression (widened, 5.2.10)");
 
     seed_matrix(6, 3, 2, vpk);
-    check_real("mat2list([G], l3, l4)", 2, "mat2list writes two lists");
+    // The one call in the expression tier that writes, so it needs kCommit —
+    // and the refs it wrote come back in lists_mask, which is what persistence
+    // keys off (5.2.8).
+    Value mv;
+    Commit mc;
+    commit_eval("mat2list([G], l3, l4)", &mv, &mc, "mat2list writes two lists");
+    check(mv.kind == Kind::kReal && mv.r == 2, "mat2list yields the count written");
+    check(mc.lists_mask == ((1U << 2) | (1U << 3)), "mat2list reports both refs");
     ++g_checks;
     if (math::lists().list(2).size() != 3 || math::lists().list(2).get(2) != 3 ||
         math::lists().list(3).size() != 3 || math::lists().list(3).get(1) != 5) {
@@ -1157,6 +1210,11 @@ void test_matrix_bridge() {
         ++g_failures;
     }
     check_compile_error("mat2list([G], x)", "mat2list targets are l1-l6", "bad mat2list target");
+    // A statement, not an expression: composing it would let one term rewrite a
+    // list another term is holding by reference. 5.2.8's static-buffer audit
+    // found this; matexpr's "must stand alone" was the same rule.
+    check_compile_error("2*mat2list([G], l3)", "mat2list must stand alone", "no composition");
+    check_compile_error("mat2list([G], l3)->a", "mat2list must stand alone", "and no store");
     check_eval_error("mat2list([G])", "mat2list needs ([A], l1, ...)", "mat2list needs targets");
     check_eval_error("list2mat(2)", "list2mat takes l1-l6 args", "list2mat needs lists");
 
@@ -1220,17 +1278,18 @@ void test_matrix_complex() {
     check_eval_error("[[i,0][0,1]]", "Non-real result", "REAL gates a complex literal");
     check_real("det([B])", -2, "real det still evaluates in REAL mode");
 
-    // But a complex RESULT built from real data — `i*[B]` — is not rejected
-    // here, and matexpr does reject it ("gate the result too", mat_expr.cpp).
-    // The difference is deliberate and is the same line 5.2.4 drew for scalars:
-    // `i^2` evaluates in this evaluator whatever the number mode, because
-    // rejecting a non-real result is a DISPATCH decision — the home screen is
-    // what knows about REAL-mode retry — and it lands with the commit
-    // semantics in 5.2.8. Pinned here so the gap is visible until then.
+    // A complex RESULT built from real data — `i*[B]`, where no register is
+    // complex — is matexpr's "gate the result too" case (mat_expr.cpp:1312).
+    // 5.2.7 left it open because nothing here owned the commit; 5.2.8 does, so
+    // the gate is on the mode: kCommit refuses it, kProbe still computes it.
+    // That split is the point. `i^2` collapsing to a real -1 in any mode is the
+    // same rule seen from the other side — intermediates are never gated, only
+    // what would be committed or displayed.
+    check_commit_error("i*[B]", "Non-real result", "REAL gates a complex result on commit");
     ++g_checks;
-    const math::Array* promoted = eval_matrix("i*[B]", "complex result in REAL mode");
+    const math::Array* promoted = eval_matrix("i*[B]", "complex result under a probe");
     if (promoted != nullptr && promoted->dtype() != math::Dtype::kComplex) {
-        std::printf("FAIL: i*[B] should still compute; the REAL gate is 5.2.8's\n");
+        std::printf("FAIL: i*[B] must still compute under a probe\n");
         ++g_failures;
     }
 
@@ -1252,18 +1311,259 @@ void test_program_reuse() {
     const int code_len = prog.n_code;
 
     Value v;
-    check(run(prog, &v, &err) && v.kind == Kind::kList, "first run");
+    check(run(prog, &v, &err, Mode::kProbe) && v.kind == Kind::kList, "first run");
     check(v.kind == Kind::kList && v.a->size() == 3 && v.a->get(2) == 6, "first run values");
 
     // Re-run the SAME program against different data: no recompilation, and
     // the program is not consumed or mutated by execution.
     const double changed[] = {10, 20, 30};
     seed_list(0, changed, 3);
-    check(run(prog, &v, &err) && v.kind == Kind::kList, "second run of the same program");
+    check(run(prog, &v, &err, Mode::kProbe) && v.kind == Kind::kList,
+          "second run of the same program");
     check(v.kind == Kind::kList && v.a->get(2) == 60, "second run tracks the new data");
     check(prog.n_code == code_len, "execution leaves the program unchanged");
 
     seed_list(0, base, 3);
+}
+
+// ---- 5.2.8: the store grammar and commit semantics ------------------------
+//
+// Five target forms in one grammar, where the three evaluators had four copies
+// of a rightmost-"->" string search that disagreed about what counts as a
+// target. The compile-side checks pin the grammar; the commit-side ones pin
+// what a run is allowed to write, and — just as importantly — what a probe is
+// not.
+
+void test_store_compile() {
+    check_rpn("2->a", "2 >v0", "scalar store to a");
+    check_rpn("2->theta", "2 >v26", "theta is a store target");
+    check_rpn("1+2->a", "1 2 + >v0", "the arrow ends the expression");
+    check_rpn("{1,2}->l3", "1 2 mklist2 >l2", "list store");
+    check_rpn("l1->l2", "L0 >l1", "list copy");
+    check_rpn("[A]->[C]", "M0 >m2", "matrix store");
+    check_rpn("[A]+[B]->[C]", "M0 M1 + >m2", "matrix expression store");
+
+    // The pointed reserved-word errors, kept verbatim from the parsers being
+    // retired: the silent case-fold these replaced was a wrong answer, not a
+    // syntax error.
+    check_compile_error("2->A", "Variables are lowercase a-z", "uppercase target");
+    check_compile_error("2->e", "e is reserved (Euler's e)", "e is Euler's number");
+    check_compile_error("2->i", "i is reserved (imaginary unit)", "i is the imaginary unit");
+
+    check_compile_error("2->3", "Bad store target", "a number is not a target");
+    check_compile_error("2->", "Bad store target", "bare arrow");
+    check_compile_error("2->ans", "Bad store target", "Ans is not writable");
+    check_compile_error("2->matans", "Bad store target", "MatAns is a result register");
+    check_compile_error("2->[K]", "Bad store target", "matrix slots stop at [J]");
+    check_compile_error("2->l7", "Bad store target", "l7 is not a slot, and not a name");
+    // Two behaviours the old rightmost-arrow search got to by accident: a
+    // chained store parsed as `(1->a) -> b` and failed inside tinyexpr, and a
+    // trailing term left the arrow in the body. Both are pointed now.
+    check_compile_error("1->a->b", "Bad store target", "stores do not chain");
+    check_compile_error("1->a+2", "Bad store target", "the target must end the input");
+}
+
+void test_store_commit() {
+    auto& vars = math::engine().vars();
+    vars.set_real(0, 0);
+    vars.set_real(math::Variables::kAns, 0);
+
+    Value v;
+    Commit c;
+    commit_eval("6->a", &v, &c, "scalar store commits");
+    check(c.var == 0, "the store reports its variable");
+    check(vars.vars[0] == 6, "a holds 6");
+    check(vars.vars[math::Variables::kAns] == 6, "Ans is written for any scalar result");
+    check(c.list == -1 && c.matrix == -1 && c.lists_mask == 0, "nothing else was written");
+
+    // Ans is written with no store at all — the rule matexpr and the engine
+    // both have, and the reason `ans` resolves to something after every entry.
+    vars.set_real(math::Variables::kAns, 0);
+    commit_eval("2+3", &v, &c, "a storeless result still updates Ans");
+    check(vars.vars[math::Variables::kAns] == 5, "Ans is 5");
+    check(c.var == -1, "no store target reported");
+
+    // A complex value stores whole (4D.15) rather than losing its imaginary
+    // part, which is why the commit goes through set_complex.
+    math::set_number_mode(math::NumberMode::kRectangular);
+    commit_eval("3+4i->b", &v, &c, "complex store");
+    check(vars.is_complex(1) && vars.vars[1] == 3 && vars.imag[1] == 4, "b holds 3+4i");
+    math::set_number_mode(math::NumberMode::kReal);
+    vars.set_real(0, 0);
+    vars.set_real(1, 0);
+}
+
+void test_store_probe() {
+    auto& vars = math::engine().vars();
+    vars.set_real(2, 11);
+    vars.set_real(math::Variables::kAns, 99);
+    const double base[] = {1, 2, 3};
+    seed_list(4, base, 3);
+
+    // The whole contract of kProbe: the same value, and nothing written. This
+    // is what the home screen's REAL-mode probe needs (it works today only
+    // because complexexpr happens to have no state to write) and what 5.2.9's
+    // differential harness needs to run one input through two evaluators.
+    Value v;
+    Commit c;
+    const char* err = nullptr;
+    check(eval("7->c", &v, &err, Mode::kProbe, &c), "a store compiles and runs under a probe");
+    check(v.kind == Kind::kReal && v.r == 7, "the probe returns the value it would have stored");
+    check(vars.vars[2] == 11, "the probe did not write c");
+    check(vars.vars[math::Variables::kAns] == 99, "the probe did not write Ans");
+    check(c.var == -1 && c.lists_mask == 0, "the probe reports no commits");
+
+    check(eval("{9,9}->l5", &v, &err, Mode::kProbe, &c), "a list store runs under a probe");
+    check(math::lists().list(4).size() == 3 && math::lists().list(4).get(0) == 1,
+          "the probe did not write l5");
+
+    // A kind mismatch is a property of the input, not of the mode, so a probe
+    // reports it too — otherwise the probe would answer a different question
+    // from the run it stands in for.
+    ++g_checks;
+    if (eval("2->l1", &v, &err, Mode::kProbe, &c)) {
+        std::printf("FAIL: a probe must still reject a mismatched store\n");
+        ++g_failures;
+    }
+    vars.set_real(2, 0);
+}
+
+void test_store_targets() {
+    Value v;
+    Commit c;
+    const double base[] = {1, 2, 3};
+    seed_list(0, base, 3);
+
+    // l1 -> l2, the copy form.
+    commit_eval("l1->l2", &v, &c, "list copy commits");
+    check(c.list == 1 && c.lists_mask == (1U << 1), "l2 is the reported target");
+    check(math::lists().list(1).size() == 3 && math::lists().list(1).get(2) == 3, "l2 has l1");
+    check(v.kind == Kind::kList && v.a == &math::lists().list(1),
+          "the value points at the stored slot, not the temporary");
+
+    // A named list that does not exist yet is created when the store commits,
+    // never when it compiles — a program that fails to evaluate must not leave
+    // a stray empty list behind (4D.13).
+    math::named_lists().remove(math::named_lists().find("cost"));
+    check_rpn("l1*2->cost", "L0 2 * >n0", "a new named list compiles as a pending name");
+    check(math::named_lists().find("cost") < 0, "compiling did not create the list");
+    ++g_checks;
+    if (eval("{1,2}->cost", &v, nullptr, Mode::kProbe, &c) &&
+        math::named_lists().find("cost") >= 0) {
+        std::printf("FAIL: a probe created a named list\n");
+        ++g_failures;
+    }
+    commit_eval("l1*2->cost", &v, &c, "named-list store commits");
+    const int slot = math::named_lists().find("cost");
+    check(slot >= 0, "the named list exists after the commit");
+    check(c.names_modified, "the registry change is reported so the directory persists");
+    check(c.list == math::kNamedRefBase + slot, "the ref uses the one numbering (4D.13)");
+    check(math::named_lists().list(slot).get(1) == 4, "and holds the value");
+
+    // Re-running the SAME program must store again, not fail as a duplicate —
+    // compile-once/eval-N applies to stores as much as to expressions.
+    Program prog;
+    const char* err = nullptr;
+    check(compile("{7,8}->cost", prog, &err), "the pending-name program compiles");
+    check(run(prog, &v, &err, Mode::kCommit, &c), "first commit creates");
+    check(run(prog, &v, &err, Mode::kCommit, &c), "second commit stores into the same list");
+    check(math::named_lists().list(slot).get(0) == 7, "the second run overwrote");
+    math::named_lists().remove(slot);
+
+    // Matrix store, and MatAns alongside it (mat_expr.cpp:1322): the matrix
+    // editor and matans.dat both read that buffer, and it is what gives a
+    // matrix result a lifetime past the next run.
+    const double va[4] = {1, 2, 3, 4};
+    seed_matrix(0, 2, 2, va);
+    commit_eval("[A]+[A]->[C]", &v, &c, "matrix store commits");
+    check(c.matrix == 2, "[C] is the reported target");
+    check(c.mat_ans, "a matrix result rewrites MatAns");
+    check(math::matrices().matrix(2).get(1, 1) == 8, "[C] holds the sum");
+    check(math::matexpr::mat_ans().get(1, 1) == 8, "MatAns holds it too");
+    ++g_checks;
+    if (v.kind != Kind::kMatrix || v.a != &math::matrices().matrix(2)) {
+        std::printf("FAIL: a stored matrix result must name the slot it went to\n");
+        ++g_failures;
+    }
+    commit_eval("[A]*2", &v, &c, "a storeless matrix result still lands in MatAns");
+    check(c.matrix == -1 && c.mat_ans, "MatAns without a store target");
+    ++g_checks;
+    if (v.kind != Kind::kMatrix || v.a != &math::matexpr::mat_ans()) {
+        std::printf("FAIL: an unstored matrix result must name MatAns\n");
+        ++g_failures;
+    }
+
+    // Kind mismatches. Two strings survive, each for the input it is pointed
+    // about: a missing list, and a target of the wrong shape.
+    check_commit_error("2->l1", "Store target needs a list", "a scalar is not a list");
+    check_commit_error("[A]->l1", "Store target needs a list", "nor is a matrix");
+    check_commit_error("l1->a", "Store target mismatch", "a list is not a scalar");
+    check_commit_error("[A]->a", "Store target mismatch", "nor is a matrix");
+    check_commit_error("2->[C]", "Store target mismatch", "a scalar is not a matrix");
+    check_commit_error("l1->[C]", "Store target mismatch", "nor is a list");
+}
+
+// The other half of 5.2.7's outstanding pair: `sort_asc(l4)` sorts l4 in place
+// in listexpr, because a bare list argument makes the call a statement. The
+// expression tier evaluates it by value; the in-place half is recovered as an
+// implicit store, which is why it lands with the store grammar rather than
+// with the list tier.
+void test_store_in_place_sort() {
+    const double jumbled[] = {3, 1, 2};
+    seed_list(3, jumbled, 3);
+
+    check_rpn("sort_asc(l4)", "L3 lf9/1 >l3", "a bare-argument sort stores back");
+    check_rpn("sort_asc(l4+0)", "L3 0 + lf9/1", "a compound argument stays by value");
+    check_rpn("sort_asc(l4)*1", "L3 lf9/1 1 *", "and so does a sort inside an expression");
+
+    Value v;
+    Commit c;
+    commit_eval("sort_asc(l4)", &v, &c, "in-place sort commits");
+    check(math::lists().list(3).get(0) == 1 && math::lists().list(3).get(2) == 3, "l4 is sorted");
+    check(c.lists_mask == (1U << 3), "the sorted list is reported for persistence (D35)");
+
+    // sort + store writes both, which is listexpr's rule (list_expr.cpp:1387).
+    seed_list(3, jumbled, 3);
+    commit_eval("sort_asc(l4)->l5", &v, &c, "sort with a store target");
+    check(math::lists().list(3).get(0) == 1, "the source is still sorted in place");
+    check(math::lists().list(4).get(0) == 1, "and the target holds the result");
+    check(c.lists_mask == ((1U << 3) | (1U << 4)), "both refs need persisting");
+    check(c.list == 4, "the store target is the one reported as the result");
+
+    // A probe of the same input sorts nothing.
+    seed_list(3, jumbled, 3);
+    const char* err = nullptr;
+    check(eval("sort_asc(l4)", &v, &err, Mode::kProbe, &c), "the probe evaluates");
+    check(v.kind == Kind::kList && v.a->get(0) == 1, "and returns the sorted value");
+    check(math::lists().list(3).get(0) == 3, "but leaves l4 alone");
+}
+
+// REAL mode never commits or displays a non-real value (D30). The gate is on
+// the result, never on intermediates — which is the distinction that lets
+// abs(3+4i) work in REAL mode on every path, old and new.
+void test_store_real_gate() {
+    math::set_number_mode(math::NumberMode::kReal);
+    check_commit_error("sqrt(-4)", "Non-real result", "a complex scalar result");
+    check_commit_error("sqrt(-4)->a", "Non-real result", "and it is refused before the store");
+    ++g_checks;
+    if (math::engine().vars().is_complex(0)) {
+        std::printf("FAIL: a rejected result must not reach the variable\n");
+        ++g_failures;
+    }
+    check_commit_error("{1,-1}^0.5", "Non-real result", "a complex list result");
+
+    Value v;
+    Commit c;
+    commit_eval("i^2", &v, &c, "an intermediate may be complex");
+    check(v.kind == Kind::kReal && v.r == -1, "i^2 is a real -1 in any mode");
+    commit_eval("abs(3+4i)", &v, &c, "and so may an argument");
+    check(v.kind == Kind::kReal && v.r == 5, "abs(3+4i) is 5");
+
+    // The same inputs under a probe: computed, not gated. That split is what
+    // makes a probe usable as a probe.
+    const char* err = nullptr;
+    check(eval("sqrt(-4)", &v, &err, Mode::kProbe, &c), "the probe computes sqrt(-4)");
+    check(v.kind == Kind::kComplex && std::fabs(v.c.im - 2) < 1e-9, "and it is 2i");
 }
 
 }  // namespace
@@ -1292,6 +1592,12 @@ int main() {
     test_matrix_bridge();
     test_matrix_complex();
     test_program_reuse();
+    test_store_compile();
+    test_store_commit();
+    test_store_probe();
+    test_store_targets();
+    test_store_in_place_sort();
+    test_store_real_gate();
     test_compile_basics();
     test_compile_associativity();
     test_compile_unary();

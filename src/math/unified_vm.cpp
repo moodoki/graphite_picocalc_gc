@@ -20,9 +20,16 @@
 // over-deep input is a reported error rather than the hard fault matexpr's
 // depth-3 cap exists to prevent (D48).
 //
-// Scope as of 5.2.7: real and complex scalars — arithmetic, unary negation,
+// Scope as of 5.2.8: real and complex scalars — arithmetic, unary negation,
 // powers, variables, catalog constants, calls to catalog/builtin functions —
-// and lists and matrices of either. Only stores are left (5.2.8).
+// lists and matrices of either, and the stores that commit them.
+//
+// 5.2.8 also made this evaluator the layer that decides what may be committed,
+// which the three it replaces split three ways: matexpr and listexpr gated
+// their own results because they wrote their own slots, while complexexpr never
+// gated anything because its caller committed for it. run(Mode::kCommit) owns
+// all of it now, and Mode::kProbe is the same evaluation with every write held
+// back — see Mode in the header.
 namespace math::unified {
 
 namespace {
@@ -356,6 +363,12 @@ struct Machine {
     int n = 0;
     int body_depth = 0;
     const char* err = nullptr;
+    // kProbe computes the value and writes nothing — no store, no Ans, no
+    // MatAns, no in-place sort, no mat2list columns. See Mode in the header.
+    Mode mode = Mode::kProbe;
+    Commit cm;
+
+    bool committing() const { return mode == Mode::kCommit; }
 
     bool fail(const char* msg) {
         if (err == nullptr) {
@@ -1285,10 +1298,11 @@ struct Machine {
     }
 
     // mat2list([A], l1, …): columns out into list targets. The targets are
-    // refs (kPushInt), not values — this WRITES them. What the home screen
-    // shows for it, and when the written lists get persisted, are commit
-    // questions that belong to 5.2.8; here the count of lists written is the
-    // value.
+    // refs (kPushInt), not values — this WRITES them, which is why it is one of
+    // the two places a probe run has to hold back (the other is the in-place
+    // sort's implicit store). The value is the number of lists written, so a
+    // probe still answers the same question; matexpr's "Done (n lists)" display
+    // string is a dispatcher concern and is reconstructible from lists_mask.
     bool mat2list(const Value* args, int argc) {
         if (args[0].kind != Kind::kMatrix) {
             return fail("Expected a matrix");
@@ -1303,6 +1317,10 @@ struct Machine {
             if (!real_int(args[i], &ref) || ref < 0) {
                 return fail("mat2list targets are l1-l6");
             }
+            if (!committing()) {
+                ++written;
+                continue;
+            }
             Array& dst = list_by_ref(ref);
             dst.clear();
             if (!dst.set_dtype(complex ? Dtype::kComplex : Dtype::kDouble) || !dst.resize(rows)) {
@@ -1315,6 +1333,7 @@ struct Machine {
                     dst.set(r, m.get(r, i - 1));
                 }
             }
+            cm.lists_mask |= 1U << ref;
             ++written;
         }
         return finish_call(argc, Value::real(written));
@@ -1507,6 +1526,114 @@ struct Machine {
         return ok && finish_call(argc, Value::matrix(out));
     }
 
+    // ---- stores and commit semantics (5.2.8) -----------------------------
+
+    // REAL mode never commits or displays a non-real value (D30). The test is
+    // on the value, not on how it was built: `i^2` is -1 and stores fine, while
+    // `i*[B]` is a complex matrix and does not. Intermediates are never gated —
+    // that is what makes abs(3+4i) = 5 work in REAL mode, on every path.
+    bool real_mode_ok(const Value& v) const {
+        if (number_mode() != NumberMode::kReal) {
+            return true;
+        }
+        if (v.is_array()) {
+            return v.a->dtype() != Dtype::kComplex;
+        }
+        return v.as_complex().im == 0.0;
+    }
+
+    // Resolve a `-> name` target that did not exist at compile time. find()
+    // first, so a program run N times creates the list once and stores into it
+    // N times rather than failing as a duplicate on the second run.
+    int resolve_new_list() {
+        const int found = named_lists().find(p->new_list);
+        if (found >= 0) {
+            return kNamedRefBase + found;
+        }
+        const int made = named_lists().create(p->new_list);
+        if (made < 0) {
+            return -1;
+        }
+        cm.names_modified = true;
+        return kNamedRefBase + made;
+    }
+
+    bool store_list(int ref, const Value& v) {
+        Array& dst = list_by_ref(ref);
+        // `l1 -> l1` and the in-place sort's implicit store both land here with
+        // the value already in the destination.
+        if (v.a != &dst && !listops::copy(*v.a, dst)) {
+            return fail("Out of list memory");
+        }
+        cm.list = static_cast<int16_t>(ref);
+        cm.lists_mask |= 1U << ref;
+        return push(Value::list(&dst));
+    }
+
+    // A store writes a slot the operand stack may still be naming, so it rests
+    // on an invariant the compiler guarantees: kStore is only ever emitted at
+    // the end of a program, where exactly one value is live. Nothing can then
+    // read a slot this just rewrote. mat2list is the one other writer and it is
+    // held to the same shape rule (see check_statement_forms); an in-body store
+    // would break both and is why this is written down rather than assumed.
+    bool store(const Instr& in) {
+        Value v;
+        if (!pop(&v)) {
+            return false;
+        }
+        if (n != 0) {
+            return fail("Syntax error");  // a store mid-expression is a compiler bug
+        }
+        const auto kind = static_cast<StoreKind>(in.a);
+        // Kind mismatch first: it is the same error whether or not this run
+        // commits, so a probe reports it too.
+        if (kind == StoreKind::kMatrix ? v.kind != Kind::kMatrix
+            : kind == StoreKind::kVar  ? !v.is_scalar()
+                                       : v.kind != Kind::kList) {
+            // The two strings the retired parsers used, each kept for the input
+            // it is pointed about: `2 -> l1` is a missing list, `[A] -> a` is a
+            // target of the wrong shape.
+            return fail(kind == StoreKind::kVar || kind == StoreKind::kMatrix
+                            ? "Store target mismatch"
+                            : "Store target needs a list");
+        }
+        if (!real_mode_ok(v)) {
+            return fail("Non-real result");  // never commit what REAL cannot show
+        }
+        if (!committing()) {
+            return push(v);
+        }
+        switch (kind) {
+            case StoreKind::kMatrix: {
+                Array& dst = matrices().matrix(in.b);
+                if (!matops::copy(*v.a, dst)) {
+                    return fail("Out of matrix memory");
+                }
+                cm.matrix = static_cast<int8_t>(in.b);
+                return push(Value::matrix(&dst));
+            }
+            case StoreKind::kVar: {
+                const Complex z = v.as_complex();
+                if (z.im == 0.0) {
+                    engine().vars().set_real(in.b, z.re);
+                } else {
+                    engine().vars().set_complex(in.b, z.re, z.im);
+                }
+                cm.var = static_cast<int8_t>(in.b);
+                return push(v);
+            }
+            case StoreKind::kNewList: {
+                const int ref = resolve_new_list();
+                if (ref < 0) {
+                    return fail("Too many named lists");
+                }
+                return store_list(ref, v);
+            }
+            default:
+                return store_list(in.b, v);
+        }
+    }
+
     bool step(const Instr& in) {
         switch (in.op) {
             case Op::kPushConst: {
@@ -1593,9 +1720,10 @@ struct Machine {
                 return call_list(in);
             case Op::kCallMat:
                 return call_mat(in);
+            case Op::kStore:
+                return store(in);
             default:
-                // kStore arrives with 5.2.8; kJump / kRet are handled by the
-                // execution loop.
+                // kJump / kRet are handled by the execution loop.
                 return fail("Syntax error");
         }
     }
@@ -1678,6 +1806,10 @@ bool list_fn_is_seq(int idx) {
     return idx == static_cast<int>(ListFn::kSeq);
 }
 
+bool list_fn_is_sort(int idx) {
+    return idx == static_cast<int>(ListFn::kSortAsc) || idx == static_cast<int>(ListFn::kSortDesc);
+}
+
 int mat_fn_index(const char* name, size_t len) {
     for (int i = 0; i < kMatFnCount; ++i) {
         if (std::strlen(kMatFnTable[i].name) == len &&
@@ -1692,9 +1824,12 @@ bool mat_fn_quotes_list_refs(int idx) {
     return idx == static_cast<int>(MatFn::kMat2list);
 }
 
-bool run(const Program& p, Value* out, const char** err) {
+bool run(const Program& p, Value* out, const char** err, Mode mode, Commit* commit) {
     if (err != nullptr) {
         *err = nullptr;
+    }
+    if (commit != nullptr) {
+        *commit = Commit{};
     }
     // Every temporary from the previous run dies here — which is also what
     // makes the returned list Value valid only until the next call.
@@ -1704,6 +1839,7 @@ bool run(const Program& p, Value* out, const char** err) {
     }
     Machine m;
     m.p = &p;
+    m.mode = mode;
     if (!m.run_from(0)) {
         if (err != nullptr) {
             *err = m.err != nullptr ? m.err : "Syntax error";
@@ -1719,8 +1855,53 @@ bool run(const Program& p, Value* out, const char** err) {
         }
         return false;
     }
+    Value v = m.st[0];
+
+    if (mode == Mode::kCommit) {
+        // The result gate, which a store has already applied to itself — this
+        // is the storeless case (`sqrt(-4)` in REAL mode). Doing it here rather
+        // than in the dispatcher is what closes 5.2.7's outstanding narrowing:
+        // matexpr gates a complex result built from real data, this evaluator
+        // did not, and the difference was only ever about which layer owned the
+        // commit. One evaluator owns it now.
+        if (!m.real_mode_ok(v)) {
+            if (err != nullptr) {
+                *err = "Non-real result";
+            }
+            return false;
+        }
+        auto& vars = engine().vars();
+        if (v.is_scalar()) {
+            const Complex z = v.as_complex();
+            if (z.im == 0.0) {
+                vars.set_real(Variables::kAns, z.re);  // a real write clears the imag part
+            } else {
+                vars.set_complex(Variables::kAns, z.re, z.im);
+            }
+        } else if (v.kind == Kind::kMatrix) {
+            // MatAns, exactly as matexpr leaves it (mat_expr.cpp:1322): the
+            // matrix editor shows it, matans.dat persists it, and it is what
+            // gives a matrix result a lifetime past the next run() — the temps
+            // die there. Still matexpr's buffer while both evaluators exist;
+            // MatAns is a store, not evaluator state, and 5.2.11 rehomes it
+            // with the rest of the file.
+            if (!matops::copy(*v.a, matexpr::mat_ans_mutable())) {
+                if (err != nullptr) {
+                    *err = "Out of matrix memory";
+                }
+                return false;
+            }
+            m.cm.mat_ans = true;
+            if (m.cm.matrix < 0) {
+                v = Value::matrix(&matexpr::mat_ans());
+            }
+        }
+    }
+    if (commit != nullptr) {
+        *commit = m.cm;
+    }
     if (out != nullptr) {
-        *out = m.st[0];
+        *out = v;
     }
     return true;
 }

@@ -143,7 +143,64 @@ enum class Op : uint8_t {
     kJump,       // b = absolute code index; skips a quoted body (5.2.6)
     kRet,        // ends a quoted body, handing its value back to the caller
     kIndex,      // [A](row, col) — pops col, row, matrix
-    kStore,      // b = encoded target, see StoreTarget
+    kStore,      // a = StoreKind, b = target index (5.2.8)
+};
+
+// ---- Stores (5.2.8) ------------------------------------------------------
+//
+// One grammar for the five target forms the three evaluators accepted
+// separately — `-> a`, `-> theta`, `-> l1`-`l6`, `-> name` and `-> [A]`-`[J]`.
+// The arrow is compiled, not stripped: every evaluator today finds the
+// rightmost "->" by string search and re-trims the body around it
+// (engine.cpp:402, complex_expr.cpp:454, list_expr.cpp:1306, mat_expr.cpp:978),
+// which is four copies of one rule and the reason `2->3` reports different
+// errors depending on which parser claimed the input.
+enum class StoreKind : uint8_t {
+    kNone,
+    kVar,      // index = Variables slot (a-z, theta)
+    kList,     // index = list ref, one numbering: 0-5 = l1-l6, 6+k = named slot k
+    kNewList,  // a named list that does not exist yet — the name is in
+               // Program::new_list and the registry entry is created at COMMIT
+               // time, so a program that fails to evaluate leaves no stray
+               // empty list behind (listexpr's rule since 4D.13)
+    kMatrix,   // index = matrix slot 0-9
+};
+
+// Longest storable named list. Must match NamedLists::kMaxName, asserted where
+// the compiler resolves the name; kept as a literal so this header does not
+// pull in the list stores.
+constexpr int kMaxStoreName = 5;
+
+// Commit vs probe (5.2.8). A probe run computes the value and touches nothing:
+// no Ans, no store, no MatAns, no in-place sort, no mat2list writes. It is what
+// the REAL-mode probe on the home screen needs (home_screen.cpp:669, which
+// leans on complexexpr never mutating engine state) and what the differential
+// harness in 5.2.9 needs to run the same input through both evaluators without
+// the first one changing what the second sees.
+//
+// The two modes return the same *value* for the same input — the difference is
+// side effects only, with one deliberate exception: REAL mode's rule that a
+// non-real value is never committed or displayed (D30) is a commit rule, so
+// kCommit reports "Non-real result" where kProbe hands back the value. That is
+// exactly the question a probe is asked.
+enum class Mode : uint8_t { kCommit, kProbe };
+
+// What a kCommit run wrote, so the caller knows what to persist. One
+// convention replacing three: matexpr's {stored_matrix, stored_list,
+// matrices_modified, lists_modified, uint8 lists_mask}, listexpr's
+// {stored_list, lists_modified, uint32 lists_mask, names_modified} and
+// engine/complexexpr's bare stored_var.
+struct Commit {
+    int8_t var = -1;     // `-> a` / `-> theta` target, else -1. Ans is written
+                         // for every scalar result, store or no store.
+    int8_t matrix = -1;  // `-> [X]` target, else -1
+    int16_t list = -1;   // `-> lk` / `-> name` target, else -1
+    // Every list ref written by this run, by ref number: the store, an in-place
+    // sort, and mat2list's column targets. Persistence keys off this, not off
+    // `list` — the D35 sort-persistence gap was exactly that distinction.
+    uint32_t lists_mask = 0;
+    bool names_modified = false;  // the named-list registry gained an entry
+    bool mat_ans = false;         // a matrix result rewrote MatAns; persist it
 };
 
 // 4 bytes. Kept deliberately narrow: the program array is sized for the worst
@@ -161,11 +218,12 @@ struct Instr {
 // phase5.2-spec.md §5). Everything here is bss:
 //
 //   operand stack   64 x 24 =  1,536 B
-//   Program                  =  2,056 B  (code 1,024 + consts 1,024 + 8
-//                                         bookkeeping; measured on target,
-//                                         not derived — the struct pads)
+//   Program                  =  2,064 B  (code 1,024 + consts 1,024 + 16
+//                                         bookkeeping and the pending store
+//                                         name; measured on target, not
+//                                         derived — the struct pads)
 //                             -------
-//                              3,592 B
+//                              3,600 B
 //
 // The list tier (5.2.6) adds ~160 B on top of that and no buffers at all: its
 // chunk staging overlays the shared compute arena (scratch.hpp, 4 B for the
@@ -194,6 +252,10 @@ struct Program {
     Complex consts[kMaxConsts];
     int n_code = 0;
     int n_consts = 0;
+    // The pending `-> name` target of a kStore with kind kNewList (5.2.8).
+    // Text, because the registry entry is created when the store commits, not
+    // when it compiles.
+    char new_list[kMaxStoreName + 1] = {};
 };
 
 // ---- Compiler (5.2.3) ----------------------------------------------------
@@ -201,10 +263,10 @@ struct Program {
 // Shunting-yard, iterative: no parse recursion, so nesting costs operator-stack
 // slots rather than call frames. Emits RPN into `out`.
 //
-// Scope as of 5.2.6: numeric and imaginary literals, variables, catalog
+// Scope as of 5.2.8: numeric and imaginary literals, variables, catalog
 // constants and function calls, `+ - * / ^`, unary sign, parentheses, brace
-// list literals, `l1`-`l6` and named-list references, and the list functions.
-// Matrix literals and references arrive with 5.2.7, stores with 5.2.8.
+// list literals, `l1`-`l6` and named-list references, the list and matrix
+// functions, matrix literals and references, and the store suffix.
 //
 // `kPushVar` slots are `Variables`' own indices (0-25 = a-z, 26 = theta,
 // 27 = Ans) rather than a parallel numbering, so `Variables::is_complex(idx)`
@@ -233,6 +295,9 @@ int builtin_arity(int idx);
 // and the variable slot reach the machine as kPushInt operands.
 int list_fn_index(const char* name, size_t len);
 bool list_fn_is_seq(int idx);
+// sort_asc/sort_desc, the one pair whose whole-expression form is a statement
+// rather than an expression — see the store grammar in unified_compile.cpp.
+bool list_fn_is_sort(int idx);
 
 // Matrix functions (5.2.7): the catalogue's other `fn == nullptr` block, plus
 // the vector ops. Same story as the list table and looked up right after it —
@@ -261,8 +326,14 @@ bool compile(const char* src, Program& out, const char** err);
 //
 // A returned list Value points at an evaluator-owned temporary that stays valid
 // until the NEXT run() — the same contract listexpr's Result::list has had
-// since Phase 3A.
-bool run(const Program& p, Value* out, const char** err);
+// since Phase 3A. A returned *matrix* Value does not need that caveat in
+// kCommit mode: a matrix result is copied into MatAns (or into its `-> [X]`
+// slot), which is where matexpr has always left it.
+//
+// `mode` is deliberately not defaulted: silently committing is the failure mode
+// this parameter exists to prevent. `commit` may be null when the caller does
+// not care what was written.
+bool run(const Program& p, Value* out, const char** err, Mode mode, Commit* commit = nullptr);
 
 static_assert(sizeof(Value) == 24,
               "Value is the measured 24 B (5.2.1); update the budget if it moves");
