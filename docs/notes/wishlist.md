@@ -10,10 +10,41 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Re-vendor tinyexpr from upstream `master`, and drop our local `factor()`
+  fix** (raised 2026-08-09 while checking whether D51 was worth reporting
+  upstream — it was not, because it was already fixed there). The project was
+  dormant for years and then landed **22 commits on 2026-08-05**, four days
+  before ours. `drivers/README.md`'s policy already decides the direction —
+  "port their fix if it is equivalent" — and it **is** equivalent: their
+  [`1e2ba48`](https://github.com/codeplea/tinyexpr/commit/1e2ba481) fixes both
+  defects D51 fixes, by a different route, and our 46-case corpus passes on
+  `master` with 0 failures. Carrying a private fork of a fix that exists
+  upstream is the thing to stop doing. **But `master` is not a drop-in**, which
+  is why this is a wishlist item and not a chore:
+  - It merged the **logic branch**, so `!` is now prefix logical-not. We use
+    `!` as *postfix factorial*. `Engine::preprocess` rewrites every `!` to
+    `fac(...)` before the parser sees one, so nothing breaks today — but that
+    containment stops being incidental and starts being load-bearing, and `!=`
+    would acquire a meaning.
+  - [`a851f2b`](https://github.com/codeplea/tinyexpr/commit/a851f2be) **"Limit
+    parser recursion depth, fixes #136" is D47's bug, fixed upstream** — inside
+    the parser, counting what actually recurses, where our `kMaxParseDepth = 7`
+    is a paren-count pre-scan bolted on outside it (`engine.cpp`). Adopting
+    theirs could retire ours, which is the real prize here.
+  - Also locale-independent number parsing, `unsigned char` ctype fixes, ARMCC
+    support, and an upstream CI workflow.
+  - Sequencing note: this touches the evaluator that **Phase 5.2's §9 A/B
+    measurement uses as its baseline**, so do it either before that measurement
+    or well after — not between the two halves of it.
+
 - **Replace tinyexpr with the unified evaluator on the numeric path too**
-  (raised 2026-08-09, **D50**, spec P5.2-7). Would make it four parsers → *one*,
-  fix the above everywhere, remove tinyexpr's depth-7 parse cap from graphing
-  (D47) and return 7,897 B of flash. **Revisit after Phase 5.2 closes**, and not
+  (raised 2026-08-09, **D50**, spec P5.2-7). **The alternative to the item
+  above, and they resolve the same two problems by opposite routes** — a
+  re-vendor keeps tinyexpr and adopts upstream's depth limit; this one deletes
+  tinyexpr and the depth limit with it. Whichever is decided first should
+  discharge the other rather than both being carried. Would make it four
+  parsers → *one*, remove tinyexpr's depth-7 parse cap from graphing (D47) and
+  return 7,897 B of flash. **Revisit after Phase 5.2 closes**, and not
   before §9's M1 has measured per-sample latency for the stack machine against
   tinyexpr — that number is the one input the decision needs and nobody has it.
   Known costs, measured rather than guessed: a `Program` is a fixed 2,064 B
