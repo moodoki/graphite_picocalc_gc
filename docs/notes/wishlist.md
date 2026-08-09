@@ -10,6 +10,44 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Collapse `Kind::kMatrix` and `Kind::kList` into one shape-driven array kind**
+  (raised 2026-08-09 while re-evaluating the change register's preserved rows
+  after 5.2.12). **The storage is already unified and that is the common
+  misconception about this item**: `math::Array` is one type with `ndim_` in
+  {1,2}, one `dtype_`, one SRAM/PSRAM backing and one set of accessors —
+  `is_list()` is literally `ndim_ == 1`. What is still split is the `Value` tag
+  (~25 branch sites in `unified_vm.cpp`) and the `listops::`/`matops::`
+  namespaces. So the change is "let shape drive behaviour", not "share storage".
+  - **It is a correctness-and-clarity change, not a performance one.** Checked
+    against all three of the phase's measured regressions and it moves none of
+    them: **M6** is pure scalar tier — its ~4.6 us re-entry and ~1.7x per-op rate
+    never touch the array tag — while **M2** is memory bandwidth (streaming
+    passes) and **M5** is a fixed compile cost. Nobody should scope this
+    expecting a speedup.
+  - **P6 would be fixed for free.** It says "a returned *list* `Value` is valid
+    only until the next `run()`", but `unified_eval.hpp:83` already states the
+    rule for both kinds — the lifetime contract is kind-agnostic today and P6
+    just describes half of it. Collapsing the tag corrects the wording and
+    changes nothing else.
+  - **P5 would dissolve, but by obsolescence rather than repair.** Its aliasing
+    hazard — `mat2list` writes named list slots the operand stack may hold by
+    reference — is about slot mutation plus a by-reference stack, and unification
+    does not touch either. But `mat2list` exists only to unpack matrix columns
+    into list variables, and under a shape-driven model that is a **slice**,
+    which *returns a value* instead of *writing slots* and so has no hazard at
+    all. Note this is a **second, independent route** to P5 dissolving (the
+    register's re-evaluation names the by-reference model as the first), which
+    makes P5 the weakest-anchored of the preserved rows.
+  - **Where the real cost is**, and it should be scoped before anyone starts:
+    (a) **error messages are derived from kind checks** — `unified_vm.cpp`
+    gates on `Kind::kMatrix` at 1126/1146/1306/1453 to produce "Expected a
+    matrix", "Store target mismatch" and friends, so every one has to be
+    re-derived from shape. That is E-class register churn, which 5.2 found to be
+    the expensive kind (E8 was the single row the phase could not cheaply
+    change). (b) **`copy` genuinely disagrees**: `eval_shim.hpp:90` records that
+    `matops::copy` would *reshape* a 1-D array where `listops::copy` does not —
+    a semantic decision, not a mechanical merge.
+
 - **Re-vendor tinyexpr from upstream `master`, and drop our local `factor()`
   fix** (raised 2026-08-09 while checking whether D51 was worth reporting
   upstream — it was not, because it was already fixed there). The project was
@@ -44,18 +82,35 @@ only of features that don't yet have a home.
   tinyexpr and the depth limit with it. Whichever is decided first should
   discharge the other rather than both being carried. Would make it four
   parsers → *one*, remove tinyexpr's depth-7 parse cap from graphing (D47) and
-  return 7,897 B of flash. **Revisit after Phase 5.2 closes**, and not
-  before §9's M1 has measured per-sample latency for the stack machine against
-  tinyexpr — that number is the one input the decision needs and nobody has it.
-  Known costs, measured rather than guessed: a `Program` is a fixed 2,064 B
-  against a malloc'd tree of ~120 B for `sin(x)+2*x`, so caching Y1-Y7 compiled
-  would cost 14.4 KB against ~1 KB; `compile()`/`run()` are non-reentrant
-  singletons and the numeric path re-enters them; the evaluator's chunk staging
-  overlays the `kCompute` arena that `stats`/`matrix`/`infer` own; and there is
-  no differential corpus off the home screen, where 5.2.9 found three bugs
-  inside covered territory. Note that `phase4-spec.md` §5.2's "would double
-  arithmetic cost" does **not** argue against this — it argued against a
-  `Complex` numeric value type, and this evaluator keeps a real tier.
+  return 7,897 B of flash.
+  ~~**Revisit after Phase 5.2 closes**, and not before §9's M1 has measured
+  per-sample latency…~~ — **that number now exists, and it argues against
+  doing this** (5.2.12, D50's amendment, spec P5.2-7). Measured on the shape
+  that matters — `listops::seq` compiles once and evaluates many, which is the
+  graphing pattern — the VM is **~1.75x slower per operation** than tinyexpr's
+  compiled tree walk, plus ~4.6 us/element of fixed re-entry. Seven Y= slots at
+  three operations would go **86.6 → 152.3 ms per redraw**, on the screen
+  **D10 leg B already exists to speed up**. M1's one-shot win (−22 to −32%)
+  comes from dropping the REAL-mode double evaluation and does not transfer to
+  repeated evaluation.
+  - **Two of the costs listed here have since been corrected**, so do not carry
+    them forward unexamined. The **14.4 KB** `Program` figure assumed caching
+    Y1-Y7 compiled; nothing requires that, and compile is a fixed ~0.19 ms
+    against ~12 ms of evaluation per redraw, so compile-per-redraw is fine. And
+    **flash would improve**, not worsen: −7,897 B returned against the +1,960
+    (Pico 1) / +3,320 (Pico 2) that 5.2 spent.
+  - Still standing: `compile()`/`run()` are non-reentrant singletons and the
+    numeric path re-enters them; the chunk staging overlays the `kCompute` arena
+    that `stats`/`matrix`/`infer` own; and there is no differential corpus off
+    the home screen, where 5.2.9 found three bugs inside covered territory.
+  - `phase4-spec.md` §5.2's "would double arithmetic cost" does **not** argue
+    against this — it argued against a `Complex` numeric value type, and this
+    evaluator keeps a real tier. The valid argument is the measured one above.
+  - **What would have to change first**: the gap is a ~4.6 us fixed per-call
+    re-entry (VM entry/exit, plausibly attackable alone) plus a ~1.7x
+    per-operation rate (flat RPN with switch dispatch against a direct tree walk
+    through function pointers). **Nothing was profiled**, so neither is
+    established as irreducible — nor as fixable.
 
 - **Screenshot capture — serial dump (debug aid) + save-to-SD (user feature)**
   (raised 2026-08-05, same session as serial key injection — two uses of the

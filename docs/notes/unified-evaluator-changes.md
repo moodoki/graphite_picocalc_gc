@@ -294,6 +294,16 @@ contents). That aliasing hazard is structural and unchanged. **If the
 by-reference model is ever revisited — copy-on-return, say — these two must be
 revisited together**, and P5 would likely dissolve on its own.
 
+There is a **second, independent route to the same place**, raised the same day
+and now on the wishlist: collapsing `Kind::kMatrix`/`kList` into one shape-driven
+kind. That does not fix P5's hazard — the hazard is slot mutation plus a
+by-reference stack, neither of which is about typing — but it would make
+`mat2list` unnecessary, since unpacking a matrix column becomes a **slice** that
+returns a value rather than a statement that writes slots. Two independent routes
+to obsolescence makes **P5 the weakest-anchored of these rows**. It would also
+fix P6's wording for free: P6 is stated as a list rule, but
+`unified_eval.hpp:83` already applies it to both kinds.
+
 **P7 — the premise was already dead when this row was written, and the row did
 not say so.** It cites `phase4-spec.md` §5.2's guardrail. **D50 established the
 same day that this reason does not transfer**: §5.2 argued against a `Complex`
