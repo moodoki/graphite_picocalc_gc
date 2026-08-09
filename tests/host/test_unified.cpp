@@ -787,13 +787,14 @@ void test_list_wrappers() {
     const double plus[] = {2, 4, 7, 11};
     check_list("cumsum(range(1,4))+1", plus, 4, "wrapper result feeds an elementwise op");
 
-    // Value semantics, always: sort_asc on a bare list does NOT mutate it here.
-    // listexpr's in-place form is a commit decision and lands with the store
-    // grammar in 5.2.8 — flagged rather than silently changed.
+    // Value semantics in the expression tier, always. listexpr's in-place form
+    // is a COMMIT behaviour and 5.2.8 restored it there, as an implicit store —
+    // so a probe of the same input sorts nothing, which is what these two
+    // checks are: the expression half in isolation.
     const double unsorted[] = {3, 1, 2};
     seed_list(3, unsorted, 3);
     check_list("sort_asc(l4)", sorted, 3, "sort by value");
-    check(math::lists().list(3).get(0) == 3, "l4 unchanged: in-place sorting is 5.2.8's call");
+    check(math::lists().list(3).get(0) == 3, "a probe leaves l4 alone (test_store_in_place_sort)");
 
     // What the phase is for. listexpr caps this chain at kMaxRec = 3 because
     // every level costs a call frame against core 0's 4 KB (D47); here the
@@ -1492,6 +1493,15 @@ void test_store_targets() {
         std::printf("FAIL: an unstored matrix result must name MatAns\n");
         ++g_failures;
     }
+
+    // A list result from a MATRIX expression, into a named list. Impossible
+    // today from either side: matexpr's store targets have no named-list branch
+    // and listexpr never sees `dim([A])`. The target grammar stopped being
+    // per-evaluator. Widened, 5.2.10.
+    commit_eval("dim([A])->mydim", &v, &c, "a matrix-expression list into a named list");
+    const int dim_slot = math::named_lists().find("mydim");
+    check(dim_slot >= 0 && math::named_lists().list(dim_slot).get(0) == 2, "mydim holds dim([A])");
+    math::named_lists().remove(dim_slot);
 
     // Kind mismatches. Two strings survive, each for the input it is pointed
     // about: a missing list, and a target of the wrong shape.

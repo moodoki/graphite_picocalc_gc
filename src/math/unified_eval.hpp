@@ -60,6 +60,12 @@ class Array;
 // than the extra streaming. 5.2.12 measures it on hardware against today's
 // lift; that measurement, not this comment, is what settles it.
 //
+// Where this evaluator answers differently from the three it replaces, the case
+// is recorded in docs/notes/unified-evaluator-changes.md — the behaviour change
+// register — with the host check that pins it. That file, not a comment here,
+// is what 5.2.9's differential harness treats as its allow-list and what 5.2.10
+// signs off. A difference that is not in it is a bug.
+//
 // This header is task 5.2.2: the value type, the instruction encoding and the
 // sizing. The compiler is 5.2.3, the machine 5.2.4.
 namespace math::unified {

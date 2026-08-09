@@ -41,7 +41,7 @@ on, dotted ones are significant units that *turned up* and sit outside the
 parent phase's goals. Idea F emerged from Phase 4's design-departures review and
 was reinforced by Phase 5's bug work (D46, D48), but unifying the evaluators was
 never part of what Phase 5 set out to deliver — Phase 5 closed without it. It is
-substantial — §4 now sizes it at **~146 hrs**, larger than Phase 6B — so the
+substantial — §4 now sizes it at **~150 hrs**, larger than Phase 6B — so the
 dotted form is a judgement call: it is a consequence of earlier phases rather
 than a new goal of its own, and it belongs before Phase 6 rather than alongside
 it.
@@ -184,7 +184,7 @@ replaces. The cost is intermediate arrays — `sin(l1)+2*l2` streams three passe
 where today's lift streams one — drawn from the ArrayStore temporaries
 `listexpr` already pays for. **5.2.12 measures it against today's lift on
 hardware; that measurement settles whether the trade was right, not this
-paragraph.**
+paragraph** — §9, rows M2 and M3.
 
 One mechanism did survive from the element-slot idea, for the one case that
 genuinely needs deferred evaluation: `seq(expr, var, lo, hi, step)` compiles
@@ -222,11 +222,11 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.6~~ | ~~List tier incl. the lift~~ **DONE 2026-08-09** (broadcast, not element slots — §3) | 22 | `test_lists` passes; **compile-once/eval-N preserved**, 256-element chunks |
 | ~~5.2.7~~ | ~~Matrix tier~~ **DONE 2026-08-09** (`dim`/`eigenvals` no longer need to stand alone) | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
 | ~~5.2.8~~ | ~~Superset store grammar + commit semantics~~ **DONE 2026-08-09** (both outstanding narrowings closed) | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
-| 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs |
-| 5.2.10 | Widened behaviours + allow-list | 10 | Each widened case has a written expectation and a TI-parity rationale |
-| 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
-| 5.2.12 | On-device verification, both boards | 8 | Stack peak, lift timing vs today, bss delta, serial-injection differential |
-| | **Total** | **146** | |
+| 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs; the [change register](../notes/unified-evaluator-changes.md) is its allow-list |
+| 5.2.10 | Widened behaviours + allow-list | 10 | Every register row signed off with a TI-parity rationale; the register's D-rows (display strings, REAL-mode probe sequencing) discharged |
+| 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it. **Not before §9's A/B pass**, which needs both pipelines buildable |
+| 5.2.12 | On-device verification, both boards | 12 | Stack peak, bss delta, serial-injection differential, and **§9's A/B latency measurement against the old pipeline** |
+| | **Total** | **150** | |
 
 **On the estimate.** This is roughly double the 73 hrs written before the
 inventory, and it is a consequence of the four decisions rather than of scope
@@ -234,6 +234,11 @@ creep. The phase number **stays 5.2** (decided 2026-08-09): provenance is the
 criterion - this turned up as a consequence of Phases 4 and 5 rather than being
 a goal of its own. Recorded explicitly so the convention's size test is seen to
 have been considered rather than ignored.
+
+**146 → 150, 2026-08-09**: 5.2.12 gains 4 hrs for §9's A/B latency pass against
+the old pipeline. The phase replaces the home screen's evaluator, so "is it
+faster or slower than what it replaces" needs a measurement rather than an
+argument — and §3 has been promising exactly that measurement since 5.2.6.
 
 ## 5. Sizing — DONE 2026-08-09 (task 5.2.1). The premise was wrong.
 
@@ -417,71 +422,91 @@ it. A store emitted inside a quoted body would violate it.
 | P5.2-4 | Does idea H (polymorphic variables, D40) become cheap once this lands? | §H notes unified storage "almost certainly means a fourth format change". Worth re-costing after, not before. |
 | P5.2-5 | Do the retired parsers' error strings need to be preserved verbatim? | Host tests assert on exact strings ("Too deeply nested", "Dim mismatch"). Changing them is a test churn cost to budget. **Partly answered 2026-08-09 (5.2.8)**: the criterion is provenance — a string that states a decision is kept verbatim ("e is reserved (Euler's e)"), a string that fell out of a parser accident is replaced. Both store-grammar cases are listed below. |
 
-### Widenings found so far — the running list 5.2.10 signs off
+### Behaviour changes — moved out 2026-08-09 (5.2.8)
 
-Each is a case the retired evaluator rejected and the unified one answers. They
-are pinned by value in `test_unified` already, so the widening is deliberate;
-what 5.2.10 owes each row is a TI-parity judgement.
+The running list of widenings, narrowings, grammar changes and error-string
+divergences now lives in
+**[unified-evaluator-changes.md](../notes/unified-evaluator-changes.md)** — the
+behaviour change register. It was a table in this section through 5.2.7 and
+outgrew it: by 5.2.8 the same rows had to serve three consumers with different
+needs, and a design spec is the wrong shape for all three.
 
-| # | Was | Now | Where it comes from |
-|---|---|---|---|
-| W1 | `sin(l1)` on a complex list → *"Complex lists support only +, -, scalar \* and /"* | maps elementwise | `eval_clift`'s narrow grammar is gone (5.2.6) |
-| W2 | `l1*l1` on complex lists → *"Complex lists: one list per term"* | elementwise product | same |
-| W3 | `2/l1` on a complex list → *"Cannot divide by a list"* | elementwise reciprocal | same |
-| W4 | `sum(l1)+1` on a complex list → *"Complex sum/mean must stand alone"* | composes | a reduction returns a `Value`, not spliced text (5.2.6) |
-| W5 | `sqrt({4,-1})` → NaN element | promotes the list to complex | scalar `sqrt(-4) = 2i` applied elementwise (5.2.6) |
-| W6 | `sort_asc(sort_asc(sort_asc(sort_asc(...))))` → *"Too deeply nested"* at 3 levels | evaluates | the cap was a call-frame budget (D47), and there are no frames now (5.2.6) |
-| W7 | `2*dim([A])`, `sum(dim([A]))` → *"dim/eigenvals must stand alone"* | compose | `matexpr::Value` could not hold a list; this one can (5.2.7) |
-| W8 | `eigenvals` of a complex-conjugate spectrum → unstorable display text (D30/P4-7) | a complex list | "lists are real-only" stopped being true in 4D.24 (5.2.7) |
-| W9 | `det(([A]*([A]+[A]))+[A])` → *"Too deeply nested"* (depth 4) | evaluates | `matexpr`'s cap is 3 with 84 B of margin — the same call-frame budget (5.2.7) |
-| W10 | `list2mat(range(1,3), l2)` → *"list2mat takes l1-l6 args"* | takes any list expression | its arguments are values now, not tokens (5.2.7) |
-| W11 | `mat2list([A], costs)` → *"mat2list targets are l1-l6"* | named lists work as targets | one ref numbering since 4D.13 (5.2.7) |
-| W12 | `l1 -> a` → *"Syntax error"* from whichever parser claimed the line | *"Store target mismatch"* | one store grammar instead of four rightmost-`->` searches (5.2.8) |
-| W13 | `<matrix expr> -> name` → no such form; matrices stored only to `[A]`-`[J]` and lists only from `listexpr` | every value kind reaches every target it fits | the target grammar stopped being per-evaluator (5.2.8) |
+- **Host** — every row names the check in `test_unified.cpp` that pins it.
+- **Differential (5.2.9)** — the register *is* the harness's allow-list. A diff
+  that appears there is expected; a diff that does not is a bug, and nothing may
+  be added to the allow-list without a row.
+- **On device (5.2.12)** — the register's `Input` column is the serial-injection
+  replay script (§9).
 
-**Both narrowings 5.2.7 left open are closed** (5.2.8), neither silently:
+It also carries what this section never did: behaviours **preserved on purpose**
+where unification made a change reachable (the D46 angle-mode wrappers, 4D.25's
+complex-read gate, `mat2list`'s statement rule), and the coverage statement for
+regions with no rows at all. **5.2.10 signs off every row**, and the finished
+register is a byproduct deliverable at 5.2 closure.
 
-- `sort_asc(l4)` with a bare list argument sorts `l4` **in place** again. The
-  expression tier still evaluates it by value; the in-place half is recovered as
-  an *implicit store* back to the same ref, emitted only when the whole program
-  is `push-ref; sort`. That is where it belongs — `listexpr`'s in-place form was
-  always a statement, and statements are what the store grammar covers.
-  `sort_asc(l4) -> l5` writes both refs, as `list_expr.cpp:1387` does.
-- A complex *result* built from real data (`i*[B]` in REAL mode) is rejected
-  again, and the layering question that held it up has an answer: **the gate is
-  on the mode, not on the layer.** `Mode::kCommit` refuses a non-real result
-  ("Non-real result", D30); `Mode::kProbe` computes it and writes nothing. The
-  three retired evaluators split this three ways — `matexpr` and `listexpr`
+Two entries are worth keeping here because they are design conclusions rather
+than test rows:
+
+- **Both narrowings 5.2.7 left open are closed** (5.2.8). `sort_asc(l4)` sorts
+  in place again, as an implicit store — `listexpr`'s in-place form was always a
+  statement, and statements are what a store grammar covers. And a complex
+  *result* built from real data (`i*[B]` in REAL mode) is rejected again,
+  because **the gate is on the mode, not on the layer**: `Mode::kCommit` refuses
+  a non-real result (D30), `Mode::kProbe` computes it and writes nothing. The
+  three retired evaluators split that three ways — `matexpr` and `listexpr`
   gated because they wrote their own slots, `complexexpr` never gated because
   its caller committed for it — and the split was always about who owned the
-  commit, not about what the value was. One evaluator owns both now.
-  Intermediates are still never gated: `i^2` is `-1` and `abs(3+4i)` is `5` in
-  any mode.
+  commit, not about what the value was.
+- **P5.2-5's criterion is provenance.** A string that states a decision is kept
+  verbatim ("e is reserved (Euler's e)"); a string that fell out of a parser
+  accident is replaced (`1->a+2` reported "Syntax error" from inside tinyexpr
+  only because the rightmost-arrow search left the arrow in the body).
 
-One deliberate narrowing is **added**, from §6.2's audit: `mat2list` may not
-compose or be stored ("mat2list must stand alone"), which restores `matexpr`'s
-rule for the reason `matexpr` had it.
+## 9. On-device performance measurement (5.2.12)
 
-Two divergences in error *strings*, which is the concrete part of P5.2-5's
-answer. Both are cases where the old text came from a parser accident rather
-than a decision, and both are pinned in `test_unified`:
+**This phase replaces the home screen's evaluator, so it must be measured
+against the one it replaces, not merely against a budget.** §3's list-lift
+design says so explicitly — the broadcast rewrite trades extra streaming passes
+for once-per-element evaluation, and "5.2.12 measures it on hardware; that
+measurement, not this comment, is what settles it".
 
-- `1->a->b` and `1->a+2` reported *"Syntax error"* from inside tinyexpr, because
-  the rightmost-arrow search silently left the arrow in the body. Both are
-  *"Bad store target"* now.
-- `2->l1` keeps `listexpr`'s *"Store target needs a list"*; every other kind
-  mismatch keeps `matexpr`'s *"Store target mismatch"*. Two strings, each for
-  the input it is pointed about, rather than one generic one.
+**Sequencing, and it is a real constraint.** The comparison needs *both*
+pipelines buildable from one tree, which is true only during the flag window —
+after 5.2.10 flips the default and **before 5.2.11 deletes the old evaluators**.
+So the A/B pass is taken in that window and 5.2.12 confirms the shipped build's
+numbers against it. Left until after 5.2.11, the baseline would have to come
+from a checked-out older commit, which is a different binary in more ways than
+the one being measured.
 
-What 5.2.8 deliberately did **not** take is the *display* strings —
-`mat2list`'s "Done (n lists)" and the `num⇒a` store echo are formatting, and the
-evaluator now hands a dispatcher everything they need (the count as the value,
-`Commit::lists_mask`, `Commit::var`). They belong with the dispatcher in 5.2.10.
+**Method.** One script, three outputs, riding the mechanism Phase 5.1 already
+built: serial injection auto-echoes `inject: "<expr>" -> "<result>" kind=…`, and
+`stack: peak` prints on any new high-water mark (`main.cpp:713`, `main.cpp:545`).
+Add an elapsed field to the inject echo and the same script yields results,
+stack peaks and timings for both builds in one pass. Median of N repetitions per
+line; the first run of each line is discarded (cold caches, PSRAM wake).
 
-`matexpr`'s *"Undefined result"* for a non-finite scalar is **not** carried over:
-the engine and `complexexpr` both commit `inf`/`nan` to Ans today, so gating it
-here would change the majority behaviour rather than preserve it. If that is
-wanted it is a display decision for 5.2.10, applied to all four kinds at once.
+**What to measure**, chosen so each line isolates one claim:
+
+| # | Input shape | What it answers |
+|---|---|---|
+| M1 | `2+3*4`, `sin(30)+ln(2)` | **Scalar entry latency.** The one nobody has costed: today a plain scalar goes through tinyexpr, and after this phase it does not. A regression here is felt on every keypress-to-answer, so it is the guardrail measurement, not a curiosity. |
+| M2 | `sin(l1)+2*l2` at 999 elements | **The lift.** Three streaming passes here against `listexpr`'s one. §3's open trade. |
+| M3 | `l1/sum(l1)` at 999 elements | **The correctness half of the same trade** — the loop-invariant reduction the element-slot design would have recomputed N times. Expected to favour the new evaluator; if it does not, the reasoning in §3 is wrong. |
+| M4 | a 256-element list, and a 257-element one | **Chunk-boundary cost**, against the same pair on the old lift. |
+| M5 | `det([A])`, `[A]*[B]` at 6x6 | **Matrix ops**, which should be unchanged — the same `matops` underneath, reached differently. A difference here means dispatch overhead, not arithmetic. |
+| M6 | `seq(x^2, x, 1, 200, 1)` | **Quoted-body re-entry**, the machine's only nesting, against `listexpr`'s per-element tinyexpr compile. |
+| M7 | the register's replay script end to end | **Aggregate**, and the differential pass at the same time. |
+
+**What counts as a pass.** M1 within noise of today or better; M5 unchanged; M2
+is the one genuinely open question and a regression there is a finding to record
+and cost, not automatically a blocker — the phase's case rests on correctness
+and ~10 KB of bss, and §3 already commits to reporting the number either way.
+Both boards, because the RP2350's cache and the RP2040's lack of one have
+diverged before (D14, the 4D.38 batch).
+
+**Also in the same session**, unchanged from the task row: stack peak per input
+(the whole point of moving depth off the call stack), the bss delta 5.2.11
+banks, and the serial-injection differential.
 
 ## 8. Non-goals
 
@@ -493,6 +518,9 @@ wanted it is a display decision for 5.2.10, applied to all four kinds at once.
 
 ## References
 
+- [unified-evaluator-changes.md](../notes/unified-evaluator-changes.md) — the
+  behaviour change register: every widening, narrowing, grammar change and
+  error-string divergence, each pinned to a host check and replayable on device
 - [design-departures-matrix-complex.md](../notes/design-departures-matrix-complex.md) §F
 - [decisions.md](../notes/decisions.md) D37, D40, D45, D46, D47, D48
 - [phase4-spec.md](phase4-spec.md) §5.2 — the performance guardrail
