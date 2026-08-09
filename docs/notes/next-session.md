@@ -40,7 +40,25 @@ peak **3,972 -> 2,344** (Pico 2), `kMaxStack = 64` exact with 65 a clean error.
 > still per-element (`array_format.cpp:58/68/75`), ~17 other `get()` call sites
 > are untouched, and the root cause is unknown.
 >
-> **New 2026-08-09**: matrix display was probed and **does not show the defect** —
+> **Investigated further 2026-08-09 and it will not reproduce.** The fix is
+> **confirmed causal** — reverting `format_list` to per-element reads brings the
+> fault straight back (7/30, 2/30, same corrupt value). Three of four candidate
+> locations are eliminated by sensitive folds: the **write path**, the failing
+> expression's **stored data**, and **bulk read** are all clean, 0/30. But a
+> temporary firmware diagnostic ran **40,000+ per-element reads with zero
+> failures** across six variants, including after heavy streaming — against ~2%
+> in the real path. **A ~1000x rate discrepancy means the trigger is contextual**,
+> and it argues *against* the DMA-contention hypothesis. **Start from the address
+> hypothesis**: the only difference left is that the diagnostic used a local
+> `math::Array` while the real case formats an evaluator temporary from the pool,
+> a different PSRAM region. Log the failing temporary's `psram_addr_` first.
+>
+> Also: the signature recorded earlier was **wrong** — "partial transfer, low 4
+> bytes unwritten" came from comparing the *derived numerator*, not the value
+> read. It is a **single-bit flip at mantissa bit ~32**. And 10-significant-figure
+> display output cannot recover low mantissa bytes at all.
+>
+> **Earlier 2026-08-09**: matrix display was probed and **does not show the defect** —
 > a PSRAM-backed 200x2 matrix with varied values, plus single-element
 > `[G](3,1)` reads, came back 1-distinct-in-30 on all four, at sensitivity
 > comparable to the test that caught lists at 8/30. So the exposure may be
