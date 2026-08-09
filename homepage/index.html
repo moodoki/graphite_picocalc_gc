@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphite — a graphing calculator for the PicoCalc</title>
+<meta name="description" content="TI-83/84-inspired graphing calculator firmware for the ClockworkPi PicoCalc: graphing, statistics, matrices, complex numbers and a symbolic CAS.">
+<meta property="og:title" content="Graphite — a graphing calculator for the PicoCalc">
+<meta property="og:description" content="Graphing, statistics, matrices, complex numbers and a symbolic CAS, on an RP2040 or RP2350.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📐</text></svg>">
+<style>
+  /* Self-contained by design: no CDN, no web fonts, no JS. The firmware
+     ships an offline help browser; the site can manage the same. */
+  :root {
+    --bg: #fbfaf7;
+    --fg: #1b1a17;
+    --muted: #5d5a52;
+    --rule: #ddd8cc;
+    --card: #fffefb;
+    --accent: #b25a00;      /* the amber the firmware uses for exact forms */
+    --accent-fg: #fff;
+    --code-bg: #f0ede4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14140f;
+      --fg: #e8e4d9;
+      --muted: #a09b8e;
+      --rule: #2f2e26;
+      --card: #1c1b15;
+      --accent: #e8a33d;
+      --accent-fg: #14140f;
+      --code-bg: #23221a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.25rem; }
+  a { color: var(--accent); }
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+
+  header { padding: 4.5rem 0 3rem; border-bottom: 1px solid var(--rule); }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); line-height: 1.1; margin: 0 0 0.6rem; letter-spacing: -0.02em; }
+  .tagline { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--muted); margin: 0 0 2rem; max-width: 44rem; }
+  .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; }
+  .badge {
+    font-size: 0.8rem; letter-spacing: 0.03em; text-transform: uppercase;
+    border: 1px solid var(--rule); border-radius: 100px; padding: 0.2rem 0.7rem; color: var(--muted);
+  }
+
+  .buttons { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .btn {
+    display: inline-block; text-decoration: none; font-weight: 600;
+    padding: 0.7rem 1.15rem; border-radius: 7px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--accent-fg);
+  }
+  .btn.ghost { background: transparent; color: var(--fg); border-color: var(--rule); }
+  .btn small { display: block; font-weight: 400; opacity: 0.85; font-size: 0.78rem; }
+
+  section { padding: 3.25rem 0; border-bottom: 1px solid var(--rule); }
+  h2 { font-size: 1.45rem; margin: 0 0 1.5rem; letter-spacing: -0.01em; }
+  h3 { font-size: 1rem; margin: 0 0 0.4rem; }
+
+  .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--rule); border-radius: 9px; padding: 1.1rem 1.2rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+  .scroll { overflow-x: auto; }
+  th, td { text-align: left; padding: 0.55rem 0.9rem 0.55rem 0; border-bottom: 1px solid var(--rule); }
+  th { font-weight: 600; }
+  td.muted, .muted { color: var(--muted); }
+
+  ul.links { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.6rem;
+             grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); }
+  ul.links a { font-weight: 600; text-decoration: none; }
+  ul.links a:hover { text-decoration: underline; }
+  ul.links span { display: block; color: var(--muted); font-size: 0.9rem; font-weight: 400; }
+
+  footer { padding: 2.5rem 0 4rem; color: var(--muted); font-size: 0.9rem; }
+  footer p { margin: 0 0 0.6rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>Graphite</h1>
+    <p class="tagline">
+      A TI-83/84-inspired graphing calculator, running as firmware on the
+      ClockworkPi PicoCalc. Graphing, statistics, matrices, complex numbers
+      and a symbolic CAS — on a microcontroller with 264&nbsp;KB of RAM.
+    </p>
+    <div class="badges">
+      <span class="badge">v0.4.0</span>
+      <span class="badge">RP2040 &amp; RP2350</span>
+      <span class="badge">C++17</span>
+      <span class="badge">2,599 host tests</span>
+    </div>
+    <div class="buttons">
+      <a class="btn" href="https://github.com/moodoki/graphite_picocalc_gc/releases/latest/download/picocalc_graphcalc-pico.uf2">
+        Download for Pico 1<small>RP2040 · .uf2</small>
+      </a>
+      <a class="btn" href="https://github.com/moodoki/graphite_picocalc_gc/releases/latest/download/picocalc_graphcalc-pico2.uf2">
+        Download for Pico 2<small>RP2350 · .uf2</small>
+      </a>
+      <a class="btn ghost" href="https://github.com/moodoki/graphite_picocalc_gc">
+        Source on GitHub<small>MIT / GPL-2.0 — see notice</small>
+      </a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Calculating</h3>
+        <p>Natural math display with stacked fractions and raised exponents.
+        Exact forms where they exist — <code>sqrt(8)</code> shows as 2√2,
+        <code>sin(pi/3)</code> as √3/2.</p>
+      </div>
+      <div class="card">
+        <h3>Graphing</h3>
+        <p>Function, parametric, polar and sequence modes. Trace, zoom,
+        shading, a CALC menu (zero, min/max, intersect, dy/dx, fnInt), value
+        tables and split-screen.</p>
+      </div>
+      <div class="card">
+        <h3>Statistics</h3>
+        <p>Six lists plus named lists, 1-var and 2-var stats, ten regression
+        models, seven distributions, the full inference suite, and stat
+        plots.</p>
+      </div>
+      <div class="card">
+        <h3>Linear algebra</h3>
+        <p>Ten matrix variables with determinant, inverse, row-echelon form,
+        eigenvalues and eigenvectors — real and complex spectra.</p>
+      </div>
+      <div class="card">
+        <h3>Complex numbers</h3>
+        <p><span class="mono">a+bi</span> and <span class="mono">r∠θ</span>
+        modes throughout, including complex-valued variables, lists and
+        matrices.</p>
+      </div>
+      <div class="card">
+        <h3>Symbolic math</h3>
+        <p>A CAS with simplify, expand, factor, differentiate, solve and a
+        bounded symbolic integrator — callable inline from the home screen.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Two boards, one source tree</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th></th><th>Pico 1 H (RP2040)</th><th>Pico 2 H (RP2350)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="muted">CPU</td><td>2× Cortex-M0+ @ 133 MHz</td><td>2× Cortex-M33 @ 150 MHz</td></tr>
+          <tr><td class="muted">SRAM</td><td>264 KB</td><td>520 KB</td></tr>
+          <tr><td class="muted">Flash</td><td>2 MB</td><td>4 MB</td></tr>
+          <tr><td class="muted">FPU</td><td>None — ROM softfloat</td><td>Single-precision hardware</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:1.25rem">
+      Both are supported targets, and every release is verified on both.
+      Hardware differences stay inside the platform layer; the calculator
+      itself does not know which chip it is running on.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Install</h2>
+    <p>Hold <strong>BOOTSEL</strong> while plugging in USB-C, then drop the
+    <code>.uf2</code> onto the volume that appears. That is the whole
+    procedure.</p>
+    <p class="muted">Already running Graphite? <span class="mono">Home → F4 MODE →
+    “Reboot to bootloader”</span> saves reaching for the button.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Documentation</h2>
+    <ul class="links">
+      <li><a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/USAGE.md">Using the calculator</a>
+        <span>Screens, keys, and why the bindings use Alt rather than Shift.</span></li>
+      <li><a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/FEATURES.md">Features</a>
+        <span>The full capability list.</span></li>
+      <li><a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/ROADMAP.md">Roadmap</a>
+        <span>What is built, what is next, and the spec behind each phase.</span></li>
+      <li><a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/CONTRIBUTING.md">Contributing</a>
+        <span>Build it, test it on a host, and the layer rules.</span></li>
+      <li><a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/docs/notes/decisions.md">Decision log</a>
+        <span>Why things are the way they are — including what went wrong.</span></li>
+      <li><a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/docs/architecture.md">Architecture</a>
+        <span>Layers, ownership, and what may include what.</span></li>
+    </ul>
+    <p class="muted" style="margin-top:1.5rem">
+      There is also a help browser on the device itself — <span class="mono">F5</span>
+      from the home screen — whose function catalog is generated from the same
+      table the parser registers from, so it cannot drift from what the
+      firmware actually accepts.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      The project’s own code is MIT. The combined firmware binary links
+      GPL-2.0 display and keyboard drivers, so the firmware as a whole is
+      distributed under GPL-2.0; the bitmap fonts carry their own upstream
+      licences. Full component table in
+      <a href="https://github.com/moodoki/graphite_picocalc_gc/blob/main/NOTICE.md">NOTICE.md</a>.
+    </p>
+    <p>
+      Built on <a href="https://github.com/laingcc/Picocalc-Coyote-OS">Coyote OS</a>
+      drivers, the <a href="https://github.com/raspberrypi/pico-sdk">Pico SDK</a>,
+      and hardware by <a href="https://www.clockworkpi.com/">ClockworkPi</a>.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

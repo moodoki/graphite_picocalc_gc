@@ -1,0 +1,54 @@
+name: Pages
+
+# Publishes homepage/ to GitHub Pages. Deliberately not a static-site
+# generator: the page is one self-contained HTML file with no build step, no
+# dependencies and no external requests, so there is nothing here to break
+# independently of the page itself.
+#
+# One-time manual setup: repo Settings -> Pages -> Source = "GitHub Actions".
+# A workflow file cannot set that for itself. Pages also requires the repo to
+# be public (or a paid plan).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'homepage/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a run in progress finish rather than cancelling it — a half-deployed
+# Pages site is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Skip while the repo is private — Pages would fail the run rather than
+    # skip it, and a red check that nobody can fix is worse than no check.
+    # This starts passing by itself the moment visibility flips.
+    if: github.event.repository.private == false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload homepage
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: homepage
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
