@@ -36,7 +36,21 @@ peak **3,972 -> 2,344** (Pico 2), `kMaxStack = 64` exact with 65 a clean error.
 > **Fixed in the display path only**: `format_list` now block-reads through
 > `read_range` instead of per-element `get()`. Verified **0 in ~144 runs**.
 >
-> **Do not read that as closed.** The split is by *access pattern*:
+> **Partially resolved — do not read it as closed.** `format_matrix_impl` is
+> still per-element (`array_format.cpp:58/68/75`), ~17 other `get()` call sites
+> are untouched, and the root cause is unknown.
+>
+> **New 2026-08-09**: matrix display was probed and **does not show the defect** —
+> a PSRAM-backed 200x2 matrix with varied values, plus single-element
+> `[G](3,1)` reads, came back 1-distinct-in-30 on all four, at sensitivity
+> comparable to the test that caught lists at 8/30. So the exposure may be
+> **narrower than "per-element PSRAM reads are unreliable"**: something
+> distinguishes a freshly-written list temporary from settled matrix storage.
+> That is a sharper and cheaper question than the concurrency hypothesis — try it
+> first. It also means the remaining call sites may not be at risk, so this is
+> lower-severity than it first looked, on 30 samples of one shape.
+>
+> The split is by *access pattern*:
 > `read_range` (bulk) is clean, `Array::get` (one 8-byte PSRAM transfer) is not,
 > and nobody knows why. Note what argues against the obvious DMA-contention
 > guess: a 2 KB `read_range` performs ~67 chunked transfers to `get()`'s one, yet

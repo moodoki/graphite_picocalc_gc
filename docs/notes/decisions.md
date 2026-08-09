@@ -21,7 +21,7 @@ Format:
 ## D53: per-element PSRAM reads are intermittently wrong — list *display* corrupts where the arithmetic does not
 
 **Date**: 2026-08-09
-**Status**: Accepted (bug record; fix pending)
+**Status**: Accepted — **PARTIALLY RESOLVED**: the one reachable path is fixed and verified, the root cause is unknown, and the entry stays open
 **Context**: Found by 5.2.12's Pico 1 leg (D52), which is the first time anything
 replayed the same list expression tens of times in a row on that board. Typing it
 once, as every previous bench pass did, would never have shown it.
@@ -122,6 +122,46 @@ before, across every shape in the battery.
 
 So: the reachable symptom is gone and the defect is not. Closing this needs the
 concurrency test, not another symptom fix.
+
+**What is and is not fixed, stated plainly** because "fixed" and "closed" are
+being used for different things above:
+
+| | state |
+|---|---|
+| `format_list` | **fixed**, 0 corrupted in ~144 runs against 8/30 before |
+| `format_matrix_impl` | **not fixed** — still per-element, `array_format.cpp:58/68/75` |
+| ~17 other `Array::get` call sites | **not fixed** |
+| root cause | **unknown** |
+
+### Follow-up probe, 2026-08-09: the exposure may be narrower than assumed
+
+`format_matrix_impl` was left untouched on the assumption it carries the same
+risk. **Probed, and it does not show the defect.** A 200x2 matrix — 400 elements,
+so past `kSlabBytes` and PSRAM-backed, built by `list2mat(l1,l2)` so the visible
+cells hold *varied* values rather than an identity matrix's zeros:
+
+| input | result |
+|---|---|
+| `list2mat(l1,l2)` displayed | 1 distinct in 30 |
+| `list2mat(l1,l2)->[G]` | 1 distinct in 30 |
+| `[G](3,1)`, `[G](7,2)` — single-element `get(r,c)` on PSRAM | 1 distinct in 30 each |
+
+Sensitivity is comparable to the test that caught the list case (~4-5 visible
+values, 30 reps, where lists showed 8/30), so this is not a null result for lack
+of looking. **It is still absence of evidence rather than proof** — matrices
+could have a lower per-read rate, and both display paths truncate, so only the
+first few values are ever sampled.
+
+**But it argues the fault is narrower than "per-element PSRAM reads are
+unreliable".** Something distinguishes the list result path from a stored
+matrix, and the two obvious candidates are that the list case reads a *freshly
+written temporary* while the matrix case reads settled storage, and that they
+reach PSRAM through different call shapes. That is a sharper question than the
+concurrency hypothesis and probably a cheaper one to answer.
+
+**Practical effect on priority**: the remaining call sites may not be at risk at
+all, which makes this lower-severity than the entry above implies — but nobody
+should treat that as established on 30 samples of one shape.
 
 **Tradeoffs**: leaving it unfixed means a user can see a wrong digit in a long
 list on a Pico 1 — cosmetic, since the value is right and anything computed from
