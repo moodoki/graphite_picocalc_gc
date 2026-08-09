@@ -1,6 +1,62 @@
 # Start here — next session
 
-**Last session:** 2026-08-08 (later) — **Post-D47 group-5/6 bench sweep on the
+**Last session:** 2026-08-09 (later) — **Phase 5.2 tasks 5.2.6-5.2.11: the
+unified evaluator now IS the home screen, and the three it replaces are
+deleted.** 3,903 lines gone, four parsers down to two, three of four depth caps
+retired with the parsers that needed them. `det(([A]*([A]+[A]))+[A])` — the
+expression that hard-faulted the Pico 1 last session — evaluates. Net **-6,888 B
+of bss, +1,500 B of text**. Suites at 1,930 checks green, both boards build.
+
+**Nothing here is hardware-verified.** That is 5.2.12, and it is the only task
+left in the phase.
+
+Full detail: worklog's **2026-08-09 (later)** entry, the byproduct register
+[unified-evaluator-changes.md](unified-evaluator-changes.md), and
+[phase5.2-spec.md](../phases/phase5.2-spec.md) §9 for the measurement plan.
+
+---
+
+## Decisions left to soak (2026-08-09)
+
+Parked deliberately before hardware verification, so they can be changed while
+changing them is still cheap. Each says where it lives and what reversing costs.
+**Everything below is behaviour a user could notice** — the structural choices
+(shim, rehomed formatters, `Mode` not defaulted) are not listed because
+reversing them changes nothing observable.
+
+| # | Decision | Where | Cost to change now |
+|---|---|---|---|
+| 1 | **`1/0` shows `Inf`, not "Undefined result"** — `matexpr`'s gate was dropped rather than generalised. The 5.2.10 sign-off nearly went the other way. TI raises `ERR:DIVIDE BY 0`. | register W14, §2.5 | Small — one check in `run()`. But it would change the *scalar* path, which every user hits. |
+| 2 | **`(-2)^2` will read 4 on the home screen and still plot as -4** until tinyexpr's `factor()` is patched (D50 split it out as a separate bugfix). | register F1, D50, wishlist | Small — ~5 lines in the vendored parser, parse-time only. Pulling it in *before* 5.2.12 would let one hardware pass verify both. **The most tempting one to reconsider.** |
+| 3 | **`mat2list` may not compose or be stored** — `matexpr`'s rule, restored after 5.2.7 briefly dropped it, because it writes lists the operand stack may still hold by reference. | register P5, spec §6.2 | Small — delete `check_statement_forms()`. But then `l1 * mat2list([A], l1)` has an order-dependent answer. |
+| 4 | **A bare `sort_asc(l1)` echoes no store target** (matches `listexpr`); an explicit `-> l5` echoes one. | `StoreKind::kListInPlace` | Trivial — one flag. |
+| 5 | **`1->a->b` is "Bad store target"**, not a syntax error from inside tinyexpr; the *first* arrow ends the expression, where the old parsers took the rightmost. | register G1/G3 | Small, but the old behaviour was an accident rather than a choice. |
+| 6 | **Error-text divergences**: `{1,foo}` → "Syntax error" (was "Bad list element"); `fac(a)` with complex `a` → "Non-real result" (was "Non-real variable"). | register E8, E9 | E9 trivial. E8 needs list-context tracking in the compiler — the only one that is not cheap. |
+| 7 | **Replacing tinyexpr on the numeric path is deferred past 5.2 closure**, with the measured costs written down and §9's M1 named as the missing input. | D50, spec P5.2-7 | Nothing to change now — it is a deferral, and the numbers are recorded either way. |
+
+Two more that are decisions but not really reversible: the **differential
+harness retired** with the evaluators it compared (recoverable from git if 5.2.12
+wants it back), and the **~770 old checks were ported rather than deleted**,
+which is what caught the complex-list read gate.
+
+---
+
+**Next up: 5.2.12, on-device verification** (both boards, 12 hrs). It owes:
+
+1. **Stack peak** per input — the whole point of moving depth off the call
+   stack. The comparison is last session's `matexpr` figures: 4,012 of 4,096 on
+   the Pico 1 at depth 3, 3,860 on the Pico 2 after the leaf fix.
+2. **The A/B latency pass, §9's M1-M7.** Baseline is the **v0.3.1 release
+   `.uf2`** — no rebuild needed, and its injection block is byte-identical to
+   today's, so one script parses both. Timing is host-side round-trip
+   (the released binary predates any firmware elapsed field). **M5 is the
+   control**: it should not move, and if it does the other rows are not
+   measuring the evaluator.
+3. **The register replay** — its `Input` column is the script; the observed diff
+   must equal the table.
+4. `.bss` delta confirmed on the board, not only from `size`.
+
+**Previous session:** 2026-08-08 (later) — **Post-D47 group-5/6 bench sweep on the
 Pico 1, one crash found and capped (D48), and idea F promoted to worth-doing.**
 Four of five heavy paths were clean under live stack guards: idle 1,540 of
 4,096, graph redraw + zoom 2,360, and **the list/1-Var-stats/inference set never

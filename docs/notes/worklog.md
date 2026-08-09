@@ -305,6 +305,87 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-09 (later) — Phase 5.2 tasks 5.2.6-5.2.11: the unified evaluator replaces the three home-screen evaluators. **All HW-PENDING**
+
+Six tasks in one session, ending with `matexpr`, `complexexpr` and `listexpr`
+deleted. The home screen now runs on one evaluator: a shunting-yard compiler
+emitting a flat RPN program, executed by a stack machine, neither of which
+recurses on the C++ call stack (D48's constraint).
+
+**5.2.6 list tier** — and a design reversal. The committed element-slot lift
+(re-run the whole program per element) is wrong on *correctness* before
+performance: `l1/sum(l1)` would recompute an O(N) reduction N times, quadratic
+on exactly the expression `listexpr` handles linearly today. Replaced with
+**broadcast dispatch**: a list operand broadcasts at the instruction consuming
+it, 256-element chunks into one temporary. Every node is evaluated once per
+element by construction. Cost: extra streaming passes, deferred to §9/M2 to
+settle on hardware.
+
+**5.2.7 matrix tier.** Lists broadcast, matrices do not — `[A]*[B]` is the
+matrix product — and that asymmetry is why `matexpr` was ever a separate parser.
+`norm` was Frobenius in one file and Euclidean in another; one entry now,
+dispatched on the argument. `dot`/`cross` came too: 5.2.6 missed them because
+they live in `listexpr`'s whole-expression block, not its function table.
+
+**5.2.8 store grammar.** Five target forms in one grammar, replacing four copies
+of a rightmost-`->` string search that disagreed about what counts as a target.
+The interesting half is the layering question it settles: the three evaluators
+split commit responsibility three ways, so **the gate is on the MODE, not the
+layer** — `kCommit` applies REAL mode's rule and writes, `kProbe` computes and
+writes nothing. Both narrowings 5.2.7 left open closed on that.
+
+**5.2.9 differential harness — three bugs on its first run.** 259 expressions
+harvested from the suites that pin the retired evaluators, both number modes,
+both pipelines from the same seeded state: 518 comparisons, 494 exact. It found
+postfix `!` missing outright (shipped syntax both old scalar paths reached by
+*rewriting* the input, so there was no grammar rule to port); the REAL-mode
+commit gate testing `im == 0` exactly, rejecting `e^(i*pi)`; and the store-
+mismatch strings splitting by target kind when today they split by which
+evaluator claimed the line — correcting a `test_unified` assertion written by
+hand two tasks earlier. **And one bug that is not ours**: `(-2)^2` is `-4` from
+tinyexpr and `4` from `complexexpr` — the two shipped evaluators disagree today,
+the second instance of the class that justified this phase (D46 was the first).
+D50 splits that fix out as a separate bugfix and defers "replace tinyexpr
+entirely" past 5.2 closure.
+
+**5.2.10 the flip.** `PICOCALC_UNIFIED_EVAL` defaults ON. The dispatcher lives
+in `math/`, not the screen, so the harness could compare **display strings**
+too — which caught a bare `sort_asc(l1)` echoing `{1,2,3}=>l1` where the screen
+prints `{1,2,3}`. All ~40 register rows signed off with a TI-parity rationale;
+W14 nearly went the other way. The REAL-mode probe is *gone*: it existed only
+because tinyexpr cannot see complex values.
+
+**5.2.11 deletion.** 3,903 lines, three of four depth caps, and the ~770 checks
+in `test_lists`/`test_matrix`/`test_complex_expr` **kept** — ported through
+`tests/host/eval_shim.hpp` rather than deleted, since §6 calls those checks the
+specification. The port immediately found a real defect the harness could not:
+`sum(l1)` over a complex list in REAL mode returned 3 instead of erroring,
+because complex *list* reads were ungated where matrix reads were (4D.25, the
+register's P1). The differential harness retired with the evaluators it
+compared against.
+
+**Sizes, and a claim corrected twice.** §5 predicted "deletion is what banks
+it". Measured on the Pico 1:
+
+    before the flip   text 461,852   bss 217,396
+    5.2.10 flipped    text 466,068   bss 210,676
+    5.2.11 deleted    text 463,352   bss 210,508
+    net                    +1,500        -6,888
+
+`--gc-sections` banks the bss as soon as the call sites disappear; deletion adds
+almost nothing, because by then the linker had already dropped it and the
+remainder (formatters, MatAns) *moved* rather than vanished. Deletion's real
+return is the lines, the caps, and a bug class that is now unrepresentable.
+
+**Byproduct deliverable**:
+[unified-evaluator-changes.md](unified-evaluator-changes.md), the behaviour
+change register — every widening, narrowing, fix, grammar and error-text change,
+each pinned to a host check and replayable on device.
+
+Suites 1,930 checks green, both boards build, lint/format/docs clean. **Nothing
+is hardware-verified**: 5.2.12 owes stack peak, the A/B latency pass against the
+v0.3.1 release binary (§9), and the register replay on both boards.
+
 ## 2026-08-09 — Phase 5.1 built: serial line injection. **HW-verified on the Pico 2**
 
 All six tasks (5.1.1-5.1.6) in one session, on branch `phase-5.1`.

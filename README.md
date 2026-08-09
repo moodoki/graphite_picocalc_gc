@@ -103,17 +103,24 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   now reported as an error rather than returning an unconverged tree that
   looks converged. See
   [docs/phases/phase5-spec.md](docs/phases/phase5-spec.md).
-- **Phases 5.1 and 5.2 (planned)**: two *dotted* sub-phases — significant
-  work that turned up rather than planned phase goals (see `AGENTS.md` for
-  the numbering convention). **5.1** adds serial line injection so a host
-  script can submit expressions to the home screen over USB and read back
-  the result and its kind, turning hand-driven bench checks into repeatable
-  ones. **5.2** is the unified evaluator: one tagged-value evaluator over an
-  explicit evaluation stack replacing the three home-screen mini-evaluators,
-  motivated by two independent findings — the real and complex evaluators
-  silently disagreeing on DEGREE-mode trig (D46), and four parsers each
-  needing a separately-discovered stack budget, three found by a crash
-  (D48). See [docs/phases/phase5.1-spec.md](docs/phases/phase5.1-spec.md)
+- **Phases 5.1 and 5.2**: two *dotted* sub-phases — significant work that
+  turned up rather than planned phase goals (see `AGENTS.md` for the
+  numbering convention). **5.1 (complete, HW-verified)** adds serial line
+  injection so a host script can submit expressions to the home screen over
+  USB and read back the result and its kind, turning hand-driven bench
+  checks into repeatable ones. **5.2 (code-complete, hardware verification
+  pending)** is the unified evaluator: one tagged-value evaluator — a
+  shunting-yard compiler emitting a flat RPN program, run by a stack machine
+  — replacing the three home-screen mini-evaluators, motivated by two
+  independent findings: the real and complex evaluators silently disagreeing
+  on DEGREE-mode trig (D46), and four parsers each needing a
+  separately-discovered stack budget, three found by a crash (D48). As built
+  it deletes 3,903 lines and three of those four depth caps, returns ~6.9 KB
+  of static RAM, and found a *second* live disagreement between the two
+  shipped evaluators along the way (`(-2)^2`, D50). Every behaviour that
+  changed is recorded in
+  [docs/notes/unified-evaluator-changes.md](docs/notes/unified-evaluator-changes.md).
+  See [docs/phases/phase5.1-spec.md](docs/phases/phase5.1-spec.md)
   and [docs/phases/phase5.2-spec.md](docs/phases/phase5.2-spec.md).
 - **Phase 6 (planned)**: non-calculator functions — an app-launcher
   framework (6A) and MicroPython as its first base app (6B), plus room
