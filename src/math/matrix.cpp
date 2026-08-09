@@ -1190,6 +1190,18 @@ bool eigenvectors(const Array& a, Array& out, const char** err) {
 
 namespace math {
 
+// MatAns storage (5.2.11, moved from mat_expr.cpp's g_mresult). A function-
+// local static for the same reason matrices() is one: no global constructor
+// ordering to reason about.
+const Array& mat_ans() {
+    return mat_ans_mutable();
+}
+
+Array& mat_ans_mutable() {
+    static Array instance;
+    return instance;
+}
+
 MatrixStore& matrices() {
     static MatrixStore instance;
     return instance;

@@ -6,7 +6,6 @@
 #include "math/engine.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
-#include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/scratch.hpp"
@@ -1060,7 +1059,7 @@ struct Machine {
         if (slot < 0 || slot > kMatAnsSlot) {
             return fail("Syntax error");
         }
-        const Array& m = slot == kMatAnsSlot ? matexpr::mat_ans() : matrices().matrix(slot);
+        const Array& m = slot == kMatAnsSlot ? mat_ans() : matrices().matrix(slot);
         if (m.size() == 0) {
             return fail(slot == kMatAnsSlot ? "No matrix result" : "Matrix is empty");
         }
@@ -1724,7 +1723,21 @@ struct Machine {
                     (ref >= ListStore::kCount && !named_lists().used(ref - kNamedRefBase))) {
                     return fail("Syntax error");
                 }
-                return push(Value::list(&list_by_ref(ref)));
+                const Array& l = list_by_ref(ref);
+                // REAL mode never READS complex data, even for an operation
+                // whose result is real (4D.25) — the same gate push_matrix
+                // carries, and for the same reason: `sum(l1)` over a complex
+                // list sums to a real number, and answering it would mean
+                // having silently read imaginary parts to get there.
+                //
+                // Found by 5.2.11's port of test_lists ("REAL mode rejects
+                // complex sum"). The differential harness could not have found
+                // it: its seeded world has no complex list, so REAL mode never
+                // met one. A gate on the RESULT is not a gate on the read.
+                if (l.dtype() == Dtype::kComplex && number_mode() == NumberMode::kReal) {
+                    return fail("Non-real result");
+                }
+                return push(Value::list(&l));
             }
             case Op::kMakeList:
                 return make_list(in.a);
@@ -1903,13 +1916,12 @@ bool run(const Program& p, Value* out, const char** err, Mode mode, Commit* comm
                 vars.set_complex(Variables::kAns, z.re, z.im);
             }
         } else if (v.kind == Kind::kMatrix) {
-            // MatAns, exactly as matexpr leaves it (mat_expr.cpp:1322): the
-            // matrix editor shows it, matans.dat persists it, and it is what
-            // gives a matrix result a lifetime past the next run() — the temps
-            // die there. Still matexpr's buffer while both evaluators exist;
-            // MatAns is a store, not evaluator state, and 5.2.11 rehomes it
-            // with the rest of the file.
-            if (!matops::copy(*v.a, matexpr::mat_ans_mutable())) {
+            // MatAns: the matrix editor shows it, matans.dat persists it, and
+            // it is what gives a matrix result a lifetime past the next run(),
+            // where the temps die. It is a store, not evaluator state — which
+            // is why 5.2.11 moved it to matrix.hpp rather than deleting it with
+            // the file it used to live in.
+            if (!matops::copy(*v.a, mat_ans_mutable())) {
                 if (err != nullptr) {
                     *err = "Out of matrix memory";
                 }
@@ -1917,7 +1929,7 @@ bool run(const Program& p, Value* out, const char** err, Mode mode, Commit* comm
             }
             m.cm.mat_ans = true;
             if (m.cm.matrix < 0) {
-                v = Value::matrix(&matexpr::mat_ans());
+                v = Value::matrix(&mat_ans());
             }
         }
     }

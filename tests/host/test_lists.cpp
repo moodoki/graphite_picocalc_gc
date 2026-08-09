@@ -9,7 +9,8 @@
 #include "math/array.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
-#include "math/list_expr.hpp"
+#include "eval_shim.hpp"
+#include "math/array_format.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
 #include "math/named_lists.hpp"
@@ -35,14 +36,15 @@ void check_near(double got, double expected, const char* what, double tol = 1e-9
     }
 }
 
-math::listexpr::Result eval_list(const char* input) {
-    return math::listexpr::evaluate(input);
+// 5.2.11: the same checks, the unified evaluator underneath. See eval_shim.hpp.
+shim::Result eval_list(const char* input) {
+    return shim::eval(input);
 }
 
 void check_list_result(const char* input, const double* expected, int n) {
     ++g_checks;
     const auto res = eval_list(input);
-    if (res.kind != math::listexpr::Kind::kList) {
+    if (res.kind != shim::Kind::kList) {
         std::printf("FAIL: '%s' -> kind %d, error %s (expected list)\n", input,
                     static_cast<int>(res.kind), res.error != nullptr ? res.error : "-");
         ++g_failures;
@@ -66,7 +68,7 @@ void check_list_result(const char* input, const double* expected, int n) {
 void check_list_error(const char* input, const char* expected_err) {
     ++g_checks;
     const auto res = eval_list(input);
-    if (res.kind != math::listexpr::Kind::kError) {
+    if (res.kind != shim::Kind::kError) {
         std::printf("FAIL: '%s' -> kind %d (expected error '%s')\n", input,
                     static_cast<int>(res.kind), expected_err);
         ++g_failures;
@@ -250,17 +252,19 @@ void test_list_ops() {
 }
 
 void test_list_expr() {
-    using math::listexpr::Kind;
+    using shim::Kind;
 
     // Reset l1..l6.
     for (int i = 0; i < math::ListStore::kCount; ++i) {
         math::lists().list(i).resize(0);
     }
 
-    // Non-list inputs fall through.
-    check(eval_list("2+2").kind == Kind::kNone, "scalar is kNone");
-    check(eval_list("ln(2)").kind == Kind::kNone, "ln(2) is not a list token");
-    check(eval_list("sin(x)+1").kind == Kind::kNone, "plain expr is kNone");
+    // Non-list inputs used to return kNone — "not my syntax", the signal that
+    // drove the dispatch cascade. One evaluator asks no such question (5.2.11),
+    // so these now evaluate as the scalars they are.
+    check(eval_list("2+2").kind == Kind::kScalar, "a scalar is just a scalar now");
+    check(eval_list("ln(2)").kind == Kind::kScalar, "ln(2) evaluates");
+    check(eval_list("sin(x)+1").kind == Kind::kScalar, "so does a plain expression");
 
     const double lit[] = {1, 2, 3};
     check_list_result("{1, 2, 3}", lit, 3);
@@ -333,8 +337,12 @@ void test_list_expr() {
     // keep working (checked above). One level deeper must be a clean
     // error, not a deeper descent — and the sort path is what to test,
     // since it is the one the older ctx.depth counter never covered.
-    check_list_error("sort_asc(sort_asc(sort_asc(sort_asc({3,1,2}))))", "Too deeply nested");
-    check_list_error("cumsum(sort_asc(sort_asc({3,1,2})))", "Too deeply nested");
+    // Was "Too deeply nested" at 3 levels — a call-frame budget (D47) with no
+    // user-facing justification. Register W6.
+    const double sorted123[] = {1, 2, 3};
+    check_list_result("sort_asc(sort_asc(sort_asc(sort_asc({3,1,2}))))", sorted123, 3);
+    const double cs123[] = {1, 3, 6};
+    check_list_result("cumsum(sort_asc(sort_asc({3,1,2})))", cs123, 3);
 
     const double sq[] = {1, 4, 9, 16, 25};
     check_list_result("seq(x^2, x, 1, 5, 1)", sq, 5);
@@ -348,7 +356,7 @@ void test_list_expr() {
     check_list_error("l1+l6", "List length mismatch");
     check_list_error("seq(x,x,1,5)", "seq needs (expr, var, lo, hi, step)");
     check_list_error("seq(x,e,1,5,1)", "seq var must be a-z (not e/i) or theta");
-    check_list_error("{1,foo}", "Bad list element");
+    check_list_error("{1,foo}", "Syntax error");  // register E8
     check_list_error("l1+*2", "Syntax error");
 
     // Empty lists.
@@ -359,21 +367,21 @@ void test_list_expr() {
     // Formatting.
     char buf[48];
     eval_list("{1,2.5,3}->l6");
-    math::listexpr::format_list(math::lists().list(5), buf, sizeof(buf));
+    math::format_list(math::lists().list(5), buf, sizeof(buf));
     check(std::strcmp(buf, "{1,2.5,3}") == 0, "format_list");
     math::lists().list(5).resize(0);
-    math::listexpr::format_list(math::lists().list(5), buf, sizeof(buf));
+    math::format_list(math::lists().list(5), buf, sizeof(buf));
     check(std::strcmp(buf, "{}") == 0, "format_list empty");
     char tiny[12];
     eval_list("{111111,222222,333333}->l6");
-    math::listexpr::format_list(math::lists().list(5), tiny, sizeof(tiny));
+    math::format_list(math::lists().list(5), tiny, sizeof(tiny));
     check(std::strchr(tiny, math::kEllipsisGlyph) != nullptr, "format_list truncates");
 
     // Compact per-element formatting (testdrive 2026-07-20): fractional
     // values round to 4 significant figures so more fit before truncation;
     // integers and short decimals are unchanged.
     eval_list("{1/3,2/3,4}->l6");
-    math::listexpr::format_list(math::lists().list(5), buf, sizeof(buf));
+    math::format_list(math::lists().list(5), buf, sizeof(buf));
     check(std::strcmp(buf, "{0.3333,0.6667,4}") == 0, "format_list compact float");
 
     // PSRAM-tier lists through the lift path.
@@ -389,7 +397,7 @@ void test_list_expr() {
 // D24: brace literals and wrapper calls as lift operands, range(), the
 // mean/median/stdev reductions, and general reduction arguments.
 void test_list_expr_d24() {
-    using math::listexpr::Kind;
+    using shim::Kind;
     eval_list("{1,2,3}->l1");
 
     // Brace literals broadcast (HW 2026-07-19 bug: "Expected a list" /
@@ -465,7 +473,10 @@ void test_list_expr_d24() {
     check_list_error("{1,2}+{1,2,3}", "List length mismatch");
     check_list_error("range(1,2,-1)", "Bad seq range");
     check_list_error("range(1)", "range needs (lo, hi[, step])");
-    check_list_error("{1}+{2}+{3}+{4}+{5}", "Too many list terms");
+    // Was "Too many list terms" — listexpr's kMaxOperands. The temp pool bounds
+    // live temporaries now, not terms in the input. Register W16.
+    const double one15[] = {15};
+    check_list_result("{1}+{2}+{3}+{4}+{5}", one15, 1);
     check_list_error("stdev({5})", "Undefined result");
 }
 
@@ -486,7 +497,7 @@ void check_clist(const math::Array& a, int i, double re, double im, const char* 
 void check_list_error(const char* input, const char* expected, const char* what) {
     ++g_checks;
     const auto res = eval_list(input);
-    if (res.kind != math::listexpr::Kind::kError || res.error == nullptr ||
+    if (res.kind != shim::Kind::kError || res.error == nullptr ||
         std::strcmp(res.error, expected) != 0) {
         std::printf("FAIL: '%s' -> kind %d err '%s' (expected '%s') [%s]\n", input,
                     static_cast<int>(res.kind), res.error != nullptr ? res.error : "-", expected,
@@ -548,7 +559,7 @@ void test_complex_array() {
 }
 
 void test_complex_list_expr() {
-    using math::listexpr::Kind;
+    using shim::Kind;
     math::set_number_mode(math::NumberMode::kRectangular);
 
     // Complex literal store + recall.
@@ -586,12 +597,15 @@ void test_complex_list_expr() {
     check_clist(*res.list, 1, 22, -1, "l1+l2 [1]");
 
     // sum/mean standalone.
+    // The sum of a complex list lands on the real axis here, so it comes back
+    // REAL. listexpr reported it as complex because its csum path was typed by
+    // the argument rather than by the answer.
     res = eval_list("sum(l1)");
-    check(res.kind == Kind::kScalar && res.scalar_complex, "sum(l1) complex scalar");
+    check(res.kind == Kind::kScalar, "sum(l1) is a scalar");
     check(std::fabs(res.cvalue.re - 3) < 1e-9 && std::fabs(res.cvalue.im - 0) < 1e-9,
           "sum(l1) = 3");
     res = eval_list("mean(l1)");
-    check(res.kind == Kind::kScalar && res.scalar_complex, "mean(l1) complex scalar");
+    check(res.kind == Kind::kScalar, "mean(l1) is a scalar");
     check(std::fabs(res.cvalue.re - 1.5) < 1e-9 && std::fabs(res.cvalue.im - 0) < 1e-9,
           "mean(l1) = 1.5");
     check(math::lists().list(0).dtype() == math::Dtype::kComplex, "l1 unchanged by sum");
@@ -600,13 +614,22 @@ void test_complex_list_expr() {
     check_list_error("stdev(l1)", "Non-real list", "stdev errors");
     check_list_error("median(l1)", "Non-real list", "median errors");
     check_list_error("prod(l1)", "Non-real list", "prod errors");
-    check_list_error("sum(l1)+1", "Complex sum/mean must stand alone", "embedded sum errors");
     check_list_error("sort_asc(l1)", "Non-real list", "in-place sort errors");
     check_list_error("cumsum(l1)", "Non-real list", "cumsum errors");
-    check_list_error("sin(l1)", "Complex lists support only +, -, scalar * and /",
-                     "unsupported lift errors");
-    check_list_error("l1*l1", "Complex lists: one list per term", "list*list errors");
-    check_list_error("2/l1", "Cannot divide by a list", "divide by list errors");
+
+    // These four were `eval_clift`'s grammar, not a property of complex lists:
+    // a TI-84 in a+bi mode maps functions over them elementwise. Register
+    // W1-W4, signed off 5.2.10. l1 is {1+2i, 2-2i} here.
+    res = eval_list("sum(l1)+1");
+    check(res.kind == Kind::kScalar && std::fabs(res.scalar.value - 4) < 1e-9,
+          "a complex reduction composes (W4)");
+    res = eval_list("sin(l1)");
+    check(res.kind == Kind::kList && res.list->dtype() == math::Dtype::kComplex,
+          "a function maps over a complex list (W1)");
+    res = eval_list("l1*l1");
+    check(res.kind == Kind::kList && res.list->size() == 2, "list times list (W2)");
+    res = eval_list("2/l1");
+    check(res.kind == Kind::kList && res.list->size() == 2, "scalar over a list (W3)");
 
     // Length mismatch still reported.
     eval_list("{1,2,3}->l3");
@@ -614,7 +637,7 @@ void test_complex_list_expr() {
 
     // Formatting: rectangular per-element.
     char buf[120];
-    math::listexpr::format_list(l1, buf, sizeof(buf));
+    math::format_list(l1, buf, sizeof(buf));
     check(std::strchr(buf, '{') != nullptr && std::strchr(buf, '}') != nullptr,
           "format_list braces");
 
@@ -641,7 +664,7 @@ void test_complex_list_expr() {
 
 // Vector ops (4D.22, Batch 5): dot/cross/norm whole-expression forms.
 void test_vector_ops() {
-    using math::listexpr::Kind;
+    using shim::Kind;
 
     auto res = eval_list("{1,2,3}->l1");
     check(res.kind == Kind::kList, "vec: seed l1");
@@ -684,7 +707,7 @@ void test_vector_ops() {
 
 // Named lists (4D.13): registry rules + full expression integration.
 void test_named_lists() {
-    using math::listexpr::Kind;
+    using shim::Kind;
     auto& nl = math::named_lists();
 
     // Name validation.
@@ -734,9 +757,9 @@ void test_named_lists() {
     check(res.kind == Kind::kList && nl.count() == 2, "second named list");
     res = eval_list("dot(costs,qty)");
     check(res.kind == Kind::kScalar && res.scalar.value == 5 + 12 + 21, "dot over named");
-    check_list_error("{1}->ans", "Syntax error");  // ans is not a valid list name
+    check_list_error("{1}->ans", "Bad store target");  // ans is reserved; register E7
     res = eval_list("nope*2");
-    check(res.kind == Kind::kNone, "unknown name is not list syntax");
+    check(res.kind == Kind::kError, "an unknown name is an error, not a fall-through");
 
     // Removal frees the name for reuse.
     check(nl.remove(nl.find("qty")), "remove qty");

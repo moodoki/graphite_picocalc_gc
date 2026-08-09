@@ -18,17 +18,16 @@ generic binary-op dispatch over a wider tag enum.
 It also **absorbs the shared function catalogue** (`catalog.hpp`), so the home
 screen no longer escapes to tinyexpr for scalar spans.
 
-**Status**: **In progress — tasks 5.2.1-5.2.10 done 2026-08-09. The home screen
-runs on it.** The evaluator compiles and runs every home-screen value kind —
-real and complex scalars, lists and matrices of either — resolves the whole
-callable surface natively, commits its own results, and is now the default
-(`PICOCALC_UNIFIED_EVAL=ON`). It is checked *differentially* against the
-pipeline it replaces, values, committed state and **displayed strings**: **494
-of 518 comparisons agree exactly, and every divergence carries a signed-off row
-in the [change register](../notes/unified-evaluator-changes.md)**. The flip
-already returns **6,720 B of bss** — the linker drops `listexpr`'s string
-scratch the moment no screen calls it. **What is left is the deletion (5.2.11)
-and on-device verification (5.2.12).**
+**Status**: **In progress — tasks 5.2.1-5.2.11 done 2026-08-09. `matexpr`,
+`complexexpr` and `listexpr` are gone.** One evaluator compiles and runs every
+home-screen value kind — real and complex scalars, lists and matrices of either
+— resolves the whole callable surface natively, and commits its own results.
+**3,903 lines deleted**, four parsers down to two, and the three depth caps with
+them. The ~770 checks those suites carried were *kept*, ported onto the new
+evaluator through a shim (`tests/host/eval_shim.hpp`); the differential harness
+that blessed the migration retired with the thing it compared against. Net
+against the pre-phase baseline: **-6,888 B of bss, +1,500 B of text**. **What is
+left is on-device verification (5.2.12).**
 Sizing: §5. Migration strategy: §6.1. Idea F has been a committed follow-on
 since 2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a
 phase number at the same time. This is the highest-risk item on the project's
@@ -92,6 +91,13 @@ budgets, and **three of the four were found by something crashing**:
 `matexpr`'s cap landed with **84 bytes of margin** on the Pico 1 and required a
 follow-up leaf fix before it held on the Pico 2 at all. That is containment, not
 headroom, and it is the fourth time the same shape of bug has been paid for.
+
+**Three of those four caps no longer exist** (5.2.11): `matexpr`'s 3,
+`complexexpr`'s 7/4 and `listexpr`'s `kMaxRec` of 3 went with the parsers they
+guarded. tinyexpr keeps its 7 — it still owns the graphing path (§2). Depth is
+now 64 operand-stack slots in bss, and the inputs those caps rejected —
+including `det(([A]*([A]+[A]))+[A])`, the expression that hard-faulted the
+Pico 1 — evaluate.
 
 ## 2. Scope boundary — four parsers become two, not one
 
@@ -238,7 +244,7 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.8~~ | ~~Superset store grammar + commit semantics~~ **DONE 2026-08-09** (both outstanding narrowings closed) | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
 | ~~5.2.9~~ | ~~Differential harness~~ **DONE 2026-08-09** (494/518 agree; 3 real bugs found) | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs; the [change register](../notes/unified-evaluator-changes.md) is its allow-list |
 | ~~5.2.10~~ | ~~Widened behaviours + allow-list~~ **DONE 2026-08-09** (default flipped; bss -6,720 already) | 10 | Every register row signed off with a TI-parity rationale; the register's D-rows (display strings, REAL-mode probe sequencing) discharged |
-| 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
+| ~~5.2.11~~ | ~~Retire the three evaluators; remove their caps~~ **DONE 2026-08-09** (3,903 lines deleted, ~770 checks kept) | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
 | 5.2.12 | On-device verification, both boards | 12 | Stack peak, bss delta, serial-injection differential, and **§9's A/B latency measurement against the v0.3.1 release binary** |
 | | **Total** | **150** | |
 
@@ -333,10 +339,30 @@ drops `listexpr`'s ~8.4 KB of string scratch, because nothing calls
 | `PICOCALC_UNIFIED_EVAL=OFF` | 461,852 | 217,396 |
 | `PICOCALC_UNIFIED_EVAL=ON` | 466,068 | **210,676** |
 
-So "deletion is what banks it" was **half right**: `--gc-sections` banks the bss
-as soon as the call sites go, and what 5.2.11 still has to bank is the *text* —
-the ~28 KB of code in the three files, which stays linked while `format_list`,
-`format_matrix` and `mat_ans` are still called out of them.
+**Final accounting, 5.2.11.** Deleting the sources moved it a further 168 B of
+bss and, notably, *added* 64 B of text:
+
+| stage | text | bss |
+|---|---|---|
+| before the flip (`OFF`) | 461,852 | 217,396 |
+| 5.2.10, flipped | 466,068 | 210,676 |
+| 5.2.11, deleted | **463,352** | **210,508** |
+| **net** | **+1,500** | **-6,888** |
+
+So "deletion is what banks it" was **wrong, and worth correcting rather than
+quietly restating**. `--gc-sections` banks essentially everything as soon as the
+call sites disappear; by 5.2.11 the linker had already dropped what deletion
+would have removed, and the remaining text belonged to the formatters and MatAns
+— which *moved* rather than vanished. Deletion's real return is not bytes:
+
+- **3,903 lines** of source gone (`mat_expr` 1,595, `list_expr` 1,717,
+  `complex_expr` 591, headers included);
+- three of four depth caps gone with the parsers that needed them (§1);
+- and the class of bug this phase exists to remove — two evaluators disagreeing
+  — is now unrepresentable on the home screen, because there is one.
+
+The phase still nets bss back, and the +1,500 B of text is the honest price of a
+stack machine that does more than the three parsers did.
 
 A depth of 64 is also far more generous than what the call stack affords today:
 `matexpr` is capped at **3** (D48, 84 B of margin before the leaf fix),

@@ -14,7 +14,6 @@
 #include <cstring>
 
 #include "platform/storage.hpp"
-#include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 
 namespace math {
@@ -168,8 +167,6 @@ bool MatrixStore::load(platform::Storage& storage) {
     return all_done;
 }
 
-namespace matexpr {
-
 // MatAns lives in its own file, mirroring the one-file-per-matrix
 // scheme; it uses the same PCM2 header/element format as [A]..[J] so
 // the shared save/load helpers apply unchanged.
@@ -202,7 +199,5 @@ bool load_ans(platform::Storage& storage) {
     }
     return false;  // Needs PSRAM not yet up — let late-init retry
 }
-
-}  // namespace matexpr
 
 }  // namespace math

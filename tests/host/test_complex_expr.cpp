@@ -7,7 +7,7 @@
 #include <cstring>
 #include <initializer_list>
 
-#include "math/complex_expr.hpp"
+#include "eval_shim.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/types.hpp"
@@ -25,9 +25,31 @@ void check(bool ok, const char* what) {
     }
 }
 
+// 5.2.11: the same checks, the unified evaluator underneath (eval_shim.hpp).
+// These run in RECT so a complex result is not gated on commit (D30) — the old
+// evaluator never gated, because its caller did.
+struct CxResult {
+    bool ok = false;
+    math::Complex value;
+    const char* error = nullptr;
+    int stored_var = -1;
+};
+
+CxResult eval_cx(const char* expr) {
+    const shim::Result r = shim::eval(expr);
+    CxResult out;
+    out.ok = r.kind != shim::Kind::kError;
+    out.error = r.error;
+    if (out.ok) {
+        out.value = r.scalar_complex ? r.cvalue : math::Complex(r.scalar.value, 0);
+        out.stored_var = r.scalar.stored_var;
+    }
+    return out;
+}
+
 void check_ok(const char* expr, double re, double im, const char* what, double tol = 1e-9) {
     ++g_checks;
-    const auto r = math::complexexpr::evaluate(expr);
+    const auto r = eval_cx(expr);
     if (!r.ok || std::fabs(r.value.re - re) > tol || std::fabs(r.value.im - im) > tol) {
         std::printf("FAIL: %s -> ok=%d (%.9g,%.9g) (expected (%.9g,%.9g)) [%s]\n", expr,
                     r.ok ? 1 : 0, r.value.re, r.value.im, re, im, what);
@@ -37,7 +59,7 @@ void check_ok(const char* expr, double re, double im, const char* what, double t
 
 void check_err(const char* expr, const char* expected, const char* what) {
     ++g_checks;
-    const auto r = math::complexexpr::evaluate(expr);
+    const auto r = eval_cx(expr);
     if (r.ok || r.error == nullptr || std::strcmp(r.error, expected) != 0) {
         std::printf("FAIL: %s -> ok=%d err='%s' (expected '%s') [%s]\n", expr, r.ok ? 1 : 0,
                     r.error != nullptr ? r.error : "-", expected, what);
@@ -45,15 +67,11 @@ void check_err(const char* expr, const char* expected, const char* what) {
     }
 }
 
-void test_mentions_i() {
-    check(math::complexexpr::mentions_i("3+2i"), "mentions_i 2i");
-    check(math::complexexpr::mentions_i("i"), "mentions_i bare");
-    check(math::complexexpr::mentions_i("i*2"), "mentions_i i*2");
-    check(!math::complexexpr::mentions_i("sin(3)"), "mentions_i not in sin");
-    check(!math::complexexpr::mentions_i("fix"), "mentions_i not in fix");
-    check(!math::complexexpr::mentions_i("2+3"), "mentions_i plain");
-    check(math::complexexpr::mentions_i("2*i+1"), "mentions_i standalone");
-}
+// `mentions_i` is gone with the dispatch it served (5.2.11). It existed so the
+// home screen could decide WHICH evaluator to run — a question one evaluator
+// does not ask. Nothing replaced it, so there is nothing to re-test here; the
+// behaviour it used to gate (`3+2i` evaluating as complex) is pinned throughout
+// this file.
 
 void test_arithmetic() {
     check_ok("i", 0, 1, "bare i");
@@ -96,18 +114,18 @@ void test_scalar_span_fallback() {
 }
 
 void test_store() {
-    const auto r = math::complexexpr::evaluate("5->a");
+    const auto r = eval_cx("5->a");
     check(r.ok && r.stored_var == 0 && r.value.is_real() && r.value.re == 5, "store real to a");
 
     // Complex stores are allowed since 4D.15 (the dispatch layer
     // commits them into the widened Variables).
-    const auto c = math::complexexpr::evaluate("2i->a");
+    const auto c = eval_cx("2i->a");
     check(c.ok && c.stored_var == 0 && c.value.re == 0 && c.value.im == 2, "store complex to a");
     check_err("5->E", "Variables are lowercase a-z", "store uppercase errors");
     check_err("5->e", "e is reserved (Euler's e)", "store e errors");
     check_err("5->i", "i is reserved (imaginary unit)", "store i errors");
 
-    const auto t = math::complexexpr::evaluate("7->theta");
+    const auto t = eval_cx("7->theta");
     check(t.ok && t.stored_var == math::Variables::kTheta, "store theta");
 }
 
@@ -132,7 +150,10 @@ void test_complex_vars() {
     math::calc_t out = 0;
     check(!math::eval_field("a+1", &out), "eval_field errors on complex var");
     check(math::engine().compile("a+1") == nullptr, "compile errors on complex var");
-    check_err("fac(a)", "Non-real variable", "opaque span with complex var errors");
+    // "Non-real variable" was eval_field's message, reported when a scalar span
+    // escaped to the real engine. There is no escape now: the catalog function
+    // itself refuses a complex argument. Register E9.
+    check_err("fac(a)", "Non-real result", "a real-only function refuses a complex var");
 
     check(math::refs_complex_var("a+1"), "refs_complex_var hit");
     check(!math::refs_complex_var("b+1"), "refs_complex_var miss");
@@ -140,8 +161,11 @@ void test_complex_vars() {
 
     // Ans and theta slots participate too.
     vars.set_complex(math::Variables::kAns, 0, 1);  // Ans = i
-    check_ok("ans*ans", -1, 0, "complex ans");
+    // Checked BEFORE evaluating: an evaluation commits Ans now (5.2.10), where
+    // complexexpr left that to its caller. `ans*ans` is -1, so reading Ans
+    // afterwards would find a real.
     check(math::refs_complex_var("ans+1"), "refs_complex_var ans");
+    check_ok("ans*ans", -1, 0, "complex ans");
     vars.set_real(math::Variables::kAns, 0);
 
     // Sweep-slot exclusion: a stale complex x must not block compiling
@@ -235,7 +259,6 @@ void test_number_mode_default() {
     }
     math::set_number_mode(math::NumberMode::kRectangular);
     check(math::number_mode() == math::NumberMode::kRectangular, "set_number_mode rect");
-    math::set_number_mode(math::NumberMode::kReal);
 }
 
 // The complex evaluator must honour DEGREE mode exactly as the real one
@@ -273,7 +296,7 @@ void test_angle_mode() {
         for (const char* e : reals) {
             ++g_checks;
             const auto rr = math::engine().evaluate(e);
-            const auto cc = math::complexexpr::evaluate(e);
+            const auto cc = eval_cx(e);
             if (!rr.ok || !cc.ok || std::fabs(rr.value - cc.value.re) > 1e-9 ||
                 std::fabs(cc.value.im) > 1e-12) {
                 std::printf("FAIL: %s in %s: real=%.12g complex=(%.12g,%.12g)\n", e, mode,
@@ -305,7 +328,7 @@ void test_real_pow_exact() {
     const char* const ints[] = {"10202^2", "2^10", "3^5", "7^4", "((((2+1)^2+1)^2+1)^2+1)^2+1"};
     for (const char* e : ints) {
         ++g_checks;
-        const auto r = math::complexexpr::evaluate(e);
+        const auto r = eval_cx(e);
         if (!r.ok || r.value.re != std::floor(r.value.re) || r.value.im != 0.0) {
             std::printf("FAIL: %s -> (%.17g,%.17g), expected an exact integer\n", e, r.value.re,
                         r.value.im);
@@ -323,29 +346,22 @@ void test_real_pow_exact() {
     check_ok("4^0.5", 2.0, 0.0, "4^0.5");
 }
 
-// Parse-nesting caps (D47). This parser costs ~368 B of stack per level and
-// core 0 has 4 KB before core 1's, so the depth that fits depends on how deep
-// the caller already is — hence two caps. Over-cap input must be a clean
-// error, never a crash.
-void test_parse_depth_cap() {
-    // Rung N of the D45 ladder needs depth N+1, so the default cap of 7
-    // carries it to rung 6 — the case D45 stress-tested. Verified above in
-    // test_real_pow_exact for rung 4; here is the boundary itself.
-    // Acceptance is the assertion here, not the arithmetic — rung 4's value
-    // is pinned in test_real_pow_exact above, and rung 5 (1.0832814e16) is
-    // past 2^53 so it is not exactly representable anyway.
-    check(math::complexexpr::evaluate("(((((2+1)^2+1)^2+1)^2+1)^2+1)^2+1").ok,
-          "nesting rung 5 within the default cap");
-    check(math::complexexpr::evaluate("((((((2+1)^2+1)^2+1)^2+1)^2+1)^2+1)^2+1").ok,
-          "nesting rung 6 within the default cap (the D45 stress case)");
-    // Right-assoc: 2^(2^(2^2)) = 2^16. One more caret would be 2^65536 = inf,
-    // which parses fine but says nothing about depth.
-    check_ok("2^2^2^2", 65536.0, 0.0, "right-assoc ^ chain within the cap");
+// Parse-nesting caps (D47) — REMOVED in 5.2.11, and this test now asserts
+// their absence. complexexpr recursed ~368 B per level against core 0's 4 KB,
+// so it carried two caps (7, and 4 when reached from a list or matrix
+// evaluation that had already spent ~2,400 B). Depth is operand-stack slots
+// now, so the inputs those caps rejected simply evaluate. Same class as the
+// register's W6 and W9; signed off there.
+void test_depth_caps_are_gone() {
+    check(eval_cx("(((((2+1)^2+1)^2+1)^2+1)^2+1)^2+1").ok, "nesting rung 5");
+    check(eval_cx("((((((2+1)^2+1)^2+1)^2+1)^2+1)^2+1)^2+1").ok,
+          "nesting rung 6 (the D45 stress case)");
+    check_ok("2^2^2^2", 65536.0, 0.0, "right-assoc ^ chain");
 
-    // One past the default: a clean error, not a fault. Note this cycle has
-    // no parentheses at the deep end — a paren-count pre-scan (which is what
-    // tinyexpr gets) would miss it entirely, which is why this parser carries
-    // a real counter.
+    // Both of these used to be "Too deeply nested". The second is the shape a
+    // paren-count pre-scan would miss entirely, which is why the old parser
+    // needed a real counter — and why moving depth off the call stack is worth
+    // more than raising a number.
     {
         char deep[256];
         std::size_t w = 0;
@@ -353,7 +369,7 @@ void test_parse_depth_cap() {
             w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "2^"));
         }
         w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, "1"));
-        check_err(deep, "Too deeply nested", "30-deep ^ chain rejected");
+        check(eval_cx(deep).ok, "30-deep ^ chain evaluates");
     }
     {
         char deep[256];
@@ -365,29 +381,12 @@ void test_parse_depth_cap() {
         for (int i = 0; i < 20; ++i) {
             w += static_cast<std::size_t>(std::snprintf(deep + w, sizeof(deep) - w, ")"));
         }
-        check_err(deep, "Too deeply nested", "20-deep paren nest rejected");
+        check(eval_cx(deep).ok, "20-deep paren nest evaluates");
     }
+    check(eval_cx("((((1+i))))").ok, "5 levels, which the nested cap rejected");
 
-    // The nested cap is tighter, because list/matrix evaluation has already
-    // spent ~2,400 B before reaching this parser. Same expression, both caps.
-    const char* five = "((((1+i))))";  // 5 levels
-    ++g_checks;
-    if (!math::complexexpr::evaluate(five, math::complexexpr::kMaxParseDepth).ok) {
-        std::printf("FAIL: %s should pass at the default cap\n", five);
-        ++g_failures;
-    }
-    ++g_checks;
-    {
-        const auto r = math::complexexpr::evaluate(five, math::complexexpr::kMaxParseDepthNested);
-        if (r.ok || r.error == nullptr || std::strcmp(r.error, "Too deeply nested") != 0) {
-            std::printf("FAIL: %s should be rejected at the nested cap -> ok=%d err=%s\n", five,
-                        r.ok ? 1 : 0, r.error != nullptr ? r.error : "(null)");
-            ++g_failures;
-        }
-    }
-
-    // Siblings must not accumulate depth — parse_term/parse_expr call
-    // parse_unary in a loop, so a long flat chain has to stay shallow.
+    // Siblings must still not accumulate depth: a flat chain costs operand
+    // slots, and 64 of those is a different budget from 7 call frames.
     check_ok("1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1+1", 20.0, 0.0, "flat sum stays shallow");
     check_ok("2*2*2*2*2*2*2*2*2*2", 1024.0, 0.0, "flat product stays shallow");
 }
@@ -395,7 +394,15 @@ void test_parse_depth_cap() {
 }  // namespace
 
 int main() {
-    test_mentions_i();
+    // The default-mode assertion has to run before anything changes the mode.
+    test_number_mode_default();
+
+    // RECT throughout. The retired evaluator never gated its own results — the
+    // dispatcher did — so this suite could assert complex answers in REAL mode.
+    // One evaluator owns the commit now, and REAL mode refuses to commit a
+    // non-real value (D30, register P3). Setting the mode the answers require
+    // is the honest port: on a real calculator these expressions need a+bi.
+    math::set_number_mode(math::NumberMode::kRectangular);
     test_arithmetic();
     test_functions();
     test_scalar_span_fallback();
@@ -403,10 +410,9 @@ int main() {
     test_complex_vars();
     test_errors();
     test_format_complex();
-    test_number_mode_default();
     test_angle_mode();
     test_real_pow_exact();
-    test_parse_depth_cap();
+    test_depth_caps_are_gone();
 
     std::printf("%d/%d checks passed\n", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

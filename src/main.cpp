@@ -27,7 +27,6 @@
 #include "ui/screen_manager.hpp"
 #include "math/functions.hpp"
 #include "math/lists.hpp"
-#include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "apps/graph_model.hpp"
@@ -357,7 +356,7 @@ int main() {
     // Matrix variables (Phase 4A) — same all-or-nothing contract.
     bool matrices_loaded = math::matrices().load(platform::storage());
     // MatAns (last matrix result) — persisted like the named matrices.
-    bool matans_loaded = math::matexpr::load_ans(platform::storage());
+    bool matans_loaded = math::load_ans(platform::storage());
     // Device power settings (4D.19-20): brightness/APD; a missing file
     // keeps the STM32's own boot defaults.
     bool settings_loaded = platform::power::load(platform::storage());
@@ -482,7 +481,7 @@ int main() {
                     }
                 }
                 if (!matans_loaded) {
-                    matans_loaded = math::matexpr::load_ans(platform::storage());
+                    matans_loaded = math::load_ans(platform::storage());
                     if (matans_loaded) {
                         printf("late-init: matans loaded at %lu ms\n",
                                static_cast<unsigned long>(now));

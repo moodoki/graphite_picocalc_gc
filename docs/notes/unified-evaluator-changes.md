@@ -1,6 +1,6 @@
 # Unified evaluator — behaviour change register (Phase 5.2)
 
-**Last updated**: 2026-08-09 (through task 5.2.10)
+**Last updated**: 2026-08-09 (through task 5.2.11)
 **Status**: **every row signed off (§2.5, task 5.2.10)**; the register keeps
 accumulating if the cutover finds more. The finished document is a byproduct
 deliverable at 5.2 closure.
@@ -29,16 +29,24 @@ column rather than prose:
 1. **Host** — every row is pinned by a named check in
    `tests/host/test_unified.cpp`. A row with no pin is not a decision, it is an
    accident waiting to be found on hardware.
-2. **Differential (5.2.9, built)** — `tests/host/test_differential.cpp` runs
+2. **Differential (5.2.9-5.2.11, retired)** — `tests/host/test_differential.cpp` ran
    **259 expressions harvested from the suites that pin the three retired
    evaluators, in both number modes**, through both pipelines from the same
    seeded state, and compares the result *and* everything each one wrote.
    **This register is exactly its allow-list** (`differential_allow.inc`, one
    row per id): a divergence with no row fails, and a row that never diverges
    fails too. Adding a row is a decision recorded here, not a way to quiet the
-   test. Since 5.2.10 it compares the whole dispatcher — `evaluate_home`
-   against the old cascade — so **what the screen prints** is compared too, not
-   only the value behind it.
+   test. From 5.2.10 it compared the whole dispatcher — `evaluate_home` against
+   the old cascade — so **what the screen prints** was compared too, not only
+   the value behind it.
+
+   **It retired with the evaluators it compared against (5.2.11)**, which is the
+   whole lifecycle of a differential harness: it exists to bless a migration and
+   has nothing left to compare once the migration lands. What carries forward is
+   the ~770 checks in `test_lists`, `test_matrix` and `test_complex_expr`, which
+   5.2.11 *ported* onto the new evaluator through `tests/host/eval_shim.hpp`
+   rather than deleting. Every row below that changed one of their expectations
+   says which row it is.
 3. **On device (5.2.12)** — the `Input` column *is* the serial-injection replay
    script. Sent to a firmware built with the old pipeline and one with the
    unified evaluator, the observed diff must equal this table, row for row.
@@ -91,8 +99,8 @@ is a TI-parity judgement, not a re-test — they are pinned already.
 | W11 | `mat2list([A], costs)` | *"mat2list targets are l1-l6"* | named lists work as targets | one ref numbering since 4D.13 (5.2.7) | `test_matrix_bridge` |
 | W12 | `l1->a` | *"Syntax error"* from whichever parser claimed the line | *"Store target mismatch"* | one store grammar instead of four rightmost-`->` searches (5.2.8) | `test_store_targets` |
 | W13 | `dim([A])->mydim` | no such form — `matexpr`'s store targets have no named-list branch and `listexpr` never sees `dim([A])` | stores the list | the target grammar stopped being per-evaluator (5.2.8) | `test_store_targets` |
-| W15 | `conj(a)`, and `real`/`imag`/`arg` of a real | *"Syntax error"* in REAL mode (tinyexpr has no `conj`), works in RECT (`complexexpr` does) | works in both | `complexexpr`'s complex-only table is one of the three the evaluator absorbed (5.2.5); it is no longer behind a mode | `test_differential` |
-| W16 | `{1}+{2}+{3}+{4}+{5}` | *"Too many list terms"* | evaluates | `listexpr`'s `kMaxOperands` term cap. The temp pool still bounds this, but it bounds *live* temporaries rather than terms in the input (5.2.6) | `test_differential` |
+| W15 | `conj(a)`, and `real`/`imag`/`arg` of a real | *"Syntax error"* in REAL mode (tinyexpr has no `conj`), works in RECT (`complexexpr` does) | works in both | `complexexpr`'s complex-only table is one of the three the evaluator absorbed (5.2.5); it is no longer behind a mode | `test_builtins` (REAL mode is the default there) |
+| W16 | `{1}+{2}+{3}+{4}+{5}` | *"Too many list terms"* | evaluates | `listexpr`'s `kMaxOperands` term cap. The temp pool still bounds this, but it bounds *live* temporaries rather than terms in the input (5.2.6) | `test_lists` |
 | W14 | a non-finite scalar result on the matrix path, e.g. `det([A])/0` | *"Undefined result"* | returns `inf`, committed to Ans | the engine and `complexexpr` already commit `inf`/`nan`; gating only the matrix path was the odd one out (5.2.8) | — see N/D below |
 
 **W14 is the one widening nobody asked for**, and the one row the 5.2.10
@@ -108,7 +116,7 @@ this phase.
 
 | # | Input | Today | Unified | Origin | Pinned by |
 |---|---|---|---|---|---|
-| F1 | `(-2)^2` | **-4** on the real path, **4** on the complex path — the two shipped evaluators disagree | **4** | tinyexpr's `factor()` cannot tell `-2^2` from `(-2)^2`; the unified compiler keeps grouping (5.2.9) | `test_differential` |
+| F1 | `(-2)^2` | **-4** on the real path, **4** on the complex path — the two shipped evaluators disagree | **4** | tinyexpr's `factor()` cannot tell `-2^2` from `(-2)^2`; the unified compiler keeps grouping (5.2.9) | `test_compile_unary`, `test_builtins` |
 
 **F1 in full**, because it is the second instance of the bug class that
 justified this phase and it was found by the harness on its first run.
@@ -198,14 +206,25 @@ parser accident is replaced.
 | E3 | `[A]->a`, `2->[C]`, `l1->[C]` | *"Store target mismatch"* (`matexpr`) | unchanged | `test_store_targets` |
 | E4 | `2->A`, `2->e`, `2->i` | *"Variables are lowercase a-z"*, *"e is reserved (Euler's e)"*, *"i is reserved (imaginary unit)"* | unchanged, verbatim — these state decisions (D1/D11/D19/D30) and the silent case-fold one of them replaced was a wrong answer | `test_store_compile` |
 | E5 | `sum(1)`, `det(1)` | *"Syntax error"* — help-only catalog rows with no implementation | *"Expected a list"* / *"Expected a matrix"* | `test_vm_errors` |
-| E6 | `2->Theta` | *"Syntax error"* — the uppercase name matched no target, so the arrow was left in the body for tinyexpr | *"Bad store target"* | `test_differential` |
-| E7 | `{1}->ans` | *"Syntax error"*, same mechanism | *"Bad store target"* — `ans` is a reserved name, not a target | `test_differential` |
-| E8 | `{1,foo}` | *"Bad list element"* | *"Syntax error"* | `test_differential` |
+| E6 | `2->Theta` | *"Syntax error"* — the uppercase name matched no target, so the arrow was left in the body for tinyexpr | *"Bad store target"* | `test_store_compile` |
+| E7 | `{1}->ans` | *"Syntax error"*, same mechanism | *"Bad store target"* — `ans` is a reserved name, not a target | `test_lists` |
+| E8 | `{1,foo}` | *"Bad list element"* | *"Syntax error"* | `test_lists` |
+| E9 | `fac(a)` with a complex `a` | *"Non-real variable"* — `eval_field`'s message, raised when a scalar span escaped to the real engine | *"Non-real result"* — there is no escape now, so the catalog function itself refuses the argument | `test_complex_expr` |
 
 E8 is the one row where the replacement is arguably less pointed, and it is
 kept: `foo` is an unknown identifier *anywhere*, and the unified compiler
 resolves identifiers before it knows what encloses them. "Bad list element"
 described the position, not the problem.
+
+**A note on how P1 nearly stopped being true.** 5.2.11's port of `test_lists`
+caught a real defect: `sum(l1)` over a **complex list in REAL mode** returned 3
+instead of erroring. The evaluator gated complex *matrix* reads at `kPushMat`
+but not complex *list* reads at `kPushList`, so an operation with a real result
+could reach imaginary parts to compute it. The differential harness could not
+have found it — its seeded world has no complex list, so REAL mode never met
+one — and neither could a gate on the result, which is what was there. Fixed in
+`kPushList`, and it is why porting the old suites was worth more than trusting
+the harness alone.
 
 ### Preserved on purpose
 

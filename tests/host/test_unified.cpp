@@ -13,7 +13,7 @@
 #include "math/array.hpp"
 #include "math/engine.hpp"
 #include "math/lists.hpp"
-#include "math/mat_expr.hpp"
+#include "math/array_format.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/types.hpp"
@@ -282,6 +282,13 @@ void test_compile_unary() {
     // Unary binds looser than ^, so -3^2 is -(3^2), matching the existing
     // evaluators and ordinary mathematical convention.
     check_rpn("-3^2", "3 2 ^ neg", "unary is looser than ^");
+    // ...but a PARENTHESISED negation is a finished operand, so (-2)^2 is 4.
+    // tinyexpr answers -4: its factor() hoists the negation out of the power
+    // without knowing the parens closed it, and by then the node is
+    // indistinguishable from -2. Register F1 — the second live disagreement
+    // between two shipped evaluators, after D46. Pinned here since 5.2.11
+    // retired the differential harness that found it.
+    check_rpn("(-2)^2", "2 neg 2 ^", "(-2) is a closed operand before ^ applies");
     check_rpn("+3", "3", "unary plus is a no-op");
 }
 
@@ -583,6 +590,10 @@ void test_builtins() {
 
     // Euler's identity, end to end through both tables.
     check_real("exp(0)*cos(0)", 1, "builtin and catalog compose");
+
+    // F1, evaluated rather than just compiled.
+    check_real("(-2)^2", 4, "(-2)^2 is 4 (register F1; tinyexpr says -4)");
+    check_real("(-2)^3", -8, "and (-2)^3 is -8, which both agree on");
 }
 
 // ---- 5.2.6: the list tier -------------------------------------------------
@@ -1365,6 +1376,7 @@ void test_store_compile() {
     // retired: the silent case-fold these replaced was a wrong answer, not a
     // syntax error.
     check_compile_error("2->A", "Variables are lowercase a-z", "uppercase target");
+    check_compile_error("2->Theta", "Bad store target", "an uppercase name (register E6)");
     check_compile_error("2->e", "e is reserved (Euler's e)", "e is Euler's number");
     check_compile_error("2->i", "i is reserved (imaginary unit)", "i is the imaginary unit");
 
@@ -1497,7 +1509,7 @@ void test_store_targets() {
     check(c.matrix == 2, "[C] is the reported target");
     check(c.mat_ans, "a matrix result rewrites MatAns");
     check(math::matrices().matrix(2).get(1, 1) == 8, "[C] holds the sum");
-    check(math::matexpr::mat_ans().get(1, 1) == 8, "MatAns holds it too");
+    check(math::mat_ans().get(1, 1) == 8, "MatAns holds it too");
     ++g_checks;
     if (v.kind != Kind::kMatrix || v.a != &math::matrices().matrix(2)) {
         std::printf("FAIL: a stored matrix result must name the slot it went to\n");
@@ -1506,7 +1518,7 @@ void test_store_targets() {
     commit_eval("[A]*2", &v, &c, "a storeless matrix result still lands in MatAns");
     check(c.matrix == -1 && c.mat_ans, "MatAns without a store target");
     ++g_checks;
-    if (v.kind != Kind::kMatrix || v.a != &math::matexpr::mat_ans()) {
+    if (v.kind != Kind::kMatrix || v.a != &math::mat_ans()) {
         std::printf("FAIL: an unstored matrix result must name MatAns\n");
         ++g_failures;
     }

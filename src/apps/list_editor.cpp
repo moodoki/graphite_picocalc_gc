@@ -8,12 +8,12 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
-#include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/functions.hpp"
 #include "math/list_ops.hpp"
 #include "math/lists.hpp"
+#include "math/unified_home.hpp"
 #include "apps/graph_screen.hpp"
 #include "apps/mode_screen.hpp"
 #include "apps/nav.hpp"
@@ -249,21 +249,22 @@ void ListEditorScreen::commit_edit() {
     if (!math::eval_field(input_.text(), &v)) {
         // Complex entry (4D.24): `i`-bearing values and complex-valued
         // variables don't ride the real field evaluator.
-        const auto cr = math::complexexpr::evaluate(input_.text());
-        if (!cr.ok) {
+        math::Complex cval;
+        const char* cerr = nullptr;
+        if (!math::unified::evaluate_scalar(input_.text(), &cval, &cerr)) {
             msg_ = "Bad value";
             invalidate_entry();
             return;
         }
-        if (cr.value.is_real()) {
-            v = cr.value.re;
+        if (cval.is_real()) {
+            v = cval.re;
         } else if (math::number_mode() == math::NumberMode::kReal) {
             msg_ = "Non-real result";  // D30 precedent
             invalidate_entry();
             return;
         } else {
             complex_val = true;
-            cv = cr.value;
+            cv = cval;
         }
     }
     // A complex element migrates the whole list to the complex tier

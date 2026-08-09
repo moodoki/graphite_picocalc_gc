@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "math/complex.hpp"
 #include "math/types.hpp"
 #include "math/unified_eval.hpp"
 
@@ -49,5 +50,15 @@ struct HomeResult {
 // Commits on success (Mode::kCommit): Ans, the store target, MatAns, and any
 // list a sort or mat2list wrote. The caller persists what `commit` names.
 HomeResult evaluate_home(const char* expr, bool to_frac);
+
+// Evaluate a scalar cell entry, committing nothing (5.2.11). The list and
+// matrix editors used complexexpr::evaluate for this, relying on it never
+// writing engine state — true of that evaluator by accident of design rather
+// than by contract. Mode::kProbe makes it a contract.
+//
+// Returns false with *err on a parse failure or a non-scalar result. A complex
+// value comes back whole; whether the caller may store it is the caller's rule
+// (both editors reject non-real in REAL mode, D30).
+bool evaluate_scalar(const char* expr, Complex* out, const char** err);
 
 }  // namespace math::unified

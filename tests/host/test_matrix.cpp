@@ -10,7 +10,8 @@
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/lists.hpp"
-#include "math/mat_expr.hpp"
+#include "eval_shim.hpp"
+#include "math/array_format.hpp"
 #include "math/matrix.hpp"
 
 namespace {
@@ -480,15 +481,16 @@ void test_psram_tier() {
 
 // ---- Expression layer (mat_expr) ----
 
-math::matexpr::Result eval_mat(const char* input) {
-    return math::matexpr::evaluate(input);
+// 5.2.11: the same checks, the unified evaluator underneath. See eval_shim.hpp.
+shim::Result eval_mat(const char* input) {
+    return shim::eval(input);
 }
 
 void check_mat_result(const char* input, int rows, int cols, const double* expected,
                       const char* what) {
     ++g_checks;
     const auto res = eval_mat(input);
-    if (res.kind != math::matexpr::Kind::kMatrix) {
+    if (res.kind != shim::Kind::kMatrix) {
         std::printf("FAIL: %s: '%s' -> kind %d, error %s (expected matrix)\n", what, input,
                     static_cast<int>(res.kind), res.error != nullptr ? res.error : "-");
         ++g_failures;
@@ -513,7 +515,7 @@ void check_mat_result(const char* input, int rows, int cols, const double* expec
 void check_mat_scalar(const char* input, double expected, const char* what) {
     ++g_checks;
     const auto res = eval_mat(input);
-    if (res.kind != math::matexpr::Kind::kScalar || !res.scalar.ok) {
+    if (res.kind != shim::Kind::kScalar || !res.scalar.ok) {
         std::printf("FAIL: %s: '%s' -> kind %d, error %s (expected scalar)\n", what, input,
                     static_cast<int>(res.kind), res.error != nullptr ? res.error : "-");
         ++g_failures;
@@ -526,10 +528,31 @@ void check_mat_scalar(const char* input, double expected, const char* what) {
     }
 }
 
+// dim()/eigenvals() compose now (register W7), so the suite needs a list check
+// where it only ever needed matrix and scalar ones.
+void check_mat_list(const char* input, const double* expected, int n, const char* what) {
+    ++g_checks;
+    const auto res = eval_mat(input);
+    if (res.kind != shim::Kind::kList || res.list == nullptr || res.list->size() != n) {
+        std::printf("FAIL: %s: '%s' -> kind %d (expected a list of %d)\n", what, input,
+                    static_cast<int>(res.kind), n);
+        ++g_failures;
+        return;
+    }
+    for (int i = 0; i < n; ++i) {
+        if (std::fabs(res.list->get(i) - expected[i]) > 1e-9) {
+            std::printf("FAIL: %s: '%s' [%d] -> %.12g (expected %.12g)\n", what, input, i,
+                        res.list->get(i), expected[i]);
+            ++g_failures;
+            return;
+        }
+    }
+}
+
 void check_mat_error(const char* input, const char* expected_err, const char* what) {
     ++g_checks;
     const auto res = eval_mat(input);
-    if (res.kind != math::matexpr::Kind::kError || res.error == nullptr ||
+    if (res.kind != shim::Kind::kError || res.error == nullptr ||
         std::strcmp(res.error, expected_err) != 0) {
         std::printf("FAIL: %s: '%s' -> kind %d, error '%s' (expected '%s')\n", what, input,
                     static_cast<int>(res.kind), res.error != nullptr ? res.error : "-",
@@ -546,8 +569,10 @@ void test_expr_basics() {
     check(fill(matrices().matrix(0), 2, 2, va), "expr fill [A]");
     check(fill(matrices().matrix(1), 2, 2, vb), "expr fill [B]");
 
-    check(eval_mat("2+2").kind == matexpr::Kind::kNone, "non-matrix input -> kNone");
-    check(eval_mat("{1,2}+l1").kind == matexpr::Kind::kNone, "list input -> kNone");
+    // kNone was "not my syntax", the signal that drove the dispatch cascade.
+    // One evaluator asks no such question (5.2.11): these evaluate.
+    check(eval_mat("2+2").kind == shim::Kind::kScalar, "a scalar is just a scalar now");
+    check(eval_mat("{1,2}+l1").kind != shim::Kind::kNone, "and list syntax is evaluated, not declined");
 
     const double vaa[4] = {1, 2, 3, 4};
     check_mat_result("[A]", 2, 2, vaa, "bare ref");
@@ -607,36 +632,36 @@ void test_expr_store() {
 
     // Matrix store
     auto res = eval_mat("[A]*2 -> [C]");
-    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 2 && res.matrices_modified,
+    check(res.kind == shim::Kind::kMatrix && res.stored_matrix == 2 && res.matrices_modified,
           "store to [C]");
     check_near(matrices().matrix(2).get(1, 1), 8.0, "store [C] value");
 
     // Copy form
     res = eval_mat("[A] -> [D]");
-    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 3, "copy [A] -> [D]");
+    check(res.kind == shim::Kind::kMatrix && res.stored_matrix == 3, "copy [A] -> [D]");
     check_near(matrices().matrix(3).get(0, 1), 2.0, "copy [D] value");
 
     // MatAns holds the last matrix result
-    check(matexpr::mat_ans().dim(0) == 2, "MatAns rows");
-    check_near(matexpr::mat_ans().get(0, 0), 1.0, "MatAns value");
+    check(mat_ans().dim(0) == 2, "MatAns rows");
+    check_near(mat_ans().get(0, 0), 1.0, "MatAns value");
 
     // Scalar store
     res = eval_mat("det([A]) -> q");
-    check(res.kind == matexpr::Kind::kScalar && res.scalar.stored_var == 'q' - 'a',
+    check(res.kind == shim::Kind::kScalar && res.scalar.stored_var == 'q' - 'a',
           "det -> q stored");
     check_near(engine().vars()['q'], -2.0, "q value");
     check_near(engine().vars().ans(), -2.0, "Ans updated");
 
     // dim/eigenvals list results
     res = eval_mat("dim([A])");
-    check(res.kind == matexpr::Kind::kList && res.list->size() == 2, "dim kind");
+    check(res.kind == shim::Kind::kList && res.list->size() == 2, "dim kind");
     check_near(res.list->get(0), 2.0, "dim rows");
     check_near(res.list->get(1), 2.0, "dim cols");
 
     const double vs[9] = {2, -1, 0, -1, 2, -1, 0, -1, 2};
     check(fill(matrices().matrix(4), 3, 3, vs), "fill [E] sym");
     res = eval_mat("eigenvals([E]) -> l2");
-    check(res.kind == matexpr::Kind::kList && res.stored_list == 1 && res.lists_modified,
+    check(res.kind == shim::Kind::kList && res.stored_list == 1 && res.lists_modified,
           "eigenvals -> l2");
     check_near(lists().list(1).get(0), 2.0 + std::sqrt(2.0), "eigenvals l2[0]", 1e-8);
 
@@ -649,26 +674,35 @@ void test_expr_store() {
     std::snprintf(cpx_pair, sizeof(cpx_pair), "{%c,-%c}", math::kImagUnitGlyph,
                   math::kImagUnitGlyph);
     check(fill(matrices().matrix(4), 2, 2, vrot2), "fill [E] rotation");
+    // A complex-conjugate spectrum was unstorable display text because lists
+    // were real-only — which 4D.24 changed. It is a complex list now, and it
+    // stores. Register W8. In REAL mode it is refused like any complex list,
+    // which is where this check runs.
+    (void)cpx_pair;
+    check_mat_error("eigenvals([E])", "Non-real result", "REAL mode refuses a complex spectrum");
+    check_mat_error("eigenvals([E]) -> l3", "Non-real result", "and refuses to store one");
+    math::set_number_mode(math::NumberMode::kRectangular);
     res = eval_mat("eigenvals([E])");
-    check(res.kind == matexpr::Kind::kText, "eigenvals complex kind");
-    check(res.text != nullptr && std::strcmp(res.text, cpx_pair) == 0, "eigenvals complex text");
-    check_mat_error("eigenvals([E]) -> l3", "Complex results can't be stored",
-                    "eigenvals complex store rejected");
+    check(res.kind == shim::Kind::kList && res.list->dtype() == math::Dtype::kComplex,
+          "in RECT it is a complex list (W8)");
+    res = eval_mat("eigenvals([E]) -> l3");
+    check(res.kind == shim::Kind::kList && res.stored_list == 2, "and it stores (W8)");
+    math::set_number_mode(math::NumberMode::kReal);
 
     // eig(...) is an alias of eigenvals(...) — same list result, same
     // complex-text form, same "must stand alone" rejection.
     check(fill(matrices().matrix(4), 3, 3, vs), "fill [E] sym (eig alias)");
     res = eval_mat("eig([E]) -> l2");
-    check(res.kind == matexpr::Kind::kList && res.stored_list == 1 && res.lists_modified,
+    check(res.kind == shim::Kind::kList && res.stored_list == 1 && res.lists_modified,
           "eig alias -> l2");
     check_near(lists().list(1).get(0), 2.0 + std::sqrt(2.0), "eig alias l2[0]", 1e-8);
     check(fill(matrices().matrix(4), 2, 2, vrot2), "fill [E] rotation (eig alias)");
-    res = eval_mat("eig([E])");
-    check(res.kind == matexpr::Kind::kText && res.text != nullptr &&
-              std::strcmp(res.text, cpx_pair) == 0,
-          "eig alias complex text");
-    check_mat_error("2*eig([A])", "dim/eigenvals must stand alone",
-                    "eig alias must stand alone");
+    check_mat_error("eig([E])", "Non-real result", "eig alias, same complex rule");
+    // "must stand alone" was a consequence of matexpr::Value not holding a
+    // list. Register W7.
+    // [A] is {{1,2},{3,4}}: eigenvalues (5 +/- sqrt(33))/2, doubled.
+    const double eig2[2] = {5.0 + std::sqrt(33.0), 5.0 - std::sqrt(33.0)};
+    check_mat_list("2*eig([A])", eig2, 2, "eig composes (W7)");
 
     // Store mismatches
     check_mat_error("[A] -> l1", "Store target mismatch", "matrix to list target");
@@ -698,7 +732,8 @@ void test_expr_errors() {
     check_mat_error("[A]^[A]", "Bad matrix exponent", "matrix exponent");
     check_mat_error("det([A]", "Syntax error", "unbalanced");
     check_mat_error("[A]*", "Syntax error", "trailing operator");
-    check_mat_error("2*dim([A])", "dim/eigenvals must stand alone", "nested dim");
+    const double dim2[2] = {4, 4};
+    check_mat_list("2*dim([A])", dim2, 2, "dim composes (W7)");
     check_mat_error("[B]^T*[Q]", "Syntax error", "bad token");
     check_mat_error("det(identity(2))+", "Syntax error", "trailing plus");
 }
@@ -728,11 +763,12 @@ void test_expr_depth_cap() {
 
     // Depth 4 is rejected rather than faulting — this is the shape that
     // hard-faulted on the Pico 1 with sp below __StackBottom.
-    check_mat_error("det(([A]*([A]+[A]))+[A])", "Too deeply nested",
-                    "depth 4 rejected (the HW crash shape)");
-    check_mat_error("((([A])))", "Too deeply nested", "depth 4 paren chain rejected");
-    check_mat_error("det(inverse(([A])))", "Too deeply nested",
-                    "depth 4 via nested function calls");
+    // Depth 4 used to be rejected — the shape that hard-faulted the Pico 1 with
+    // sp below __StackBottom (D48). Depth is operand-stack slots now, so all
+    // three evaluate. Register W9, and the user-visible payoff of the phase.
+    check_mat_scalar("det(([A]*([A]+[A]))+[A])", -6.0, "the HW crash shape now evaluates");
+    check_mat_result("((([A])))", 2, 2, va2, "depth 4 paren chain evaluates");
+    check_mat_scalar("det(inverse(([A])))", -0.5, "depth 4 nested calls evaluate");
 
     // The guard is RAII precisely so siblings do not accumulate: parse_term
     // and parse_expr call parse_unary in a loop, and a flat expression of any
@@ -779,7 +815,7 @@ void test_format_matrix() {
     const double v[4] = {1, 2.5, -3, 4};
     check(fill(m, 2, 2, v), "format fill");
     char buf[64];
-    matexpr::format_matrix(m, buf, sizeof(buf));
+    format_matrix(m, buf, sizeof(buf));
     check(std::strcmp(buf, "[[1,2.5][-3,4]]") == 0, "format small matrix");
 
     // Cells use the compact formatter: irrational entries cap at 4 sig
@@ -787,14 +823,14 @@ void test_format_matrix() {
     Array frac;
     const double fv[4] = {1.0 / 3.0, 2.5, -3, 4};
     check(fill(frac, 2, 2, fv), "compact fill");
-    matexpr::format_matrix(frac, buf, sizeof(buf));
+    format_matrix(frac, buf, sizeof(buf));
     check(std::strcmp(buf, "[[0.3333,2.5][-3,4]]") == 0, "format compact cell");
 
     // format_matrix_frac (>Frac on matrices): real cells become p/q.
     Array fr;
     const double frv[4] = {0.5, 0.25, 0.75, 0.2};
     check(fill(fr, 2, 2, frv), "frac fill");
-    matexpr::format_matrix_frac(fr, buf, sizeof(buf));
+    format_matrix_frac(fr, buf, sizeof(buf));
     check(std::strcmp(buf, "[[1/2,1/4][3/4,1/5]]") == 0, "format_matrix_frac");
 
     // Near-zero cleanup: roundoff cells (2.22e-16 vs a max of 1) snap to a
@@ -803,7 +839,7 @@ void test_format_matrix() {
     Array chop;
     const double cz[4] = {1, 2.220446049250313e-16, 0, 1};
     check(fill(chop, 2, 2, cz), "chop fill");
-    matexpr::format_matrix(chop, buf, sizeof(buf));
+    format_matrix(chop, buf, sizeof(buf));
     check(std::strcmp(buf, "[[1,0][0,1]]") == 0, "near-zero real cell snaps to 0");
 
     // A genuinely tiny-magnitude matrix is preserved (its own max sets the
@@ -811,7 +847,7 @@ void test_format_matrix() {
     Array tiny;
     const double tv[4] = {1e-15, 2e-15, 3e-15, 4e-15};
     check(fill(tiny, 2, 2, tv), "tiny fill");
-    matexpr::format_matrix(tiny, buf, sizeof(buf));
+    format_matrix(tiny, buf, sizeof(buf));
     check(std::strstr(buf, "1e-15") != nullptr && std::strcmp(buf, "[[0,0][0,0]]") != 0,
           "tiny-magnitude matrix not chopped");
 
@@ -820,14 +856,14 @@ void test_format_matrix() {
     const Complex ccz[4] = {Complex(1, 0), Complex(2.22e-16, -4.44e-16), Complex(0, 0),
                             Complex(1, 0)};
     check(cfill(cchop, 2, 2, ccz), "cchop fill");
-    matexpr::format_matrix(cchop, buf, sizeof(buf));
+    format_matrix(cchop, buf, sizeof(buf));
     check(std::strcmp(buf, "[[1,0][0,1]]") == 0, "near-zero complex cell snaps to 0");
 
     Array big;
     const char* err = nullptr;
     check(matops::identity(10, big, &err), "identity(10)");
     char small[24];
-    matexpr::format_matrix(big, small, sizeof(small));
+    format_matrix(big, small, sizeof(small));
     check(std::strchr(small, math::kEllipsisGlyph) != nullptr, "format truncates");
     check(small[std::strlen(small) - 1] == ']', "format truncation closes");
 }
@@ -975,43 +1011,43 @@ void test_complex_expr_layer() {
 
     // det([A]) is a complex scalar; Ans commits complex.
     auto res = eval_mat("det([A])");
-    check(res.kind == matexpr::Kind::kScalar && res.scalar_complex, "det([A]) complex scalar");
+    check(res.kind == shim::Kind::kScalar && res.scalar_complex, "det([A]) complex scalar");
     check_cnear(res.cvalue, -1, 3, "det([A]) value");
     check(engine().vars().is_complex(Variables::kAns), "complex Ans committed");
 
     // Element access promotes.
     res = eval_mat("[A](1,1)");
-    check(res.kind == matexpr::Kind::kScalar && res.scalar_complex, "[A](1,1) complex");
+    check(res.kind == shim::Kind::kScalar && res.scalar_complex, "[A](1,1) complex");
     check_cnear(res.cvalue, 1, 1, "[A](1,1) value");
 
     // Complex scalar subterms scale a real matrix.
     res = eval_mat("i*[B]");
-    check(res.kind == matexpr::Kind::kMatrix && res.matrix->dtype() == Dtype::kComplex,
+    check(res.kind == shim::Kind::kMatrix && res.matrix->dtype() == Dtype::kComplex,
           "i*[B] complex matrix");
     check_cnear(res.matrix->cget(0, 0), 0, 5, "i*[B] value");
     res = eval_mat("2i*[B]");
-    check(res.kind == matexpr::Kind::kMatrix, "2i shorthand parses");
+    check(res.kind == shim::Kind::kMatrix, "2i shorthand parses");
     check_cnear(res.matrix->cget(0, 1), 0, 12, "2i*[B] value");
 
     // Mixed matrix arithmetic.
     res = eval_mat("[A]+[B]");
-    check(res.kind == matexpr::Kind::kMatrix, "[A]+[B] ok");
+    check(res.kind == shim::Kind::kMatrix, "[A]+[B] ok");
     check_cnear(res.matrix->cget(0, 0), 6, 1, "[A]+[B] value");
 
     // Stores preserve the dtype (and complex scalars store to vars).
     res = eval_mat("[A]->[C]");
-    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 2 &&
+    check(res.kind == shim::Kind::kMatrix && res.stored_matrix == 2 &&
               matrices().matrix(2).dtype() == Dtype::kComplex,
           "[A]->[C] keeps complex");
     res = eval_mat("[A](1,1)->z");
-    check(res.kind == matexpr::Kind::kScalar && res.scalar_complex &&
+    check(res.kind == shim::Kind::kScalar && res.scalar_complex &&
               engine().vars().is_complex('z' - 'a'),
           "complex scalar var store");
     engine().vars().set_real('z' - 'a', 0);
 
     // format_matrix uses the complex formatter.
     char buf[96];
-    matexpr::format_matrix(matrices().matrix(0), buf, sizeof(buf));
+    format_matrix(matrices().matrix(0), buf, sizeof(buf));
     check(std::strchr(buf, kImagUnitGlyph) != nullptr, "format_matrix complex glyph");
 
     // Complex cells use the compact per-component formatter too: a
@@ -1019,7 +1055,7 @@ void test_complex_expr_layer() {
     Array cfrac;
     const Complex cv[1] = {{1.0 / 3.0, 1.0 / 3.0}};
     check(cfill(cfrac, 1, 1, cv), "compact complex fill");
-    matexpr::format_matrix(cfrac, buf, sizeof(buf));
+    format_matrix(cfrac, buf, sizeof(buf));
     check(std::strstr(buf, "0.3333") != nullptr && std::strstr(buf, "0.3333333") == nullptr,
           "format_matrix compact complex cell");
 
@@ -1045,7 +1081,7 @@ void test_matrix_literals() {
     using namespace math;
     const double vaa[4] = {1, 2, 3, 4};
     auto res = eval_mat("[[1,2][3,4]]");
-    check(res.kind == matexpr::Kind::kMatrix, "literal evaluates");
+    check(res.kind == shim::Kind::kMatrix, "literal evaluates");
     check_matrix(*res.matrix, 2, 2, vaa, "literal values");
 
     const double vrow[3] = {5, 7, 11};
@@ -1056,7 +1092,7 @@ void test_matrix_literals() {
     check_mat_scalar("det([[1,2][3,4]])", -2.0, "det of literal");
 
     res = eval_mat("[[1,2][3,4]] -> [E]");
-    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 4, "literal store");
+    check(res.kind == shim::Kind::kMatrix && res.stored_matrix == 4, "literal store");
     check_near(matrices().matrix(4).get(1, 0), 3.0, "stored literal value");
 
     check_mat_error("[[1,2][3]]", "Dim mismatch", "ragged literal errors");
@@ -1065,7 +1101,7 @@ void test_matrix_literals() {
     // Complex literal in RECT mode; gated in REAL.
     set_number_mode(NumberMode::kRectangular);
     res = eval_mat("[[i,0][0,1]]");
-    check(res.kind == matexpr::Kind::kMatrix && res.matrix->dtype() == Dtype::kComplex,
+    check(res.kind == shim::Kind::kMatrix && res.matrix->dtype() == Dtype::kComplex,
           "complex literal");
     check_cnear(res.matrix->cget(0, 0), 0, 1, "complex literal value");
     set_number_mode(NumberMode::kReal);
@@ -1075,13 +1111,13 @@ void test_matrix_literals() {
 void test_matans_token() {
     using namespace math;
     const double vaa[4] = {1, 2, 3, 4};
-    check(eval_mat("[[1,2][3,4]]").kind == matexpr::Kind::kMatrix, "seed MatAns");
+    check(eval_mat("[[1,2][3,4]]").kind == shim::Kind::kMatrix, "seed MatAns");
     check_mat_result("matans", 2, 2, vaa, "matans recalls");
     const double vdbl[4] = {2, 4, 6, 8};
     check_mat_result("2*matans", 2, 2, vdbl, "matans in expression");
     check_mat_scalar("det(matans)", -8.0, "det(matans) after 2*matans");
     auto res = eval_mat("matans -> [F]");
-    check(res.kind == matexpr::Kind::kMatrix && res.stored_matrix == 5, "matans store");
+    check(res.kind == shim::Kind::kMatrix && res.stored_matrix == 5, "matans store");
 }
 
 void test_list_matrix_bridge() {
@@ -1106,7 +1142,7 @@ void test_list_matrix_bridge() {
 
     // Round-trip back out.
     res = eval_mat("mat2list([G], l3, l4)");
-    check(res.kind == matexpr::Kind::kText, "mat2list returns text");
+    check(res.kind == shim::Kind::kText, "mat2list returns text");  // "Done (n lists)", D1
     check((res.lists_mask & 0b1100) == 0b1100, "mat2list mask");
     check(lists().list(2).size() == 3 && lists().list(2).get(2) == 3, "l3 column values");
     check(lists().list(3).size() == 3 && lists().list(3).get(1) == 5, "l4 column values");
