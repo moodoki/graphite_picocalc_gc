@@ -83,7 +83,7 @@ and a 500-caret chain parses without incident.
 
 **This is a local fix to a vendored driver**, the first one, so `drivers/README.md`
 gains the "Local modifications" section its own policy has been reserving. A
-re-vendor must re-apply it; upstream #52 is open.
+re-vendor must re-apply it — or, per the correction below, adopt upstream's.
 
 **Verified before/after on the same Pico 2**, by flashing each build and
 replaying one 32-expression corpus through Phase 5.1's serial injection —
@@ -126,6 +126,60 @@ where it now displays an amber `1/4`.
 if it is equivalent, keep ours if it is not. The larger question, whether the
 unified evaluator should replace tinyexpr on the numeric path outright, is
 unaffected and stays where D50 left it: after 5.2 closes, with §9's M1 measured.
+
+### Correction, 2026-08-09: upstream had already fixed it, four days earlier
+
+**This entry twice said upstream #52 was open. It was not** — it was closed
+**2026-08-05**, and the claim came from a web search taken at face value instead
+of the two API calls that would have checked it. Only the narrow reading
+survives: the bug is present in our vendored `4a7456e` (2025-12-12), which
+predates the fix. Corrected here rather than quietly, because the wrong version
+sends the next reader looking for work that no longer exists.
+
+**What actually happened.** tinyexpr had been dormant for years; #52 was filed in
+July 2019, diagnosed correctly by the maintainer within a day — *"it will
+optimize `(-1)^0` to `-1^0` to `-(1^0)`, which is very wrong"* — and then sat.
+The same 2019 comment predicted the second defect before anyone hit it: *"there
+are probably other cases such as `-a^-b^-c` that need special consideration."*
+On 2026-08-05 the project woke up and landed 22 commits, including
+[`1e2ba48`](https://github.com/codeplea/tinyexpr/commit/1e2ba481) "Fix unary
+operator handling with TE_POW_FROM_RIGHT, fixes #52".
+
+**Their fix covers both defects and is equivalent to ours**, reached by a
+different route. They keep the sign scan in `power()` and record it in a new
+`state::applied_unary` flag, so `factor()` hoists only a unary operator actually
+written to the left of a `^`; we moved the scan into `factor()` instead. For B2
+they move the insertion slot inside the unary node
+(`slot = p_unary ? &p->parameters[0] : &insert->parameters[1]`), which is the
+same tree ours builds. Both are iterative — nobody reintroduced recursion per
+caret. Verified rather than assumed: our 46-expression corpus runs against
+upstream `master` with **0 failures**, and their `smoke.c` re-enables a
+`/* TODO POW FROM RIGHT IS STILL BUGGY */` block that had been commented out
+since 2020, containing `2^-3^4` and `-2^-3^-4`.
+
+**So nothing goes upstream.** No issue to file, no fix to contribute; a duplicate
+would be noise. The good-citizen move is the opposite one — stop carrying a
+private fork of a fix that now exists upstream.
+
+**The follow-up is a re-vendor, and `drivers/README.md`'s policy already decides
+it**: "port their fix if it is equivalent" — it is. But `master` is **22 commits
+ahead** and not a drop-in, so this is scoped work rather than a drive-by:
+
+- It merged the **logic branch**, so `!` is now prefix logical-not with its own
+  `logical_not`/`notnot` node types. We use `!` as *postfix factorial*.
+  `Engine::preprocess` rewrites every `!` to `fac(...)` before tinyexpr sees one,
+  so the collision is contained today — but that containment becomes
+  load-bearing rather than incidental, and `!=` would now mean something.
+- [`a851f2b`](https://github.com/codeplea/tinyexpr/commit/a851f2be) **"Limit
+  parser recursion depth, fixes #136"** — that is **D47's bug**, fixed upstream.
+  Our `kMaxParseDepth = 7` paren-count pre-scan in `engine.cpp` is a workaround
+  outside the parser; theirs is inside it and counts what actually recurses.
+  Adopting it could retire ours.
+- Plus locale-independent number parsing, `unsigned char` ctype fixes, ARMCC
+  support, and a CI workflow.
+
+Until that happens our local fix stands and the "Local modifications" row is
+still correct — it just has a shorter expected life than it looked like.
 
 ## D49: Integer powers of a complex base are computed, not approximated — and why the display-tolerance alternative was rejected
 

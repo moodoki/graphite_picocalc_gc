@@ -456,6 +456,10 @@ static te_expr *power(state *s) {
  * right: it took `insertion->parameters[1]` as the base of the next `^`, so a
  * negated exponent was re-based and `2^-3^2` built `2^((-3)^2)`.
  *
+ * NOTE: upstream fixed both in 1e2ba48 (2026-08-05), after the 4a7456e we
+ * vendored, by a different but equivalent route -- do not re-apply this on top
+ * of a re-vendor, adopt theirs. See D51's correction section.
+ *
  * Both are one mistake -- letting a negation and a `^` swap places -- so the
  * grammar is restated to scan the sign HERE, at each level, and the chain is
  * built through an insertion point so the sign always stays OUTSIDE the
