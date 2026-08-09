@@ -604,6 +604,44 @@ v0.3.1 release.
 (the whole point of moving depth off the call stack), the bss delta 5.2.11
 banks, and the serial-injection differential.
 
+### Amendment, 2026-08-09 — this method did not work; what replaced it (D52)
+
+**Everything above about host-side round-trip timing is superseded.** It was
+tried first, on hardware, and cannot resolve the evaluator:
+
+- The round trip carries a **full-frame push** (`main.cpp:398` — "a full-frame
+  push is ~200 ms"), giving a **~113 ms floor with ~80 ms spread** against an
+  evaluator cost of 0.5-17 ms. The decisive observation is the ordering, not the
+  ratio: the 999-element M2 row had a **lower minimum (80 ms) than `2+3*4`
+  (104 ms)**.
+- "Enough repetitions cancel it" is the specific claim that fails. The push cost
+  depends on **the result being rendered**, so it is correlated with the thing
+  under test, not independent overhead.
+- Timing the whole `submit_line` fails too — it contains the SD history write.
+  `2+3*4` was 19.0 ms of which **0.63 ms** was evaluation.
+
+**What replaced it**: a firmware probe bracketing evaluation only (top of
+`evaluate_input` to entry of `push_entry`, the funnel every branch passes
+through), with the **baseline rebuilt from the v0.3.2 tag carrying the same
+probe**, applied to both trees by one script so the instrumentation is provably
+identical. `scripts/ab-measure.py` runs it.
+
+**This also strengthens the M5 control rather than weakening it.** The released
+binary was chosen partly so the comparison would not be confounded by unrelated
+commits; the rebuilt baseline differs from `phase-5.2` by the evaluator work
+alone, so M5's shift is dispatch overhead and nothing else. Note M5 *did* move
+(+0.08 to +0.17 ms) — small in absolute terms, and §9 above already names a
+difference there as dispatch overhead rather than arithmetic. Judge it in
+milliseconds, not percent: on a 0.5 ms row a percentage says more about the
+divisor than the change.
+
+**The baseline is now the v0.3.2 release**, not v0.3.1 — it is what this branch
+forks from, and it differs by exactly the thing under test.
+
+Results, both boards, and the two regressions to record (M2 +36/+52%, M6
++54/+80%) are in **D52**. Depth results, including the one place the "depth costs
+no call frames" claim needs a caveat, are there too.
+
 ## 8. Non-goals
 
 - Touching `evaluate_real()` / tinyexpr (§2).

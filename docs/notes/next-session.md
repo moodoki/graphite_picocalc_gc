@@ -1,6 +1,55 @@
 # Start here — next session
 
-**Last session:** 2026-08-09 (later still) — **tinyexpr's unary-minus/`^` bug
+**Last session:** 2026-08-09 (last) — **Phase 5.2 task 5.2.12: on-device
+verification, both boards. §9's measurement method did not survive contact with
+the hardware, and the Pico 1 found two bugs** (D52, D53). 5.2.12's own work is
+**done**; two defects it surfaced are **not**, and one of them should be fixed
+before Phase 6 starts.
+
+**The numbers** (evaluation-only firmware probe, median of 15, per-sample spread
+0.02-0.18 ms, Pico 2 then Pico 1): **M1 -29%/-32%** — the guardrail row is
+*better*, not merely unchanged, because REAL mode no longer evaluates twice;
+**M3 -17%/-9%**, **M4 -32%/-14%**, **M5 +0.15/+0.17 ms** dispatch;
+**M2 +52%/+36%** and **M6 +54%/+80%**, the two regressions. M2 is §3's promised
+number and it is the predicted cost (5.7 us/element = two extra streaming passes
+at D10's ~6.8 MB/s). Depth: **paren 16 -> 62+, matrix 3 -> 14+**, worst stack
+peak **3,972 -> 2,344** (Pico 2), `kMaxStack = 64` exact with 65 a clean error.
+`.bss` **-5,360 B** (Pico 1) — which does **not** match the phase's claimed
+-6,888 and is recorded as measured, not reconciled.
+
+> ## The two open defects
+>
+> **1. `matexpr`'s depth cap does not hold on the Pico 1 — v0.3.2 hard-faults.**
+> `det((([A]*[A])+[A])*[A])` reboots the shipped firmware. `DepthGuard` is RAII
+> *inside* `parse_unary`, so depth 4 allocates its frame before the guard can
+> refuse it, and the Pico 1 has 144 B of margin against a ~600 B frame. **Phase
+> 5.2 fixes this by deleting `matexpr`** (returns `8` at a 2,104 peak) — so if
+> 5.2 merges, nothing more is owed. **If 5.2 slips, `main` needs a point fix**,
+> because every release from v0.2.0 to v0.3.2 carries a reachable hard fault on
+> that board. See D48's amendment.
+>
+> **2. Per-element PSRAM reads are intermittently wrong (D53) — fix before
+> Phase 6.** A long list *displays* one element wrong on ~8 runs in 30, Pico 1
+> only. **The arithmetic is correct** (`sum(l1/499500)` is exactly `1`, 25/25);
+> it is `format_list` reading via `Array::get` one 8-byte PSRAM transfer at a
+> time where the compute path streams in chunks. Pre-existing — identical 8/30
+> on v0.3.2 and on 5.2 — so **not a phase regression**; 5.2 only widens which
+> expressions reach it. **The trap when fixing this**: bulk-reading `format_list`
+> makes the symptom vanish and is worth doing anyway (999 SPI transactions become
+> ~4), but if the cause is DMA/SPI contention with core 1's display push — the
+> hypothesis D53 records and does *not* claim as proven — then every other
+> per-element `Array::get` on a PSRAM array still carries it. Test the hypothesis
+> before deciding the fix; D53 names the cheapest test.
+
+**Also corrected: nothing moved to PSRAM.** D48 said the explicit stack would be
+"PSRAM-friendly" and that this is "what makes much larger depth reachable at
+all". 5.2 put the operand stack in **bss** (1,536 B) and never needed PSRAM.
+
+New tool: **`scripts/ab-measure.py`**, plus a firmware `eval_us=` probe on the
+inject echo. Full detail: `decisions.md` **D52** (results + why the method
+changed), **D53**, D48's amendment, and `phase5.2-spec.md` §9's amendment.
+
+**Previous session:** 2026-08-09 (later still) — **tinyexpr's unary-minus/`^` bug
 fixed at the source (D51), shipped as v0.3.2 on `main`, HW-verified on the
 Pico 2, and merged back into this branch.** Not 5.2 work: D50 had split it out,
 and it landed on the shipping baseline so it is in the firmware whether or not
@@ -62,7 +111,20 @@ which is what caught the complex-list read gate.
 
 ---
 
-**Next up: 5.2.12, on-device verification** (both boards, 12 hrs). It owes:
+~~**Next up: 5.2.12, on-device verification**~~ — **DONE 2026-08-09, both
+boards** (D52). All four items below were delivered except the last, which has no
+mechanism: the diag screen reports PSRAM, die temp, SD and keys but **no
+static-RAM figure**, so the ELF number is the only one available — and it is
+definitionally what was flashed. Item 2's method was replaced outright (see
+D52). Kept below as the record of what the task was scoped to owe.
+
+**5.2 is now code-complete and hardware-verified. What remains before it closes
+is a judgement call, not a task**: M2 (+52%/+36%) and M6 (+54%/+80%) are recorded
+regressions, and §9's own criteria call those "a finding to record and cost, not
+automatically a blocker". Decide whether to accept them, then do the phase-close
+docs pass and open the PR.
+
+The original brief, for reference:
 
 1. **Stack peak** per input — the whole point of moving depth off the call
    stack. The comparison is last session's `matexpr` figures: 4,012 of 4,096 on

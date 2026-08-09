@@ -18,6 +18,177 @@ Format:
 
 ---
 
+## D53: per-element PSRAM reads are intermittently wrong — list *display* corrupts where the arithmetic does not
+
+**Date**: 2026-08-09
+**Status**: Accepted (bug record; fix pending)
+**Context**: Found by 5.2.12's Pico 1 leg (D52), which is the first time anything
+replayed the same list expression tens of times in a row on that board. Typing it
+once, as every previous bench pass did, would never have shown it.
+
+`l1/499500` with `l1 = seq(x,x,1,999,1)` renders element 1 as
+**`4.004007642e-6`** instead of `4.004004004e-6` on roughly **8 runs in 30**, on
+the same board, same session, same input. Rate is **identical on v0.3.2 and on
+phase-5.2** (8/30 both), so this is **shipped behaviour, not a phase regression**.
+
+**The values are correct. Only the rendering is wrong.** `sum(l1/499500)`
+returns exactly `1` on 25/25 runs, and that fold cannot hide a bad element the
+way `sum(l1*1)` can — a 1.8e-6 error in one element of a 499,500 sum formats
+identically to the right answer, which is how the first, insensitive test
+mistakenly cleared it.
+
+**Mechanism**, as far as the evidence goes:
+
+- `format_list` (`array_format.cpp:98`) reads **one element at a time** through
+  `Array::get(i)` (`array.cpp:26`), which for a PSRAM-backed array is an 8-byte
+  `psram_backend::read`. A 999-element list is 999 separate PIO/SPI transfers.
+- The compute path does **not** do this — it streams in chunks — and the compute
+  path is clean.
+- `kSlabBytes = 2048` (256 doubles, D21) is the SRAM/PSRAM threshold, so a
+  100-element list lives in SRAM and **never corrupts**, while a 999-element one
+  lives in PSRAM and does. That threshold is also what M4's 256/257 pair
+  straddles — it is not a streaming chunk boundary, and 5.2.12 initially
+  mis-read it as one.
+- **Pico 1 only.** The Pico 2 showed nothing across the whole pass.
+
+**Decision**: record it now, fix before the next phase starts, and do not
+attribute it to Phase 5.2.
+
+**Rationale for the suspected root cause, stated as a hypothesis and not a
+finding**: `Psram::read` issues `pio_spi_write_read_dma_blocking` per 31-byte
+chunk (`psram.cpp:105`), and core 1's display service pushes the panel over
+**DMA** (`display.cpp:53`). The Pico 1 renders in 16-px strips — roughly twenty
+core-1 pushes per frame — where the Pico 2 pushes one full framebuffer. More
+concurrent DMA/SPI activity per unit of work on exactly the board that shows the
+defect. That is consistent with everything observed, but nothing here proves it;
+no test in this pass isolated concurrency.
+
+**Two candidate fixes, and why they are not the same fix**:
+
+1. **Bulk-read the display path** — have `format_list` stream the array the way
+   the compute path does instead of calling `get()` per element. Small, and it
+   is a large speedup regardless (999 SPI transactions become ~4). But if the
+   hypothesis above is right, this **narrows the window rather than closing it**,
+   and every other per-element `Array::get` on a PSRAM array keeps the exposure.
+2. **Fix `Psram::read`** — if it is DMA/SPI contention with core 1, the fix is
+   arbitration, and it is the real one. Bigger, and it needs the hypothesis
+   confirmed first.
+
+Doing (1) and calling the bug closed would be the tempting mistake: the symptom
+disappears from the one path that made it visible, while the cause stays.
+
+**Tradeoffs**: leaving it unfixed means a user can see a wrong digit in a long
+list on a Pico 1 — cosmetic, since the value is right and anything computed from
+it is right, but indistinguishable from a real arithmetic bug to whoever sees it.
+
+**Revisit when**: the concurrency hypothesis is tested. The cheapest test is to
+suspend the core-1 display service around a long run of per-element PSRAM reads
+and see whether the corruption stops.
+
+## D52: Phase 5.2 on-device verification — §9's measurement method did not survive contact with the hardware
+
+**Date**: 2026-08-09
+**Status**: Accepted (measurement + method correction)
+**Context**: Task 5.2.12, both boards. §9 specified an A/B latency pass against a
+released binary, timed **host-side** as the round trip from writing a line to
+reading its echo, on the argument that "the same overhead sits on both sides, so
+enough repetitions cancel it."
+
+**That argument is wrong, and the hardware says so in two independent ways.**
+
+- **The round trip has a ~113 ms floor and an ~80 ms spread** (Pico 2). A submit
+  triggers a full-frame push — `main.cpp:398` says so: *"a full-frame push is
+  ~200 ms, so redraw only after input."* The evaluator's own cost is 0.5-17 ms
+  underneath that. The decisive observation is not the ratio but the ordering:
+  the 999-element M2 row had a **lower minimum (80 ms) than `2+3*4` (104 ms)**.
+  Scheduling phase dominates the work completely. And the push cost depends on
+  the *result being rendered*, so it is not overhead that cancels — it is
+  correlated with the thing under test.
+- **Timing the whole `submit_line` does not work either**, which was the obvious
+  next move and also wrong: it contains the SD history write
+  (`persist_history_line`). `2+3*4` measured **19.0 ms**, of which **0.63 ms**
+  was evaluation. 97% of the number was I/O.
+
+**Decision**: measure with a firmware probe bracketing evaluation only — top of
+`evaluate_input` to entry of `push_entry`, which every branch funnels through, so
+it captures evaluation plus result formatting and excludes I/O and rendering —
+and **rebuild the baseline from the v0.3.2 tag with the same probe**, applied to
+both trees by one script so the instrumentation is provably identical rather than
+hand-matched twice.
+
+**Rationale**: §9 chose a released binary to avoid a rebuild and to compare
+"what users have against what they will get". The second reason survives; the
+first cost more than it saved. And the rebuild strengthens the control rather
+than weakening it: v0.3.2 differs from `phase-5.2` **only** by the evaluator
+work, so M5's movement is genuinely dispatch overhead rather than the "different
+commit" confound §9 was guarding against.
+
+**Results** — evaluation time in ms, median of 15, per-sample spread 0.02-0.18 ms
+so every delta below is 10-100x its own noise:
+
+| | input | Pico 2 base -> new | Pico 1 base -> new |
+|---|---|---|---|
+| M1 | `2+3*4` | 0.884 -> **0.627** (-29%) | 1.318 -> **0.890** (-32%) |
+| M1 | `sin(30)+ln(2)` | 1.487 -> **1.165** (-22%) | 2.090 -> **1.503** (-28%) |
+| M2 | `sin(l1)+2*l2` @999 | 10.889 -> **16.552** (+52%) | 28.552 -> **38.843** (+36%) |
+| M3 | `l1/sum(l1)` @999 | 8.457 -> **7.019** (-17%) | 13.850 -> **~12.65** (-9%) |
+| M4 | `sum(sin(l3))` @256 | 2.116 -> **1.442** (-32%) | 5.851 -> **5.035** (-14%) |
+| M4 | `sum(sin(l4))` @257 | 3.412 -> **2.676** (-22%) | 7.658 -> **6.761** (-12%) |
+| M5 | `det([A])` 6x6 | 0.491 -> **0.637** (+0.146 ms) | 0.714 -> **0.885** (+0.171 ms) |
+| M5 | `[A]*[B]` 6x6 | 0.552 -> **0.634** (+0.082 ms) | 0.965 -> **1.049** (+0.084 ms) |
+| M6 | `seq(x^2,x,1,200,1)` | 1.851 -> **2.847** (+54%) | 3.821 -> **6.894** (+80%) |
+
+**Against §9's own pass criteria**: M1 is not merely "within noise of today" but
+**better on both boards**, because REAL mode no longer evaluates twice — the
+`complexexpr` probe plus `engine` pair that register row D4 describes. M3
+confirms §3's reasoning about hoisting the loop-invariant reduction. M4 improves
+on both sides of the SRAM/PSRAM threshold.
+
+**M2 is the regression §3 committed to reporting either way, and it is the
+predicted one.** +5.66 ms over 999 elements is 5.7 us/element; two extra
+streaming passes x 8 KB x read+write at D10's measured ~6.8 MB/s predicts ~4.8 ms.
+The cost is the three-pass lift, not something unexplained. **M6 (+54%/+80%)** is
+the second regression: quoted-body re-entry against `listexpr`'s per-element
+tinyexpr compile.
+
+**M5 moved and that is a cost, not an invalidation.** §9 itself says a
+difference there "means dispatch overhead, not arithmetic" — it is compiling a
+`Program` before running it. The first version of the comparison script failed
+the control on percentage alone, which on a 0.5 ms row is a statement about the
+divisor; it now judges absolute milliseconds.
+
+**Depth, which had never been tested on hardware.** The claim under test was that
+moving depth off the call stack makes it free, and the falsifiable form is that
+**stack peak must not grow with nesting depth**:
+
+- Scalar/paren/unary: **confirmed**. The ladder plateaued at 2,756 and depths 32
+  through 63 registered no new high-water mark at all. `kMaxStack = 64` is
+  enforced exactly — 64 evaluates, **65 returns "Too deeply nested"**, no fault.
+- **Matrix nesting is the exception: ~104 B of call stack per level.** Input
+  *length* is free (2 to 30 flat terms, zero new marks) and it is not the CAS
+  exact-form probe (`>dec` suppresses that; peaks still climb). Bounded in
+  practice — depth 14 is the deepest a 128-char line allows, at ~2,230 of 4,096 —
+  but the mechanism is unexplained and the blanket claim needs this caveat.
+
+**Before/after on the same boards**: paren nesting 16 -> 62+, matrix nesting
+**3 -> 14+**, worst stack peak **3,972 -> 2,344** (Pico 2) and **hard fault ->
+3,068** (Pico 1). `.bss` **-5,360 B** (Pico 1), **-5,348 B** (Pico 2).
+
+**The `.bss` figure does not match the phase's own claim of -6,888 B** and is
+recorded as measured rather than reconciled to it. v0.3.2 differs from the branch
+point only by D51, which has no static data, so the baseline choice does not
+explain a ~1.5 KB gap. Whoever picks this up should find out which figure counted
+what before quoting either.
+
+**Two things §9 asked for that this pass did not deliver**: `.bss` "confirmed on
+the board" has no mechanism — the diag screen reports PSRAM, die temp, SD and
+keys, but no static-RAM figure, so the ELF number is the only one available (and
+is definitionally what was flashed). And M7's register replay ran clean on both
+boards (31 inputs, 36 lines, no faults) but was compared by eye against the
+register rather than diffed mechanically.
+
+**Revisit when**: M2 or M6 shows up as a felt slowdown in real use. Both are
+recorded costs, not blockers — the phase's case rests on correctness and bss.
 
 ## D51: tinyexpr's unary minus binds to its own operand — the `(-2)^2` fix ships ahead of the unified evaluator, not with it
 
@@ -492,6 +663,44 @@ Pico 1's ~52 KB headroom, a whole-firmware change of the same class as
 `PICO_USE_STACK_GUARDS`; (c) an explicit-stack iterative parser, whose depth is
 bounded by an array rather than by frames — and that array *is* PSRAM-friendly,
 being accessed sequentially rather than as a call stack.
+
+### Amendment, 2026-08-09: the cap does not hold on the Pico 1, and it never did
+
+**5.2.12's Pico 1 leg (D52) hard-faulted the shipped v0.3.2 firmware** on
+`det((([A]*[A])+[A])*[A])` — depth 4, which this decision says is rejected. It is
+not rejected on that board; the device reboots. `lr` resolves to
+`matexpr::parse_unary` (`mat_expr.cpp:769`, *this entry's own guarded function*)
+with `sp = 0x20040f60`, **160 bytes below `__StackBottom` (0x20041000)** and
+inside core 1's stack.
+
+**The reason is structural, and it is visible in this entry's own numbers.**
+`DepthGuard` is RAII *inside* `parse_unary`, so entering depth 4 allocates the
+frame **before** the guard can refuse it. This entry measured 600 B/level after
+the leaf fix and recorded "the margin at depth 3 is now 84 bytes — containment,
+not a fix". Re-measured now, `det([[1,2][3,4]])` peaks at **3,952 of 4,096**:
+144 bytes of margin, against a ~600 B frame. The guard is one frame too late,
+and always was.
+
+The Pico 2 survives the identical input on identical code only because its frames
+are smaller (536 B/level) and its baseline peak lower — which is why 2026-08-08's
+Pico-1-then-Pico-2 sequence never caught it. **A cap that must allocate the frame
+it is rejecting cannot protect the last level.** Checking the depth *before* the
+recursive call, at each call site, is the shape that would have worked.
+
+**Not fixed here, and that is a choice with a cost**: `matexpr` is deleted by
+Phase 5.2, which handles the same input correctly at a 2,104 peak, so fixing it
+would be work thrown away. But **v0.3.2 is the current release and every release
+back to v0.2.0 carries this**, so until 5.2 merges there is a reachable
+hard-fault on the Pico 1 — a plain matrix expression a user could type. If 5.2
+slips, this needs a point fix on `main` rather than continued waiting; see the
+wishlist entry.
+
+**And the PSRAM sentence above oversold what got built.** 5.2 put the operand
+stack in **bss** — `unified_vm.cpp:39`, 64 x 24 = 1,536 B, with the comment
+saying exactly why — not in PSRAM. PSRAM was never needed: an explicit stack made
+depth cheap enough that 1.5 KB of SRAM bought 64 levels against `matexpr`'s 3.
+The claim that the array "*is* PSRAM-friendly" remains true and remains
+unexercised.
 
 **(c) belongs to idea F, not to `matexpr`** (decision 2026-08-08): the unified
 evaluator retires this parser outright, so building an explicit-stack rewrite

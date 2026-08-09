@@ -7,6 +7,9 @@
 
 namespace apps {
 
+// §9 evaluator probe (5.2.12): microseconds for the last evaluation.
+uint32_t home_eval_us();
+
 // Calculator home screen (task 2.5): expression input at the bottom,
 // scrollable history above, results via math::Engine.
 class HomeScreen : public ui::Screen {
