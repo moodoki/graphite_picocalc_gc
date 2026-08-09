@@ -8,6 +8,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege by default; the release job re-grants `contents: write` for
+# itself. Matters once the repo is public — pull requests from forks then run
+# this workflow, and the default token grant would otherwise be whatever the
+# repository setting happens to be.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build (${{ matrix.board }})
@@ -97,7 +104,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Validate markdown
-        run: python3 scripts/validate_md.py docs/ AGENTS.md README.md
+        run: |
+          python3 scripts/validate_md.py docs/ AGENTS.md \
+            README.md FEATURES.md USAGE.md ROADMAP.md CONTRIBUTING.md NOTICE.md
 
   release:
     name: Publish release artifacts

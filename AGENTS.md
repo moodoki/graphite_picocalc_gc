@@ -132,8 +132,8 @@ The HAL wraps C drivers vendored from Coyote OS (PicoCalc calculator firmware). 
 ## Files to read first
 
 - `docs/notes/next-session.md` — start-here handoff; read at the start of every session
-- `README.md` — project overview, build instructions
-- `docs/phases/phase4-spec.md` — the most recently completed implementation contract (Phase 4, the pre-release milestone); `docs/phases/phase5-spec.md` is the forward contract (CAS)
+- `README.md` — landing page. Detail lives in the root docs it links to: `FEATURES.md` (capabilities), `USAGE.md` (device UI), `ROADMAP.md` (phase status + specs), `CONTRIBUTING.md` (build/test/lint, repo layout, developer-doc index). Keep the README a landing page — when a section grows past a paragraph, it belongs in one of those four.
+- `docs/phases/phase5.2-spec.md` — the most recently completed implementation contract (unified evaluator); `docs/phases/phase6-spec.md` is the forward contract (app framework + MicroPython)
 - `docs/architecture.md` — layer rules and rationale
 - `docs/dev-environment.md` — toolchain details (macOS Apple Silicon)
 - `src/config.hpp` — compile-time configuration, board detection

@@ -181,7 +181,10 @@ def validate(path: Path) -> int:
             ):
                 # Heuristic: if the "URL" is just bare letters/numbers/digits,
                 # it's likely an inline expression like [A](2,3). Skip.
-                if not re.match(r"^[A-Za-z0-9_\-./, ]+$", url):
+                # A trailing "#anchor" on a relative path is a real link
+                # (README.md#quick-start), so allow "#" here — inline math
+                # never contains one.
+                if not re.match(r"^[A-Za-z0-9_\-./,# ]+$", url):
                     issues.append(
                         f"  Line {i}: suspicious link target: {url}"
                     )
