@@ -108,8 +108,8 @@ TI-83/84-inspired graphing calculator firmware for the [ClockworkPi PicoCalc](ht
   numbering convention). **5.1 (complete, HW-verified)** adds serial line
   injection so a host script can submit expressions to the home screen over
   USB and read back the result and its kind, turning hand-driven bench
-  checks into repeatable ones. **5.2 (code-complete, hardware verification
-  pending)** is the unified evaluator: one tagged-value evaluator — a
+  checks into repeatable ones. **5.2 (code-complete, HW-verified on both
+  boards)** is the unified evaluator: one tagged-value evaluator — a
   shunting-yard compiler emitting a flat RPN program, run by a stack machine
   — replacing the three home-screen mini-evaluators, motivated by two
   independent findings: the real and complex evaluators silently disagreeing
