@@ -18,13 +18,15 @@ generic binary-op dispatch over a wider tag enum.
 It also **absorbs the shared function catalogue** (`catalog.hpp`), so the home
 screen no longer escapes to tinyexpr for scalar spans.
 
-**Status**: **In progress — tasks 5.2.1-5.2.8 done 2026-08-09.** The evaluator
+**Status**: **In progress — tasks 5.2.1-5.2.9 done 2026-08-09.** The evaluator
 now compiles and runs every home-screen value kind — real and complex scalars,
 lists and matrices of either — with the whole callable surface resolved
 natively, and it commits its own results: one store grammar, one flag
-convention, and a probe mode that writes nothing. **What is left is the
-differential harness (5.2.9) and the cutover (5.2.10-5.2.12); nothing is wired
-to a screen yet** (§6.1).
+convention, and a probe mode that writes nothing. It is checked *differentially*
+against the pipeline it replaces: **494 of 518 comparisons agree exactly, and
+every divergence carries a row in the
+[change register](../notes/unified-evaluator-changes.md)**. **What is left is
+the cutover (5.2.10-5.2.12); nothing is wired to a screen yet** (§6.1).
 Sizing: §5. Migration strategy: §6.1. Idea F has been a committed follow-on
 since 2026-07-24 (D37); **judged worth the effort 2026-08-08 (D48)** and given a
 phase number at the same time. This is the highest-risk item on the project's
@@ -222,7 +224,7 @@ The previous 5.2.2-5.2.9 list predates all of them.
 | ~~5.2.6~~ | ~~List tier incl. the lift~~ **DONE 2026-08-09** (broadcast, not element slots — §3) | 22 | `test_lists` passes; **compile-once/eval-N preserved**, 256-element chunks |
 | ~~5.2.7~~ | ~~Matrix tier~~ **DONE 2026-08-09** (`dim`/`eigenvals` no longer need to stand alone) | 20 | `test_matrix` expression-layer passes incl. stand-alone `dim`/`eigenvals`/`mat2list` |
 | ~~5.2.8~~ | ~~Superset store grammar + commit semantics~~ **DONE 2026-08-09** (both outstanding narrowings closed) | 10 | All five target forms; one flag convention; **no-commit mode** for the REAL probe |
-| 5.2.9 | Differential harness | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs; the [change register](../notes/unified-evaluator-changes.md) is its allow-list |
+| ~~5.2.9~~ | ~~Differential harness~~ **DONE 2026-08-09** (494/518 agree; 3 real bugs found) | 12 | Snapshot/restore of Ans, matrices, lists, named lists, vars between runs; the [change register](../notes/unified-evaluator-changes.md) is its allow-list |
 | 5.2.10 | Widened behaviours + allow-list | 10 | Every register row signed off with a TI-parity rationale; the register's D-rows (display strings, REAL-mode probe sequencing) discharged |
 | 5.2.11 | Retire the three evaluators; remove their caps | 6 | Sources deleted; **bss drop measured** - deletion is what banks it |
 | 5.2.12 | On-device verification, both boards | 12 | Stack peak, bss delta, serial-injection differential, and **§9's A/B latency measurement against the v0.3.1 release binary** |
@@ -353,11 +355,22 @@ its own suite passing *differentially* → the store grammar (5.2.8) → flip th
 default → delete the old evaluators and their caps (5.2.11). Deletion is what
 banks the bss saving, so it is not optional cleanup.
 
-**Deviation so far, recorded 2026-08-09**: the harness (5.2.9) has not been
-built yet, so 5.2.4-5.2.6 were gated by *mirrored* checks in `test_unified`
-rather than differential ones — each tier's behaviours restated against the
-old suite's expectations by hand. That is weaker, and it is why 5.2.9 must land
-before the default flips rather than after.
+**The deviation this section carried from 5.2.4 is closed.** Tiers 5.2.4-5.2.8
+were gated by *mirrored* checks in `test_unified` — each tier's behaviours
+restated by hand against the old suite's expectations — because the harness did
+not exist yet. It does now (`tests/host/test_differential.cpp`), and it was
+built before the default flips, as this section required.
+
+**It found three things on its first run**, which is the case for having
+insisted on it: postfix `!` was missing from the compiler outright (shipped
+syntax that both retired scalar paths reached by *rewriting* the input, so there
+was no grammar rule to port); the REAL-mode commit gate tested `im == 0`
+exactly, rejecting `e^(i*pi)`, where the dispatcher it replaces uses
+`Complex::is_real()`'s tolerance; and the store-mismatch error strings split by
+target kind when today they split by which evaluator claimed the line, which
+made `[A] -> l1` report the wrong one — including in a `test_unified` assertion
+written by hand two tasks earlier. Mirrored tests cannot find any of those,
+because all three are places where a hand-written expectation was simply wrong.
 
 **Where differential testing does not apply**: cases that are new by
 construction (§7's cross-tier behaviours — complex-element matrices, list⊗matrix)
@@ -422,6 +435,7 @@ it. A store emitted inside a quoted body would violate it.
 | P5.2-2 | What *new* cross-tier behaviours become reachable, and are they all wanted? | Unification makes complex-element matrices and list⊗matrix ops fall out for free. Some may be undesirable or need TI-parity checks before being exposed. |
 | P5.2-3 | Does the explicit stack live in bss or the CAS arena? | The CAS `ExprPool` is already two-ended with LIFO scratch (D45) and may be the natural home rather than a second allocator. |
 | P5.2-4 | Does idea H (polymorphic variables, D40) become cheap once this lands? | §H notes unified storage "almost certainly means a fourth format change". Worth re-costing after, not before. |
+| P5.2-6 | Should tinyexpr's `(-2)^2 = -4` be fixed at the source? | **Found 2026-08-09 by 5.2.9.** `factor()` in the `TE_POW_FROM_RIGHT` build hoists a negation out of a power without knowing whether parentheses closed it, so the two shipped evaluators disagree on this input today (register F1). The unified evaluator fixes the home screen; **graphing keeps the tinyexpr reading**, so 5.2 trades a home-screen disagreement for a home-vs-graph one. Fixing it means patching the vendored parser — parse-time only, no hot-loop cost — which §2 makes a decision rather than a tier's call. |
 | P5.2-5 | Do the retired parsers' error strings need to be preserved verbatim? | Host tests assert on exact strings ("Too deeply nested", "Dim mismatch"). Changing them is a test churn cost to budget. **Partly answered 2026-08-09 (5.2.8)**: the criterion is provenance — a string that states a decision is kept verbatim ("e is reserved (Euler's e)"), a string that fell out of a parser accident is replaced. Both store-grammar cases are listed below. |
 
 ### Behaviour changes — moved out 2026-08-09 (5.2.8)

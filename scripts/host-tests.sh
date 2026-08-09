@@ -142,6 +142,20 @@ echo "== Compiling + linking test_unified =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_unified"
 
+echo "== Compiling + linking test_differential =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr -Itests/host \
+    tests/host/test_differential.cpp tests/host/host_psram_backend.cpp \
+    src/math/unified_compile.cpp src/math/unified_vm.cpp \
+    src/math/array.cpp src/math/scratch.cpp src/math/lists.cpp \
+    src/math/list_ops.cpp src/math/named_lists.cpp src/math/stats.cpp \
+    src/math/matrix.cpp src/math/mat_expr.cpp src/math/list_expr.cpp \
+    src/math/frac.cpp src/math/complex.cpp src/math/complex_expr.cpp \
+    src/math/engine.cpp src/math/functions.cpp \
+    src/math/format.cpp src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_differential"
+
 echo "== Compiling + linking test_complex =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra \
     -Isrc \
@@ -247,6 +261,9 @@ echo "== Running test_stats =="
 
 echo "== Running test_unified =="
 "$OUT/test_unified"
+
+echo "== Running test_differential =="
+"$OUT/test_differential"
 
 echo "== Running test_complex =="
 "$OUT/test_complex"

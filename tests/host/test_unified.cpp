@@ -529,6 +529,22 @@ void test_vm_errors() {
     check_compile_error("nosuchfn(1)", "Syntax error", "unknown name is still an error");
 }
 
+// Postfix factorial. Found missing by 5.2.9's differential run, which is the
+// point of that harness: `5!` is shipped home-screen syntax that nothing in the
+// unified evaluator's own tests thought to try, because both retired scalar
+// paths reached it by rewriting the input before parsing rather than by having
+// a grammar rule for it.
+void test_factorial() {
+    check_real("5!", 120, "postfix factorial");
+    check_real("(3+2)!", 120, "factorial of a parenthesised expression");
+    check_real("3!!", 720, "factorial composes without an innermost-last rescan");
+    check_real("3!+2", 8, "binds tighter than +");
+    check_real("2*4!", 48, "binds tighter than *");
+    check_real("2^3!", 64, "binds tighter than ^");
+    check_real("-3!", -6, "unary minus applies to the result, not the operand");
+    check_compile_error("!", "Syntax error", "a bare factorial has no operand");
+}
+
 // 5.2.5 closed the gap 5.2.4 found: the callable surface is three tables, not
 // one — catalog.cpp's 82 rows, tinyexpr's builtins, and complex_expr's
 // complex-only set. These pin all three reaching the evaluator.
@@ -1505,8 +1521,12 @@ void test_store_targets() {
 
     // Kind mismatches. Two strings survive, each for the input it is pointed
     // about: a missing list, and a target of the wrong shape.
+    // The split is by the VALUE, not the target — which is what today's inputs
+    // actually produce, and not what this test asserted before 5.2.9's
+    // differential run checked it: `2->l1` reaches listexpr ("needs a list"),
+    // `[A]->l1` reaches matexpr first because it holds a matrix token.
     check_commit_error("2->l1", "Store target needs a list", "a scalar is not a list");
-    check_commit_error("[A]->l1", "Store target needs a list", "nor is a matrix");
+    check_commit_error("[A]->l1", "Store target mismatch", "a matrix is a mismatch, not a gap");
     check_commit_error("l1->a", "Store target mismatch", "a list is not a scalar");
     check_commit_error("[A]->a", "Store target mismatch", "nor is a matrix");
     check_commit_error("2->[C]", "Store target mismatch", "a scalar is not a matrix");
@@ -1587,6 +1607,7 @@ int main() {
     test_vm_constants();
     test_vm_errors();
     test_builtins();
+    test_factorial();
     test_list_literals();
     test_list_refs();
     test_list_reductions();

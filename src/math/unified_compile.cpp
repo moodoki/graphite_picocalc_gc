@@ -515,6 +515,20 @@ struct Compiler {
         return emit(Op::kPushMat, static_cast<uint8_t>(slot));
     }
 
+    // Postfix `!` compiles to the catalogue's own `fac`, looked up by name so
+    // there is one factorial in the system rather than a second copy wired to
+    // an operator.
+    bool emit_factorial() {
+        int n = 0;
+        const FnDescriptor* cat = catalog(&n);
+        for (int k = 0; k < n; ++k) {
+            if (std::strcmp(cat[k].name, "fac") == 0) {
+                return emit(Op::kCall, 1, static_cast<uint16_t>(k));
+            }
+        }
+        return fail("Syntax error");
+    }
+
     // ---- the store suffix (5.2.8) ----------------------------------------
 
     // Record the target and require it to be the end of the input. The old
@@ -794,6 +808,21 @@ struct Compiler {
             if (c == '^' && (s[1] == 'T' || s[1] == 't') && !ident_char(s[2])) {
                 s += 2;
                 if (!emit(Op::kTranspose)) {
+                    return false;
+                }
+                continue;
+            }
+            // `5!` — postfix factorial, the same shape. Both retired scalar
+            // paths reached it by REWRITING the input to `fac(5)` before
+            // parsing (engine.cpp:46 and complex_expr.cpp's
+            // preprocess_factorial, a copy of it). A postfix operator needs no
+            // rewrite here: emit the call against the operand already on the
+            // stack. It binds tightest, so `2*4!` is 48 and `2^3!` is 64, and
+            // `3!!` composes without the innermost-last rescan the rewrite
+            // needed.
+            if (c == '!') {
+                ++s;
+                if (!emit_factorial()) {
                     return false;
                 }
                 continue;

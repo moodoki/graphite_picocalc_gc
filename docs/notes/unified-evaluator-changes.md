@@ -28,10 +28,14 @@ column rather than prose:
 1. **Host** — every row is pinned by a named check in
    `tests/host/test_unified.cpp`. A row with no pin is not a decision, it is an
    accident waiting to be found on hardware.
-2. **Differential (5.2.9)** — the harness runs the existing suites' expressions
-   through *both* evaluators and asserts identical results. **This register is
-   exactly its allow-list**: a diff that appears here is expected, a diff that
-   does not is a bug. Nothing else may be added to the allow-list without a row.
+2. **Differential (5.2.9, built)** — `tests/host/test_differential.cpp` runs
+   **259 expressions harvested from the suites that pin the three retired
+   evaluators, in both number modes**, through both pipelines from the same
+   seeded state, and compares the result *and* everything each one wrote.
+   **This register is exactly its allow-list** (`differential_allow.inc`, one
+   row per id): a divergence with no row fails, and a row that never diverges
+   fails too. Adding a row is a decision recorded here, not a way to quiet the
+   test.
 3. **On device (5.2.12)** — the `Input` column *is* the serial-injection replay
    script. Sent to a firmware built with the old pipeline and one with the
    unified evaluator, the observed diff must equal this table, row for row.
@@ -44,10 +48,16 @@ column rather than prose:
 |---|---|
 | **W** | **Widening** — rejected today, works now |
 | **N** | **Narrowing** — works today, rejected now |
+| **F** | **Fix** — today's answer is *wrong*, and unification corrects it |
 | **G** | **Grammar** — what the parser accepts, or how something is spelled |
 | **E** | **Error text** — same accept/reject, different message |
 | **P** | **Preserved on purpose** — looked like it would change, deliberately did not |
 | **D** | **Deferred** — owed by a later task, listed so it is not lost |
+
+**F is the class this phase exists for** and it was added on 2026-08-09, when
+5.2.9's first differential run produced one. D46 — the DEGREE-mode trig
+disagreement — would have been an F row had it not been fixed before this file
+existed. An F row is not a risk to sign off; it is the payoff.
 
 "Today" throughout means shipped behaviour on `main`, not an intermediate state
 of this branch.
@@ -76,12 +86,56 @@ is a TI-parity judgement, not a re-test — they are pinned already.
 | W11 | `mat2list([A], costs)` | *"mat2list targets are l1-l6"* | named lists work as targets | one ref numbering since 4D.13 (5.2.7) | `test_matrix_bridge` |
 | W12 | `l1->a` | *"Syntax error"* from whichever parser claimed the line | *"Store target mismatch"* | one store grammar instead of four rightmost-`->` searches (5.2.8) | `test_store_targets` |
 | W13 | `dim([A])->mydim` | no such form — `matexpr`'s store targets have no named-list branch and `listexpr` never sees `dim([A])` | stores the list | the target grammar stopped being per-evaluator (5.2.8) | `test_store_targets` |
+| W15 | `conj(a)`, and `real`/`imag`/`arg` of a real | *"Syntax error"* in REAL mode (tinyexpr has no `conj`), works in RECT (`complexexpr` does) | works in both | `complexexpr`'s complex-only table is one of the three the evaluator absorbed (5.2.5); it is no longer behind a mode | `test_differential` |
+| W16 | `{1}+{2}+{3}+{4}+{5}` | *"Too many list terms"* | evaluates | `listexpr`'s `kMaxOperands` term cap. The temp pool still bounds this, but it bounds *live* temporaries rather than terms in the input (5.2.6) | `test_differential` |
 | W14 | a non-finite scalar result on the matrix path, e.g. `det([A])/0` | *"Undefined result"* | returns `inf`, committed to Ans | the engine and `complexexpr` already commit `inf`/`nan`; gating only the matrix path was the odd one out (5.2.8) | — see N/D below |
 
 **W14 is the one widening nobody asked for.** It is listed as a widening because
 it accepts what was rejected, but the old behaviour was arguably better. Making
 it uniform is a display decision across all four kinds and belongs to 5.2.10
 (D3) — not to a single tier quietly keeping or dropping a gate.
+
+### Fixes
+
+| # | Input | Today | Unified | Origin | Pinned by |
+|---|---|---|---|---|---|
+| F1 | `(-2)^2` | **-4** on the real path, **4** on the complex path — the two shipped evaluators disagree | **4** | tinyexpr's `factor()` cannot tell `-2^2` from `(-2)^2`; the unified compiler keeps grouping (5.2.9) | `test_differential` |
+
+**F1 in full**, because it is the second instance of the bug class that
+justified this phase and it was found by the harness on its first run.
+
+Type `(-2)^2` on the home screen today and the answer depends on the number
+mode: **-4** in REAL, **4** in RECT — or in REAL if the expression happens to
+mention `i` or reference a complex variable, since that is what routes an input
+to `complexexpr`. `test_complex_expr.cpp:318` pins the complex path's `4`;
+nothing pinned the real path's `-4`.
+
+The mechanism is upstream, in `drivers/tinyexpr/tinyexpr.c`'s `TE_POW_FROM_RIGHT`
+build of `factor()`:
+
+```c
+if (ret->type == (TE_FUNCTION1 | TE_FLAG_PURE) && ret->function == negate) {
+    te_expr *se = ret->parameters[0];
+    free(ret); ret = se; neg = 1;      /* hoist the negation out of the power */
+}
+```
+
+By the time `factor()` runs, `(-2)` has already been parsed and the parentheses
+are gone — the node is simply a `negate`, indistinguishable from the one `-2`
+produces. So the negation is hoisted out of the exponentiation and re-applied
+after: `-(2^2)`. `(0-2)^2` gives `4` on both paths, which is the same expression
+with the negation spelled so it does not reach that test.
+
+The unified evaluator has no such case: parentheses close an operand in the
+shunting-yard, so `(-2)` is a finished value before `^` is applied. It agrees
+with `complexexpr`, with the pinned test, and with the arithmetic.
+
+**This does not reach graphing.** `evaluate_real()` is tinyexpr and §2 of the
+spec makes it out of scope, so after 5.2 the home screen answers `4` and
+`Y1=(-2)^X` still plots the tinyexpr reading. That trades a home-screen
+disagreement for a home-vs-graph one. Fixing it properly means patching the
+vendored parser — see **P5.2-6** in the spec, which is a decision, not
+something a tier should take on its own.
 
 ### Narrowings
 
@@ -130,6 +184,14 @@ parser accident is replaced.
 | E3 | `[A]->a`, `2->[C]`, `l1->[C]` | *"Store target mismatch"* (`matexpr`) | unchanged | `test_store_targets` |
 | E4 | `2->A`, `2->e`, `2->i` | *"Variables are lowercase a-z"*, *"e is reserved (Euler's e)"*, *"i is reserved (imaginary unit)"* | unchanged, verbatim — these state decisions (D1/D11/D19/D30) and the silent case-fold one of them replaced was a wrong answer | `test_store_compile` |
 | E5 | `sum(1)`, `det(1)` | *"Syntax error"* — help-only catalog rows with no implementation | *"Expected a list"* / *"Expected a matrix"* | `test_vm_errors` |
+| E6 | `2->Theta` | *"Syntax error"* — the uppercase name matched no target, so the arrow was left in the body for tinyexpr | *"Bad store target"* | `test_differential` |
+| E7 | `{1}->ans` | *"Syntax error"*, same mechanism | *"Bad store target"* — `ans` is a reserved name, not a target | `test_differential` |
+| E8 | `{1,foo}` | *"Bad list element"* | *"Syntax error"* | `test_differential` |
+
+E8 is the one row where the replacement is arguably less pointed, and it is
+kept: `foo` is an unknown identifier *anywhere*, and the unified compiler
+resolves identifiers before it knows what encloses them. "Bad list element"
+described the position, not the problem.
 
 ### Preserved on purpose
 
@@ -161,6 +223,10 @@ been prevented structurally.
 
 ## 3. Coverage — what is NOT in this register
 
+**As of 2026-08-09 the differential harness reports 494 of 518 comparisons in
+exact agreement, with all 24 divergences carrying a row above.** That number is
+what makes the rest of this section a claim rather than a hope.
+
 Stated so an empty region reads as "checked" rather than "not looked at":
 
 - **Arithmetic, precedence and associativity.** Unchanged by construction: the
@@ -171,7 +237,16 @@ Stated so an empty region reads as "checked" rather than "not looked at":
 - **The catalogue's 82 functions, tinyexpr's 24 builtins and the complex-only
   set.** Same names, same arities, same values — three tables reached natively
   instead of through `eval_field`. Pinned by `test_builtins`.
-- **Number and angle modes**, beyond P1–P3.
+- **Number and angle modes**, beyond P1–P3. The whole corpus runs in both REAL
+  and RECT, in DEGREES — D46's territory — and RECT produced **no divergence
+  the register did not already carry**, which is the strongest single statement
+  in this file: the complex tier and `complexexpr` agree across every expression
+  the complex suite contains.
+- **Postfix factorial.** Absent from the compiler until 5.2.9's first run found
+  it (`5!` is shipped syntax that both retired scalar paths reached by rewriting
+  the input before parsing, so no grammar rule existed to port). Now a postfix
+  operator, pinned by `test_factorial`. Not a register row: it never shipped
+  broken, it was a gap in the branch.
 - **Everything off the home screen.** Graphing, tables, stats, the solver, the
   CAS and the editors do not go through this evaluator (P7).
 

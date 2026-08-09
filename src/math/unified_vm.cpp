@@ -1532,6 +1532,16 @@ struct Machine {
     // on the value, not on how it was built: `i^2` is -1 and stores fine, while
     // `i*[B]` is a complex matrix and does not. Intermediates are never gated —
     // that is what makes abs(3+4i) = 5 work in REAL mode, on every path.
+    //
+    // Complex::is_real() carries a 1e-12 tolerance and this must use it, not an
+    // exact `im == 0`: `e^(i*pi)` computes to -1 + 1.22e-16i, and the dispatcher
+    // it replaces accepts exactly that as real (home_screen.cpp:629, via the
+    // same predicate). 5.2.9's differential run found the difference — an exact
+    // test here rejected an expression that ships working today.
+    //
+    // This is a different question from 5.2.4's exactness rule for the returned
+    // VALUE, which stays `im == 0` on purpose (D49 made integer powers exact so
+    // it could). Committing tolerates roundoff; collapsing a type does not.
     bool real_mode_ok(const Value& v) const {
         if (number_mode() != NumberMode::kReal) {
             return true;
@@ -1539,7 +1549,7 @@ struct Machine {
         if (v.is_array()) {
             return v.a->dtype() != Dtype::kComplex;
         }
-        return v.as_complex().im == 0.0;
+        return v.as_complex().is_real();
     }
 
     // Resolve a `-> name` target that did not exist at compile time. find()
@@ -1590,12 +1600,16 @@ struct Machine {
         if (kind == StoreKind::kMatrix ? v.kind != Kind::kMatrix
             : kind == StoreKind::kVar  ? !v.is_scalar()
                                        : v.kind != Kind::kList) {
-            // The two strings the retired parsers used, each kept for the input
-            // it is pointed about: `2 -> l1` is a missing list, `[A] -> a` is a
-            // target of the wrong shape.
-            return fail(kind == StoreKind::kVar || kind == StoreKind::kMatrix
-                            ? "Store target mismatch"
-                            : "Store target needs a list");
+            // The two strings the retired parsers used, kept for exactly the
+            // inputs that produce them today. The split is by the VALUE, not by
+            // the target: `2 -> l1` reached listexpr, which says a store target
+            // needs a list; `[A] -> l1` reached matexpr first (it holds a matrix
+            // token), which says the target is mismatched. 5.2.9's differential
+            // run found this — the first cut split by target kind and got
+            // `[A] -> l1` wrong.
+            return fail(v.is_scalar() && kind != StoreKind::kVar && kind != StoreKind::kMatrix
+                            ? "Store target needs a list"
+                            : "Store target mismatch");
         }
         if (!real_mode_ok(v)) {
             return fail("Non-real result");  // never commit what REAL cannot show
@@ -1613,8 +1627,11 @@ struct Machine {
                 return push(Value::matrix(&dst));
             }
             case StoreKind::kVar: {
+                // is_real(), not `im == 0`, for the same reason real_mode_ok
+                // uses it: what gets committed must match what the dispatcher
+                // commits today, roundoff included.
                 const Complex z = v.as_complex();
-                if (z.im == 0.0) {
+                if (z.is_real()) {
                     engine().vars().set_real(in.b, z.re);
                 } else {
                     engine().vars().set_complex(in.b, z.re, z.im);
@@ -1873,7 +1890,7 @@ bool run(const Program& p, Value* out, const char** err, Mode mode, Commit* comm
         auto& vars = engine().vars();
         if (v.is_scalar()) {
             const Complex z = v.as_complex();
-            if (z.im == 0.0) {
+            if (z.is_real()) {
                 vars.set_real(Variables::kAns, z.re);  // a real write clears the imag part
             } else {
                 vars.set_complex(Variables::kAns, z.re, z.im);
