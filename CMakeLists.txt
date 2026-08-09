@@ -232,12 +232,23 @@ set(PICOCALC_PHASE "5.1")
 # shipping build free of a path that lets the USB port drive the UI.
 option(PICOCALC_SERIAL_INJECT "Accept expression lines over USB serial (dev tooling)" ON)
 
+# Evaluation timing probe (5.2.12, D52). Brackets evaluation + result formatting
+# inside HomeScreen and appends `eval_us=` to the serial-injection echo, which is
+# what scripts/ab-measure.py reads. **Default OFF**: it is a measurement tool,
+# not a feature, and a shipped build should not carry a timer on the evaluation
+# path. Turn it on for an A/B pass with -DPICOCALC_EVAL_PROBE=ON, on BOTH builds
+# being compared — see docs/notes/measurements/phase5.2/README.md, and
+# scripts/apply-eval-probe.py for instrumenting a released tag that predates
+# this option.
+option(PICOCALC_EVAL_PROBE "Time evaluation and report it on the inject echo (measurement only)" OFF)
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PICOCALC_PHASE="${PICOCALC_PHASE}"
     $<$<BOOL:${PICOCALC_SERIAL_INJECT}>:PICOCALC_SERIAL_INJECT=1>
+    $<$<BOOL:${PICOCALC_EVAL_PROBE}>:PICOCALC_EVAL_PROBE=1>
     # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
     # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
     # SDK default declares only 2 KB of it, so __StackBottom sat in the

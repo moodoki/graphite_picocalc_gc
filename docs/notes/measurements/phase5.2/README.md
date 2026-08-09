@@ -214,12 +214,31 @@ python3 scripts/ab-measure.py --out N.json --label "phase-5.2+probe" -n 15
 python3 scripts/ab-measure.py --compare B.json N.json
 ```
 
-The baseline build is a worktree at the `v0.3.2` tag with the probe applied. The
-probe is three edits — a timer in `home_screen.cpp`, an accessor in the header,
-and `eval_us=` on the inject echo in `main.cpp`; `phase-5.2` carries it
-permanently, so only the baseline tree needs patching. Apply it with a script to
-both trees and diff the result, rather than by hand twice: the whole comparison
-rests on the two probes being identical.
+The probe is a **CMake option, off by default** — it is a measurement tool, not a
+feature, and a shipped build should not carry a timer on the evaluation path:
+
+```bash
+cmake -G Ninja -DPICO_BOARD=pico -DPICOCALC_EVAL_PROBE=ON -B build/pico-probe -S .
+```
+
+Cost when enabled: **+12 B of `.bss`** (two globals) and no measurable text
+change. With it off, the inject echo simply has no `eval_us=` field and
+`serial-console.py` reports `None` — the parser reads both, which is what makes
+one script work across builds.
+
+**The baseline needs `scripts/apply-eval-probe.py`**, because v0.3.2 and earlier
+predate the option. It injects the same three edits the option compiles in, so a
+diff of the two probes should be empty:
+
+```bash
+git worktree add /tmp/v032 v0.3.2
+python3 scripts/apply-eval-probe.py /tmp/v032
+cmake -G Ninja -DPICO_BOARD=pico -B /tmp/v032/build/pico -S /tmp/v032
+```
+
+Apply it with the script rather than by hand on each tree: the whole comparison
+rests on the two probes being identical, and hand-editing twice is how that
+stops being true.
 
 ## See also
 

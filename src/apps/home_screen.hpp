@@ -7,7 +7,9 @@
 
 namespace apps {
 
-// §9 evaluator probe (5.2.12): microseconds for the last evaluation.
+// Evaluation probe (5.2.12, D52): microseconds for the last evaluation, or 0
+// when built without -DPICOCALC_EVAL_PROBE. Declared unconditionally so the
+// inject echo needs no #if around the call itself.
 uint32_t home_eval_us();
 
 // Calculator home screen (task 2.5): expression input at the bottom,

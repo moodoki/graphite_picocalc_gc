@@ -721,9 +721,14 @@ int main() {
                     // pushes no history entry to report.
                     printf("inject: \"%s\" -> command\n", inject_buf);
                 } else {
+#if PICOCALC_EVAL_PROBE
                     printf("inject: \"%s\" -> \"%s\" kind=%s us=%lu eval_us=%lu\n", inject_buf,
                            result, kind, static_cast<unsigned long>(elapsed_us),
                            static_cast<unsigned long>(apps::home_eval_us()));
+#else
+                    printf("inject: \"%s\" -> \"%s\" kind=%s us=%lu\n", inject_buf, result, kind,
+                           static_cast<unsigned long>(elapsed_us));
+#endif
                 }
                 dirty = true;
             }

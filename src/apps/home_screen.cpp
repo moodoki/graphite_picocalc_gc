@@ -137,10 +137,16 @@ int HomeScreen::visible_count() const {
     return since < static_cast<uint32_t>(history_count_) ? static_cast<int>(since) : history_count_;
 }
 
-// §9 evaluator probe (5.2.12). Started at the top of evaluate_input and
-// stopped here, on entry to push_entry -- every evaluation branch funnels
-// through this function, and the SD history write happens after it. So the
-// window is evaluation + result formatting, with no I/O and no rendering.
+// Evaluation probe (5.2.12, D52) — compiled only under -DPICOCALC_EVAL_PROBE.
+// Started at the top of evaluate_input and stopped here, on entry to
+// push_entry: every evaluation branch funnels through this function, and the SD
+// history write happens after it, so the window is evaluation + result
+// formatting with no I/O and no rendering.
+//
+// Off by default. It is a measurement tool, not a feature — a shipped build
+// should not carry a timer on the evaluation path, and D52's A/B pass is the
+// only thing that reads it. See docs/notes/measurements/phase5.2/README.md.
+#if PICOCALC_EVAL_PROBE
 namespace {
 uint64_t g_probe_t0 = 0;
 uint32_t g_probe_us = 0;
@@ -149,12 +155,19 @@ uint32_t g_probe_us = 0;
 uint32_t home_eval_us() {
     return g_probe_us;
 }
+#else
+uint32_t home_eval_us() {
+    return 0;
+}
+#endif
 
 void HomeScreen::push_entry(const char* expr, const char* result, ResultKind kind) {
+#if PICOCALC_EVAL_PROBE
     if (g_probe_t0 != 0) {
         g_probe_us = static_cast<uint32_t>(platform::uptime_us() - g_probe_t0);
         g_probe_t0 = 0;
     }
+#endif
     ++entries_total_;
     Entry& e = history_[history_head_];
     std::strncpy(e.expr, expr, sizeof(e.expr) - 1);
@@ -375,8 +388,10 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     if (input_.empty()) {
         return;
     }
+#if PICOCALC_EVAL_PROBE
     g_probe_t0 = platform::uptime_us();
     g_probe_us = 0;
+#endif
 
     // Inline CAS (Phase 5, 4D.21): recognize a single diff()/integ()/
     // factor()/expand()/simplify()/solve() call and route it to the symbolic
