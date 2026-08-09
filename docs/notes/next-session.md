@@ -28,18 +28,29 @@ peak **3,972 -> 2,344** (Pico 2), `kMaxStack = 64` exact with 65 a clean error.
 > because every release from v0.2.0 to v0.3.2 carries a reachable hard fault on
 > that board. See D48's amendment.
 >
-> **2. Per-element PSRAM reads are intermittently wrong (D53) — fix before
-> Phase 6.** A long list *displays* one element wrong on ~8 runs in 30, Pico 1
-> only. **The arithmetic is correct** (`sum(l1/499500)` is exactly `1`, 25/25);
-> it is `format_list` reading via `Array::get` one 8-byte PSRAM transfer at a
-> time where the compute path streams in chunks. Pre-existing — identical 8/30
-> on v0.3.2 and on 5.2 — so **not a phase regression**; 5.2 only widens which
-> expressions reach it. **The trap when fixing this**: bulk-reading `format_list`
-> makes the symptom vanish and is worth doing anyway (999 SPI transactions become
-> ~4), but if the cause is DMA/SPI contention with core 1's display push — the
-> hypothesis D53 records and does *not* claim as proven — then every other
-> per-element `Array::get` on a PSRAM array still carries it. Test the hypothesis
-> before deciding the fix; D53 names the cheapest test.
+> **2. Per-element PSRAM reads are intermittently wrong (D53) — symptom fixed,
+> DEFECT STILL OPEN.** A long list displayed one element wrong on ~8 runs in 30,
+> Pico 1 only. Pre-existing — identical 8/30 on v0.3.2 and on 5.2 — so **not a
+> phase regression**; 5.2 only widens which expressions reach it.
+>
+> **Fixed in the display path only**: `format_list` now block-reads through
+> `read_range` instead of per-element `get()`. Verified **0 in ~144 runs**.
+>
+> **Do not read that as closed.** The split is by *access pattern*:
+> `read_range` (bulk) is clean, `Array::get` (one 8-byte PSRAM transfer) is not,
+> and nobody knows why. Note what argues against the obvious DMA-contention
+> guess: a 2 KB `read_range` performs ~67 chunked transfers to `get()`'s one, yet
+> only `get()` corrupts — transfer count is not the variable. **~20 other
+> `get()` call sites** and `format_matrix_impl` still carry the exposure; they
+> have just never been run 30 times in a row. D53 names the concurrency test that
+> would actually settle it.
+>
+> **Method note worth more than the bug**: two "sensitive" tests cleared this
+> wrongly before the third caught it, both by summing. `sum(l1*1)` and
+> `sum(l1/499500)` both hide a single-element fault in the low digits of a large
+> total — the second *worse* than the first, because dividing shrank the error to
+> 3.6e-12. `sum(l1)-499500` works. **A sum is the wrong instrument for a
+> single-element fault.**
 
 **Also corrected: nothing moved to PSRAM.** D48 said the explicit stack would be
 "PSRAM-friendly" and that this is "what makes much larger depth reachable at

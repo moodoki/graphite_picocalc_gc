@@ -31,11 +31,30 @@ once, as every previous bench pass did, would never have shown it.
 the same board, same session, same input. Rate is **identical on v0.3.2 and on
 phase-5.2** (8/30 both), so this is **shipped behaviour, not a phase regression**.
 
-**The values are correct. Only the rendering is wrong.** `sum(l1/499500)`
-returns exactly `1` on 25/25 runs, and that fold cannot hide a bad element the
-way `sum(l1*1)` can — a 1.8e-6 error in one element of a 499,500 sum formats
-identically to the right answer, which is how the first, insensitive test
-mistakenly cleared it.
+**The stored data is fine; one *read path* is not.** Getting this right took
+three tries and two of them were wrong, which is worth recording because both
+failures were the same mistake:
+
+1. `sum(l1*1)` returned `499500` on 20/20 — read as "values are correct". It
+   cannot show anything: a 1.8e-6 element error moves a 499,500 sum to
+   499500.0000018, which formats identically at 10 significant figures.
+2. `sum(l1/499500)` returned exactly `1` on 25/25 — read as confirmation, and
+   written up as "the values are correct, only the rendering is wrong". Also
+   blind, and worse: after division the element error is **3.6e-12**, so the sum
+   is 1 + 3.6e-12. Arithmetic on the corrupt value that was *supposed* to expose
+   it instead buried it deeper.
+3. `sum(l1)-499500` returns `0` on 25/25. **This one can see it** — subtracting
+   the expected total leaves a 1.8e-6 residue with nothing to hide behind.
+
+So the third test is the one that means something, and it says the **bulk** path
+reads correct data. But the corrupt element is real, not a formatting artifact:
+`4.004007642e-6 x 499500 = 2.0000018`, i.e. `l1[1]` genuinely came back as
+2.0000018 instead of 2. **A sum is the wrong instrument for a single-element
+fault**, and reaching for one twice cost this investigation more than the bug did.
+
+**The split is by access pattern, not by data**: `read_range` (bulk, used by
+every compute path) is clean; `Array::get` (one 8-byte PSRAM transfer per
+element, used by display) is not.
 
 **Mechanism**, as far as the evidence goes:
 
@@ -76,6 +95,33 @@ no test in this pass isolated concurrency.
 
 Doing (1) and calling the bug closed would be the tempting mistake: the symptom
 disappears from the one path that made it visible, while the cause stays.
+
+### Fix applied, 2026-08-09 — (1) only, and the bug stays open
+
+`format_list` now pulls real elements in blocks of 32 through `read_range`
+instead of one at a time through `get()`, into a **static** buffer rather than a
+local — destination-in-bss versus destination-on-the-stack is one of only two
+differences between the clean path and the broken one, so the fix mirrors the
+compute path exactly rather than inventing a third access pattern. It is also
+strictly faster.
+
+**Verified on the Pico 1: 0 corrupted in ~144 evaluations**, against 8/30 (27%)
+before, across every shape in the battery.
+
+**This does not close D53**, and the entry stays open deliberately:
+
+- The **root cause is still unknown**. The concurrency hypothesis above is
+  untested, and the observation that argues *against* it is that a 2 KB
+  `read_range` performs ~67 chunked PIO transfers to `get()`'s one, yet only
+  `get()` corrupts. Transfer count is not the variable; something about the
+  8-byte single-shot read, or its stack destination, is.
+- **~20 other `Array::get` call sites remain**, and any of them touching an
+  array past `kSlabBytes` carries the same exposure. They have simply never been
+  hammered 30 times in a row the way 5.2.12 hammered this one.
+- `format_matrix_impl` still reads cell-by-cell and is untouched.
+
+So: the reachable symptom is gone and the defect is not. Closing this needs the
+concurrency test, not another symptom fix.
 
 **Tradeoffs**: leaving it unfixed means a user can see a wrong digit in a long
 list on a Pico 1 — cosmetic, since the value is right and anything computed from

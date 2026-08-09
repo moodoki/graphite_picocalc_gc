@@ -106,6 +106,27 @@ void format_list(const Array& a, char* buf, size_t buf_len) {
     buf[pos++] = '{';
     const int n = a.size();
     const bool complex = a.dtype() == Dtype::kComplex;
+
+    // Real elements are pulled in blocks through read_range rather than one at
+    // a time through get() (D53). On a PSRAM-backed array — anything past
+    // kSlabBytes, i.e. 256 doubles — a per-element get() intermittently
+    // returned a wrong value on the Pico 1: `l1/499500` rendered element 1 as
+    // 4.004007642e-6 instead of 4.004004004e-6 on ~8 runs in 30, which is
+    // l1[1] read as 2.0000018 rather than 2. The bulk path is clean under the
+    // same conditions (sum(l1)-499500 is exactly 0 on 25/25, a test that would
+    // show an error that size), and it is what every compute path already
+    // uses, so this mirrors it rather than inventing a third access pattern.
+    //
+    // The buffer is static, like the compute path's, and deliberately not a
+    // local: destination-in-bss vs destination-on-the-stack is one of the two
+    // differences between the clean path and the broken one, and the root
+    // cause is NOT yet established. See D53 — this removes the defect from the
+    // one path that made it visible; it does not close the underlying bug, and
+    // ~20 other get() call sites still carry it.
+    constexpr int kBlock = 32;  // Far more than the buffer can ever print
+    static calc_t g_block[kBlock];
+    int block_first = -1;
+
     for (int i = 0; i < n; ++i) {
         char num[48];
         // Compact per-element formatting so more values fit before the
@@ -114,7 +135,12 @@ void format_list(const Array& a, char* buf, size_t buf_len) {
         if (complex) {
             format_complex(a.cget(i), number_mode(), num, sizeof(num));
         } else {
-            format_number_compact(a.get(i), num, sizeof(num));
+            if (block_first < 0 || i >= block_first + kBlock) {
+                block_first = i;
+                const int count = n - i < kBlock ? n - i : kBlock;
+                a.read_range(block_first, count, g_block);
+            }
+            format_number_compact(g_block[i - block_first], num, sizeof(num));
         }
         const size_t need = std::strlen(num) + (i > 0 ? 1 : 0);
         if (pos + need + 6 > buf_len) {  // Room for ",<ellipsis>}" + NUL
