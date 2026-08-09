@@ -549,6 +549,57 @@ analogue to graphing, not the same code, and **nothing was profiled** — why th
 VM costs more per operation than a tree walk is unknown, so the gap is not
 established as irreducible. Full data: `measurements/phase5.2/README.md`.
 
+#### What it would actually cost, projected onto the workload
+
+**M2 does not transfer, and should not be counted here.** It is the *list* tier —
+multi-operand broadcasting with additive streaming passes. `evaluate_real()` is
+**scalar-only**; tinyexpr has no list broadcasting to regress, and the list tier
+stays home-screen-only either way. **M6 is the entire question.**
+
+Every numeric-path consumer is compile-once-evaluate-many, which is M6's exact
+shape: `FunctionSource` (`eval_compiled` per pixel column), `TableModel` (per
+row), `numeric_solve` (per iteration), and `fnInt` (thousands per integral).
+Per-element scalar evaluation, Pico 1, from M6's body ladder at N=200 — SRAM, so
+no PSRAM-write component muddying it:
+
+| body | ops | tinyexpr | VM | ratio | 320-point redraw |
+|---|---|---|---|---|---|
+| `x` | 0 | 14.2 us | 18.8 | 1.32x | 4.6 -> 6.0 ms |
+| `x^2` | 1 | 19.1 | 34.4 | **1.80x** | 6.1 -> 11.0 ms |
+| `sin(x)+x^2` | 3 | 38.7 | 68.0 | **1.76x** | 12.4 -> **21.8 ms** |
+| `sin(x)+cos(x)+x^2` | 5 | 54.5 | 94.6 | **1.74x** | 17.4 -> **30.3 ms** |
+
+**~1.75x on the evaluation phase of everything tinyexpr serves.** Seven Y= slots
+at three operations: **86.6 -> 152.3 ms per redraw, +66 ms.**
+
+**And it lands on the one screen already known to be the bottleneck.** A heavy
+Pico 1 redraw measured 1.17 s, and **D10 leg B exists specifically to
+parallelise `recompute_function`** because it is compute-bound. Making it 1.75x
+slower runs directly against work already queued to make it faster.
+
+**Two objections that do *not* apply**, recorded so they are not re-raised:
+
+- **Flash improves.** Retiring tinyexpr returns 7,897 B against the +1,960
+  (Pico 1) / +3,320 (Pico 2) this phase spent — net **-4.5 to -6 KB**.
+- **This entry's own 14.4 KB RAM figure is avoidable.** It assumed caching Y1-Y7
+  compiled (7 x 2,064 B). Nothing requires that: M5 measures compile at a fixed
+  ~0.19 ms against ~12 ms of evaluation per redraw, so compile-per-redraw is
+  comfortably affordable. The *opposite* nuance has strengthened, though — the
+  phase's real bss win is **-5,092 B**, not the projected -6,888, so there is
+  less headroom than this entry assumed if anyone did want caching.
+
+**What would have to change first.** The gap is two costs with different
+prospects: a **~4.6 us fixed per-call re-entry** (the 1.32x on a trivial body),
+which is VM entry/exit and plausibly attackable on its own, and the **~1.7x
+per-operation rate**, which is the interpreter design — flat RPN with switch
+dispatch against tinyexpr's direct tree walk through function pointers. Profile
+before assuming either is fixed.
+
+As it stands the trade is a 7,897 B flash win and one-parser tidiness against a
+**1.75x slowdown on the most latency-visible screen in the product**. That is the
+wrong way round, and it is the same conclusion the paragraph above reaches from
+the other direction.
+
 **Amendment, 2026-08-09 (same day): part 2 is discharged — see D51.** The bugfix
 was taken immediately rather than left on the wishlist, on `main` and released as
 **v0.3.2**, so it is in the shipping firmware whether or not 5.2 ever closes.
