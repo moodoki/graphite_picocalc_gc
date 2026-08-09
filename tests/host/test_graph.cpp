@@ -186,6 +186,21 @@ int main() {
         expect(all_defined, "x^2 defined everywhere");
         eng.free_compiled(h);
 
+        // D51: patching tinyexpr rather than only the home-screen evaluator is
+        // what makes the fix reach here. `(-2)^x` at x_min is (-2)^-10 =
+        // +1/1024; before the fix the negation was hoisted out of the power
+        // and every column came back with the wrong sign.
+        h = eng.compile("(-2)^x");
+        expect(h != nullptr, "compile (-2)^x");
+        graph::FunctionSource negbase(eng, h);
+        negbase.begin(vp);
+        bool neg_first_ok = false;
+        if (negbase.next(&x, &y, &defined)) {
+            neg_first_ok = defined && x == -10.0 && std::fabs(y - 1.0 / 1024.0) < 1e-12;
+        }
+        expect(neg_first_ok, "(-2)^x at x=-10 is +1/1024, not -1/1024");
+        eng.free_compiled(h);
+
         h = eng.compile("sqrt(x)");
         expect(h != nullptr, "compile sqrt(x)");
         graph::FunctionSource half(eng, h);

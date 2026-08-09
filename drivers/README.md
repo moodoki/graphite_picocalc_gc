@@ -1,6 +1,6 @@
 # Vendored drivers
 
-**Read-only third-party C drivers.** Do not edit in place — wrap in `src/platform/` if behavior needs to change.
+**Third-party C drivers, treated as read-only by default.** Wrap in `src/platform/` if behavior needs to change. Editing in place is the exception, not the rule — when it is unavoidable, follow "Updating a vendored driver" below and record it under [Local modifications](#local-modifications) so a re-vendor cannot silently drop it.
 
 ## Vendored sources
 
@@ -35,5 +35,20 @@ If upstream fixes a bug or adds a feature we need:
 If we make a local fix not yet upstream:
 
 1. Apply the fix in-place.
-2. Document it in this README under a "Local modifications" section (added on first such fix).
+2. Document it in this README under the "Local modifications" section below.
 3. Open an issue or PR upstream when feasible.
+
+## Local modifications
+
+Fixes carried in our copy that are **not** upstream. **Re-vendoring drops these** —
+re-apply every row, or confirm the new upstream already contains it.
+
+| Driver | What | Why | Reference |
+|--------|------|-----|-----------|
+| `fatfs/` | `ffconf.h`: `FF_USE_LFN=1`, code page 437 | Long filenames and the glyph set the UI needs | **D8** |
+| `tinyexpr/` | `factor()` rewritten in the `TE_POW_FROM_RIGHT` branch: the leading sign is scanned in `factor()` and the `^` chain is built through an insertion point, so a negation stays outside the sub-chain it introduced | `(-2)^2` returned **-4** — a parenthesised negation was hoisted out of the power, because `-2` and `(-2)` are the same node once the parentheses are gone. The insertion loop had the matching bug on the right, so `2^-3^2` built `2^((-3)^2)` = 512. Reported upstream as [issue #52](https://github.com/codeplea/tinyexpr/issues/52) (`(-1)^0 == -1`), still open at `4a7456e` | **D51** |
+
+The tinyexpr change is deliberately **iterative** rather than a recursive
+`factor()`. A `^` chain contains no parentheses, so `math::Engine`'s paren-count
+depth guard cannot bound it and a frame per caret would run at core 0's 4 KB
+stack. See D51.
