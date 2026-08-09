@@ -29,6 +29,9 @@ Thumbs.db
 
 # Personal/agent state (per-developer, not committed)
 CLAUDE.local.md
+# Generated mirrors of external state — regenerate, never review
+# (docs/notes/issues.local.md comes from scripts/gh-issues.py)
+*.local.md
 .claude/memory/
 .claude/state/
 .agent/state/
