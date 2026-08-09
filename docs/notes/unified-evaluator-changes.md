@@ -131,11 +131,16 @@ shunting-yard, so `(-2)` is a finished value before `^` is applied. It agrees
 with `complexexpr`, with the pinned test, and with the arithmetic.
 
 **This does not reach graphing.** `evaluate_real()` is tinyexpr and §2 of the
-spec makes it out of scope, so after 5.2 the home screen answers `4` and
-`Y1=(-2)^X` still plots the tinyexpr reading. That trades a home-screen
-disagreement for a home-vs-graph one. Fixing it properly means patching the
-vendored parser — see **P5.2-6** in the spec, which is a decision, not
-something a tier should take on its own.
+spec makes it out of scope, so on 5.2 alone the home screen answers `4` while
+`Y1=(-2)^X` still plots the tinyexpr reading — a home-screen disagreement traded
+for a home-vs-graph one.
+
+**Decided 2026-08-09 (D50): the parser gets patched, as a separate bugfix
+outside this phase.** Split out rather than folded in because at the source it
+fixes graphing too, and because it is not gated on 5.2 — roughly five lines,
+parse-time only. Until it lands, the row above is the honest description of what
+ships. Whether the unified evaluator should replace tinyexpr *outright* is the
+larger question and is deferred past 5.2 closure (spec P5.2-7).
 
 ### Narrowings
 

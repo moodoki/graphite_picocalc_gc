@@ -18,6 +18,82 @@ Format:
 
 ---
 
+## D50: tinyexpr stays on the numeric path — its `(-2)^2` bug is a separate bugfix, and replacing it outright is a post-5.2 question
+
+**Date**: 2026-08-09
+**Status**: Accepted (scoping)
+**Context**: Phase 5.2's differential harness (task 5.2.9) found that the two
+shipped home-screen evaluators **disagree today**: `(-2)^2` is `-4` from
+tinyexpr and `4` from `complexexpr`, so the answer depends on the number mode
+or on whether the expression happens to mention `i`. The cause is upstream, in
+`drivers/tinyexpr/tinyexpr.c`'s `TE_POW_FROM_RIGHT` build of `factor()`, which
+hoists a negation out of a power without knowing whether parentheses closed it —
+by then `(-2)` is just a `negate` node, indistinguishable from `-2`. `(0-2)^2`
+gives `4` on both paths.
+
+This is the second instance of the class that justified Phase 5.2 (D46 was the
+first), and it raised the obvious follow-on: if the unified evaluator gets this
+right, should it replace tinyexpr everywhere rather than only on the home
+screen?
+
+**Decision**: Three parts.
+
+1. **The unified evaluator stays home-screen-only for 5.2**, as
+   `phase4-spec.md` §5.2 requires. Graphing, tables, stats and the solver keep
+   `evaluate_real()`.
+2. **The `(-2)^2` fix is a separate bugfix**, taken outside 5.2 and not gated on
+   it. It is ~5 lines in the vendored parser and parse-time only.
+3. **"Replace tinyexpr entirely" is revisited after 5.2 closes**, with §9's
+   measured per-sample numbers in hand (spec P5.2-7).
+
+**Rationale**: The guardrail's stated reason no longer applies, and saying so
+matters: §5.2 argued that "making the default numeric path complex would double
+arithmetic cost", which describes the design 4C considered — a `Complex` value
+type — not this evaluator, where real ⊕ real never touches complex arithmetic.
+So the original argument does not transfer. Four other costs do, and they are
+the real ones:
+
+- **A `Program` is a fixed 2,064 B**; a tinyexpr tree is malloc'd and
+  proportional to the expression (~120 B for `sin(x)+2*x`). Today's graph screen
+  compiles → sweeps → frees one at a time and would survive, but caching Y1-Y7
+  compiled would cost 7 x 2,064 = 14.4 KB against ~1 KB — more than the phase's
+  whole bss win.
+- **`compile()` and `run()` are non-reentrant singletons**, safe only because
+  nothing on the home screen re-enters them. The numeric path does
+  (`list_ops.cpp:290` compiles inside an evaluation; `eval_field` reaches the
+  engine at the leaf of another parser's recursion).
+- **The scratch-arena invariant**: the evaluator's chunk staging overlays
+  `scratch::kCompute`, whose other owners are `stats`, `matrix` and `infer`.
+  They cannot collide today only because the evaluator is home-screen-only.
+- **No differential coverage off the home screen.** The 5.2.9 harness and the
+  change register cover home-screen expressions; graphing, tables and stats have
+  no corpus, so every plotted curve would become an unverified regression
+  surface. 5.2.9 found three bugs inside *covered* territory.
+
+Measured, for whoever picks this up:
+
+| | tinyexpr | unified evaluator |
+|---|---|---|
+| text | 7,897 B | 30,734 B (both TUs) |
+| bss | 0 (heap trees) | 2,442 B + 2,064 per live `Program` |
+
+Splitting the bugfix out is what lets the correctness win land without any of
+that: patched at the source it fixes the home screen *and* graphing, where 5.2
+alone fixes only the home screen.
+
+**Tradeoffs**: Until the bugfix lands, 5.2 trades a home-screen disagreement
+(REAL vs RECT) for a home-vs-graph one — `(-2)^2` will read `4` on the home
+screen while `Y1=(-2)^X` still plots the tinyexpr reading. That is a smaller and
+more visible inconsistency than the current one, but it is a real regression in
+kind and is recorded rather than glossed. Deferring the replacement question
+also means the project keeps two evaluators, and with them the possibility of a
+third D46.
+
+**Revisit when**: 5.2 closes and §9's M1 has measured per-sample latency for the
+stack machine against tinyexpr. That number is the one input the decision needs
+and nobody has it yet — the honest answer to "faster or slower" today is that
+it is unknown.
+
 ## D49: Integer powers of a complex base are computed, not approximated — and why the display-tolerance alternative was rejected
 
 **Date**: 2026-08-09

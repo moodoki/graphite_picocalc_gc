@@ -101,6 +101,16 @@ evaluator must stay **strictly home-screen-only**, exactly as
 `evaluate_complex()` is today. Graphing, tables and stats keep the narrow, fast
 real path.
 
+**The boundary holds, but its stated reason does not — recorded 2026-08-09
+(D50), so a later reader does not re-derive it.** "Would double arithmetic cost"
+describes the design 4C was weighing, a `Complex` numeric value type. This
+evaluator keeps a real tier: real ⊕ real never touches complex arithmetic. What
+actually argues for the boundary is different and is written down in D50 and
+P5.2-7 — fixed-size `Program`s, non-reentrant compile/run singletons, the
+`kCompute` arena invariant, and the absence of any differential corpus off the
+home screen. The question is revisited after this phase closes, with §9's
+measured numbers.
+
 So the end state is two evaluators, not one:
 
 | path | before | after |
@@ -435,7 +445,8 @@ it. A store emitted inside a quoted body would violate it.
 | P5.2-2 | What *new* cross-tier behaviours become reachable, and are they all wanted? | Unification makes complex-element matrices and list⊗matrix ops fall out for free. Some may be undesirable or need TI-parity checks before being exposed. |
 | P5.2-3 | Does the explicit stack live in bss or the CAS arena? | The CAS `ExprPool` is already two-ended with LIFO scratch (D45) and may be the natural home rather than a second allocator. |
 | P5.2-4 | Does idea H (polymorphic variables, D40) become cheap once this lands? | §H notes unified storage "almost certainly means a fourth format change". Worth re-costing after, not before. |
-| P5.2-6 | Should tinyexpr's `(-2)^2 = -4` be fixed at the source? | **Found 2026-08-09 by 5.2.9.** `factor()` in the `TE_POW_FROM_RIGHT` build hoists a negation out of a power without knowing whether parentheses closed it, so the two shipped evaluators disagree on this input today (register F1). The unified evaluator fixes the home screen; **graphing keeps the tinyexpr reading**, so 5.2 trades a home-screen disagreement for a home-vs-graph one. Fixing it means patching the vendored parser — parse-time only, no hot-loop cost — which §2 makes a decision rather than a tier's call. |
+| ~~P5.2-6~~ | ~~Should tinyexpr's `(-2)^2 = -4` be fixed at the source?~~ | **DECIDED 2026-08-09 (D50): yes, as a separate bugfix outside 5.2.** `factor()` in the `TE_POW_FROM_RIGHT` build hoists a negation out of a power without knowing whether parentheses closed it, so the two shipped evaluators disagree on this input today (register F1). ~5 lines, parse-time only. Split out because patched at the source it fixes graphing too, where 5.2 alone fixes only the home screen — and because it is not gated on this phase. Until it lands, 5.2 trades a home-screen disagreement for a home-vs-graph one. |
+| P5.2-7 | Should the unified evaluator replace tinyexpr on the numeric path too? | **Raised 2026-08-09 by P5.2-6; DEFERRED past 5.2 closure (D50).** §5.2's "would double arithmetic cost" argues against a `Complex` numeric path, not against this evaluator, which keeps a real tier — so the guardrail's stated reason does not transfer. Four costs do: a fixed 2,064 B `Program` vs a malloc'd tree (~120 B for `sin(x)+2*x`); `compile()`/`run()` are non-reentrant singletons and the numeric path re-enters; the `kCompute` arena invariant (`stats`/`matrix`/`infer` own it); and no differential corpus off the home screen. Gains: F1 fixed everywhere, four parsers → one, tinyexpr's depth-7 cap gone from graphing, 7,897 B of flash. **The missing input is §9's M1** — per-sample latency, stack machine vs tinyexpr. |
 | P5.2-5 | Do the retired parsers' error strings need to be preserved verbatim? | Host tests assert on exact strings ("Too deeply nested", "Dim mismatch"). Changing them is a test churn cost to budget. **Partly answered 2026-08-09 (5.2.8)**: the criterion is provenance — a string that states a decision is kept verbatim ("e is reserved (Euler's e)"), a string that fell out of a parser accident is replaced. Both store-grammar cases are listed below. |
 
 ### Behaviour changes — moved out 2026-08-09 (5.2.8)

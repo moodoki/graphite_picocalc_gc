@@ -10,6 +10,35 @@ only of features that don't yet have a home.
 
 ## Active (unscheduled)
 
+- **Fix tinyexpr's `(-2)^2 = -4`** (found 2026-08-09 by Phase 5.2's differential
+  harness; **D50**, spec P5.2-6). `factor()` in the `TE_POW_FROM_RIGHT` build
+  hoists a negation out of a power without knowing whether parentheses closed
+  it, so `(-2)` and `-2` are the same node by the time it runs. The two shipped
+  evaluators therefore **disagree on this input today** — `-4` from tinyexpr,
+  `4` from `complexexpr` — and which one you get depends on the number mode.
+  Phase 5.2 fixes the home screen; only patching the vendored parser fixes
+  graphing, tables and the solver. ~5 lines, parse-time only, no hot-loop cost.
+  Deliberately *not* folded into 5.2: it is a bugfix that stands alone and is
+  not gated on that phase. Listed here so it survives 5.2's closure — see
+  [unified-evaluator-changes.md](unified-evaluator-changes.md) F1 for the
+  mechanism and the reproduction.
+
+- **Replace tinyexpr with the unified evaluator on the numeric path too**
+  (raised 2026-08-09, **D50**, spec P5.2-7). Would make it four parsers → *one*,
+  fix the above everywhere, remove tinyexpr's depth-7 parse cap from graphing
+  (D47) and return 7,897 B of flash. **Revisit after Phase 5.2 closes**, and not
+  before §9's M1 has measured per-sample latency for the stack machine against
+  tinyexpr — that number is the one input the decision needs and nobody has it.
+  Known costs, measured rather than guessed: a `Program` is a fixed 2,064 B
+  against a malloc'd tree of ~120 B for `sin(x)+2*x`, so caching Y1-Y7 compiled
+  would cost 14.4 KB against ~1 KB; `compile()`/`run()` are non-reentrant
+  singletons and the numeric path re-enters them; the evaluator's chunk staging
+  overlays the `kCompute` arena that `stats`/`matrix`/`infer` own; and there is
+  no differential corpus off the home screen, where 5.2.9 found three bugs
+  inside covered territory. Note that `phase4-spec.md` §5.2's "would double
+  arithmetic cost" does **not** argue against this — it argued against a
+  `Complex` numeric value type, and this evaluator keeps a real tier.
+
 - **Screenshot capture — serial dump (debug aid) + save-to-SD (user feature)**
   (raised 2026-08-05, same session as serial key injection — two uses of the
   same underlying capability; that item has since graduated to **Phase 5.1**,
