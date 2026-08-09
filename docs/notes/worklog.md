@@ -305,7 +305,92 @@ Still to verify on hardware:
 
 ---
 
-## 2026-08-09 (later) — tinyexpr's unary minus binds to its own operand (D51). **HW-verified on the Pico 2**
+## 2026-08-09 (last) — Phase 5.2 task 5.2.12: on-device verification, both boards. **The measurement plan was wrong and the tighter board found two bugs** (D52, D53)
+
+The phase's last task, and it did what a hardware pass is for: it invalidated the
+method it was given, then found a hard fault in *shipped* firmware and an
+intermittent wrong-looking answer that ten thousand host checks could not.
+
+**§9's method does not work, and the failure is instructive** (D52). It
+specified host-side round-trip timing against a released binary, arguing "the
+same overhead sits on both sides, so enough repetitions cancel it". On hardware
+the round trip has a **~113 ms floor and ~80 ms spread** — a submit triggers a
+full-frame push — against an evaluator cost of 0.5-17 ms. The clinching
+observation was not the ratio but the **ordering**: the 999-element M2 row had a
+*lower minimum* (80 ms) than `2+3*4` (104 ms). And the cancellation argument
+fails specifically, because the push cost depends on the result being rendered,
+so it is correlated with the thing under test. Timing the whole `submit_line`
+fails too — it contains the SD history write, and `2+3*4` measured 19.0 ms of
+which **0.63 ms** was evaluation. Replaced with a firmware probe around
+evaluation only, and **the baseline rebuilt from the v0.3.2 tag carrying the same
+probe**, applied to both trees by one script so the instrumentation is provably
+identical rather than hand-matched twice. New tool: `scripts/ab-measure.py`.
+
+**The numbers, median of 15, per-sample spread 0.02-0.18 ms** so every delta is
+10-100x its own noise. Pico 2 then Pico 1: **M1 -29%/-32%** (the guardrail row is
+*better*, not merely unchanged — REAL mode no longer evaluates twice, D4's probe
+pair); **M3 -17%/-9%** (§3's loop-invariant hoist, confirmed); **M4 -32%/-14%**;
+**M5 +0.15/+0.17 ms** (dispatch: compiling a `Program` first); **M2 +52%/+36%**
+and **M6 +54%/+80%**, the two regressions. M2 is the one §3 promised to report
+either way and it is the *predicted* cost: +5.66 ms over 999 elements is
+5.7 us/element, and two extra streaming passes x 8 KB x read+write at D10's
+~6.8 MB/s predicts ~4.8 ms.
+
+**Depth had never been tested on hardware, and the claim needed a caveat.** The
+falsifiable form of "depth moved off the call stack" is *stack peak must not grow
+with nesting depth*. For scalars/parens/unary it holds outright — the ladder
+plateaued at 2,756 and depths 32 through 63 registered no new mark at all;
+`kMaxStack = 64` is exact, with 65 returning "Too deeply nested" and no fault.
+**Matrix nesting is the exception at ~104 B/level**, and it is not input length
+(2 to 30 flat terms, zero new marks) nor the CAS exact-form probe (`>dec`
+suppresses that; peaks still climb). Bounded by the 128-char line cap, mechanism
+unexplained. Before/after: paren nesting **16 -> 62+**, matrix nesting
+**3 -> 14+**, worst peak **3,972 -> 2,344** (Pico 2). `.bss` **-5,360 B** (Pico 1),
+**-5,348** (Pico 2) — which does **not** match the phase's claimed -6,888 and is
+recorded as measured rather than reconciled.
+
+**Also corrected: nothing moved to PSRAM.** D48's design note said the explicit
+stack would be "PSRAM-friendly" and that this is "what makes much larger depth
+reachable at all". 5.2 put the operand stack in **bss** (`unified_vm.cpp:39`,
+64 x 24 = 1,536 B) and never needed PSRAM — 1.5 KB of SRAM bought 64 levels
+against `matexpr`'s 3.
+
+**Bug 1 — the shipped firmware hard-faults on the Pico 1** (D48 amendment).
+`det((([A]*[A])+[A])*[A])`, depth 4, reboots v0.3.2. `lr` resolves to
+`matexpr::parse_unary` — **D48's own guarded function** — with `sp` 160 bytes
+below `__StackBottom`, inside core 1's stack. The cause is structural: `DepthGuard`
+is RAII *inside* `parse_unary`, so depth 4 allocates its frame before the guard
+can refuse it, and the Pico 1 has 144 B of margin against a ~600 B frame. D48 had
+written "containment, not a fix" and was righter than it knew. The Pico 2
+survives identical code purely on smaller frames, which is why 2026-08-08's
+pass missed it. Phase 5.2 returns `8` correctly at a 2,104 peak — but **v0.3.2
+and every release back to v0.2.0 carry the fault** until 5.2 merges.
+
+**Bug 2 — per-element PSRAM reads are intermittently wrong** (D53), and the
+first attribution of it was mine and wrong. `l1/499500` renders one element as
+`4.004007642e-6` instead of `4.004004004e-6` on **8 runs in 30**. It looked like
+a 5.2 regression because `l1/sum(l1)` corrupts on 5.2 (5/30) and never on the
+baseline (0/30) — but widening the battery showed `l1/499500` corrupts at an
+**identical 8/30 on both builds**. It is shipped behaviour; 5.2 only widens which
+expressions reach it, because one evaluator means one path. **The values are
+correct** — `sum(l1/499500)` is exactly `1` on 25/25, and that fold is sensitive
+where the first one tried, `sum(l1*1)`, was not: a 1.8e-6 error in one element of
+a 499,500 sum formats identically to the right answer. So it is the *rendering*:
+`format_list` reads one element at a time through `Array::get`, which for a
+PSRAM-backed array is an 8-byte PIO/SPI transfer, 999 of them. The compute path
+streams in chunks and is clean. `kSlabBytes = 2048` (256 doubles, D21) is the
+SRAM/PSRAM threshold, so a 100-element list never corrupts — which also means
+M4's 256/257 pair straddles *that*, not a streaming chunk boundary as this
+session first assumed.
+
+**M7 register replay** clean on both boards (31 inputs, 36 lines, no faults).
+`.bss` "confirmed on the board" has no mechanism — the diag screen shows PSRAM,
+die temp, SD and keys, but no static-RAM figure.
+
+Full detail: `decisions.md` **D52**, **D53**, and D48's amendment;
+`phase5.2-spec.md` §9's amendment.
+
+## 2026-08-09 (later still) — tinyexpr's unary minus binds to its own operand (D51). **HW-verified on the Pico 2**
 
 Bugfix on `fix/tinyexpr-pow-negation`, off `main`. **Deliberately not part of Phase
 5.2**: the unified evaluator fixes `(-2)^2` on the home screen only and has no
@@ -382,6 +467,87 @@ toolchain's system include paths and reports a wall of bogus
 passes. Left for a separate de-stale commit.
 
 Full detail: `decisions.md` **D51**, `drivers/README.md` "Local modifications".
+
+## 2026-08-09 (later) — Phase 5.2 tasks 5.2.6-5.2.11: the unified evaluator replaces the three home-screen evaluators. **All HW-PENDING**
+
+Six tasks in one session, ending with `matexpr`, `complexexpr` and `listexpr`
+deleted. The home screen now runs on one evaluator: a shunting-yard compiler
+emitting a flat RPN program, executed by a stack machine, neither of which
+recurses on the C++ call stack (D48's constraint).
+
+**5.2.6 list tier** — and a design reversal. The committed element-slot lift
+(re-run the whole program per element) is wrong on *correctness* before
+performance: `l1/sum(l1)` would recompute an O(N) reduction N times, quadratic
+on exactly the expression `listexpr` handles linearly today. Replaced with
+**broadcast dispatch**: a list operand broadcasts at the instruction consuming
+it, 256-element chunks into one temporary. Every node is evaluated once per
+element by construction. Cost: extra streaming passes, deferred to §9/M2 to
+settle on hardware.
+
+**5.2.7 matrix tier.** Lists broadcast, matrices do not — `[A]*[B]` is the
+matrix product — and that asymmetry is why `matexpr` was ever a separate parser.
+`norm` was Frobenius in one file and Euclidean in another; one entry now,
+dispatched on the argument. `dot`/`cross` came too: 5.2.6 missed them because
+they live in `listexpr`'s whole-expression block, not its function table.
+
+**5.2.8 store grammar.** Five target forms in one grammar, replacing four copies
+of a rightmost-`->` string search that disagreed about what counts as a target.
+The interesting half is the layering question it settles: the three evaluators
+split commit responsibility three ways, so **the gate is on the MODE, not the
+layer** — `kCommit` applies REAL mode's rule and writes, `kProbe` computes and
+writes nothing. Both narrowings 5.2.7 left open closed on that.
+
+**5.2.9 differential harness — three bugs on its first run.** 259 expressions
+harvested from the suites that pin the retired evaluators, both number modes,
+both pipelines from the same seeded state: 518 comparisons, 494 exact. It found
+postfix `!` missing outright (shipped syntax both old scalar paths reached by
+*rewriting* the input, so there was no grammar rule to port); the REAL-mode
+commit gate testing `im == 0` exactly, rejecting `e^(i*pi)`; and the store-
+mismatch strings splitting by target kind when today they split by which
+evaluator claimed the line — correcting a `test_unified` assertion written by
+hand two tasks earlier. **And one bug that is not ours**: `(-2)^2` is `-4` from
+tinyexpr and `4` from `complexexpr` — the two shipped evaluators disagree today,
+the second instance of the class that justified this phase (D46 was the first).
+D50 splits that fix out as a separate bugfix and defers "replace tinyexpr
+entirely" past 5.2 closure.
+
+**5.2.10 the flip.** `PICOCALC_UNIFIED_EVAL` defaults ON. The dispatcher lives
+in `math/`, not the screen, so the harness could compare **display strings**
+too — which caught a bare `sort_asc(l1)` echoing `{1,2,3}=>l1` where the screen
+prints `{1,2,3}`. All ~40 register rows signed off with a TI-parity rationale;
+W14 nearly went the other way. The REAL-mode probe is *gone*: it existed only
+because tinyexpr cannot see complex values.
+
+**5.2.11 deletion.** 3,903 lines, three of four depth caps, and the ~770 checks
+in `test_lists`/`test_matrix`/`test_complex_expr` **kept** — ported through
+`tests/host/eval_shim.hpp` rather than deleted, since §6 calls those checks the
+specification. The port immediately found a real defect the harness could not:
+`sum(l1)` over a complex list in REAL mode returned 3 instead of erroring,
+because complex *list* reads were ungated where matrix reads were (4D.25, the
+register's P1). The differential harness retired with the evaluators it
+compared against.
+
+**Sizes, and a claim corrected twice.** §5 predicted "deletion is what banks
+it". Measured on the Pico 1:
+
+    before the flip   text 461,852   bss 217,396
+    5.2.10 flipped    text 466,068   bss 210,676
+    5.2.11 deleted    text 463,352   bss 210,508
+    net                    +1,500        -6,888
+
+`--gc-sections` banks the bss as soon as the call sites disappear; deletion adds
+almost nothing, because by then the linker had already dropped it and the
+remainder (formatters, MatAns) *moved* rather than vanished. Deletion's real
+return is the lines, the caps, and a bug class that is now unrepresentable.
+
+**Byproduct deliverable**:
+[unified-evaluator-changes.md](unified-evaluator-changes.md), the behaviour
+change register — every widening, narrowing, fix, grammar and error-text change,
+each pinned to a host check and replayable on device.
+
+Suites 1,930 checks green, both boards build, lint/format/docs clean. **Nothing
+is hardware-verified**: 5.2.12 owes stack peak, the A/B latency pass against the
+v0.3.1 release binary (§9), and the register replay on both boards.
 
 ## 2026-08-09 — Phase 5.1 built: serial line injection. **HW-verified on the Pico 2**
 

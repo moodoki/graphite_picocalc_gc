@@ -1,0 +1,434 @@
+# Unified evaluator — behaviour change register (Phase 5.2)
+
+**Last updated**: 2026-08-09 (through task 5.2.11)
+**Status**: **every row signed off (§2.5, task 5.2.10)**; the register keeps
+accumulating if the cutover finds more. The finished document is a byproduct
+deliverable at 5.2 closure.
+
+**Purpose.** Phase 5.2 replaces three home-screen evaluators
+(`math::matexpr`, `math::complexexpr`, `math::listexpr`) with one. Where the
+unified evaluator answers differently from what ships today, that is a decision
+to record, not a test to quietly relax
+([phase5.2-spec.md](../phases/phase5.2-spec.md) §6). This file is the single
+place those differences live, in a form that can be **checked against** rather
+than read.
+
+Related: [phase5.2-spec.md](../phases/phase5.2-spec.md) is the design and the
+task plan; [decisions.md](decisions.md) carries the numbered decisions this
+rests on (D30, D37, D46, D47, D48, D49);
+[design-departures-matrix-complex.md](design-departures-matrix-complex.md) §F is
+where the idea came from.
+
+---
+
+## 1. How to check this list
+
+Three independent uses, which is why the table has an `Input` and a `Pinned by`
+column rather than prose:
+
+1. **Host** — every row is pinned by a named check in
+   `tests/host/test_unified.cpp`. A row with no pin is not a decision, it is an
+   accident waiting to be found on hardware.
+2. **Differential (5.2.9-5.2.11, retired)** — `tests/host/test_differential.cpp` ran
+   **259 expressions harvested from the suites that pin the three retired
+   evaluators, in both number modes**, through both pipelines from the same
+   seeded state, and compares the result *and* everything each one wrote.
+   **This register is exactly its allow-list** (`differential_allow.inc`, one
+   row per id): a divergence with no row fails, and a row that never diverges
+   fails too. Adding a row is a decision recorded here, not a way to quiet the
+   test. From 5.2.10 it compared the whole dispatcher — `evaluate_home` against
+   the old cascade — so **what the screen prints** was compared too, not only
+   the value behind it.
+
+   **It retired with the evaluators it compared against (5.2.11)**, which is the
+   whole lifecycle of a differential harness: it exists to bless a migration and
+   has nothing left to compare once the migration lands. What carries forward is
+   the ~770 checks in `test_lists`, `test_matrix` and `test_complex_expr`, which
+   5.2.11 *ported* onto the new evaluator through `tests/host/eval_shim.hpp`
+   rather than deleting. Every row below that changed one of their expectations
+   says which row it is.
+3. **On device (5.2.12)** — the `Input` column *is* the serial-injection replay
+   script. Sent to a firmware built with the old pipeline and one with the
+   unified evaluator, the observed diff must equal this table, row for row.
+   Since 5.2.10 the host harness also compares the **display strings and store
+   echoes**, so the on-device pass confirms rather than discovers.
+   (§4 of this file, and phase5.2-spec.md §9 for the timing pass that rides
+   along with it.)
+
+**Classes.** The id prefix is the class:
+
+| prefix | meaning |
+|---|---|
+| **W** | **Widening** — rejected today, works now |
+| **N** | **Narrowing** — works today, rejected now |
+| **F** | **Fix** — today's answer is *wrong*, and unification corrects it |
+| **G** | **Grammar** — what the parser accepts, or how something is spelled |
+| **E** | **Error text** — same accept/reject, different message |
+| **P** | **Preserved on purpose** — looked like it would change, deliberately did not |
+| **D** | **Deferred** — owed by a later task, listed so it is not lost |
+
+**F is the class this phase exists for** and it was added on 2026-08-09, when
+5.2.9's first differential run produced one. D46 — the DEGREE-mode trig
+disagreement — would have been an F row had it not been fixed before this file
+existed. An F row is not a risk to sign off; it is the payoff.
+
+"Today" throughout means shipped behaviour on `main`, not an intermediate state
+of this branch.
+
+---
+
+## 2. The register
+
+### Widenings
+
+Every one of these is a case a retired evaluator rejected. What 5.2.10 owes each
+is a TI-parity judgement, not a re-test — they are pinned already.
+
+| # | Input | Today | Unified | Origin | Pinned by |
+|---|---|---|---|---|---|
+| W1 | `sin(l1)`, l1 complex | *"Complex lists support only +, -, scalar * and /"* | maps elementwise | `eval_clift`'s narrow grammar is gone (5.2.6) | `test_complex_lists` |
+| W2 | `l1*l1`, l1 complex | *"Complex lists: one list per term"* | elementwise product | same | `test_complex_lists` |
+| W3 | `2/l1`, l1 complex | *"Cannot divide by a list"* | elementwise reciprocal | same | `test_complex_lists` |
+| W4 | `sum(l1)+1`, l1 complex | *"Complex sum/mean must stand alone"* | composes | a reduction returns a `Value`, not spliced text (5.2.6) | `test_complex_lists` |
+| W5 | `sqrt({4,-1})` | NaN element | promotes the list to complex | scalar `sqrt(-4) = 2i` applied elementwise (5.2.6) | `test_list_chunking` |
+| W6 | `sort_asc(sort_asc(sort_asc(sort_asc({3,1,2}))))` | *"Too deeply nested"* at 3 levels | evaluates | the cap was a call-frame budget (D47); there are no frames now (5.2.6) | `test_list_wrappers` |
+| W7 | `2*dim([A])`, `sum(dim([A]))` | *"dim/eigenvals must stand alone"* | compose | `matexpr::Value` could not hold a list; this one can (5.2.7) | `test_matrix_bridge` |
+| W8 | `eigenvals([D])`, complex-conjugate spectrum | unstorable display text (D30/P4-7) | a complex list | "lists are real-only" stopped being true in 4D.24 (5.2.7) | `test_matrix_bridge` |
+| W9 | `det(([A]*([A]+[A]))+[A])` | *"Too deeply nested"* (depth 4) | evaluates | `matexpr`'s cap is 3 with 84 B of margin — the same call-frame budget (5.2.7) | `test_matrix_depth` |
+| W10 | `list2mat(range(1,3), l2)` | *"list2mat takes l1-l6 args"* | takes any list expression | arguments are values now, not tokens (5.2.7) | `test_matrix_bridge` |
+| W11 | `mat2list([A], costs)` | *"mat2list targets are l1-l6"* | named lists work as targets | one ref numbering since 4D.13 (5.2.7) | `test_matrix_bridge` |
+| W12 | `l1->a` | *"Syntax error"* from whichever parser claimed the line | *"Store target mismatch"* | one store grammar instead of four rightmost-`->` searches (5.2.8) | `test_store_targets` |
+| W13 | `dim([A])->mydim` | no such form — `matexpr`'s store targets have no named-list branch and `listexpr` never sees `dim([A])` | stores the list | the target grammar stopped being per-evaluator (5.2.8) | `test_store_targets` |
+| W15 | `conj(a)`, and `real`/`imag`/`arg` of a real | *"Syntax error"* in REAL mode (tinyexpr has no `conj`), works in RECT (`complexexpr` does) | works in both | `complexexpr`'s complex-only table is one of the three the evaluator absorbed (5.2.5); it is no longer behind a mode | `test_builtins` (REAL mode is the default there) |
+| W16 | `{1}+{2}+{3}+{4}+{5}` | *"Too many list terms"* | evaluates | `listexpr`'s `kMaxOperands` term cap. The temp pool still bounds this, but it bounds *live* temporaries rather than terms in the input (5.2.6) | `test_lists` |
+| W14 | a non-finite scalar result on the matrix path, e.g. `det([A])/0` | *"Undefined result"* | returns `inf`, committed to Ans | the engine and `complexexpr` already commit `inf`/`nan`; gating only the matrix path was the odd one out (5.2.8) | — see N/D below |
+
+**W14 is the one widening nobody asked for**, and the one row the 5.2.10
+sign-off nearly rejected. It is a widening because it accepts what was rejected,
+but the old behaviour was arguably better. **Kept** (§2.5): adopting `matexpr`'s
+gate everywhere would change the *scalar* path — the one users hit constantly —
+in a phase whose whole claim is that it does not change answers, and
+`format.cpp:82` has printed `Inf`/`NaN` deliberately since Phase 1. Matching
+TI's `ERR:DIVIDE BY 0` is a display decision for all four kinds at once, outside
+this phase.
+
+### Fixes
+
+| # | Input | Today | Unified | Origin | Pinned by |
+|---|---|---|---|---|---|
+| F1 | `(-2)^2` | **-4** on the real path, **4** on the complex path — the two shipped evaluators disagreed | **4** | tinyexpr's `factor()` could not tell `-2^2` from `(-2)^2`; the unified compiler keeps grouping (5.2.9) | `test_compile_unary`, `test_builtins` |
+
+> **Closed 2026-08-09 by D51, and it is the one row that stopped being a
+> divergence.** The vendored parser was patched on `main` and released as
+> **v0.3.2**, so tinyexpr now answers `4` too. The row stays because it is the
+> record of what the harness found, and because it is the reason the parser got
+> looked at — but read it in the past tense: as of v0.3.2 the unified evaluator
+> **agrees** with `evaluate_real()` here rather than correcting it. Two claims
+> below are superseded and marked in place.
+
+**F1 in full**, because it is the second instance of the bug class that
+justified this phase and it was found by the harness on its first run.
+
+Type `(-2)^2` on the home screen today and the answer depends on the number
+mode: **-4** in REAL, **4** in RECT — or in REAL if the expression happens to
+mention `i` or reference a complex variable, since that is what routes an input
+to `complexexpr`. `test_complex_expr.cpp:318` pins the complex path's `4`;
+nothing pinned the real path's `-4`.
+
+The mechanism is upstream, in `drivers/tinyexpr/tinyexpr.c`'s `TE_POW_FROM_RIGHT`
+build of `factor()`:
+
+```c
+if (ret->type == (TE_FUNCTION1 | TE_FLAG_PURE) && ret->function == negate) {
+    te_expr *se = ret->parameters[0];
+    free(ret); ret = se; neg = 1;      /* hoist the negation out of the power */
+}
+```
+
+By the time `factor()` runs, `(-2)` has already been parsed and the parentheses
+are gone — the node is simply a `negate`, indistinguishable from the one `-2`
+produces. So the negation is hoisted out of the exponentiation and re-applied
+after: `-(2^2)`. `(0-2)^2` gives `4` on both paths, which is the same expression
+with the negation spelled so it does not reach that test.
+
+The unified evaluator has no such case: parentheses close an operand in the
+shunting-yard, so `(-2)` is a finished value before `^` is applied. It agrees
+with `complexexpr`, with the pinned test, and with the arithmetic.
+
+~~**This does not reach graphing.**~~ **Superseded — it does now.**
+`evaluate_real()` is tinyexpr and §2 of the spec keeps it out of *this phase's*
+scope, so on 5.2 alone the home screen would have answered `4` while
+`Y1=(-2)^X` still plotted the tinyexpr reading — a home-screen disagreement
+traded for a home-vs-graph one. **D51 patched the parser instead, so neither
+inconsistency ships.** `Y1=(-2)^X` plots `4` at X=2.
+
+**Decided 2026-08-09 (D50): the parser gets patched, as a separate bugfix
+outside this phase.** Split out rather than folded in because at the source it
+fixes graphing too, and because it is not gated on 5.2. **Done the same day
+(D51), released as v0.3.2, HW-verified on the Pico 2** — so the row above is now
+history rather than a description of what ships.
+
+Two things that split turned up, worth keeping:
+
+- **"Roughly five lines" was wrong**, and usefully so. Patching at the source
+  exposed a **second** defect in the same function — `2^-3^2` returned 512
+  because the right-associative insertion loop re-based a negated exponent —
+  which **no 5.2 row covers**, because the unified evaluator gets that case right
+  and the harness had nothing to disagree with. Looking at the parser is what
+  found it.
+- **The fix is deliberately iterative**, not a recursive `factor()`. A `^` chain
+  carries no parentheses, so `Engine`'s paren-count depth guard cannot bound it —
+  the same constraint that shaped this phase's own stack machine (D48).
+
+Whether the unified evaluator should replace tinyexpr *outright* is the larger
+question and is unaffected: still deferred past 5.2 closure (spec P5.2-7), still
+waiting on §9's M1.
+
+### Narrowings
+
+| # | Input | Today | Unified | Origin | Pinned by |
+|---|---|---|---|---|---|
+| *(none outstanding)* | | | | | |
+
+Two narrowings were open between 5.2.6 and 5.2.8 and **both are closed**, which
+is why this table is empty rather than absent:
+
+- `sort_asc(l4)` sorting `l4` in place. The expression tier evaluates by value;
+  the in-place half came back in 5.2.8 as an **implicit store**, emitted only
+  when the whole program is `push-ref; sort`. See P4.
+- Rejecting a complex *result* built from real data in REAL mode (`i*[B]`).
+  Closed in 5.2.8 by putting the gate on the **mode** rather than the layer:
+  `Mode::kCommit` refuses it, `Mode::kProbe` computes it. See P3.
+
+A third briefly existed inside this branch and never shipped: 5.2.7 dropped
+`matexpr`'s "mat2list must stand alone", and 5.2.8's audit put it back (P5).
+
+### Grammar
+
+| # | Change | Today | Unified | Pinned by |
+|---|---|---|---|---|
+| G1 | The store arrow is **compiled**, not string-searched | each evaluator scans for the *rightmost* `->` and re-trims the body around it (`engine.cpp:402`, `complex_expr.cpp:454`, `list_expr.cpp:1306`, `mat_expr.cpp:978`) | the first `->` ends the expression; the rest is the target | `test_store_compile` |
+| G2 | Five target forms in one grammar | which targets exist depends on which evaluator claimed the line | `-> a`, `-> theta`, `-> l1`-`l6`, `-> name`, `-> [A]`-`[J]`, always | `test_store_compile` |
+| G3 | `1->a->b` | parsed as `(1->a) -> b`, then failed inside tinyexpr | *"Bad store target"* — stores do not chain | `test_store_compile` |
+| G4 | Depth limits | four separately-discovered call-frame caps: `matexpr` 3, `complexexpr` 7/4, tinyexpr 7 (D45/D47/D48) | one operand/operator-stack depth of 64, reported as *"Too deeply nested"* / *"Expression too complex"* | `test_compile_depth`, `test_depth_budget` |
+| G5 | Scalar spans | escape to `eval_field` → `Engine::evaluate_at` → tinyexpr, the only place `pi`/`e`/`ans`/`theta` and `catalog.cpp` resolve | resolved natively; the escape hatch is gone, which is what makes "four parsers → two" true | `test_vm_constants`, `test_builtins` |
+| G6 | `norm(x)` | Frobenius in `mat_expr`, Euclidean in `list_expr` — one name, two implementations that could never disagree because they could never meet | one entry, dispatched on the argument's kind | `test_matrix_bridge` |
+| G7 | Whole-expression forms | `dim`/`eigenvals`/`mat2list`/`sort_asc`/`dot`/`cross`/`norm` are recognised by matching the *whole input string* | ordinary calls in one grammar (`mat2list` excepted — P5) | `test_matrix_bridge` |
+
+G4–G7 are mechanism changes with user-visible consequences; G5 has none by
+design and is listed so the differential harness knows to expect none.
+
+### Error text
+
+The criterion is **provenance** — the concrete part of open question P5.2-5. A
+string that states a decision is kept verbatim; a string that fell out of a
+parser accident is replaced.
+
+| # | Input | Today | Unified | Pinned by |
+|---|---|---|---|---|
+| E1 | `1->a+2` | *"Syntax error"* (from tinyexpr — the arrow was left in the body) | *"Bad store target"* | `test_store_compile` |
+| E2 | `2->l1` | *"Store target needs a list"* (`listexpr`) | unchanged | `test_store_targets` |
+| E3 | `[A]->a`, `2->[C]`, `l1->[C]` | *"Store target mismatch"* (`matexpr`) | unchanged | `test_store_targets` |
+| E4 | `2->A`, `2->e`, `2->i` | *"Variables are lowercase a-z"*, *"e is reserved (Euler's e)"*, *"i is reserved (imaginary unit)"* | unchanged, verbatim — these state decisions (D1/D11/D19/D30) and the silent case-fold one of them replaced was a wrong answer | `test_store_compile` |
+| E5 | `sum(1)`, `det(1)` | *"Syntax error"* — help-only catalog rows with no implementation | *"Expected a list"* / *"Expected a matrix"* | `test_vm_errors` |
+| E6 | `2->Theta` | *"Syntax error"* — the uppercase name matched no target, so the arrow was left in the body for tinyexpr | *"Bad store target"* | `test_store_compile` |
+| E7 | `{1}->ans` | *"Syntax error"*, same mechanism | *"Bad store target"* — `ans` is a reserved name, not a target | `test_lists` |
+| E8 | `{1,foo}` | *"Bad list element"* | *"Syntax error"* | `test_lists` |
+| E9 | `fac(a)` with a complex `a` | *"Non-real variable"* — `eval_field`'s message, raised when a scalar span escaped to the real engine | *"Non-real result"* — there is no escape now, so the catalog function itself refuses the argument | `test_complex_expr` |
+
+E8 is the one row where the replacement is arguably less pointed, and it is
+kept: `foo` is an unknown identifier *anywhere*, and the unified compiler
+resolves identifiers before it knows what encloses them. "Bad list element"
+described the position, not the problem.
+
+**A note on how P1 nearly stopped being true.** 5.2.11's port of `test_lists`
+caught a real defect: `sum(l1)` over a **complex list in REAL mode** returned 3
+instead of erroring. The evaluator gated complex *matrix* reads at `kPushMat`
+but not complex *list* reads at `kPushList`, so an operation with a real result
+could reach imaginary parts to compute it. The differential harness could not
+have found it — its seeded world has no complex list, so REAL mode never met
+one — and neither could a gate on the result, which is what was there. Fixed in
+`kPushList`, and it is why porting the old suites was worth more than trusting
+the harness alone.
+
+### Preserved on purpose
+
+Rows that a reader — or a reviewer of the diff — would reasonably expect to have
+changed. Each one is a place unification made a behaviour *reachable* that had
+been prevented structurally.
+
+| # | Behaviour | Why it survives |
+|---|---|---|
+| P1 | REAL mode never reads complex data: a complex `[X]`, a complex literal, a complex list element | 4D.25's rule. Gating reads, not just results, is what stops a real part being taken silently. `test_matrix_complex` |
+| P2 | `m_sin`/`m_cos`/… angle-mode wrappers scale the whole complex argument | **D46 itself** — the bug that motivated this phase. Without them DEGREE mode is ignored whenever Number mode is not REAL. `test_vm_complex` |
+| P3 | REAL mode never commits or displays a non-real *result* | D30. In the unified evaluator the gate is on `Mode::kCommit`; intermediates are never gated, so `i^2` is `-1` and `abs(3+4i)` is `5` in any mode. `test_store_real_gate` |
+| P4 | `sort_asc(l4)` sorts `l4` in place; `sort_asc(l4)->l5` writes both refs | `listexpr`'s in-place form is a statement. Restored as an implicit store; persistence keys off `Commit::lists_mask`, which is the distinction the D35 sort gap turned on. `test_store_in_place_sort` |
+| P5 | `mat2list` may not compose or be stored (*"mat2list must stand alone"*) | It writes list slots the operand stack may still hold **by reference**: `l1 * mat2list([A], l1)` would read l1's *new* contents. Found by 5.2.8's static-buffer audit; `matexpr` had the rule for the same reason. `test_matrix_bridge` |
+| P6 | A returned list `Value` is valid only until the next `run()` | `listexpr::Result::list` has had this contract since Phase 3A. A stored or sorted result names its slot instead, and a matrix result names MatAns. `test_store_targets` |
+| P7 | `evaluate_real()` / tinyexpr is untouched on the graphing, table and stats path | ~~`phase4-spec.md` §5.2's performance guardrail.~~ **That reason is wrong and the project already knew it — see the re-evaluation below.** The boundary holds on a *measured* premise instead: ~1.75x on repeated scalar evaluation (D52/D50). Strictly home-screen-only, as `evaluate_complex()` is today. |
+
+#### Re-evaluated 2026-08-09, after 5.2.12 measured the hardware
+
+Preservation decisions are worth re-checking once there is data, because a row
+kept for a reason that has since evaporated is worse than a row that changed:
+it looks deliberate. All seven were re-read against what 5.2.12 found. **Six
+hold. One was resting on a premise the project had already disproved.**
+
+**P1, P3 — hold, untouched.** Both are data-flow invariants (4D.25's read gate,
+D30's commit gate). Nothing measured bears on them; performance evidence cannot
+argue for or against a correctness rule.
+
+**P2 — holds, and is the strongest of the seven.** Its premise *is* D46, the bug
+that motivated the phase. If anything 5.2.12 reinforced it: M1's -22 to -32%
+comes precisely from no longer running two evaluators that could disagree.
+
+**P4 — holds.** Compatibility with `listexpr`'s statement form. The open soak
+item about whether a bare `sort_asc(l1)` should echo a store target is a
+*display* question and does not touch this premise.
+
+**P5, P6 — hold, and they are one decision, not two.** Both rest on the same
+model: list `Value`s travel **by reference**. P6 states the lifetime contract;
+P5 forbids `mat2list` composing because it writes slots the operand stack may
+still hold by reference (`l1 * mat2list([A], l1)` would read l1's *new*
+contents). That aliasing hazard is structural and unchanged. **If the
+by-reference model is ever revisited — copy-on-return, say — these two must be
+revisited together**, and P5 would likely dissolve on its own.
+
+There is a **second, independent route to the same place**, raised the same day
+and now on the wishlist: collapsing `Kind::kMatrix`/`kList` into one shape-driven
+kind. That does not fix P5's hazard — the hazard is slot mutation plus a
+by-reference stack, neither of which is about typing — but it would make
+`mat2list` unnecessary, since unpacking a matrix column becomes a **slice** that
+returns a value rather than a statement that writes slots. Two independent routes
+to obsolescence makes **P5 the weakest-anchored of these rows**. It would also
+fix P6's wording for free: P6 is stated as a list rule, but
+`unified_eval.hpp:83` already applies it to both kinds.
+
+**P7 — the premise was already dead when this row was written, and the row did
+not say so.** It cites `phase4-spec.md` §5.2's guardrail. **D50 established the
+same day that this reason does not transfer**: §5.2 argued against a `Complex`
+numeric value type, where every real operation would pay complex cost. This
+evaluator keeps a real tier — real ⊕ real never touches complex arithmetic. The
+spec's §2 carries that correction; this row was not updated to match, so it has
+been citing a superseded argument.
+
+The boundary still holds, and now on evidence rather than inheritance.
+**5.2.12's M6 measured what §5.2 could only assert**: on *repeated* scalar
+evaluation — the shape of graphing, tables, `numeric_solve` and `fnInt` — the VM
+is **~1.75x slower per operation** than tinyexpr's compiled tree walk, plus
+~4.6 us/element of fixed re-entry. Seven Y= slots at three operations would go
+**86.6 -> 152.3 ms per redraw**. So P7 survives on a stronger footing than it
+ever had; only the recorded reason was wrong.
+
+**One category note.** P7 is not the same kind of row as P1-P6. Those are
+behaviours the evaluator preserves; P7 is a statement about what the phase did
+not touch. The 2.5 sign-off's "P1-P7 keep — parity unchanged by construction"
+reads as one judgement over seven comparable rows, and it is not: P1-P6 are
+parity, P7 is scope. Worth splitting if this register is ever reused as a
+template.
+
+### Deferred
+
+| # | Owed | To |
+|---|---|---|
+| D1 | `mat2list`'s *"Done (n lists)"* display string. The evaluator returns the count as the value and reports the refs in `Commit::lists_mask`; formatting is the dispatcher's. | 5.2.10 |
+| D2 | The `num⇒a` store echo, and exact-form display interaction with a store | 5.2.10 |
+| D3 | Whether a non-finite result should report *"Undefined result"* uniformly across all four kinds (see W14) | 5.2.10 |
+| D4 | REAL-mode retry / probe sequencing on the home screen, now that one evaluator can answer both questions in one run | 5.2.10 |
+| D5 | The differential allow-list wiring: this register, machine-read | 5.2.9 |
+
+---
+
+## 2.5 Sign-off (task 5.2.10, 2026-08-09)
+
+Every row above, with the TI-parity judgement §4 of the task list asked for.
+The reference machines are the TI-83/84+ family and, where the 84+ has no
+equivalent, the TI-Nspire CX II CAS — the same two
+[ti-parity.md](ti-parity.md) uses.
+
+| rows | verdict | TI-parity rationale |
+|---|---|---|
+| W1-W5 | **keep** | Parity-positive. A TI-84 in `a+bi` mode holds complex lists and maps functions over them elementwise; `sqrt({4,-1})` gives `{2, i}` there. `listexpr`'s "complex lists support only +, -, scalar * and /" was our limitation, not TI's. |
+| W6, W9, W16 | **keep** | Parity-positive. TI has no per-expression nesting or term caps — it runs out of memory, it does not refuse depth 4. These three caps were call-frame budgets (D47/D48) and had no user-facing justification. |
+| W7 | **keep** | Parity-positive. `dim(` on a TI returns a list that composes like any other. "must stand alone" was a consequence of `matexpr::Value` not holding a list. |
+| W8 | **keep** | Parity-positive against the Nspire, which returns eigenvalues as a list including complex ones. The 84+ has no `eigVl(`. Unstorable display text was a 4C-era workaround for real-only lists, and 4D.24 removed the premise. |
+| W10, W11 | **keep** | Departure, superset. TI's `List►matr(` takes list *names*; ours takes any list-valued expression and any list target. Strictly more, and it costs no TI behaviour. |
+| W12, W13 | **keep** | Parity-positive. TI's STO► accepts any target whose type matches the value; which targets exist does not depend on how the expression was parsed. |
+| W14 | **keep, noted** | **Departure, and pre-existing.** TI raises `ERR:DIVIDE BY 0` and stores nothing; we display `Inf`/`NaN` and commit them — and have on the scalar path since Phase 1 (`format.cpp:82` handles both deliberately). What changed is only that the matrix path stopped being the one place that errored instead. **Uniformity is the win being claimed here, not TI parity**; matching TI would mean changing all four kinds, which is a display decision outside this phase. |
+| W15 | **keep** | Parity-positive. `conj(`, `real(`, `imag(` are available on a TI regardless of mode. Ours were reachable only when the expression already looked complex. |
+| F1 | **keep** | **Parity-restoring.** A TI-84 computes `(-2)^2 = 4`. We were wrong on one of two paths. |
+| G1-G3 | **keep** | Parity-neutral to positive. TI treats STO► as a terminal operator: it ends the expression, it does not chain, and a bad target is a pointed error rather than a syntax error from the expression parser. |
+| G4 | **keep** | Parity-positive; see W6. |
+| G5, G7 | **keep** | Invisible to a user. Mechanism only — the same names, arities and values, reached without an escape hatch. |
+| G6 | **keep** | Parity-positive. TI's `norm(` takes both a list and a matrix and means the right thing for each; ours needed two implementations in two files to do the same. |
+| E1-E8 | **keep** | Parity-neutral. TI's strings (`ERR:SYNTAX`, `ERR:DATA TYPE`) are nothing like ours in either version, so parity cannot be the criterion. Provenance is, and it is applied row by row: a string that states a decision survives verbatim, one that fell out of a parser accident does not. |
+| P1-P6 | **keep** | Parity unchanged by construction — these are the rows that did *not* move. **Re-checked 2026-08-09** against 5.2.12's measurements; all six premises hold. |
+| P7 | **keep**, new reason | Scope, not parity — a different kind of row from P1-P6. **Its recorded premise (§5.2's guardrail) was already superseded by D50 when this table was written.** It now holds on 5.2.12's measurement instead: ~1.75x on repeated scalar evaluation. See the re-evaluation under *Preserved on purpose*. |
+| D1-D5 | **discharged** | See below. |
+
+**No row was rejected.** That is worth stating rather than leaving implicit: the
+sign-off was a real pass — W14 nearly went the other way, and it is kept only
+because the alternative (adopting `matexpr`'s "Undefined result" everywhere)
+would have changed the scalar path, which is the one users hit constantly, in a
+phase whose whole claim is that it does not change answers.
+
+### The deferred rows, discharged
+
+| # | Owed | Outcome |
+|---|---|---|
+| D1 | `mat2list`'s *"Done (n lists)"* | **Discharged.** Reconstructed in `unified_home.cpp` from `Commit::lists_mask`, exactly as 5.2.8 promised. `real result + non-empty mask` identifies `mat2list` uniquely — an in-place sort and a list store both yield lists — so the evaluator needed no special case plumbed through it. |
+| D2 | the `num⇒a` store echo, and exact-form interaction | **Discharged.** `evaluate_home` returns a store *label* and the screen composes the glyph, because `math` must not include `gfx`. Exact-form suppression on a store is now one flag (`exact_form_ok`) instead of three conditions re-derived at the call site. |
+| D3 | *"Undefined result"* for non-finite results | **Decided: not adopted** — see W14. |
+| D4 | REAL-mode retry / probe sequencing | **Discharged by deletion.** The probe is gone. It existed because tinyexpr cannot see complex values, so REAL mode ran `complexexpr` first purely to ask "would this be non-real?" — two evaluations and two string scans (`mentions_i`, `refs_complex_var`) for one answer. One evaluator answers it in one run, because the gate is inside the commit. |
+| D5 | the differential allow-list, machine-read | **Done in 5.2.9** (`differential_allow.inc`). |
+
+## 3. Coverage — what is NOT in this register
+
+**As of 2026-08-09 the differential harness reports 494 of 518 comparisons in
+exact agreement, with all 24 divergences carrying a row above.** That number is
+what makes the rest of this section a claim rather than a hope.
+
+Stated so an empty region reads as "checked" rather than "not looked at":
+
+- **Arithmetic, precedence and associativity.** Unchanged by construction: the
+  compiler's precedence table is written against `mat_expr.cpp:812-865` and
+  `complex_expr.cpp:366-404`, and `^` stays right-associative because tinyexpr
+  is built with `TE_POW_FROM_RIGHT`. Pinned by `test_compile_associativity` and
+  `test_vm_matches_real_path`.
+- **The catalogue's 82 functions, tinyexpr's 24 builtins and the complex-only
+  set.** Same names, same arities, same values — three tables reached natively
+  instead of through `eval_field`. Pinned by `test_builtins`.
+- **Number and angle modes**, beyond P1–P3. The whole corpus runs in both REAL
+  and RECT, in DEGREES — D46's territory — and RECT produced **no divergence
+  the register did not already carry**, which is the strongest single statement
+  in this file: the complex tier and `complexexpr` agree across every expression
+  the complex suite contains.
+- **Postfix factorial.** Absent from the compiler until 5.2.9's first run found
+  it (`5!` is shipped syntax that both retired scalar paths reached by rewriting
+  the input before parsing, so no grammar rule existed to port). Now a postfix
+  operator, pinned by `test_factorial`. Not a register row: it never shipped
+  broken, it was a gap in the branch.
+- **Everything off the home screen.** Graphing, tables, stats, the solver, the
+  CAS and the editors do not go through this evaluator (P7).
+
+## 4. Replaying the register on hardware
+
+The `Input` column is the script. With serial injection (Phase 5.1) and two
+firmware images — the **v0.3.1 release `.uf2`** for the old pipeline (tagged
+2026-08-08, all of Phase 5.1 and none of 5.2, and its injection block is
+byte-identical to today's) and a current build for the unified evaluator — each
+row is one line in, one `inject:` echo out, on both:
+
+```
+inject: "<expr>" -> "<result>" kind=plain|symbolic|error
+```
+
+A row passes when the pair of echoes matches its `Today` and `Unified` columns.
+Rows whose inputs need seeded state (`l1` complex, `[A]` complex, a 999-element
+list) are set up by the lines preceding them in the script, so the script is
+ordered, not a set.
+
+This is the same mechanism as the differential pass in
+[phase5.2-spec.md](../phases/phase5.2-spec.md) §6.1 and it runs in the same
+session as the timing pass in §9 — one script, three outputs: results, stack
+peaks, elapsed times.

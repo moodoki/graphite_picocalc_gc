@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 include(pico_sdk_import.cmake)
 
 project(picocalc_graphcalc
-    VERSION   0.3.2
+    VERSION   0.4.0
     LANGUAGES C CXX ASM
 )
 
@@ -112,17 +112,18 @@ add_executable(picocalc_graphcalc
     src/math/named_lists.cpp
     src/math/named_lists_persist.cpp
     src/math/list_ops.cpp
-    src/math/list_expr.cpp
     src/math/stats.cpp
     src/math/dist.cpp
     src/math/infer.cpp
     src/math/matrix.cpp
     src/math/matrices_persist.cpp
-    src/math/mat_expr.cpp
     src/math/numeric_solve.cpp
     src/math/solve_expr.cpp
     src/math/complex.cpp
-    src/math/complex_expr.cpp
+    src/math/unified_compile.cpp
+    src/math/unified_vm.cpp
+    src/math/unified_home.cpp
+    src/math/array_format.cpp
     src/math/seq_expr.cpp
     src/math/units.cpp
     src/math/cas/expr.cpp
@@ -221,7 +222,7 @@ message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 # screen. Not derivable from git — bump it here when a phase/sub-phase
 # reaches code-complete (the session-wrapup agent's README status pass
 # covers this).
-set(PICOCALC_PHASE "5.1")
+set(PICOCALC_PHASE "5.2")
 
 # Serial line injection for on-device test automation (Phase 5.1). Lets a
 # host script submit whole lines to the home screen over USB serial and read
@@ -231,12 +232,23 @@ set(PICOCALC_PHASE "5.1")
 # shipping build free of a path that lets the USB port drive the UI.
 option(PICOCALC_SERIAL_INJECT "Accept expression lines over USB serial (dev tooling)" ON)
 
+# Evaluation timing probe (5.2.12, D52). Brackets evaluation + result formatting
+# inside HomeScreen and appends `eval_us=` to the serial-injection echo, which is
+# what scripts/ab-measure.py reads. **Default OFF**: it is a measurement tool,
+# not a feature, and a shipped build should not carry a timer on the evaluation
+# path. Turn it on for an A/B pass with -DPICOCALC_EVAL_PROBE=ON, on BOTH builds
+# being compared — see docs/notes/measurements/phase5.2/README.md, and
+# scripts/apply-eval-probe.py for instrumenting a released tag that predates
+# this option.
+option(PICOCALC_EVAL_PROBE "Time evaluation and report it on the inject echo (measurement only)" OFF)
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_BUILD_ID="${PICOCALC_BUILD_ID}"
     PICOCALC_PHASE="${PICOCALC_PHASE}"
     $<$<BOOL:${PICOCALC_SERIAL_INJECT}>:PICOCALC_SERIAL_INJECT=1>
+    $<$<BOOL:${PICOCALC_EVAL_PROBE}>:PICOCALC_EVAL_PROBE=1>
     # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
     # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
     # SDK default declares only 2 KB of it, so __StackBottom sat in the

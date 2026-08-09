@@ -134,6 +134,27 @@ private:
 // Singleton accessor (project convention).
 MatrixStore& matrices();
 
+// MatAns — the last matrix result. Rehomed here in 5.2.11 from `matexpr`,
+// where it had lived since 4A: it is a *store*, like matrices() and lists(),
+// not evaluator state. The matrix editor shows it as a read-only slot and
+// /picocalc/matans.dat persists it, neither of which has anything to do with
+// which evaluator produced the value. Empty until a matrix expression
+// evaluates.
+const Array& mat_ans();
+// Non-const access — for the persistence TU to restore it at boot and for the
+// evaluator to write a result. Application code reads mat_ans().
+Array& mat_ans_mutable();
+
+// MatAns persistence (/picocalc/matans.dat), so it survives a power cycle like
+// the named matrices do. Defined in the firmware-only matrices_persist.cpp so
+// the host build stays storage-free. save_ans writes the current MatAns (call
+// after a matrix result commits); load_ans restores it at boot, with the same
+// all-or-nothing contract as MatrixStore::load — false while it still needs
+// PSRAM (cold boot, D14), so the late-init loop retries — and never clobbers an
+// in-session result once one exists.
+bool save_ans(platform::Storage& storage);
+bool load_ans(platform::Storage& storage);
+
 // Single-matrix file persistence (PCM2 header + raw row-major elements),
 // shared by MatrixStore and by MatAns (mat_expr). save writes `m` to
 // `path`; load reads `path` into `m`. load returns false only when the

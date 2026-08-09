@@ -1,6 +1,210 @@
 # Start here — next session
 
-**Last session:** 2026-08-08 (later) — **Post-D47 group-5/6 bench sweep on the
+**Last session:** 2026-08-09 (last) — **Phase 5.2 task 5.2.12: on-device
+verification, both boards. §9's measurement method did not survive contact with
+the hardware, and the Pico 1 found two bugs** (D52, D53). 5.2.12's own work is
+**done**; two defects it surfaced are **not**, and one of them should be fixed
+before Phase 6 starts.
+
+**The numbers** (evaluation-only firmware probe, median of 15, per-sample spread
+0.02-0.18 ms, Pico 2 then Pico 1): **M1 -29%/-32%** — the guardrail row is
+*better*, not merely unchanged, because REAL mode no longer evaluates twice;
+**M3 -17%/-9%**, **M4 -32%/-14%**, **M5 +0.15/+0.17 ms** dispatch;
+**M2 +52%/+36%** and **M6 +54%/+80%**, the two regressions. M2 is §3's promised
+number and it is the predicted cost (5.7 us/element = two extra streaming passes
+at D10's ~6.8 MB/s). Depth: **paren 16 -> 62+, matrix 3 -> 14+**, worst stack
+peak **3,972 -> 2,344** (Pico 2), `kMaxStack = 64` exact with 65 a clean error.
+`.bss` **-5,360 B** (Pico 1) — which does **not** match the phase's claimed
+-6,888 and is recorded as measured, not reconciled.
+
+> ## The two open defects
+>
+> **1. `matexpr`'s depth cap does not hold on the Pico 1 — v0.3.2 hard-faults.**
+> `det((([A]*[A])+[A])*[A])` reboots the shipped firmware. `DepthGuard` is RAII
+> *inside* `parse_unary`, so depth 4 allocates its frame before the guard can
+> refuse it, and the Pico 1 has 144 B of margin against a ~600 B frame. **Phase
+> 5.2 fixes this by deleting `matexpr`** (returns `8` at a 2,104 peak) — so if
+> 5.2 merges, nothing more is owed. **If 5.2 slips, `main` needs a point fix**,
+> because every release from v0.2.0 to v0.3.2 carries a reachable hard fault on
+> that board. See D48's amendment.
+>
+> **2. Per-element PSRAM reads are intermittently wrong (D53) — symptom fixed,
+> DEFECT STILL OPEN.** A long list displayed one element wrong on ~8 runs in 30,
+> Pico 1 only. Pre-existing — identical 8/30 on v0.3.2 and on 5.2 — so **not a
+> phase regression**; 5.2 only widens which expressions reach it.
+>
+> **Fixed in the display path only**: `format_list` now block-reads through
+> `read_range` instead of per-element `get()`. Verified **0 in ~144 runs**.
+>
+> **Partially resolved — do not read it as closed.** `format_matrix_impl` is
+> still per-element (`array_format.cpp:58/68/75`), ~17 other `get()` call sites
+> are untouched, and the root cause is unknown.
+>
+> **New 2026-08-09**: matrix display was probed and **does not show the defect** —
+> a PSRAM-backed 200x2 matrix with varied values, plus single-element
+> `[G](3,1)` reads, came back 1-distinct-in-30 on all four, at sensitivity
+> comparable to the test that caught lists at 8/30. So the exposure may be
+> **narrower than "per-element PSRAM reads are unreliable"**: something
+> distinguishes a freshly-written list temporary from settled matrix storage.
+> That is a sharper and cheaper question than the concurrency hypothesis — try it
+> first. It also means the remaining call sites may not be at risk, so this is
+> lower-severity than it first looked, on 30 samples of one shape.
+>
+> The split is by *access pattern*:
+> `read_range` (bulk) is clean, `Array::get` (one 8-byte PSRAM transfer) is not,
+> and nobody knows why. Note what argues against the obvious DMA-contention
+> guess: a 2 KB `read_range` performs ~67 chunked transfers to `get()`'s one, yet
+> only `get()` corrupts — transfer count is not the variable. **~20 other
+> `get()` call sites** and `format_matrix_impl` still carry the exposure; they
+> have just never been run 30 times in a row. D53 names the concurrency test that
+> would actually settle it.
+>
+> **Method note worth more than the bug**: two "sensitive" tests cleared this
+> wrongly before the third caught it, both by summing. `sum(l1*1)` and
+> `sum(l1/499500)` both hide a single-element fault in the low digits of a large
+> total — the second *worse* than the first, because dividing shrank the error to
+> 3.6e-12. `sum(l1)-499500` works. **A sum is the wrong instrument for a
+> single-element fault.**
+
+**Also corrected: nothing moved to PSRAM.** D48 said the explicit stack would be
+"PSRAM-friendly" and that this is "what makes much larger depth reachable at
+all". 5.2 put the operand stack in **bss** (1,536 B) and never needed PSRAM.
+
+**The measurements are documented at
+[`docs/notes/measurements/phase5.2/`](measurements/phase5.2/README.md)** — method,
+results, caveats, and the raw per-sample JSON for both boards and both builds.
+**Phase 5.2's closure should cite it** for every performance claim. New tool:
+**`scripts/ab-measure.py`**, plus a firmware `eval_us=` probe on the inject echo. Full detail: `decisions.md` **D52** (results + why the method
+changed), **D53**, D48's amendment, and `phase5.2-spec.md` §9's amendment.
+
+**Previous session:** 2026-08-09 (later still) — **tinyexpr's unary-minus/`^` bug
+fixed at the source (D51), shipped as v0.3.2 on `main`, HW-verified on the
+Pico 2, and merged back into this branch.** Not 5.2 work: D50 had split it out,
+and it landed on the shipping baseline so it is in the firmware whether or not
+5.2 closes. `(-2)^2` was **-4** on every path `evaluate_real()` serves — home
+screen in REAL mode, graphing, tables, stats, solver — and patching the vendored
+parser turned up a **second** defect nothing had recorded: `2^-3^2` returned
+**512**, because the right-associative insertion loop re-based a negated
+exponent. Neither was pinned, because `(-2)^3` = -8 and `(0-2)^2` = 4 are right
+*by accident*. Verified by flashing the pre-fix and post-fix builds to the same
+Pico 2 and replaying one corpus through Phase 5.1's serial injection — 14 rows
+flip, the must-not-move half is byte-identical. **`mode real` first, or the pass
+is meaningless**: in `a+bi` the answer comes from `complexexpr`, which was
+already right. text **-104 B**, `.bss` flat; `test_math` 242 → 272,
+`test_graph` 72 → 74.
+
+**For 5.2 this closes soak row #2 and removes a caveat rather than adding one**
+— `Y1=(-2)^X` now plots 4 at X=2, so the home-vs-graph inconsistency the phase
+was going to ship never existed. Full detail: `decisions.md` **D51** (and D50's
+same-day amendment), worklog's **2026-08-09 (later still)** entry.
+
+**Previous session:** 2026-08-09 (later) — **Phase 5.2 tasks 5.2.6-5.2.11: the
+unified evaluator now IS the home screen, and the three it replaces are
+deleted.** 3,903 lines gone, four parsers down to two, three of four depth caps
+retired with the parsers that needed them. `det(([A]*([A]+[A]))+[A])` — the
+expression that hard-faulted the Pico 1 last session — evaluates. Net **-6,888 B
+of bss, +1,500 B of text**. Suites at 1,930 checks green, both boards build.
+
+**Nothing here is hardware-verified.** That is 5.2.12, and it is the only task
+left in the phase.
+
+Full detail: worklog's **2026-08-09 (later)** entry, the byproduct register
+[unified-evaluator-changes.md](unified-evaluator-changes.md), and
+[phase5.2-spec.md](../phases/phase5.2-spec.md) §9 for the measurement plan.
+
+---
+
+## Decisions left to soak (2026-08-09)
+
+Parked deliberately before hardware verification, so they can be changed while
+changing them is still cheap. Each says where it lives and what reversing costs.
+**Everything below is behaviour a user could notice** — the structural choices
+(shim, rehomed formatters, `Mode` not defaulted) are not listed because
+reversing them changes nothing observable.
+
+| # | Decision | Where | Cost to change now |
+|---|---|---|---|
+| 1 | **`1/0` shows `Inf`, not "Undefined result"** — `matexpr`'s gate was dropped rather than generalised. The 5.2.10 sign-off nearly went the other way. TI raises `ERR:DIVIDE BY 0`. | register W14, §2.5 | Small — one check in `run()`. But it would change the *scalar* path, which every user hits. |
+| 2 | ~~**`(-2)^2` will read 4 on the home screen and still plot as -4**~~ — **CLOSED 2026-08-09 (D51), shipped as v0.3.2 and HW-verified.** tinyexpr was patched, so it reads 4 *and* plots 4. The estimate was wrong in a useful direction: "~5 lines" became a `factor()` rewrite, because the source also held `2^-3^2` = 512, which no register row covers. | register F1, D50 amendment, D51 | **Nothing to change** — it was taken, not deferred. |
+| 3 | **`mat2list` may not compose or be stored** — `matexpr`'s rule, restored after 5.2.7 briefly dropped it, because it writes lists the operand stack may still hold by reference. | register P5, spec §6.2 | Small — delete `check_statement_forms()`. But then `l1 * mat2list([A], l1)` has an order-dependent answer. |
+| 4 | **A bare `sort_asc(l1)` echoes no store target** (matches `listexpr`); an explicit `-> l5` echoes one. | `StoreKind::kListInPlace` | Trivial — one flag. |
+| 5 | **`1->a->b` is "Bad store target"**, not a syntax error from inside tinyexpr; the *first* arrow ends the expression, where the old parsers took the rightmost. | register G1/G3 | Small, but the old behaviour was an accident rather than a choice. |
+| 6 | **Error-text divergences**: `{1,foo}` → "Syntax error" (was "Bad list element"); `fac(a)` with complex `a` → "Non-real result" (was "Non-real variable"). | register E8, E9 | E9 trivial. E8 needs list-context tracking in the compiler — the only one that is not cheap. |
+| 7 | **Replacing tinyexpr on the numeric path is deferred past 5.2 closure**, with the measured costs written down and §9's M1 named as the missing input. | D50, spec P5.2-7 | Nothing to change now — it is a deferral, and the numbers are recorded either way. |
+
+Two more that are decisions but not really reversible: the **differential
+harness retired** with the evaluators it compared (recoverable from git if 5.2.12
+wants it back), and the **~770 old checks were ported rather than deleted**,
+which is what caught the complex-list read gate.
+
+---
+
+~~**Next up: 5.2.12, on-device verification**~~ — **DONE 2026-08-09, both
+boards** (D52). All four items below were delivered except the last, which has no
+mechanism: the diag screen reports PSRAM, die temp, SD and keys but **no
+static-RAM figure**, so the ELF number is the only one available — and it is
+definitionally what was flashed. Item 2's method was replaced outright (see
+D52). Kept below as the record of what the task was scoped to owe.
+
+**5.2 is now code-complete and hardware-verified. What remains before it closes
+is a judgement call, not a task**: M2 (+52%/+36%) and M6 (+54%/+80%) are recorded
+regressions, and §9's own criteria call those "a finding to record and cost, not
+automatically a blocker". Decide whether to accept them, then do the phase-close
+docs pass and open the PR.
+
+**Both regressions were traced to mechanism** (follow-up runs, data in
+[`measurements/phase5.2/`](measurements/phase5.2/README.md)), and the summary
+sharpened along the way — it is **not** "slower on lists and matrices":
+
+- **M2 is operation count, not lists.** One operation is faster whatever the
+  source count (`l1+l2` builds a 999-element list and is **-13%**); the crossover
+  is between one operation and two. 5.2's passes are additive where `listexpr`
+  fused them. Target, if attacked: **pass fusion**.
+- **M6 is per-element interpretation**, flat from 100 to 999 elements: ~4.6
+  us/element of fixed `run_body` re-entry, ~1.7x slower per operation than
+  tinyexpr's tree walk, and ~1.6 us/element of per-element PSRAM write past 256
+  (the only cheap fix — stage `set()` and flush with `write_range`, as
+  `format_list` now does).
+- **Matrices are not a regression category.** `det`'s overhead is +0.19 ms at
+  10x10, 20x20 and 30x30 alike — a fixed `Program` compile cost, constant across
+  27x the work. M5's +15-30% is a small-matrix artifact.
+- **Flash is the third regression**, and it was missing from the first write-up:
+  text **+1,960 B (Pico 1) / +3,320 B (Pico 2)** in shipping configuration,
+  against a projected +1,500. `.bss` is **-5,092 B** on both boards, against a
+  projected -6,888. Both miss the projection, in opposite directions, and the
+  baseline choice explains neither — recorded as measured, not reconciled.
+- **One thing documented but NOT attributed**: matrix nesting costs ~104 B/level
+  of call stack, where scalar/paren/unary nesting costs nothing. Input length and
+  the CAS probe were ruled out; the mechanism is still unknown.
+
+**And M6 answered a question that was not being asked of it.** The baseline it
+beats, `listops::seq`, **compiles once and evaluates many** — the graphing shape.
+That is the per-sample number D50/P5.2-7 said was missing before deciding whether
+to replace tinyexpr on the numeric path, and it **argues against replacing**:
+one-shot entry is 22-32% faster under the unified evaluator, repeated evaluation
+~1.7x slower per operation. The measurement supports the split that already
+exists. See D50's amendment.
+
+The original brief, for reference:
+
+1. **Stack peak** per input — the whole point of moving depth off the call
+   stack. The comparison is last session's `matexpr` figures: 4,012 of 4,096 on
+   the Pico 1 at depth 3, 3,860 on the Pico 2 after the leaf fix.
+2. **The A/B latency pass, §9's M1-M7.** Baseline is now the **v0.3.2 release
+   `.uf2`**, not the v0.3.1 the spec names — v0.3.2 is what this branch actually
+   forks from, and it is the same three evaluators plus D51's parse-time fix, so
+   it isolates the evaluator change more cleanly than v0.3.1 does. Either works
+   (the fix cannot move a per-sample number), but prefer the one that differs by
+   exactly the thing under test. No rebuild needed, and the injection block is
+   still byte-identical, so one script parses both. Timing is host-side
+   round-trip (the released binaries predate any firmware elapsed field).
+   **M5 is the control**: it should not move, and if it does the other rows are
+   not measuring the evaluator.
+3. **The register replay** — its `Input` column is the script; the observed diff
+   must equal the table.
+4. `.bss` delta confirmed on the board, not only from `size`.
+
+**Previous session:** 2026-08-08 (later) — **Post-D47 group-5/6 bench sweep on the
 Pico 1, one crash found and capped (D48), and idea F promoted to worth-doing.**
 Four of five heavy paths were clean under live stack guards: idle 1,540 of
 4,096, graph redraw + zoom 2,360, and **the list/1-Var-stats/inference set never

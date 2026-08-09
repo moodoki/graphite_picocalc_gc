@@ -30,6 +30,7 @@ the hard way:
 import argparse
 import fcntl
 import glob
+import re
 import os
 import select
 import struct
@@ -91,6 +92,12 @@ class Console:
         self.fd = None
         self.verbose = verbose
         self._pending = ""
+        # Firmware-reported timings from the last submit(), or None on a build
+        # that does not report them. `last_us` is the whole submit_line
+        # (evaluation + formatting + SD history write); `last_eval_us` is the
+        # §9 probe window, evaluation + formatting only. See submit().
+        self.last_us = None
+        self.last_eval_us = None
 
     # -- connection ----------------------------------------------------
     def _open(self):
@@ -186,7 +193,15 @@ class Console:
 
     # -- the primitive the bench actually needs ------------------------
     def submit(self, expr, timeout=10.0):
-        """Send `expr`, return (ok, text, kind, diagnostics)."""
+        """Send `expr`, return (ok, text, kind, diagnostics).
+
+        Firmware evaluation time, when the build reports one, lands in
+        `self.last_us` rather than the tuple — builds predating Phase 5.2's
+        `us=` field (every release up to and including v0.3.2) leave it None,
+        and the A/B pass has to read both. See scripts/ab-measure.py.
+        """
+        self.last_us = None  # Per-submit, so a stale value can never be read
+        self.last_eval_us = None
         if len(expr) >= MAX_LINE:
             return False, f"line too long ({len(expr)} >= {MAX_LINE})", None, []
         self.send(expr)
@@ -208,10 +223,27 @@ class Console:
                 return False, body[len("error ") :], None, diags
             if body.endswith("-> command"):
                 return True, None, "command", diags
-            # inject: "<expr>" -> "<result>" kind=<kind>
+            # inject: "<expr>" -> "<result>" kind=<kind> [us=<n>] [eval_us=<n>]
+            #
+            # The trailing fields are optional and were appended over time
+            # (5.2.12), so one parser reads them and the released baselines
+            # that have none. Peel them off the END one token at a time rather
+            # than splitting on a substring: `" us="` also occurs inside
+            # `" eval_us="` far too easily, which is exactly how the first cut
+            # of this silently returned None for both.
             kind = None
-            if " kind=" in body:
-                body, kind = body.rsplit(" kind=", 1)
+            while True:
+                m = re.search(r"\s(kind|us|eval_us)=(\S+)$", body)
+                if not m:
+                    break
+                key, val = m.group(1), m.group(2)
+                body = body[: m.start()]
+                if key == "kind":
+                    kind = val
+                elif key == "us":
+                    self.last_us = int(val) if val.isdigit() else None
+                else:
+                    self.last_eval_us = int(val) if val.isdigit() else None
             text = None
             if "-> " in body:
                 text = body.split("-> ", 1)[1].strip().strip('"')

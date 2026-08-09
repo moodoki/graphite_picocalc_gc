@@ -31,7 +31,11 @@ if [[ ! -f "$ELF" ]]; then
 fi
 
 # Prefer the cross toolchain's binutils; fall back to a PATH copy.
-TC="${PICO_TOOLCHAIN_PATH:-/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi}"
+# The install path is version-stamped and moves on every toolchain upgrade, so
+# discover the newest rather than hardcoding a version (see scripts/lint.sh).
+TC="${PICO_TOOLCHAIN_PATH:-$(
+    ls -d /Applications/ArmGNUToolchain/*/arm-none-eabi 2>/dev/null | sort -V | tail -1
+)}"
 pick() {
     for c in "$TC/bin/arm-none-eabi-$1" "$(command -v "arm-none-eabi-$1" || true)"; do
         [[ -x "$c" ]] && { echo "$c"; return; }

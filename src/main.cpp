@@ -27,7 +27,6 @@
 #include "ui/screen_manager.hpp"
 #include "math/functions.hpp"
 #include "math/lists.hpp"
-#include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "apps/graph_model.hpp"
@@ -357,7 +356,7 @@ int main() {
     // Matrix variables (Phase 4A) — same all-or-nothing contract.
     bool matrices_loaded = math::matrices().load(platform::storage());
     // MatAns (last matrix result) — persisted like the named matrices.
-    bool matans_loaded = math::matexpr::load_ans(platform::storage());
+    bool matans_loaded = math::load_ans(platform::storage());
     // Device power settings (4D.19-20): brightness/APD; a missing file
     // keeps the STM32's own boot defaults.
     bool settings_loaded = platform::power::load(platform::storage());
@@ -482,7 +481,7 @@ int main() {
                     }
                 }
                 if (!matans_loaded) {
-                    matans_loaded = math::matexpr::load_ans(platform::storage());
+                    matans_loaded = math::load_ans(platform::storage());
                     if (matans_loaded) {
                         printf("late-init: matans loaded at %lu ms\n",
                                static_cast<unsigned long>(now));
@@ -703,14 +702,33 @@ int main() {
 
                 const char* result = nullptr;
                 const char* kind = nullptr;
-                if (!apps::home_screen().submit_line(inject_buf, &result, &kind)) {
+                // Evaluation time, for §9's A/B pass (5.2.12). The A/B number
+                // itself is the host-side round trip, because the baseline is a
+                // *released* binary that predates this field and cannot report
+                // one. This exists to BOUND that number: the gap between the two
+                // says how much of the round trip was never evaluation, without
+                // which a small M1 delta cannot be told from USB jitter.
+                //
+                // Appended at the end of the line, never inserted, so one parser
+                // reads both builds — the baseline simply has no `us=` to find.
+                const uint64_t t0 = time_us_64();
+                const bool ok = apps::home_screen().submit_line(inject_buf, &result, &kind);
+                const uint64_t elapsed_us = time_us_64() - t0;
+                if (!ok) {
                     printf("inject: error rejected \"%s\"\n", inject_buf);
                 } else if (result == nullptr) {
                     // Dispatched as a typed command (cls, diag, ...), which
                     // pushes no history entry to report.
                     printf("inject: \"%s\" -> command\n", inject_buf);
                 } else {
-                    printf("inject: \"%s\" -> \"%s\" kind=%s\n", inject_buf, result, kind);
+#if PICOCALC_EVAL_PROBE
+                    printf("inject: \"%s\" -> \"%s\" kind=%s us=%lu eval_us=%lu\n", inject_buf,
+                           result, kind, static_cast<unsigned long>(elapsed_us),
+                           static_cast<unsigned long>(apps::home_eval_us()));
+#else
+                    printf("inject: \"%s\" -> \"%s\" kind=%s us=%lu\n", inject_buf, result, kind,
+                           static_cast<unsigned long>(elapsed_us));
+#endif
                 }
                 dirty = true;
             }

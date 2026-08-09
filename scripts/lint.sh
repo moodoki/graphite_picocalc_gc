@@ -65,17 +65,29 @@ else
   # toolchain's built-in include paths (newlib, libstdc++). Ask g++ for
   # its search list and pass it along.
   TIDY_ARGS=()
-  TOOLCHAIN="${PICO_TOOLCHAIN_PATH:-/Applications/ArmGNUToolchain/15.2.rel1/arm-none-eabi}"
+  # The ArmGNUToolchain install path is version-stamped, so it moves on every
+  # upgrade. Discover the newest installed one rather than hardcoding a version:
+  # a stale path here does not fail loudly, it silently drops the toolchain's
+  # system include paths and buries the real output under hundreds of bogus
+  # "'cstddef' file not found" / const-correctness errors.
+  TOOLCHAIN="${PICO_TOOLCHAIN_PATH:-$(
+    ls -d /Applications/ArmGNUToolchain/*/arm-none-eabi 2>/dev/null | sort -V | tail -1
+  )}"
   ARM_GXX="$TOOLCHAIN/bin/arm-none-eabi-g++"
-  if [[ -x "$ARM_GXX" ]]; then
-    while IFS= read -r dir; do
-      TIDY_ARGS+=("--extra-arg=-isystem$dir")
-    done < <("$ARM_GXX" -mcpu=cortex-m0plus -mthumb -E -x c++ - -v </dev/null 2>&1 \
-             | sed -n '/#include <...> search starts here:/,/End of search list./p' \
-             | sed '1d;$d;s/^ //')
-  else
-    echo "WARNING: $ARM_GXX not found; clang-tidy may miss system headers." >&2
+  if [[ ! -x "$ARM_GXX" ]]; then
+    # Fatal rather than a warning, for the reason above — the run would
+    # "fail" with errors that have nothing to do with the code.
+    echo "ERROR: arm-none-eabi-g++ not found${TOOLCHAIN:+ at $ARM_GXX}." >&2
+    echo "  clang-tidy needs the cross toolchain's system headers; without them" >&2
+    echo "  every TU reports missing standard headers. Set PICO_TOOLCHAIN_PATH" >&2
+    echo "  to the install (see docs/dev-environment.md) and re-run." >&2
+    exit 1
   fi
+  while IFS= read -r dir; do
+    TIDY_ARGS+=("--extra-arg=-isystem$dir")
+  done < <("$ARM_GXX" -mcpu=cortex-m0plus -mthumb -E -x c++ - -v </dev/null 2>&1 \
+           | sed -n '/#include <...> search starts here:/,/End of search list./p' \
+           | sed '1d;$d;s/^ //')
 
   if [[ ! -f compile_commands.json ]]; then
     echo "WARNING: compile_commands.json not found." >&2

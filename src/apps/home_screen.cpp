@@ -1,4 +1,5 @@
 #include "apps/home_screen.hpp"
+#include "platform/system.hpp"  // §9 probe
 
 #include <algorithm>
 #include <cmath>
@@ -12,16 +13,14 @@
 #include "math/cas/cas_eval.hpp"
 #include "math/cas/exact.hpp"
 #include "math/cas/serialize.hpp"
-#include "math/complex_expr.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
 #include "math/frac.hpp"
-#include "math/list_expr.hpp"
 #include "math/lists.hpp"
-#include "math/mat_expr.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
 #include "math/solve_expr.hpp"
+#include "math/unified_home.hpp"
 #include "math/units.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
@@ -138,7 +137,37 @@ int HomeScreen::visible_count() const {
     return since < static_cast<uint32_t>(history_count_) ? static_cast<int>(since) : history_count_;
 }
 
+// Evaluation probe (5.2.12, D52) — compiled only under -DPICOCALC_EVAL_PROBE.
+// Started at the top of evaluate_input and stopped here, on entry to
+// push_entry: every evaluation branch funnels through this function, and the SD
+// history write happens after it, so the window is evaluation + result
+// formatting with no I/O and no rendering.
+//
+// Off by default. It is a measurement tool, not a feature — a shipped build
+// should not carry a timer on the evaluation path, and D52's A/B pass is the
+// only thing that reads it. See docs/notes/measurements/phase5.2/README.md.
+#if PICOCALC_EVAL_PROBE
+namespace {
+uint64_t g_probe_t0 = 0;
+uint32_t g_probe_us = 0;
+}  // namespace
+
+uint32_t home_eval_us() {
+    return g_probe_us;
+}
+#else
+uint32_t home_eval_us() {
+    return 0;
+}
+#endif
+
 void HomeScreen::push_entry(const char* expr, const char* result, ResultKind kind) {
+#if PICOCALC_EVAL_PROBE
+    if (g_probe_t0 != 0) {
+        g_probe_us = static_cast<uint32_t>(platform::uptime_us() - g_probe_t0);
+        g_probe_t0 = 0;
+    }
+#endif
     ++entries_total_;
     Entry& e = history_[history_head_];
     std::strncpy(e.expr, expr, sizeof(e.expr) - 1);
@@ -359,6 +388,10 @@ void HomeScreen::evaluate_input(bool force_decimal) {
     if (input_.empty()) {
         return;
     }
+#if PICOCALC_EVAL_PROBE
+    g_probe_t0 = platform::uptime_us();
+    g_probe_us = 0;
+#endif
 
     // Inline CAS (Phase 5, 4D.21): recognize a single diff()/integ()/
     // factor()/expand()/simplify()/solve() call and route it to the symbolic
@@ -449,123 +482,53 @@ void HomeScreen::evaluate_input(bool force_decimal) {
         }
     }
 
-    // Matrix expressions (Phase 4A) get next crack — [X] tokens are
-    // unambiguous. Kind::kNone means "not matrix syntax".
-    const auto mres = math::matexpr::evaluate(expr);
-    if (mres.kind != math::matexpr::Kind::kNone) {
+    // One evaluator (Phase 5.2, task 5.2.10). This replaces the matexpr ->
+    // listexpr -> scalar cascade that stood here, its REAL-mode probe, and its
+    // four result-rendering branches. What is left is display and persistence:
+    // the evaluation, the commits and the formatting all happen in one call,
+    // and `commit` says exactly what changed.
+    //
+    // The REAL-mode probe is GONE, which is the clearest single sign the split
+    // was the problem rather than a workaround. It existed because tinyexpr
+    // cannot see complex values, so REAL mode had to run complexexpr first
+    // purely to ask "would this be non-real?" — two evaluations, two string
+    // scans (mentions_i, refs_complex_var), one answer. One evaluator answers
+    // it in one run, because the gate is inside the commit (D30, 5.2.8).
+    {
         auto& result = g_eval.result;
-        bool error = false;
-        if (mres.kind == math::matexpr::Kind::kError) {
-            std::snprintf(result, sizeof(result), "%s", mres.error);
-            error = true;
-        } else if (mres.kind == math::matexpr::Kind::kScalar && mres.scalar_complex) {
-            // Complex scalar from a matrix expression (4D.25: det /
-            // element access); matexpr already committed Ans/store.
-            auto& num = g_eval.num;
-            math::format_complex(mres.cvalue, math::number_mode(), num, sizeof(num));
-            if (mres.scalar.stored_var >= 0) {
-                const char name = mres.scalar.stored_var < 26
-                                      ? static_cast<char>('a' + mres.scalar.stored_var)
-                                      : 't';  // theta
-                std::snprintf(result, sizeof(result), "%s%c%c", num, gfx::kGlyphStore, name);
-            } else {
-                std::snprintf(result, sizeof(result), "%s", num);
-            }
-        } else if (mres.kind == math::matexpr::Kind::kScalar) {
-            format_scalar_result(mres.scalar, result, sizeof(result));
-            error = !mres.scalar.ok;
-        } else if (mres.kind == math::matexpr::Kind::kList) {
-            auto& text = g_eval.text;
-            math::listexpr::format_list(*mres.list, text, sizeof(text));
-            if (mres.stored_list >= 0) {
-                std::snprintf(result, sizeof(result), "%s%cl%c", text, gfx::kGlyphStore,
-                              static_cast<char>('1' + mres.stored_list));
-            } else {
-                std::snprintf(result, sizeof(result), "%s", text);
-            }
-        } else if (mres.kind == math::matexpr::Kind::kText) {
-            std::snprintf(result, sizeof(result), "%s", mres.text);
+        const math::unified::HomeResult ures = math::unified::evaluate_home(expr, to_frac);
+        const bool error = ures.kind == math::unified::HomeKind::kError;
+        ResultKind rkind = ResultKind::kPlain;
+        if (error) {
+            std::snprintf(result, sizeof(result), "%s", ures.error);
+        } else if (ures.store_label[0] != 0) {
+            std::snprintf(result, sizeof(result), "%s%c%s", ures.text, gfx::kGlyphStore,
+                          ures.store_label);
         } else {
-            auto& text = g_eval.text;
-            if (to_frac) {
-                math::matexpr::format_matrix_frac(*mres.matrix, text, sizeof(text));
-            } else {
-                math::matexpr::format_matrix(*mres.matrix, text, sizeof(text));
-            }
-            if (mres.stored_matrix >= 0) {
-                std::snprintf(result, sizeof(result), "%s%c[%c]", text, gfx::kGlyphStore,
-                              static_cast<char>('A' + mres.stored_matrix));
-            } else {
-                std::snprintf(result, sizeof(result), "%s", text);
-            }
+            std::snprintf(result, sizeof(result), "%s", ures.text);
         }
-        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
+        if (!error && ures.exact_form_ok &&
+            apply_exact_form(expr, ures.scalar_value, -1, to_dec, result, sizeof(result))) {
+            rkind = ResultKind::kSymbolic;
+        }
+        push_entry(input_.text(), result, error ? ResultKind::kError : rkind);
         if (!error) {
-            persist_history_line(input_.text(), result, ResultKind::kPlain);
+            persist_history_line(input_.text(), result, rkind);
             save_variables();
-            if (mres.kind == math::matexpr::Kind::kMatrix) {
-                // MatAns changed — persist it so it survives a reboot
-                // like the named matrices do.
-                math::matexpr::save_ans(platform::storage());
+            const math::unified::Commit& c = ures.commit;
+            if (c.mat_ans) {
+                math::save_ans(platform::storage());
             }
-            if (mres.matrices_modified) {
-                math::matrices().save(platform::storage(), mres.stored_matrix);
+            if (c.matrix >= 0) {
+                math::matrices().save(platform::storage(), c.matrix);
             }
-            if (mres.lists_modified) {
-                math::lists().save(platform::storage(), mres.stored_list);
-            }
-            for (int i = 0; i < 6; ++i) {  // mat2list wrote several (4D.12)
-                if ((mres.lists_mask & (1U << i)) != 0) {
-                    math::lists().save(platform::storage(), i);
-                }
-            }
-        }
-        input_.clear();
-        hist_nav_ = -1;
-        pending_[0] = 0;
-        return;
-    }
-
-    // List expressions (Phase 3A) next; Kind::kNone means
-    // "not list syntax" and falls through to the scalar engine.
-    const auto lres = math::listexpr::evaluate(expr);
-    if (lres.kind != math::listexpr::Kind::kNone) {
-        auto& result = g_eval.result;
-        bool error = false;
-        if (lres.kind == math::listexpr::Kind::kError) {
-            std::snprintf(result, sizeof(result), "%s", lres.error);
-            error = true;
-        } else if (lres.kind == math::listexpr::Kind::kScalar && lres.scalar_complex) {
-            // Standalone sum/mean of a complex list (4D.24): commit Ans
-            // here, mirroring the complexexpr contract.
-            math::engine().vars().set_complex(math::Variables::kAns, lres.cvalue.re,
-                                              lres.cvalue.im);
-            math::format_complex(lres.cvalue, math::number_mode(), result, sizeof(result));
-        } else if (lres.kind == math::listexpr::Kind::kScalar) {
-            format_scalar_result(lres.scalar, result, sizeof(result));
-            error = !lres.scalar.ok;
-        } else {
-            auto& text = g_eval.text;
-            math::listexpr::format_list(*lres.list, text, sizeof(text));
-            if (lres.stored_list >= 0) {
-                char lname[8];
-                math::list_ref_name(lres.stored_list, lname, sizeof(lname));
-                std::snprintf(result, sizeof(result), "%s%c%s", text, gfx::kGlyphStore, lname);
-            } else {
-                std::snprintf(result, sizeof(result), "%s", text);
-            }
-        }
-        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
-        if (!error) {
-            persist_history_line(input_.text(), result, ResultKind::kPlain);
-            save_variables();
-            if (lres.names_modified) {  // A named list was created (4D.13)
+            if (c.names_modified) {
                 math::named_lists().save_index(platform::storage());
             }
-            // Persist every ref this evaluation wrote (stores AND
-            // in-place sorts — the latter silently skipped pre-4D.13).
+            // Every ref written, not just the store target — an in-place sort
+            // and mat2list both write without one (the D35 gap, 4D.13).
             for (int r = 0; r < math::kNamedRefBase + math::NamedLists::kMax; ++r) {
-                if ((lres.lists_mask & (1U << r)) == 0) {
+                if ((c.lists_mask & (1U << r)) == 0) {
                     continue;
                 }
                 if (r < math::kNamedRefBase) {
@@ -580,115 +543,6 @@ void HomeScreen::evaluate_input(bool force_decimal) {
         pending_[0] = 0;
         return;
     }
-
-    // Scalar >frac (4D.2): reached only when the expr wasn't matrix or
-    // list syntax. Evaluate on the real engine and show the result as
-    // p/q, falling back to decimal when no tight fraction (den <= 10000)
-    // exists.
-    if (to_frac) {
-        auto& result = g_eval.result;
-        const auto res = math::engine().evaluate(expr);
-        const bool error = !res.ok;
-        if (error) {
-            std::snprintf(result, sizeof(result), "%s", res.error);
-        } else if (!math::frac::format_fraction(res.value, 10000, result, sizeof(result))) {
-            math::format_number(res.value, result, sizeof(result));
-        }
-        push_entry(input_.text(), result, error ? ResultKind::kError : ResultKind::kPlain);
-        if (!error) {
-            persist_history_line(input_.text(), result, ResultKind::kPlain);
-            save_variables();
-        }
-        input_.clear();
-        hist_nav_ = -1;
-        pending_[0] = 0;
-        return;
-    }
-
-    // Scalar path (Phase 4C, D30): complex-aware whenever the number
-    // mode isn't REAL or the input names `i`. In plain REAL mode, the
-    // complex evaluator still runs once as a side-effect-free probe —
-    // only when the real engine would otherwise show a bare NaN — so
-    // sqrt(-4) etc. get "Non-real result" instead, without committing
-    // Ans/a store twice (math::complexexpr::evaluate never mutates
-    // engine state; only this dispatch does, exactly once).
-    auto& result = g_eval.result;
-    bool error = false;
-    ResultKind rkind = ResultKind::kPlain;
-    // Complex-valued variables force the complex path too (4D.15): in
-    // REAL mode that yields the pointed "Non-real result" error below;
-    // in RECT/POLAR the reference resolves normally.
-    const bool force_complex = math::number_mode() != math::NumberMode::kReal ||
-                               math::complexexpr::mentions_i(expr) || math::refs_complex_var(expr);
-
-    if (force_complex) {
-        const auto cres = math::complexexpr::evaluate(expr);
-        if (!cres.ok) {
-            std::snprintf(result, sizeof(result), "%s", cres.error);
-            error = true;
-        } else if (math::number_mode() == math::NumberMode::kReal && !cres.value.is_real()) {
-            std::snprintf(result, sizeof(result), "Non-real result");
-            error = true;
-        } else if (cres.value.is_real()) {
-            math::engine().vars().set_real(math::Variables::kAns, cres.value.re);
-            if (cres.stored_var >= 0) {
-                math::engine().vars().set_real(cres.stored_var, cres.value.re);
-            }
-            math::EvalResult r;
-            r.ok = true;
-            r.value = cres.value.re;
-            r.stored_var = cres.stored_var;
-            format_scalar_result(r, result, sizeof(result));
-            // A real-valued result reached through the complex path still
-            // gets exact-form display (RECT/POLAR modes, or a REAL-mode
-            // expression that merely mentions `i`). Genuinely complex values
-            // fall to the branch below and stay decimal — the CAS reserves
-            // `i` as a variable, which the probe's no-variables gate rejects.
-            if (apply_exact_form(expr, cres.value.re, cres.stored_var, to_dec, result,
-                                 sizeof(result))) {
-                rkind = ResultKind::kSymbolic;
-            }
-        } else {
-            // Complex commit (4D.15): Ans and the store target hold the
-            // full value; real-only readers error on them (D37).
-            math::engine().vars().set_complex(math::Variables::kAns, cres.value.re, cres.value.im);
-            if (cres.stored_var >= 0) {
-                math::engine().vars().set_complex(cres.stored_var, cres.value.re, cres.value.im);
-            }
-            auto& num = g_eval.num;
-            math::format_complex(cres.value, math::number_mode(), num, sizeof(num));
-            if (cres.stored_var >= 0) {
-                const char name =
-                    cres.stored_var < 26 ? static_cast<char>('a' + cres.stored_var) : 't';  // theta
-                std::snprintf(result, sizeof(result), "%s%c%c", num, gfx::kGlyphStore, name);
-            } else {
-                std::snprintf(result, sizeof(result), "%s", num);
-            }
-        }
-    } else {
-        const auto probe = math::complexexpr::evaluate(expr);
-        if (probe.ok && !probe.value.is_real()) {
-            std::snprintf(result, sizeof(result), "Non-real result");
-            error = true;
-        } else {
-            const auto res = math::engine().evaluate(expr);
-            format_scalar_result(res, result, sizeof(result));
-            error = !res.ok;
-            if (!error &&
-                apply_exact_form(expr, res.value, res.stored_var, to_dec, result, sizeof(result))) {
-                rkind = ResultKind::kSymbolic;
-            }
-        }
-    }
-
-    push_entry(input_.text(), result, error ? ResultKind::kError : rkind);
-    if (!error) {
-        persist_history_line(input_.text(), result, rkind);
-        save_variables();
-    }
-    input_.clear();
-    hist_nav_ = -1;
-    pending_[0] = 0;
 }
 
 // The plain-Enter body (Phase 5.1, task 5.1.1). Extracted verbatim from
