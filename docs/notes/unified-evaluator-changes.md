@@ -265,7 +265,57 @@ been prevented structurally.
 | P4 | `sort_asc(l4)` sorts `l4` in place; `sort_asc(l4)->l5` writes both refs | `listexpr`'s in-place form is a statement. Restored as an implicit store; persistence keys off `Commit::lists_mask`, which is the distinction the D35 sort gap turned on. `test_store_in_place_sort` |
 | P5 | `mat2list` may not compose or be stored (*"mat2list must stand alone"*) | It writes list slots the operand stack may still hold **by reference**: `l1 * mat2list([A], l1)` would read l1's *new* contents. Found by 5.2.8's static-buffer audit; `matexpr` had the rule for the same reason. `test_matrix_bridge` |
 | P6 | A returned list `Value` is valid only until the next `run()` | `listexpr::Result::list` has had this contract since Phase 3A. A stored or sorted result names its slot instead, and a matrix result names MatAns. `test_store_targets` |
-| P7 | `evaluate_real()` / tinyexpr is untouched on the graphing, table and stats path | `phase4-spec.md` §5.2's performance guardrail. The unified evaluator is strictly home-screen-only, exactly as `evaluate_complex()` is today. |
+| P7 | `evaluate_real()` / tinyexpr is untouched on the graphing, table and stats path | ~~`phase4-spec.md` §5.2's performance guardrail.~~ **That reason is wrong and the project already knew it — see the re-evaluation below.** The boundary holds on a *measured* premise instead: ~1.75x on repeated scalar evaluation (D52/D50). Strictly home-screen-only, as `evaluate_complex()` is today. |
+
+#### Re-evaluated 2026-08-09, after 5.2.12 measured the hardware
+
+Preservation decisions are worth re-checking once there is data, because a row
+kept for a reason that has since evaporated is worse than a row that changed:
+it looks deliberate. All seven were re-read against what 5.2.12 found. **Six
+hold. One was resting on a premise the project had already disproved.**
+
+**P1, P3 — hold, untouched.** Both are data-flow invariants (4D.25's read gate,
+D30's commit gate). Nothing measured bears on them; performance evidence cannot
+argue for or against a correctness rule.
+
+**P2 — holds, and is the strongest of the seven.** Its premise *is* D46, the bug
+that motivated the phase. If anything 5.2.12 reinforced it: M1's -22 to -32%
+comes precisely from no longer running two evaluators that could disagree.
+
+**P4 — holds.** Compatibility with `listexpr`'s statement form. The open soak
+item about whether a bare `sort_asc(l1)` should echo a store target is a
+*display* question and does not touch this premise.
+
+**P5, P6 — hold, and they are one decision, not two.** Both rest on the same
+model: list `Value`s travel **by reference**. P6 states the lifetime contract;
+P5 forbids `mat2list` composing because it writes slots the operand stack may
+still hold by reference (`l1 * mat2list([A], l1)` would read l1's *new*
+contents). That aliasing hazard is structural and unchanged. **If the
+by-reference model is ever revisited — copy-on-return, say — these two must be
+revisited together**, and P5 would likely dissolve on its own.
+
+**P7 — the premise was already dead when this row was written, and the row did
+not say so.** It cites `phase4-spec.md` §5.2's guardrail. **D50 established the
+same day that this reason does not transfer**: §5.2 argued against a `Complex`
+numeric value type, where every real operation would pay complex cost. This
+evaluator keeps a real tier — real ⊕ real never touches complex arithmetic. The
+spec's §2 carries that correction; this row was not updated to match, so it has
+been citing a superseded argument.
+
+The boundary still holds, and now on evidence rather than inheritance.
+**5.2.12's M6 measured what §5.2 could only assert**: on *repeated* scalar
+evaluation — the shape of graphing, tables, `numeric_solve` and `fnInt` — the VM
+is **~1.75x slower per operation** than tinyexpr's compiled tree walk, plus
+~4.6 us/element of fixed re-entry. Seven Y= slots at three operations would go
+**86.6 -> 152.3 ms per redraw**. So P7 survives on a stronger footing than it
+ever had; only the recorded reason was wrong.
+
+**One category note.** P7 is not the same kind of row as P1-P6. Those are
+behaviours the evaluator preserves; P7 is a statement about what the phase did
+not touch. The 2.5 sign-off's "P1-P7 keep — parity unchanged by construction"
+reads as one judgement over seven comparable rows, and it is not: P1-P6 are
+parity, P7 is scope. Worth splitting if this register is ever reused as a
+template.
 
 ### Deferred
 
@@ -302,7 +352,8 @@ equivalent, the TI-Nspire CX II CAS — the same two
 | G5, G7 | **keep** | Invisible to a user. Mechanism only — the same names, arities and values, reached without an escape hatch. |
 | G6 | **keep** | Parity-positive. TI's `norm(` takes both a list and a matrix and means the right thing for each; ours needed two implementations in two files to do the same. |
 | E1-E8 | **keep** | Parity-neutral. TI's strings (`ERR:SYNTAX`, `ERR:DATA TYPE`) are nothing like ours in either version, so parity cannot be the criterion. Provenance is, and it is applied row by row: a string that states a decision survives verbatim, one that fell out of a parser accident does not. |
-| P1-P7 | **keep** | Parity unchanged by construction — these are the rows that did *not* move. |
+| P1-P6 | **keep** | Parity unchanged by construction — these are the rows that did *not* move. **Re-checked 2026-08-09** against 5.2.12's measurements; all six premises hold. |
+| P7 | **keep**, new reason | Scope, not parity — a different kind of row from P1-P6. **Its recorded premise (§5.2's guardrail) was already superseded by D50 when this table was written.** It now holds on 5.2.12's measurement instead: ~1.75x on repeated scalar evaluation. See the re-evaluation under *Preserved on purpose*. |
 | D1-D5 | **discharged** | See below. |
 
 **No row was rejected.** That is worth stating rather than leaving implicit: the
