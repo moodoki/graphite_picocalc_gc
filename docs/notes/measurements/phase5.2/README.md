@@ -163,17 +163,85 @@ so a fixed 0.19 ms reads as a large percentage. Matrices are not a category of
 regression; they pay a sub-millisecond entry fee that vanishes into the
 arithmetic as soon as the matrix is non-trivial.
 
+### M6, apportioned: per-element VM re-entry, not `seq` setup
+
+M6 was the regression left unexplained when M1-M6 landed. A third run
+(`M6-base-pico1.json`, `M6-new-pico1.json`) varies element count with the body
+fixed, then body complexity with the count fixed.
+
+**(A) Element count, body fixed at `x^2`:**
+
+| N | baseline | 5.2 | per-element delta |
+|---|---|---|---|
+| 100 | 2.941 | 4.439 | 14.98 us |
+| 200 | 3.820 | 6.872 | 15.26 us |
+| 250 | 4.263 | 8.090 | 15.31 us |
+| 300 | 5.893 | 10.863 | 16.57 us |
+| 500 | 8.360 | 16.658 | 16.60 us |
+| 999 | 14.514 | 31.132 | 16.63 us |
+
+Flat, so it is a **per-element** cost and not `seq` setup. The step between 250
+and 300 (15.31 -> 16.57 us) is the output array crossing `kSlabBytes` into
+PSRAM, where `out->set(i, v.r)` becomes a per-element PSRAM write — **~1.6 us,
+about 10% of the gap**, and the same shape as D53.
+
+**(B) Body complexity, N fixed at 200 (SRAM, so no write component):**
+
+| body ops | baseline | 5.2 | per-element delta |
+|---|---|---|---|
+| 0 (`x`) | 2.848 | 3.763 | 4.58 us |
+| 1 (`x^2`) | 3.819 | 6.879 | 15.30 us |
+| 3 (`sin(x)+x^2`) | 7.734 | 13.596 | 29.31 us |
+| 5 (`sin(x)+cos(x)+x^2`) | 10.893 | 18.929 | 40.18 us |
+
+So M6 is **two structural costs plus a small avoidable one**:
+
+1. **~4.6 us/element of fixed re-entry** — `run_body` into the VM once per
+   element, visible at +32% even with a trivial body.
+2. **~1.7x slower per operation** — per element per op, tinyexpr's compiled tree
+   walk ~9.8 us against the VM's ~16.8 us.
+3. **~1.6 us/element of per-element PSRAM write** past 256 elements, the only
+   cheaply fixable part: stage `set()` into a small dedicated bss buffer and
+   flush with `write_range`, exactly as `format_list` now does. It cannot use
+   the shared `kCompute` scratch — `eval_seq`'s own comment explains why, the
+   body may call a reduction that owns the same region.
+
+### Why this matters beyond M6 — it is the input P5.2-7 was waiting for
+
+`listops::seq`, the baseline path, **compiles once and evaluates many**. That is
+exactly the shape of the graphing hot loop, which makes this the closest thing
+measured so far to the question D50 deferred: should the unified evaluator
+replace tinyexpr on the numeric path?
+
+**It points the other way from M1.** The unified evaluator wins on *one-shot*
+scalar entry (M1, -22 to -32%) because it removes the REAL-mode double
+evaluation. On *repeated* scalar evaluation it is **~1.7x slower per operation**,
+and carries ~4.6 us of per-element re-entry on top. D50 recorded that "the
+missing input is §9's M1 — per-sample latency, stack machine vs tinyexpr, and
+nobody has it". This is that number, in the regime graphing actually uses, and it
+argues for keeping tinyexpr on the numeric path rather than replacing it.
+
+Two caveats before anyone treats it as settled. `seq`'s per-element path is not
+byte-for-byte the graphing path, only its closest analogue. And nothing here was
+profiled — *why* the VM costs more per operation than a tinyexpr tree walk is
+unknown, so it is not established that the gap is irreducible.
+
 #### What this means for the M2/M6 judgement
 
 The honest one-line summary of this phase's performance is **"faster except when
-chaining two or more operations over a list"** — not "slower on lists and
-matrices". Three of the four original list rows were already faster, and the
-matrix rows are a fixed cost rather than a scaling one.
+chaining two or more operations over a list, or evaluating one repeatedly"** —
+not "slower on lists and matrices". Three of the four original list rows were
+already faster, and the matrix rows are a fixed cost rather than a scaling one.
 
-If M2 is ever worth attacking, the target is **fusing adjacent element-wise
-operations into one pass**, which is exactly what `listexpr` did structurally and
-the flat RPN program gave up. Nothing here suggests the tagged-`Value` design or
-the stack machine is the problem.
+The two regressions have **different causes and different prospects**:
+
+- **M2 is pass fusion.** The target, if it is ever worth attacking, is fusing
+  adjacent element-wise operations into one pass — what `listexpr` did
+  structurally and the flat RPN program gave up. Nothing here implicates the
+  tagged-`Value` design or the stack machine.
+- **M6 is per-element interpretation cost**, and it is the harder of the two:
+  fixed re-entry plus a per-operation rate the VM does not currently match
+  tinyexpr on. Only its PSRAM-write component is cheap to fix.
 
 **Caveat on the baseline rows**: L4 and L5 vary in their *displayed* answer on
 the baseline (D53), so this run records the variation rather than rejecting the

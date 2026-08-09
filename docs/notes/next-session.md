@@ -138,6 +138,31 @@ regressions, and §9's own criteria call those "a finding to record and cost, no
 automatically a blocker". Decide whether to accept them, then do the phase-close
 docs pass and open the PR.
 
+**Both regressions were traced to mechanism** (follow-up runs, data in
+[`measurements/phase5.2/`](measurements/phase5.2/README.md)), and the summary
+sharpened along the way — it is **not** "slower on lists and matrices":
+
+- **M2 is operation count, not lists.** One operation is faster whatever the
+  source count (`l1+l2` builds a 999-element list and is **-13%**); the crossover
+  is between one operation and two. 5.2's passes are additive where `listexpr`
+  fused them. Target, if attacked: **pass fusion**.
+- **M6 is per-element interpretation**, flat from 100 to 999 elements: ~4.6
+  us/element of fixed `run_body` re-entry, ~1.7x slower per operation than
+  tinyexpr's tree walk, and ~1.6 us/element of per-element PSRAM write past 256
+  (the only cheap fix — stage `set()` and flush with `write_range`, as
+  `format_list` now does).
+- **Matrices are not a regression category.** `det`'s overhead is +0.19 ms at
+  10x10, 20x20 and 30x30 alike — a fixed `Program` compile cost, constant across
+  27x the work. M5's +15-30% is a small-matrix artifact.
+
+**And M6 answered a question that was not being asked of it.** The baseline it
+beats, `listops::seq`, **compiles once and evaluates many** — the graphing shape.
+That is the per-sample number D50/P5.2-7 said was missing before deciding whether
+to replace tinyexpr on the numeric path, and it **argues against replacing**:
+one-shot entry is 22-32% faster under the unified evaluator, repeated evaluation
+~1.7x slower per operation. The measurement supports the split that already
+exists. See D50's amendment.
+
 The original brief, for reference:
 
 1. **Stack peak** per input — the whole point of moving depth off the call

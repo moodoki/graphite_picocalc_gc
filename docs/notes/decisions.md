@@ -223,11 +223,21 @@ constant to within 1 us across 27x the work, because it is the fixed cost of
 compiling a `Program`. M5's +15-30% is a small-matrix artifact: a 6x6 `det` is
 only ~0.5-0.9 ms, so a fixed 0.19 ms reads large. By 30x30 it is +1.6%.
 
+**M6 was apportioned by a third run**, varying element count with the body fixed
+and then body complexity with the count fixed. It is a **per-element** cost, flat
+from 100 to 999 elements, not `seq` setup — and it splits three ways: **~4.6
+us/element of fixed `run_body` re-entry** (visible at +32% with a trivial body),
+**~1.7x slower per operation** (per element per op, tinyexpr's compiled tree walk
+~9.8 us against the VM's ~16.8 us), and **~1.6 us/element of per-element PSRAM
+write** past 256 elements — the last being the only cheaply fixable part, and the
+same shape as D53.
+
 So the fair summary of this phase's performance is **"faster except when chaining
-two or more operations over a list"**, and if M2 is ever worth attacking the
-target is **fusing adjacent element-wise operations into one pass** — what
-`listexpr` did structurally and the flat RPN program gave up. Nothing here
-implicates the tagged-`Value` design or the stack machine. Data and full tables:
+two or more operations over a list, or evaluating one repeatedly"**. The two
+regressions have different causes and different prospects: **M2 is pass fusion**
+— what `listexpr` did structurally and the flat RPN program gave up, and nothing
+implicates the tagged-`Value` design or the stack machine — while **M6 is
+per-element interpretation cost**, which is the harder one. Data and full tables:
 [`measurements/phase5.2/`](measurements/phase5.2/README.md).
 
 **M5 moved and that is a cost, not an invalidation.** §9 itself says a
@@ -507,6 +517,28 @@ third D46.
 stack machine against tinyexpr. That number is the one input the decision needs
 and nobody has it yet — the honest answer to "faster or slower" today is that
 it is unknown.
+
+### Amendment, 2026-08-09: the missing input exists, and it argues against replacing
+
+**5.2.12's M6 apportionment supplies the number this clause was waiting for**,
+and from a better angle than M1. `listops::seq` — the path M6 compares against —
+**compiles once and evaluates many**, which is the shape of the graphing hot loop;
+M1 measures one-shot entry, which is not.
+
+M1 and M6 point in **opposite directions**, and the distinction is the whole
+answer. One-shot scalar entry is **22-32% faster** under the unified evaluator,
+because it removes the REAL-mode double evaluation. **Repeated** scalar
+evaluation is **~1.7x slower per operation** (per element per op: tinyexpr ~9.8
+us, the VM ~16.8 us) with a further **~4.6 us/element of fixed re-entry**. The
+home screen evaluates once per keypress; graphing evaluates hundreds of times per
+redraw. So the measurement supports **exactly the split that already exists** —
+unified on the home screen, tinyexpr on the numeric path — rather than the
+replacement.
+
+Two caveats, so this is not over-read: `seq`'s per-element loop is the closest
+analogue to graphing, not the same code, and **nothing was profiled** — why the
+VM costs more per operation than a tree walk is unknown, so the gap is not
+established as irreducible. Full data: `measurements/phase5.2/README.md`.
 
 **Amendment, 2026-08-09 (same day): part 2 is discharged — see D51.** The bugfix
 was taken immediately rather than left on the wishlist, on `main` and released as
