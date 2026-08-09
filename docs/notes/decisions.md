@@ -206,6 +206,30 @@ The cost is the three-pass lift, not something unexplained. **M6 (+54%/+80%)** i
 the second regression: quoted-body re-entry against `listexpr`'s per-element
 tinyexpr compile.
 
+**A follow-up run pinned what actually drives both**, because M1-M6 could not
+separate "is a list" from "how many passes" — M2 is the only multi-source
+broadcast in that corpus. Holding size fixed at 999 elements and varying
+operation count: `2*l1` **-7%**, `sin(l1)` **-3%**, `l1+l2` **-13%**,
+`sin(l1)+l2` **+17%**, `sin(l1)+2*l2` **+36%**. **The driver is operation count,
+and the crossover is between one operation and two** — `l1+l2` builds a
+999-element list from two sources and is *faster*, so neither "is a list" nor
+source count explains it. In 5.2 the passes are **additive** (L4 ≈ L2 + L3,
+21.8 + 10.4 against 30.6 measured); `listexpr` **fused** them, so extra
+operations were nearly free.
+
+**And matrices are not a regression category at all.** Varying size instead:
+`det`'s overhead is **+0.192, +0.192, +0.191 ms at 10x10, 20x20 and 30x30** —
+constant to within 1 us across 27x the work, because it is the fixed cost of
+compiling a `Program`. M5's +15-30% is a small-matrix artifact: a 6x6 `det` is
+only ~0.5-0.9 ms, so a fixed 0.19 ms reads large. By 30x30 it is +1.6%.
+
+So the fair summary of this phase's performance is **"faster except when chaining
+two or more operations over a list"**, and if M2 is ever worth attacking the
+target is **fusing adjacent element-wise operations into one pass** — what
+`listexpr` did structurally and the flat RPN program gave up. Nothing here
+implicates the tagged-`Value` design or the stack machine. Data and full tables:
+[`measurements/phase5.2/`](measurements/phase5.2/README.md).
+
 **M5 moved and that is a cost, not an invalidation.** §9 itself says a
 difference there "means dispatch overhead, not arithmetic" — it is compiling a
 `Program` before running it. The first version of the comparison script failed
