@@ -639,7 +639,9 @@ divisor than the change.
 forks from, and it differs by exactly the thing under test.
 
 Results, both boards, and the two regressions to record (M2 +36/+52%, M6
-+54/+80%) are in **D52**. Depth results, including the one place the "depth costs
++54/+80%) are in **D52**, with the raw per-sample data and the reproduction
+recipe at [`docs/notes/measurements/phase5.2/`](../notes/measurements/phase5.2/README.md)
+— **the phase-closure write-up should cite that**. Depth results, including the one place the "depth costs
 no call frames" claim needs a caveat, are there too.
 
 ## 8. Non-goals

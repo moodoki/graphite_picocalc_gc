@@ -56,8 +56,11 @@ peak **3,972 -> 2,344** (Pico 2), `kMaxStack = 64` exact with 65 a clean error.
 "PSRAM-friendly" and that this is "what makes much larger depth reachable at
 all". 5.2 put the operand stack in **bss** (1,536 B) and never needed PSRAM.
 
-New tool: **`scripts/ab-measure.py`**, plus a firmware `eval_us=` probe on the
-inject echo. Full detail: `decisions.md` **D52** (results + why the method
+**The measurements are documented at
+[`docs/notes/measurements/phase5.2/`](measurements/phase5.2/README.md)** — method,
+results, caveats, and the raw per-sample JSON for both boards and both builds.
+**Phase 5.2's closure should cite it** for every performance claim. New tool:
+**`scripts/ab-measure.py`**, plus a firmware `eval_us=` probe on the inject echo. Full detail: `decisions.md` **D52** (results + why the method
 changed), **D53**, D48's amendment, and `phase5.2-spec.md` §9's amendment.
 
 **Previous session:** 2026-08-09 (later still) — **tinyexpr's unary-minus/`^` bug

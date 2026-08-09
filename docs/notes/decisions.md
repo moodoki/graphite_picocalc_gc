@@ -169,20 +169,29 @@ than weakening it: v0.3.2 differs from `phase-5.2` **only** by the evaluator
 work, so M5's movement is genuinely dispatch overhead rather than the "different
 commit" confound §9 was guarding against.
 
-**Results** — evaluation time in ms, median of 15, per-sample spread 0.02-0.18 ms
-so every delta below is 10-100x its own noise:
+**Results** — evaluation time in ms, median of 15, per-sample spread 0.02-0.19 ms
+so every delta below is 10-100x its own noise. **Raw per-sample data and the full
+method are committed at
+[`docs/notes/measurements/phase5.2/`](measurements/phase5.2/README.md)** — cite
+that, not this summary, when closing the phase:
 
 | | input | Pico 2 base -> new | Pico 1 base -> new |
 |---|---|---|---|
-| M1 | `2+3*4` | 0.884 -> **0.627** (-29%) | 1.318 -> **0.890** (-32%) |
-| M1 | `sin(30)+ln(2)` | 1.487 -> **1.165** (-22%) | 2.090 -> **1.503** (-28%) |
-| M2 | `sin(l1)+2*l2` @999 | 10.889 -> **16.552** (+52%) | 28.552 -> **38.843** (+36%) |
-| M3 | `l1/sum(l1)` @999 | 8.457 -> **7.019** (-17%) | 13.850 -> **~12.65** (-9%) |
-| M4 | `sum(sin(l3))` @256 | 2.116 -> **1.442** (-32%) | 5.851 -> **5.035** (-14%) |
-| M4 | `sum(sin(l4))` @257 | 3.412 -> **2.676** (-22%) | 7.658 -> **6.761** (-12%) |
-| M5 | `det([A])` 6x6 | 0.491 -> **0.637** (+0.146 ms) | 0.714 -> **0.885** (+0.171 ms) |
-| M5 | `[A]*[B]` 6x6 | 0.552 -> **0.634** (+0.082 ms) | 0.965 -> **1.049** (+0.084 ms) |
-| M6 | `seq(x^2,x,1,200,1)` | 1.851 -> **2.847** (+54%) | 3.821 -> **6.894** (+80%) |
+| M1 | `2+3*4` | 0.884 -> **0.627** (-29%) | 1.318 -> **0.899** (-32%) |
+| M1 | `sin(30)+ln(2)` | 1.487 -> **1.165** (-22%) | 2.090 -> **1.519** (-27%) |
+| M2 | `sin(l1)+2*l2` @999 | 10.889 -> **16.552** (+52%) | 28.552 -> **38.793** (+36%) |
+| M3 | `l1/sum(l1)` @999 | 8.457 -> **7.019** (-17%) | 13.850 -> **12.610** (-9%) |
+| M4 | `sum(sin(l3))` @256 | 2.116 -> **1.442** (-32%) | 5.851 -> **5.045** (-14%) |
+| M4 | `sum(sin(l4))` @257 | 3.412 -> **2.676** (-22%) | 7.658 -> **6.775** (-12%) |
+| M5 | `det([A])` 6x6 | 0.491 -> **0.637** (+0.146 ms) | 0.714 -> **0.895** (+0.181 ms) |
+| M5 | `[A]*[B]` 6x6 | 0.552 -> **0.634** (+0.082 ms) | 0.965 -> **1.055** (+0.090 ms) |
+| M6 | `seq(x^2,x,1,200,1)` | 1.851 -> **2.847** (+54%) | 3.821 -> **6.872** (+80%) |
+
+The Pico 1 column is the **re-take after D53's fix**, which is the committed
+dataset; the pre-fix run agreed within 0.02-0.05 ms on every row it captured, so
+the fix is timing-neutral even though it sits inside the probe window. It also
+fills M3, which the pre-fix run lost to the D53 defect itself — the stability
+guard rejected the row when the displayed answer changed between repetitions.
 
 **Against §9's own pass criteria**: M1 is not merely "within noise of today" but
 **better on both boards**, because REAL mode no longer evaluates twice — the
