@@ -1,6 +1,53 @@
 # Start here — next session
 
-**Last session:** 2026-08-13 — **Phase 6 spec-completion brainstorm,
+**Last session:** 2026-08-14 — **Phase 6 spec-completion continued,
+docs-only except one small hardware-verified diagnostic.** Six new
+decisions, **D61-D66**, all in `docs/notes/decisions.md` and
+cross-referenced in `docs/phases/phase6-spec.md`. **§0's pre-flight
+checklist is now fully clear** — every item open at the start of this
+session is resolved, nothing blocks starting 6A. Highlights: the Pico 1
+MicroPython heap is **pre-committed to 40 KB** (was 48 KB), ahead of 6A
+landing, after a fresh `size-report.sh` measurement found only 2.2 KB
+of margin above threshold with zero 6A code written yet (**D61**);
+P6-13 (editing vendored `pwm_sound.h`/`.c`) and P6-12 (sensor catalog —
+DHT11/DS18B20 get dedicated C++ bindings, LM393 boards need only a new
+`calc.adc_read`) both resolved (**D62**, **D63**); build order changed
+to **Notepad (6C) before MicroPython (6B)**, proving the shared
+`TextEditorWidget` on a real app first, per direct user instruction
+(**D64**); **P6-14 hardware-confirmed on the connected Pico 1** — a
+real power-cycle reads `watchdog_caused_reboot()=false`, a non-power
+reboot reads `=1` — via a small new permanent diagnostic in
+`src/main.cpp` (**D65**); and §3.4's compiled-app launcher goes
+**self-sufficient, not `uf2loader`-dependent**, per direct user
+instruction, which surfaced two real corrections to §3.4 (a dedicated
+reset-reason marker is needed, not bare `watchdog_caused_reboot()`;
+the bootstrap must be a separate permanent firmware component, not
+logic inside `main()`) — **D66**. Full narrative in
+[worklog.md](worklog.md).
+
+**This landed on a new `phase-6` branch, not `main`** (explicit user
+request this session) — the two previous Phase 6 docs sessions
+committed straight to `main`; this one deliberately didn't. Merge or
+rebase onto `main` when picking this back up, if it hasn't happened
+already.
+
+> ## The next job is 6A.1 — nothing left to resolve first
+>
+> Every pre-flight item is closed (see D61-D66 above and the previous
+> session's D54-D60). **Start 6A implementation now**, in the D64 build
+> order: **6A.1-6A.4** (registry, launcher, screen handoff, entry
+> points) → **6A.6** (`FileBrowserScreen` navigate+pick, moved ahead of
+> the widget so `F3:LOAD` is wired for real) → **6A.5** (shared
+> `TextEditorWidget`) → **6C.1** (Notepad — first real app, proves the
+> widget end-to-end) → **6A.7** (file management, can trail) → **6B**
+> (MicroPython). See `phase6-spec.md` §5's build-order note for the
+> full rationale. One thing to remember mid-6A: a **post-6A
+> `size-report.sh` re-run is still owed** (§0.1) to confirm the 40 KB
+> heap pre-commitment's ~10 KB of assumed headroom against 6A's real
+> static cost, not just the low-single-digit-KB comparables D61
+> reasoned from.
+
+**Previous session:** 2026-08-13 — **Phase 6 spec-completion brainstorm,
 docs-only.** No firmware changed — everything landed in
 `docs/phases/phase6-spec.md` and `docs/notes/decisions.md` (**D54-D60**).
 The editor (§4.3) generalized into a shared 6A `TextEditorWidget` (§3.5)
@@ -22,24 +69,6 @@ plus two binding requirements (eager copy of list/matrix results, an
 explicit reentrancy guard) as **D60**; 6B.3's task row now points at it.
 6B is unblocked — no remaining open issue gates its scoping. Full
 narrative in [worklog.md](worklog.md).
-
-> ## Read this before picking up Phase 6: a new §0 Pre-flight checklist
->
-> `phase6-spec.md` §0 is new this session and gathers everything that
-> should be checked, decided, or built before 6A/6B work starts. **The
-> one that actually gates 6B's scope**: a fresh `size-report.sh`
-> measurement on current `main`, taken with 6A's static footprint in
-> place, is a precondition for sizing the 48 KB MicroPython heap — the
-> two existing numbers (`pre-phase5-review.md`'s ~12 KB, pre-CAS/pre-5.2;
-> the `picocalc-phase5.2-state` memory's ~5-10 KB) are both stale and
-> disagree with each other; **do not trust either.** If the fresh number
-> comes in under 56 KB free (48 KB heap + 8 KB C-stack), drop the heap
-> 48→40 KB *before* scoping 6B, not mid-implementation (Risk 6's lever).
-> §0's other item, [issue #27](https://github.com/moodoki/graphite_picocalc_gc/issues/27)
-> (6B's `calc` bindings vs. the post-5.2 evaluator), was **closed the same
-> day** — see §4.7/D60 below. What's left in §0 is a combined
-> hardware-verification spike (P6-5/P6-14) for the compiled-app reboot
-> mechanism — doesn't need a board until that spike.
 
 **Previous session:** 2026-08-10 (later) — **wiki navigation links fixed.**
 Docs-tooling only, no firmware changed. `scripts/gen-wiki.sh` was linking to
@@ -100,15 +129,16 @@ page + wiki published and auto-deploying. Full narrative in
 | [#33](https://github.com/moodoki/graphite_picocalc_gc/issues/33) | host-side renderer for docs screenshots — `font.cpp` already compiles on the host |
 | [#15](https://github.com/moodoki/graphite_picocalc_gc/issues/15) / [#16](https://github.com/moodoki/graphite_picocalc_gc/issues/16) | tinyexpr: re-vendor **or** replace — alternatives, decide one and close the other |
 
-**Next phase is 6** (app framework + MicroPython) — specced in much more
-detail after 2026-08-13's brainstorm, still not started. **Start with
-`phase6-spec.md` §0** (the pre-flight checklist above), not the task
-tables — the SRAM re-measurement it calls for is the item most likely to
-actually change 6B's scope. Committed total is now **~100 hrs** (6A 31 +
-6B 66 + 6C 3, up from 87 before this session — D54/D55). Two new unscoped
-candidates also exist: **6.1** (home-screen script replay, §9.3) and
-**6.2** (PCM sampler audio engine, §9.4) — neither is committed work, just
-recorded so it isn't lost.
+**Next phase is 6** (app framework + MicroPython) — fully specced as of
+2026-08-14, still not started. **§0's pre-flight checklist is fully
+clear** (D61-D66) — the literal next task is **6A.1**, in the D64 build
+order (see the blockquote above), not `phase6-spec.md` §0 itself
+anymore. Committed total is **~100 hrs** (6A 31 + 6B 66 + 6C 3). Two new
+unscoped candidates also exist: **6.1** (home-screen script replay,
+§9.3) and **6.2** (PCM sampler audio engine, §9.4) — neither is
+committed work, just recorded so it isn't lost. A third open question,
+**P6-15** (§4.6 entry 6/§8 — `calc.plot()`'s Y-slot clearing semantics),
+needs deciding before 6B.6, not before 6A starts.
 
 **Manual, if the wiki ever stops updating:** the `WIKI_TOKEN` secret carries an
 expiry by design (GitHub has no wiki-only permission, so it is a full repo-write

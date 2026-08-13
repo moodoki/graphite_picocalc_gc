@@ -18,6 +18,328 @@ Format:
 
 ---
 
+## D66: P6-5 resolved — self-sufficient bootstrap, no `uf2loader` dependency; two corrections this surfaced
+
+**Date**: 2026-08-14
+**Status**: Accepted
+**Context**: P6-5 asked whether §3.4 depends on `uf2loader` being
+installed, or the calculator becomes self-sufficient for the
+flash-write/reboot step. D65 (same day) hardware-confirmed the reset-
+reason mechanism (`watchdog_caused_reboot()`) a self-sufficient
+bootstrap would need, which removed the main reason to gamble on
+`uf2loader`'s undocumented auto-boot behavior instead. User decision:
+go self-sufficient.
+**Decision**: §3.4's automatic app-slot-vs-calculator boot decision is
+built entirely in this project's own code — never dependent on
+`uf2loader` being installed, present, or behaving any particular way.
+`uf2loader` is demoted from "either/or" to a **purely optional,
+user-installed, manually-invoked recovery tool** (reached by holding a
+boot key, if the user chooses to install it at all) — the calculator's
+own logic never checks for or requires its presence. This removes the
+external GPLv3 dependency from the automatic path entirely and makes
+P6-5's original question (does `reset_usb_boot()` land in `uf2loader`'s
+menu or bypass it) moot for the *automatic* path — it only still
+matters if a user manually installs `uf2loader` as an extra personal
+safety net, which is their choice to test, not this project's to
+depend on.
+
+Working through what "self-sufficient" actually requires surfaced two
+corrections to §3.4 as previously written:
+
+**1. `watchdog_caused_reboot()` alone is ambiguous — needs a dedicated
+marker, matching this codebase's own existing pattern.** §3.4's current
+text says the bootstrap should check "`watchdog_caused_reboot()` on
+every boot — true → boot the app slot." But that flag is **already
+shared by at least three other things**: D47's hard-fault recovery
+reboot (`fault.cpp`'s `watchdog_reboot(0,0,0)`), the bulk-PSRAM
+self-test's watchdog guard (`main.cpp`'s `kBulkTestMarker`), and — newly
+observed via D65's own measurement — even an ordinary
+`picotool load -f -x` flash-and-relaunch reads `watchdog_caused_reboot()
+== true`. As literally specced, a hard fault inside the *calculator
+itself* would read `true` on its recovery reboot and incorrectly divert
+into the app slot instead of recovering into the calculator. This
+codebase already has the right pattern for this — `fault.cpp`'s
+`g_crash.magic == kCrashMagic` and `main.cpp`'s
+`watchdog_hw->scratch[0] == kBulkTestMarker` both pair the bare
+watchdog flag with a dedicated marker written immediately before the
+deliberate reboot. §3.4's app-launch handoff needs the same: a distinct
+magic value (a free scratch register — `scratch[2]`/`[3]` are unused;
+`[4]-[7]` are boot-ROM-reserved, `[0]`/`[1]` are the bulk test's)
+written right before the deliberate `watchdog_reboot()` call, checked
+by the bootstrap instead of the bare flag.
+**2. The "self-sufficient bootstrap" must be a genuinely separate,
+permanent firmware component — not just an early check inside the
+calculator's own `main()`.** The "power cycle always recovers to the
+calculator, even from a hung *foreign* app" guarantee (§3.4, already
+committed) cannot be satisfied by logic embedded in the calculator's
+own image if an app is what's currently resident in the boot region —
+the calculator's own code isn't running to make that check in that
+case. Something has to run **first, unconditionally, on every single
+reset, regardless of what's currently flashed into the app-boot
+region** — which means a small, standalone, effectively-permanent
+bootstrap binary at the true reset vector, structurally distinct from
+both the calculator and any app, is required by the architecture, not
+one implementation option among two. This is a bigger piece of new
+engineering than "a few lines added to `main()`" — it's a new build
+target (own linker script, own flash placement) and a new one-time
+install step for a fresh device, on top of everything else §3.4 already
+scopes.
+**Rationale**: (1) is a straightforward correctness bug worth catching
+before implementation, not after a hard-fault-during-calculator-use
+bug report. (2) follows necessarily from a guarantee §3.4 already
+committed to (P6-14/D65's "always boot the calculator" promise) — it
+isn't new scope being added, it's scope that was already implied but
+not yet made concrete.
+**Tradeoffs**: §3.4's existing ~25-35 hr estimate was written before
+(2) was worked through this concretely — a standalone bootstrap
+component (its own minimal linker script, careful reset-vector
+placement, its own one-time flashing story) is realistically more work
+than "a small in-firmware bootstrap" reads as. Revisit the estimate
+when §3.4 is actually scoped for implementation, not now.
+**Revisit when**: §3.4 implementation begins — this decision fixes the
+*shape* (self-sufficient, dedicated marker, separate permanent
+component) but doesn't design the bootstrap itself (its exact linker
+layout, flash region boundaries, and the app-slot validity check
+needed before jumping there — a corrupted or empty app slot must not
+be jumped into blindly, matching the "never fails to boot" constraint
+§3.4 already states elsewhere).
+
+---
+
+## D65: P6-14 resolved on hardware — a real power-cycle does deassert `PICO_EN`, and `watchdog_caused_reboot()` reliably reads false for it
+
+**Date**: 2026-08-14
+**Status**: Accepted
+**Context**: §3.4's "return to calculator on a hung app" mechanism
+depends on `watchdog_caused_reboot()` distinguishing a deliberate
+app-launch handoff (true) from a real user power-cycle (false).
+Schematic evidence (AXP2101 PMIC, `PICO_EN` gating the Pico's own
+`PICO_VSYS` regulator) suggested but did not confirm this — the actual
+power-off sequencing lives in the STM32 keyboard MCU's firmware, outside
+this project's source. Tested on the connected Pico 1.
+**Decision**: Confirmed on hardware. Added a small permanent diagnostic
+(`main.cpp`: one bool captured at the same point as `g_prior_fault`,
+before anything else can re-arm the watchdog and overwrite the reason
+bits; a `"boot: watchdog_caused_reboot=%d\n"` line on the existing 30 s
+heartbeat cadence, same pattern as the `fault:`/`stack:` lines).
+Two measurements: **(1)** a non-power reboot (`picotool load -f -x`'s
+flash-and-relaunch, which never touches power) → `=1`. **(2)** a
+genuine physical power-cycle via the case's power button (USB device
+observably dropped and reappeared ~13 s later — consistent with a
+manual button press/release, not an instant chip-level reset) → `=0`.
+This confirms the schematic's prediction directly: the AXP2101's power
+button really does deassert `PICO_EN`, producing a true POR, and
+`watchdog_caused_reboot()` reliably reads false for it — exactly the
+property §3.4's boot-time app-slot-vs-calculator decision needs.
+**Rationale**: Hardware-observed, not inferred — the one thing schematic
+reading alone couldn't settle, per §0.3's own framing.
+**Tradeoffs**: The diagnostic is kept permanently (one bool + one
+heartbeat print, negligible cost) rather than reverted after the spike —
+matches the existing `fault:`/`stack:` diagnostic pattern and has
+ongoing debug value (any future "why did it reboot" question).
+**Revisit when**: A mainboard/PMIC hardware revision changes the
+power-off sequencing, or the capture point in `main()` moves without
+preserving the "before anything else can consume the reason bits"
+ordering `g_prior_fault` already established.
+
+---
+
+## D64: Build order — Notepad (6C) ships before MicroPython (6B), proving the shared widget on a real app first
+
+**Date**: 2026-08-14
+**Status**: Accepted
+**Context**: §1's phasing table already established that 6B and 6C have
+no structural dependency on each other, only both on 6A (D54 already
+noted Notepad "could ship before MicroPython if that were ever
+wanted"), but the task tables (§5) and the previous session's sequencing
+note both implicitly assumed 6A's shared `TextEditorWidget` (§3.5,
+task 6A.5) gets built in the abstract, inside 6A, ahead of any concrete
+app exercising it — with 6B.11 and 6C.1 then wrapping it "in parallel."
+User direction this session: build the text editor as the **first real
+app**, and have the MicroPython program editor be a wrapper over that
+already-working editor, not a parallel consumer of an unproven one.
+**Decision**: Resequence the build order (no change to which sub-phase
+"owns" which task, or to any hour estimate) to: **6A.1-6A.4** (registry,
+launcher, screen handoff, entry points) → **6A.6** (`FileBrowserScreen`
+navigate+pick — moved ahead of the widget so `F3:LOAD` can be wired for
+real, not stubbed) → **6A.5** (the shared widget) → **6C.1** (Notepad —
+first real app on the launcher, exercises the widget's full save/
+load/edit loop end-to-end, including on hardware) → **6A.7** (file
+management — doesn't block Notepad's core loop, can trail) → **6B**
+(MicroPython; 6B.11's editor is now explicitly "wrap the widget Notepad
+already proved," not a second untested consumer). This supersedes the
+previous session's 6A.5 sequencing note (stub `F3:LOAD`, wire it once
+6A.6 exists) — building 6A.6 first removes the need for a stub
+entirely.
+**Rationale**: Notepad is a ~3 hr thin wrapper with no interpreter, no
+`calc` bindings, and no Phase 5 dependency — the cheapest possible real
+app to prove the widget against, and a full end-to-end (edit → save →
+power-cycle → reload) hardware pass on it de-risks the widget before
+6B's ~66 hrs commit to building on top of it. It also directly answers
+Risk 10's own worry (§7 — "app framework becomes over-engineered for
+one app... expand only when a second app actually needs more") with a
+second real app *before* 6B rather than after, and gives an earlier
+shippable milestone (a working Notepad app) than waiting for all of 6B.
+**Tradeoffs**: None identified — this reorders existing tasks, it
+doesn't add or remove any. The one thing worth watching: the widget's
+`auto_indent_after` config path (Python-only, `:`-triggered) is
+untested by Notepad, which configures it off — that specific code path
+still gets its first real exercise from 6B.11, same as before.
+**Revisit when**: N/A — this is a sequencing preference, not a
+structural claim; nothing forces this order, it's just the recommended
+one now.
+
+---
+
+## D63: P6-12 resolved — the sensor catalog splits into a generic-primitive tier and a dedicated-binding tier
+
+**Date**: 2026-08-14
+**Status**: Accepted
+**Context**: §4.6 entry 2 (sensor/data-logging app) had settled its
+architecture — generic `calc.gpio_*`/`calc.i2c_*` primitives, per-sensor
+behavior as pure-Python glue scripts — but explicitly left P6-12 (which
+sensors to actually support) as a user TODO. The user's real inventory,
+given this session: **DHT11** (temperature/humidity), **DS18B20**
+(temperature, Dallas 1-Wire), and assorted **LM393-comparator** breakout
+boards (a generic Arduino-hobbyist sensor class — sound, IR/obstacle,
+tilt, flame, raindrop, etc. — sharing one op-amp-comparator output
+stage).
+**Decision**: The catalog splits into two tiers, not one:
+1. **LM393 boards need nothing new beyond one addition already implied
+   but never bound**: these output a simple digital threshold (some
+   boards also expose the raw comparator/trimpot analog node). §4.2 had
+   `calc.gpio_read`/`gpio_write`/`gpio_mode` but no ADC primitive despite
+   §4.6 entry 2 already flagging GP28 as ADC-capable — added
+   `calc.adc_read(pin)`. This confirms the "generic primitives, Python
+   glue" model holds for this whole sensor class; no further design
+   work needed.
+2. **DHT11 and DS18B20 both need a dedicated C++ binding, not a
+   Python-glue script — a narrow, reasoned exception to "no per-sensor
+   drivers."** Both are timing-critical single-wire protocols (DHT11:
+   ~26 vs ~70 µs pulse-width bit encoding after a start handshake;
+   DS18B20: Dallas 1-Wire, similarly tight slot timing, plus 64-bit ROM
+   addressing/CRC in the general multi-device case) that a MicroPython
+   bytecode loop cannot reliably time — and this project's embedding
+   specifically compounds that risk beyond a generic "Python is slow"
+   concern: **the GC can pause execution at an arbitrary bytecode
+   boundary**, which would corrupt a bit-banged read mid-sequence in a
+   way that's hard to distinguish from a flaky sensor board. Add
+   `calc.dht11_read(pin)` and `calc.ds18b20_read(pin)`, each a
+   synchronous C++ implementation that does the entire timed exchange
+   in one call — matching MicroPython's own upstream precedent of
+   implementing DHT/1-Wire via a C-level `machine.bitstream()` helper
+   rather than pure Python, for the same reason. **DS18B20 v1 scope:
+   single device per bus** (skip-ROM command) — full ROM search for
+   multiple DS18B20s on one wire is a stretch, not core.
+**Rationale**: Keeps the generic-primitive default intact rather than
+special-casing "sensors" as a category — the split is decided per
+sensor on a concrete, sourced reason (timing + this project's specific
+GC-pause exposure), the same way entries 1 and 3 were each resolved on
+their own merits rather than a blanket rule.
+**Tradeoffs**: Two more C++ entry points scoped to this feature
+whenever it's implemented, each needing its own cycle-timed
+implementation and host+hardware test pass — more work than "just bind
+`gpio_read` and let Python do it," but the alternative risks silent
+wrong readings indistinguishable from a faulty sensor board.
+**Revisit when**: This feature is actually picked up — confirm exact
+timing tolerances against the RP2040/RP2350 datasheets before choosing
+a busy-wait vs. PIO-program implementation for the two new bindings.
+Also: this is a snapshot of the user's *current* sensor box, not an
+exhaustive catalog — a genuinely new sensor later may fall in either
+tier depending on its protocol, not automatically the generic one.
+
+---
+
+## D62: P6-13 resolved — editing vendored `pwm_sound.h`/`.c` is acceptable for the sound demo's tone extension
+
+**Date**: 2026-08-14
+**Status**: Accepted
+**Context**: §4.6 entry 4 (sound demo) needs one new public entry point in
+`pwm_sound.h`/`.c` to expose the arbitrary-frequency tone the ISR already
+computes internally — the shipped API only exposes 3 fixed effects. D7's
+precedent (reimplement in the wrapper instead of touching the vendored
+driver) doesn't apply here: the tone state (`sound_frequency`/
+`sound_duration`/slice handles) is `static`/file-private to `pwm_sound.c`,
+unreachable from `platform::` without a header change. P6-13 asked
+whether editing the vendored file anyway is acceptable given
+D-prelude-1's "read-only by default" framing.
+**Decision**: Yes. `drivers/README.md`'s own policy already answers this
+directly — "editing in place is the exception, not the rule — when it is
+unavoidable, follow 'Updating a vendored driver' ... and record it under
+Local modifications" — and this is exactly that exception, not a new
+precedent. There's also a live example of the same shape already in the
+table: D51's `tinyexpr` fix. Requirement: keep the patch to the minimal
+new entry point needed (expose the existing internal
+frequency/duration computation, don't restructure the driver), add a row
+to `drivers/README.md`'s Local modifications table referencing this
+decision, and note the upstream target (Coyote OS) in case it's worth
+reporting there.
+**Rationale**: The policy exists to stop silent, undocumented drift from
+upstream, not to block genuinely necessary local additions — the README
+already anticipates and process-covers this case. Reimplementing outside
+the driver (D7's usual answer) isn't available here because the relevant
+state is compiled as file-private.
+**Tradeoffs**: One more row in the re-vendor risk table; a future
+Coyote OS re-vendor needs to re-apply this entry point (small, single
+function) or confirm upstream already has an equivalent.
+**Revisit when**: A re-vendor of `pwm_sound/` happens — check whether
+upstream added arbitrary-tone support (making this local patch
+obsolete, the same way D51 was superseded).
+
+---
+
+## D61: MicroPython heap pre-committed to 40 KB (Pico 1), ahead of 6A landing
+
+**Date**: 2026-08-14
+**Status**: Accepted
+**Context**: §0.1's pre-flight checklist called for a fresh
+`size-report.sh` measurement before sizing 6B's heap, since both existing
+numbers (`pre-phase5-review.md`'s ~12 KB pre-CAS, the phase5.2-state
+memory's ~5-10 KB) were stale and measured at different points in the
+codebase's history. Measured on current `main` (`564406f`, pre-6A):
+**bss+data = 210,764 B (205.8 KB) → 58.2 KB nominal headroom** on the
+Pico 1. This reconciles the stale ~5-10 KB figure (it was already netting
+out the 48 KB heap: 58.2 − 48 ≈ 10.2 KB) rather than contradicting it.
+Risk 6 (§7) already named "drop the heap 48→40 KB" as the lever if the
+pre-6A number came in under 56 KB free (48 KB heap + 8 KB C-stack). It
+came in at 58.2 KB — **above** the threshold, but by only 2.2 KB, with
+**zero 6A code written yet**. 6A's own additions (`AppRegistry`, the
+launcher screen, `TextEditorWidget`'s line buffer, the generalized
+`FileBrowserScreen`'s directory-entry state) are exactly the class of
+fixed-size static array that costs low-single-digit KB apiece elsewhere
+in this codebase (`g_hist_io` 8,192 B, `staging` 7,680 B, `home_screen`
+instance 7,692 B) — so treating 2.2 KB as real headroom for 6A to grow
+into was judged an unnecessary gamble.
+**Decision**: Pre-commit now to a **40 KB Pico 1 Python heap** (Pico 2
+stays at 96 KB — its ~216 KB spare isn't remotely close), rather than
+waiting for a post-6A remeasurement to decide. §4.4's memory-budget table
+and Risk 6 (§7) are updated to state this as the shipped number, not a
+conditional lever.
+**Rationale**: The lever was always going to be invoked once 6A's static
+cost was known to be real, not hypothetical — the only question was
+whether to decide before or after building 6A. Deciding after means
+6B.3-6B.16 get scoped against 48 KB, then possibly rescoped mid-6B if the
+post-6A number comes in under threshold, which is exactly the
+"discovered mid-6B" failure mode §0.1 was written to prevent. Deciding
+now costs nothing (40 KB is still a generous Python heap for the kind of
+scripts §4.6's candidate apps describe) and removes a scoping variable
+before 6B starts.
+**Tradeoffs**: 8 KB less Python heap than the original spec's number,
+in every 6B example and every future SD-discovered app — worth
+restating in any app-author-facing docs derived from §4.2. If the
+post-6A measurement comes back with much more headroom than expected
+(e.g. 6A's additions turn out smaller than the low-single-digit-KB
+comparables above), 40 KB is conservative rather than tight — an
+acceptable trade given the alternative was risking the opposite.
+**Revisit when**: The post-6A `size-report.sh` measurement §0.1 still
+calls for (once 6A actually lands) comes back — if headroom is
+comfortably above 56 KB + margin even with 40 KB assumed, there's room
+to reconsider raising it back toward 48 KB before 6B.1 locks in the
+build; if it's tighter than expected, this decision already absorbed
+the shock.
+
+---
+
 ## D60: 6B's `calc.eval()` binding shape, re-verified against the unified evaluator (closes issue #27)
 
 **Date**: 2026-08-13

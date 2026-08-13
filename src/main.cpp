@@ -72,6 +72,13 @@ constexpr uint32_t kBulkTestMarker = 0xB07DFACEu;
 bool g_prior_fault = false;
 platform::FaultInfo g_fault;
 
+// P6-14 hardware spike (2026-08-14, phase6-spec.md §0.3): does
+// watchdog_caused_reboot() actually read false after a genuine physical
+// power-cycle? Captured at the same point as g_prior_fault, before
+// anything else (run_self_tests()'s PSRAM bulk test) can re-arm the
+// watchdog and overwrite the reason bits.
+bool g_watchdog_caused_reboot = false;
+
 void run_psram_bulk_test() {
     if (watchdog_caused_reboot() && watchdog_hw->scratch[0] == kBulkTestMarker) {
         watchdog_hw->scratch[0] = 0;
@@ -327,6 +334,7 @@ int main() {
     // Before anything else can consume the watchdog reboot cause — a
     // fault-triggered reboot looks like any other to run_self_tests().
     g_prior_fault = platform::take_prior_fault(&g_fault);
+    g_watchdog_caused_reboot = watchdog_caused_reboot();
     // Paint the unused stack now, while it is shallow, so the heartbeat
     // below can report how deep anything has actually gone (D47).
     platform::paint_stack();
@@ -568,6 +576,19 @@ int main() {
                     static_cast<unsigned long>(g_fault.sp),
                     static_cast<unsigned long>(g_fault.depth),
                     static_cast<unsigned long>(platform::stack_total()));
+            }
+        }
+
+        // P6-14 hardware spike (2026-08-14): does watchdog_caused_reboot()
+        // read false after a genuine power-cycle? Same heartbeat reasoning
+        // as the blocks above — a one-shot before USB enumerates would be
+        // missed on exactly the boot this is meant to catch.
+        {
+            static uint32_t last_wd_report_ms = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            if (now_ms > 3'000 && now_ms - last_wd_report_ms >= 30'000) {
+                last_wd_report_ms = now_ms;
+                printf("boot: watchdog_caused_reboot=%d\n", g_watchdog_caused_reboot ? 1 : 0);
             }
         }
 

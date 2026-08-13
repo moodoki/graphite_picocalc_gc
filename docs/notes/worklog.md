@@ -305,6 +305,139 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-14 — Phase 6 spec-completion continued: §0 pre-flight checklist fully cleared (D61-D66), one hardware-verified firmware diagnostic
+
+Continuation of 2026-08-13's brainstorm. Docs-only except one small,
+verified firmware diagnostic (`src/main.cpp`, ~21 lines). Six new
+decisions, **D61 through D66**, all dated 2026-08-14, all Accepted, all
+in `docs/notes/decisions.md` and cross-referenced in
+`docs/phases/phase6-spec.md`.
+
+**D61 — Pico 1 MicroPython heap pre-committed to 40 KB (was 48 KB).**
+§0.1's pre-flight checklist called for a fresh `size-report.sh`
+measurement before sizing 6B's heap, since the two existing numbers
+(`pre-phase5-review.md`'s ~12 KB, the `picocalc-phase5.2-state`
+memory's ~5-10 KB) were stale and from different points in the
+codebase's history. Measured on current `main` (`564406f`, pre-6A):
+bss+data = 210,764 B → **58.2 KB nominal headroom** on the Pico 1 —
+only **2.2 KB** above the 56 KB threshold (48 KB heap + 8 KB C-stack)
+§0.1 named, with zero 6A code written yet. Rather than gamble that 6A's
+own static footprint (`AppRegistry`, launcher, `TextEditorWidget`'s
+line buffer, the generalized `FileBrowserScreen`'s directory-entry
+state — all the class of fixed-size static array that costs
+low-single-digit KB apiece elsewhere in this codebase) fits in 2.2 KB,
+took the heap-size lever proactively rather than discover a shortfall
+mid-6B. §4.4's memory table and Risk 6 (§7) updated to state 40 KB as
+the shipped number, not a conditional. A post-6A `size-report.sh`
+re-run is still owed once 6A actually lands.
+
+**D62 — P6-13 resolved: editing vendored `pwm_sound.h`/`.c` is
+acceptable.** The sound-demo tone extension needs one new public entry
+point in the vendored driver (the tone state is file-private to
+`pwm_sound.c`, so D7's usual "reimplement in the wrapper" answer isn't
+available). `drivers/README.md`'s own policy already covers this
+exact shape as its documented exception process — matches the existing
+D51/tinyexpr precedent. §4.6 entry 4 updated.
+
+**D63 — P6-12 resolved: the sensor catalog splits into two tiers,**
+against the user's actual sensor box (DHT11, DS18B20, assorted
+LM393-comparator breakout boards). LM393 boards need only the existing
+generic `calc.gpio_*` primitives plus one new addition,
+`calc.adc_read(pin)` — confirms the "generic primitives, Python glue"
+model holds for that whole class. DHT11 and DS18B20 get **dedicated
+C++ bindings** (`calc.dht11_read`/`calc.ds18b20_read`), a narrow,
+reasoned exception to "no per-sensor drivers": both are timing-critical
+single-wire protocols a MicroPython bytecode loop can't reliably time,
+and this project's GC can pause mid-bit-bang at an arbitrary point — a
+sharper risk than "Python is slow" generically. DS18B20 v1 is scoped
+single-device-per-bus (skip-ROM); multi-device ROM search is a stretch.
+§4.2 and §4.6 entry 2 updated.
+
+**D64 — build order: Notepad (6C) ships before MicroPython (6B),** per
+direct user instruction — build the text editor as the first real app,
+with MicroPython's editor wrapping it rather than being a second
+untested consumer of the shared widget. New recommended sequence:
+6A.1-6A.4 → 6A.6 (file browser, moved ahead of the widget so
+`F3:LOAD` is wired for real instead of stubbed) → 6A.5 (shared
+`TextEditorWidget`) → 6C.1 (Notepad — proves the widget end-to-end) →
+6A.7 (file management, can trail) → 6B (Python; 6B.11's editor now
+explicitly wraps the already-proven widget). No task hours moved
+between sub-phases, only build order — supersedes the previous
+session's "stub `F3:LOAD` then wire it" note. §1 and §5 updated.
+
+**D65 — P6-14 hardware-confirmed on the connected Pico 1.** Added a
+small permanent diagnostic to `src/main.cpp`: captures
+`watchdog_caused_reboot()` at boot, at the same point/ordering as the
+existing `g_prior_fault` capture (before anything else can re-arm the
+watchdog), and reports it on the existing 30 s heartbeat cadence
+(`"boot: watchdog_caused_reboot=%d\n"`, matching the existing
+`fault:`/`stack:` pattern). Flashed via `picotool load -f -x
+build/pico/picocalc_graphcalc.uf2` and measured two cases over serial
+(`scripts/serial-capture.py`): a non-power reboot (picotool's own
+flash-and-relaunch) read `=1`; a genuine physical power-cycle via the
+case's power button (USB device observably dropped and reappeared
+~13 s later) read `=0`. Confirms the AXP2101/`PICO_EN` schematic
+prediction from 2026-08-13 directly — §3.4's planned mechanism
+(distinguish "deliberate app-launch handoff" from "user power-cycled")
+is sound. Both boards rebuilt after this change and build clean;
+`lint.sh`/`format.sh` pass.
+
+**D66 — P6-5 resolved: self-sufficient bootstrap, not
+`uf2loader`-dependent,** per direct user instruction. `uf2loader`
+demoted from "either/or" to a purely optional, user-installed,
+manually-invoked recovery tool — never part of the automatic boot
+path. Working through what "self-sufficient" requires surfaced two
+real corrections to §3.4: **(1)** bare `watchdog_caused_reboot()` is
+ambiguous — already shared by D47's hard-fault recovery reboot, the
+bulk-PSRAM self-test's watchdog guard, and (per D65's own measurement)
+an ordinary `picotool` flash-and-relaunch — so the app-launch handoff
+needs a **dedicated scratch-register marker**, matching this
+codebase's existing pattern (`fault.cpp`'s `g_crash.magic`,
+`main.cpp`'s `kBulkTestMarker`), not the bare flag. **(2)** the
+bootstrap must be a genuinely **separate, permanent firmware
+component** (own linker script, own flash placement, its own one-time
+install step) — not a few lines inside the calculator's own `main()`
+— because the "power-cycle always recovers to the calculator, even
+from a hung foreign app" guarantee can't be checked from code that
+isn't currently resident when a foreign app is what's booted. §3.4's
+existing ~25-35 hr estimate is flagged as likely understated as a
+result, to revisit when §3.4 is actually scoped for implementation
+(§3.4 remains a stretch item, not core 6A/6B scope).
+
+**Net effect: §0's pre-flight checklist is now fully clear.** Every
+item that was open at the start of this session (§0.1 SRAM headroom,
+§0.5 open policy calls P6-12/P6-13, §0.3 hardware spike P6-5/P6-14) is
+resolved. Nothing blocks starting 6A implementation. Phase 6 itself is
+still **specced, not started** — no app-framework/MicroPython/Notepad
+code was written this session. The one piece of firmware code
+(`main.cpp`'s reset-reason diagnostic) is small, generically useful,
+unrelated to 6A/6B/6C's own implementation, and already verified on
+both boards plus real hardware.
+
+Also this session, folded into §4.6 without new decision numbers: two
+more candidate apps walked through against §4.2's speculative
+bindings — a **real-time game** (entry 5), which found a real gap
+(every existing input primitive blocks; added non-blocking
+`calc.key_pressed()`/`calc.key_held()`, direct wrappers over existing
+HAL surface, no estimate change), and a **graph-analysis combo app**
+(entry 6), which surfaced a new open question, **P6-15** (§8): does
+`calc.plot()` clear Y1-Y7 first, take an explicit slot argument, or
+append-with-error-on-full? Unresolved, needed before 6B.6.
+
+**Verification**: `./scripts/lint.sh` (101 files) and
+`./scripts/format.sh` both passed, no changes needed to `main.cpp`;
+`cmake --build build/pico` and `cmake --build build/pico2` both link
+clean; `python3 scripts/validate_md.py docs/phases/phase6-spec.md
+docs/notes/decisions.md` both OK. Host test suite not re-run —
+`main.cpp` isn't part of the host-testable logic surface and nothing
+under `src/math`, `src/apps`, etc. changed.
+
+Landed on a new `phase-6` branch (not `main`), per explicit user
+request this session — a deliberate departure from how the two
+previous Phase 6 docs sessions were committed straight to `main`.
+
+---
+
 ## 2026-08-13 — Phase 6 spec-completion brainstorm: editor/notepad generalized (D54), file management scoped in (D55), launcher + return-to-calculator UX resolved (D58/D59), hardware pin map researched, two new candidate sub-phases opened
 
 Docs/brainstorm-only session, no firmware changed. Everything landed in
