@@ -30,14 +30,17 @@ sub-phase 4E (MicroPython) — see
 than staying in Phase 4, and [phase4-spec.md](phase4-spec.md) for the
 sub-phase it vacated.
 
-**Two dotted sub-phases now sit ahead of this one** (2026-08-08):
-[Phase 5.1](phase5.1-spec.md) (serial line injection) and
-[Phase 5.2](phase5.2-spec.md) (the unified evaluator). Neither is a
-prerequisite in the strict sense, but two things here depend on how 5.2
-lands: its tagged-`Value` sizing pass competes for the same Pico 1 headroom
-6B's **48 KB MicroPython heap** needs (see §1.1 and Risk 6), and 6B's `calc`
-module bindings target the evaluator 5.2 would replace. Check 5.2's status
-before sizing 6B.
+**Two dotted sub-phases sat ahead of this one, and both have since
+closed**: [Phase 5.1](phase5.1-spec.md) (serial line injection) and
+[Phase 5.2](phase5.2-spec.md) (the unified evaluator, merged and tagged
+v0.4.0). Neither was a prerequisite in the strict sense, but two things
+here turned on how 5.2 landed, and both are now settled: its
+tagged-`Value` sizing competed for the same Pico 1 headroom 6B's
+MicroPython heap needs — **measured post-5.2 and the heap
+pre-committed to 40 KB on the Pico 1** (D61; see §0.1, §4.4 and Risk 6)
+— and 6B's `calc` module bindings targeted the evaluator 5.2 replaced,
+**re-verified against the unified evaluator in §4.7** (D60, closing
+issue #27). No status check is owed before sizing 6B.
 
 ---
 
@@ -131,8 +134,19 @@ final margin once 6A is real.
 
 ### 0.5 Open policy calls (not hardware-gated, just not decided)
 
-None currently open — the last item here (P6-12, sensor catalog) was
-resolved 2026-08-14, see §0.7.
+**None gate the start of 6A.** Two §8 questions are still open, both
+scoped to 6B and both about `calc.plot()`:
+
+- **P6-15** — which Y-slot `calc.plot()` writes, and whether the first
+  call clears. Needs deciding **before 6B.6**, not before 6A starts.
+- **P6-2** — whether `calc.plot()` switches to the graph immediately or
+  buffers until `show_graph()`. Carried over from phase4-spec's P4-5 and
+  never revisited; it overlaps P6-15 enough that **the two should be
+  decided together in one pass before 6B.6**, rather than P6-2 being
+  rediscovered mid-implementation.
+
+The last item that genuinely belonged in this section (P6-12, sensor
+catalog) was resolved 2026-08-14 — see §0.7.
 
 ### 0.6 Already resolved this session (2026-08-13) — listed so they aren't re-litigated
 
@@ -163,6 +177,23 @@ it — see §0.3/§3.4), D66 (P6-5 resolved: §3.4 goes self-sufficient, no
 dedicated marker, not bare `watchdog_caused_reboot()`, and that the
 bootstrap must be a separate permanent component, not logic inside
 `main()` — see §3.4). Full detail in [decisions.md](../notes/decisions.md).
+
+### 0.8 Resolved 2026-08-15
+
+**D67** — a full consistency audit of this document against source
+found 13 inconsistencies, one of them a real design gap that would have
+bitten 6A.1 on day one: §3.1's `AppEntry::launch` was a bare
+`void (*)()` with no context, which cannot serve §4.5's SD-discovered
+apps (they differ only by path, and don't exist until the boot scan
+runs). **Resolved: two tiers, one list** — compiled-in apps registered
+explicitly from `main.cpp`, SD apps appended by `scan_sd_apps()`, with
+`AppKind`/`path` on the entry and `launch` taking `const AppEntry&`.
+§3.1, §4.5, §3.4, §1.1 and 6A.1's task row are all updated. The other
+12 were drift (stale heap/hours/bss figures, an unresolved-P6-5
+paragraph left standing after D66, `calc` examples that violated the
+real single-letter variable model, a §2 file list never updated for
+D54/D55) — all corrected in place; see D67 for the itemized list.
+**Nothing here changes 6A's scope or the D64 build order.**
 
 ---
 
@@ -212,8 +243,15 @@ the [parity doc](../notes/ti-parity.md)'s "deliberately not
 chasing TI" list, which already rules this out). It's an in-firmware
 launcher screen plus a lightweight registration table: closer to "a
 second menu of screens, entered from Home" than a real OS with
-dynamically loaded code. Every app in scope here ships compiled into the
-same firmware image as everything else.
+dynamically loaded code. **No app in scope here loads executable code
+into the running firmware** — the 6A framework itself, and every app
+6A/6C ship, are compiled into the same image as everything else. The
+SD-discovered tier (§4.5) is not an exception to that: those are
+MicroPython *source* files interpreted by an interpreter that is itself
+compiled in, which is why they carry none of §9.1's relocator/ABI
+problems. §3.4's stretch `.uf2` apps are the one case that runs
+genuinely foreign machine code, and they do it by rebooting into it,
+never alongside the calculator.
 
 ---
 
@@ -223,15 +261,35 @@ same firmware image as everything else.
 src/
 ├── apps/
 │   ├── launcher_screen.hpp / .cpp  # NEW (6A): app launcher/menu screen
+│   ├── notepad_screen.hpp / .cpp   # NEW (6C): Notepad — thin TextEditorWidget
+│   │                                 #   wrapper (§3.6, D54)
+│   ├── files_screen.hpp / .cpp     # EXISTS (6A.6/6A.7): generalized in place
+│   │                                 #   into FileBrowserScreen (§3.7, D55) —
+│   │                                 #   not a new file, renamed contents
 │   └── program_screen.hpp / .cpp   # NEW (6B): MicroPython editor + runner
 │                                     #   (moved here from the old 4E plan)
+├── ui/
+│   └── text_editor_widget.hpp/.cpp # NEW (6A): shared line-numbered editor
+│                                     #   widget (§3.5, D54) — Notepad and the
+│                                     #   Python editor each own an instance
 ├── platform/
-│   └── app_registry.hpp / .cpp     # NEW (6A): app registration table + lifecycle
+│   ├── app_registry.hpp / .cpp     # NEW (6A): app registration table (both
+│   │                                 #   tiers, §3.1) + lifecycle
+│   ├── gpio.hpp / .cpp             # NEW (6B, §4.6 entry 2): GPIO/ADC HAL —
+│   │                                 #   only if sensor logging is picked up
+│   └── sound.hpp / .cpp            # NEW (§4.6 entry 4): tone HAL over the
+│                                     #   vendored pwm_sound driver — only if
+│                                     #   the sound demo is picked up
 └── scripting/
     ├── micropython_embed.hpp/.cpp  # NEW (6B): MicroPython interpreter wrapper
     ├── calc_module.hpp / .cpp      # NEW (6B): Python 'calc' module (C++ bindings)
     └── script_runner.hpp / .cpp    # NEW (6B): load + execute .py from SD card
 ```
+
+The `platform/gpio` and `platform/sound` rows are **conditional** —
+they belong to §4.6 candidate entries that are pressure-test material,
+not committed 6A/6B/6C tasks (§5). Everything else above is committed
+work.
 
 ---
 
@@ -239,20 +297,52 @@ src/
 
 ### 3.1 App registry
 
+**Two tiers, one list (decided 2026-08-15).** Compiled-in apps
+(Notepad, the Python program editor, anything else built into this
+firmware image) are **statically registered at boot**. SD-discovered
+apps — MicroPython scripts (§4.5) and, if §3.4 is ever built, compiled
+`.uf2` apps — are **populated dynamically** from the boot-time SD scan.
+Both tiers land in the same table and the launcher walks it with one
+`count()`/`get()` loop; only `kind` and where the entry's strings live
+differ.
+
 ```cpp
 namespace platform {
 
-// One entry per launchable app. Apps are statically registered at boot
-// (compiled-in, not dynamically loaded — see §1.1).
+enum class AppKind {
+    kBuiltIn,  // compiled into this firmware image; launch pushes a screen
+    kScript,   // SD-discovered MicroPython app (§4.5), path = entry .py
+    kNative,   // SD-discovered compiled .uf2 (§3.4, stretch), path = .uf2
+};
+
+// One entry per launchable app, static or SD-discovered.
 struct AppEntry {
-    const char* name;          // "MicroPython", shown in the launcher
-    const char* icon_glyph;    // optional single-glyph icon (font slot map)
-    void (*launch)();          // hands control to ui::ScreenManager
+    const char* name;        // "Notepad", shown in the launcher
+    const char* icon_glyph;  // optional single-glyph icon (font slot map)
+    AppKind kind = AppKind::kBuiltIn;
+
+    // kScript/kNative: the SD path this entry launches. kBuiltIn: nullptr.
+    // For SD entries this points into the permanent SdAppManifest table
+    // (§4.5), never into scan-time scratch — the registry stores the
+    // pointer, not a copy.
+    const char* path = nullptr;
+
+    // Takes the entry so one thunk can serve every SD app: kScript's
+    // calls PythonInterpreter::exec_file(self.path), kNative's flashes
+    // and reboots into self.path. kBuiltIn entries ignore the argument
+    // and just hand control to ui::ScreenManager.
+    void (*launch)(const AppEntry& self);
 };
 
 class AppRegistry {
 public:
+    // Tier 1 — compiled-in apps, called at boot before the scan.
     static void register_app(const AppEntry& entry);
+    // Tier 2 — SD-discovered apps, appended by scan_sd_apps() (§4.5).
+    // Separated only so a failed/absent SD card can never disturb the
+    // built-in entries; both tiers read back through count()/get().
+    static bool register_sd_app(const AppEntry& entry);
+
     static int count();
     static const AppEntry* get(int index);
 };
@@ -260,11 +350,20 @@ public:
 }  // namespace platform
 ```
 
-Registration happens once at boot (`main.cpp`, alongside the existing
-catalog/screen-manager setup) — each app's translation unit calls
-`AppRegistry::register_app` for itself, the same pattern the function
-catalog already uses to stay a single source of truth (README: *"function
-catalog driven by the same table the parser registers from"*).
+Why the entry is passed to `launch` rather than each app supplying a
+bare `void(*)()`: §4.5's SD apps are all launched the same way and
+differ only by path, so a stateless function pointer would need one
+generated thunk per discovered app — which isn't possible for entries
+that don't exist until the SD scan runs. Passing `self` keeps the whole
+dynamic tier on two shared thunks.
+
+Tier-1 registration happens once at boot, from `main.cpp` alongside the
+existing catalog/screen-manager setup — an explicit list of
+`register_app` calls, not static-initializer self-registration, so the
+launcher's ordering is visible in one place and doesn't depend on
+translation-unit init order. Tier 2 is appended immediately after, by
+`scan_sd_apps()` (§4.5), so built-in apps always sort ahead of
+SD-discovered ones and a missing card changes nothing above it.
 
 ### 3.2 Launcher screen
 
@@ -304,7 +403,7 @@ Promoted here from a deferred-future-phase candidate on 2026-07-21 (D34
 follow-up) once it became clear this can plausibly appear as **a third
 `AppEntry` kind, selected from the same launcher as everything else** —
 not a separate reboot-into-a-different-menu experience. Explicitly
-**stretch**: not part of 6A's committed 14 hrs, attempted only if there's
+**stretch**: not part of 6A's committed 31 hrs (§5), attempted only if there's
 appetite after the core sub-phase ships, same status as the old
 `program_screen`'s "syntax highlighting is a stretch goal."
 
@@ -313,7 +412,10 @@ appetite after the core sub-phase ships, same status as the old
 no shared-ABI table with the running calculator firmware (it never runs
 concurrently with it, see §9.1 for why that matters). A manifest entry
 (§4.5's format, extended with `type=native`) points at the `.uf2` file
-on SD instead of a `.py` entry script. Selecting it in the launcher:
+on SD instead of a `.py` entry script — registered into §3.1's tier-2
+list as `AppKind::kNative`, `path` pointing at the `.uf2`, so the
+launcher lists and selects it identically to a Python app. Selecting it
+in the launcher:
 
 1. Parses the `.uf2` directly off the SD card — UF2 is a simple,
    well-specified block format (512-byte self-describing blocks: magic
@@ -325,8 +427,16 @@ on SD instead of a `.py` entry script. Selecting it in the launcher:
    relocatable blob" that in-process loading would need (§9.1).
 2. Writes the parsed payload into a **reserved app-boot flash region**,
    using the Pico SDK's flash write primitives (code executing this step
-   must run from RAM, not flash, while flash is being written — the same
-   constraint this project already documents for other flash operations).
+   must run from RAM, not flash, while flash is being written, with
+   interrupts and the second core quiesced). **This project has no
+   existing flash-write code to model that on** — confirmed 2026-08-15:
+   zero hits for `flash_range_program`/`flash_range_erase`/
+   `hardware/flash` anywhere in `src/`, `drivers/` or `docs/`, because
+   all persistence to date is SD-card I/O through `platform::Storage`.
+   So this is a from-scratch HAL addition on a dual-core board, not an
+   extension of an established pattern — part of why §3.4's estimate is
+   flagged as understated below, and why the feasibility spike puts the
+   flash-write step first.
 3. Triggers a reset. On boot, a small, standalone bootstrap component —
    this project's own, **resolved 2026-08-14 (D66): self-sufficient,
    not `uf2loader`-dependent** — auto-boots whatever's in that region:
@@ -429,12 +539,12 @@ hung/misbehaving app's *common-case* recovery becomes "just power-cycle
 it," not "remember to hold the boot key" — hold-a-key stays as the
 fallback only for the rarer case of a corrupted app-slot write itself.
 
-**Feeds into P6-5, doesn't resolve it**: this reset-reason check needs
-to run as custom decision logic very early in boot — a step that leans
-toward the self-sufficient option, since a generic third-party
+**This is what settled P6-5**: the reset-reason check has to run as
+custom decision logic very early in boot, and a generic third-party
 bootloader wasn't designed with this project's specific "app slot vs.
-calculator" concept and may not expose a hook for it. Not a resolution
-of P6-5, just a new consideration for whichever way it's decided.
+calculator" concept — it may expose no hook for it at all. That
+argument is what carried P6-5 to *self-sufficient* (D66, above); it is
+no longer an open consideration.
 
 **Open questions before implementation**:
 
@@ -670,11 +780,21 @@ result = calc.eval("2 + 3 * sin(pi/4)")
 # reachable through eval(). Prefer this over calc.solve (below) whenever
 # the equation isn't symbolically solvable (§4.6 entry 3, TVM): it takes
 # no named Y-slot, so it can't clobber the user's own Y1-Y7 graphs.
-i_rate = calc.eval("solve(pv+pmt*n+fv, n, 1e-6, 1)")
+# NOTE the single-letter variable rule below — the TVM fields are stored
+# into p/m/f/n first, then r (the periodic rate) is what's solved for.
+rate = calc.eval("solve(p*(1+r)^n + m*((1+r)^n-1)/r + f, r, 1e-6, 1)")
 
-# Variables
-calc.store("A", 42)
-val = calc.recall("A")
+# Variables — names are a SINGLE lowercase letter, 'a'..'z', and the
+# match is case-sensitive (math/engine.hpp:27). Anything else silently
+# maps to Ans, so calc.store("A", ...) does NOT write a; it writes Ans.
+# solve()'s variable argument is stricter still: solve_expr.cpp:92 reads
+# arg[1][0] - 'a', i.e. only the first character, so a multi-character
+# name is not an error — it quietly solves for its first letter.
+# Bindings should reject a name that isn't exactly one char in 'a'..'z'
+# (plus theta/ans) with a Python exception rather than inheriting either
+# silent fallback. Reserve 'i' for the imaginary unit in a+bi mode.
+calc.store("a", 42)
+val = calc.recall("a")
 
 # Graphing
 calc.plot("sin(x)", color="blue")
@@ -834,11 +954,13 @@ On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus
 
 **A data point from §4.6's periodic-table walkthrough**: a ~118-record
 dataset parsed into Python objects (dicts/lists from `json.loads`) is a
-meaningful, non-disqualifying slice of the Pico 1's 48 KB budget —
+meaningful, non-disqualifying slice of the Pico 1's **40 KB** heap
+(D61 — note this paragraph's budget is the *heap*, not the ~48 KB
+total-SRAM-impact row above, which is 40 KB heap + 8 KB C stack) —
 rough order tens of bytes/object overhead plus string data likely lands
 in the low single-digit KB, but this is an estimate, not a measurement.
 Worth an actual `gc.mem_free()` check once 6B.1 exists, as the first
-real test of "how much of the 48 KB does a modest reference dataset
+real test of "how much of the 40 KB does a modest reference dataset
 actually cost," not just working-variable/script-buffer usage.
 
 ### 4.5 SD-discovered app manifests
@@ -852,9 +974,11 @@ reached through one generic program-editor "load" flow.
 ```cpp
 namespace platform {
 
-// A second, dynamically populated tier of AppRegistry entries (§3.1),
+// Backing storage for §3.1's tier-2 (dynamically populated) entries,
 // scanned once at boot from the SD card. Bounded, no heap allocation —
-// same fixed-capacity-table shape as ArrayStore's slabs.
+// same fixed-capacity-table shape as ArrayStore's slabs. This table is
+// permanent: AppEntry::name/icon_glyph/path point into it, so it must
+// outlive the scan rather than being scan-time scratch.
 struct SdAppManifest {
     char name[24];
     char icon_glyph[8];   // optional, UTF-8 glyph or empty
@@ -862,18 +986,22 @@ struct SdAppManifest {
 };
 
 // Scans /picocalc/apps/*/app.txt (flat key=value: name=, icon=, entry=),
-// populates up to kMaxSdApps entries, registers each with AppRegistry.
-// Malformed manifests are skipped and logged, never fatal.
+// populates up to kMaxSdApps manifest slots, and calls
+// AppRegistry::register_sd_app for each with kind = AppKind::kScript,
+// path = that slot's entry_path. Malformed manifests are skipped and
+// logged, never fatal.
 void scan_sd_apps();
 
-}  // namespace scripting
+}  // namespace platform
 ```
 
-Each discovered entry's `launch()` calls
-`PythonInterpreter::exec_file(entry_path)` — exactly 6B's existing
+Every discovered entry shares one `launch` thunk, which calls
+`PythonInterpreter::exec_file(self.path)` — exactly 6B's existing
 program-runner path (§4.1), just reached from a named launcher tile
-instead of the generic editor's file browser. No new execution model, no
-new failure mode beyond "bad manifest, skip it."
+instead of the generic editor's file browser. That one-thunk-for-all
+shape is why §3.1's `launch` takes the entry rather than being a bare
+`void(*)()`: the paths don't exist until the scan runs. No new
+execution model, no new failure mode beyond "bad manifest, skip it."
 
 ### 4.6 Candidate apps used to pressure-test the `calc` module (running list)
 
@@ -1078,11 +1206,22 @@ the expression language:
   variable — it does not require a named graph Y-slot the way
   `calc.graph_zero` does, so nothing here risks clobbering the user's
   own Y1–Y7 graphs. Reachable today through the already-spec'd
-  `calc.eval()`: `calc.eval("solve(pv+pmt*n+fv, n, 1e-6, 1)")` finds
-  `I%` directly. This is worth calling out in §4.2 itself so a future
-  app author reaches for `solve(...)` inside `calc.eval` rather than
-  `calc.solve`, whose CAS path is the wrong tool for this shape of
-  problem.
+  `calc.eval()`. **The single-letter rule is a real constraint on how a
+  TVM app is written, not a formatting detail**: the seven TI field
+  names (`N`, `I%`, `PV`, `PMT`, `FV`, `P/Y`, `C/Y`) have no direct
+  equivalent — variables are one lowercase char, `'a'..'z'`,
+  case-sensitive (`math/engine.hpp:27`), and `solve()`'s variable
+  argument is read as `arg[1][0] - 'a'` (`solve_expr.cpp:92`), i.e.
+  first character only, so `solve(..., pv, ...)` is not rejected — it
+  silently solves for `p`. So the app maps its fields onto single
+  letters itself (e.g. `p`/`m`/`f`/`n`, with `r` the periodic rate;
+  avoid `i`, which is the imaginary unit in a+bi mode) and keeps the
+  display labels in Python. Solving for the rate then reads
+  `calc.eval("solve(p*(1+r)^n + m*((1+r)^n-1)/r + f, r, 1e-6, 1)")` —
+  bracketed 0-100% per period. This is worth calling out in §4.2 itself
+  so a future app author reaches for `solve(...)` inside `calc.eval`
+  rather than `calc.solve`, whose CAS path is the wrong tool for this
+  shape of problem.
 - **Form UI**: a field grid with arrow-key navigation and in-place edit
   is buildable from already-spec'd primitives (`calc.wait_key`,
   `calc.draw_text`, `calc.input` for the simplest per-field edit shape)
@@ -1140,8 +1279,10 @@ to something that already exists.
   should just forward to them. Volume itself needs no `calc` binding at
   all: per the assembly manual (§4.6 entry 2), there's a physical volume
   knob, analog/hardware-controlled, not software.
-- **New source files this would actually add** (not yet in §2's list,
-  unlike everything else this session): `src/platform/sound.hpp/.cpp`.
+- **New source files this would actually add**:
+  `src/platform/sound.hpp/.cpp` — now carried in §2's list as a
+  conditional row (added 2026-08-15, along with the `ui/` and other
+  rows §2 had drifted behind on).
 
 **Scope decided 2026-08-13**: the demo app stays at the minimal tone
 extension above — monophonic square-wave melodies via `calc.tone`, not
@@ -1369,7 +1510,7 @@ sub-phase changed, only the order they're tackled in.
 
 | # | Task | Est. hrs | Acceptance |
 |---|------|---|---|
-| 6A.1 | `AppRegistry` + static registration pattern | 3 | Apps self-register at boot, `count()`/`get()` work |
+| 6A.1 | `AppRegistry` + both registration tiers (§3.1): explicit `register_app` list at boot for compiled-in apps, `register_sd_app` append point for the 6B.15/6B.16 SD tier | 3 | Built-in apps registered from `main.cpp`, `count()`/`get()` walk one combined list, `AppKind`/`path`/context-carrying `launch` in place |
 | 6A.2 | Launcher screen (list, select, launch) | 5 | Launch a stub app from the launcher |
 | 6A.3 | Screen-ownership handoff + exit-to-launcher convention | 4 | `ESC` from an app returns to launcher, not Home |
 | 6A.4 | Home-screen entry points (D58): dedicated softkey **and** `apps`/`app` typed command, both ship | 2 | Either the softkey or the `apps`/`app` command opens the launcher |
@@ -1448,7 +1589,9 @@ widget, no interpreter, no heap of its own beyond the text buffer.
 
 *(Risks 6 and 7 below were originally numbered this way in phase4-spec.md
 before MicroPython moved here — numbering kept for continuity with any
-existing cross-references.)*
+existing cross-references. Risks 10 and 11 are this document's own,
+numbered to continue that sequence rather than restart it; there is no
+Risk 8 or 9 here, and the gap is deliberate, not a dropped entry.)*
 
 ### Risk 6: MicroPython heap too small on Pico 1
 
@@ -1497,7 +1640,7 @@ P4-4/P4-5, renumbered into this document.)*
 | # | Question | Options | When |
 |---|----------|---------|------|
 | P6-1 | Python heap: static at boot or lazy on first use? | **Resolved 2026-08-13 (D57): lazy** — allocated on entering the program/app screen, freed on leaving (matches §4.4/§6's prose, now formalized) | 6B implementation |
-| P6-2 | `calc.plot()` from Python: immediate graph switch or buffered? | Immediate vs. buffered | 6B implementation |
+| P6-2 | `calc.plot()` from Python: immediate graph switch or buffered? | Immediate vs. buffered. **Still open** — inherited from phase4-spec's P4-5 and never revisited. Overlaps P6-15 (same call, adjacent semantics): decide the two together, since "buffered until `show_graph()`" and "which slot, cleared or not" jointly define what a script's plotting actually does | 6B.6, with P6-15 |
 | P6-3 | Launcher entry point: dedicated Home softkey, or typed-command-only like `lists`/`stats`? | **Resolved 2026-08-13 (D58): both** — a softkey and the `apps`/`app` command ship together | 6A implementation |
 | P6-4 | Does leaving an app via `HOME` (not `ESC`) skip the launcher entirely, or route through it? | **Resolved 2026-08-13 (D58): skips it** — `HOME` keeps its existing system-wide short-circuit-to-Home behavior unchanged; only `ESC` routes through the launcher | 6A implementation |
 | P6-5 | §3.4 compiled apps: depend on `uf2loader` being installed, or make the calculator self-sufficient for the flash-write/reboot step? | **Resolved 2026-08-14 (D66): self-sufficient.** `uf2loader` demoted to a purely optional, user-installed, manually-invoked recovery tool — never depended upon by the automatic boot path. Surfaced two corrections in the process: bare `watchdog_caused_reboot()` is ambiguous (needs a dedicated scratch-register marker, matching this codebase's existing `g_crash.magic`/`kBulkTestMarker` pattern); the bootstrap must be a genuinely separate, permanent component, not logic inside the calculator's own `main()` — §3.4's ~25-35 hr estimate predates this and is likely understated | Resolved; bootstrap design itself still owed at §3.4 implementation |
@@ -1510,7 +1653,7 @@ P4-4/P4-5, renumbered into this document.)*
 | P6-12 | §4.6 entry 2: which specific sensors/protocols to support | **Resolved 2026-08-14 (D63)**, against the user's actual sensor box: **DHT11**, **DS18B20**, assorted **LM393**-comparator boards. LM393 needs only the existing generic primitives plus a new `calc.adc_read(pin)`; DHT11/DS18B20 get dedicated `calc.dht11_read`/`calc.ds18b20_read` C++ bindings — single-wire timing plus this project's GC-pause exposure make pure-Python glue unreliable for those two specifically | §4.6 entry 2 implementation, if/when picked up |
 | P6-13 | §4.6 entry 4 (sound demo): playing an arbitrary tone needs one new public entry point in the vendored `pwm_sound.h`/`.c` (the ISR already computes arbitrary frequency/duration internally; only the enum-limited public API is missing it) — is editing vendored driver code acceptable here, given D-prelude-1 treats `drivers/` as read-only third-party, wrapped rather than modified? | **Resolved 2026-08-14 (D62): yes** — `drivers/README.md`'s own policy already documents this exact exception (minimal patch, recorded under Local modifications), matching the D51/tinyexpr precedent. D7's usual answer (reimplement in the wrapper) doesn't apply — the tone state is `static`/file-private to `pwm_sound.c` | §4.6 entry 4 implementation |
 | P6-14 | §3.4: does a real power-cycle actually deassert `PICO_EN` (POR on the Pico), confirming `watchdog_caused_reboot()` reliably distinguishes "user power-cycled" from "calculator deliberately handed off to an app"? | **Resolved 2026-08-14 (D65), hardware-confirmed on the Pico 1**: yes — `watchdog_caused_reboot()` read `false` after a genuine physical power-cycle and `true` after a non-power reboot. New permanent diagnostic in `main.cpp` (`boot: watchdog_caused_reboot=%d`, 30 s heartbeat) | Resolved |
-| P6-15 | §4.6 entry 6: `calc.plot()` writes into one of the real, persisted Y1-Y7 slots (`graph::GraphState`, `kFunctionSlots = 7`) — same shared-state model as `calc.store`/`recall` touching real variables. Not yet specified: does the first `calc.plot()` call in a script clear existing Y-slots first, append to the next free one, or something else? What happens on a 9th call, or if all 7 are already in use by the user's own graphs? | Auto-clear-on-first-call (predictable, but silently drops the user's own Y1-Y7 the moment a script plots anything) vs. explicit slot argument (`calc.plot(expr, slot=1, ...)`, no silent clobber but pushes bookkeeping onto script authors) vs. append-with-error-on-full (matches `calc.store`'s "touches real state" philosophy most closely, but a script re-run without clearing accumulates stale functions) | 6B.6 implementation |
+| P6-15 | §4.6 entry 6: `calc.plot()` writes into one of the real, persisted Y1-Y7 slots (`graph::GraphState`, `kFunctionSlots = 7`) — same shared-state model as `calc.store`/`recall` touching real variables. Not yet specified: does the first `calc.plot()` call in a script clear existing Y-slots first, append to the next free one, or something else? What happens on a 9th call, or if all 7 are already in use by the user's own graphs? | Auto-clear-on-first-call (predictable, but silently drops the user's own Y1-Y7 the moment a script plots anything) vs. explicit slot argument (`calc.plot(expr, slot=1, ...)`, no silent clobber but pushes bookkeeping onto script authors) vs. append-with-error-on-full (matches `calc.store`'s "touches real state" philosophy most closely, but a script re-run without clearing accumulates stale functions). **Decide alongside P6-2** — same call, adjacent semantics | 6B.6 implementation |
 
 ---
 
@@ -1551,7 +1694,8 @@ compounding reasons:
 
 1. **The SD card isn't executable memory** — a loaded app has to be
    staged into RAM or a reserved on-chip flash partition first (RAM
-   competes with Pico 1's already-tight ~188.8 KB/264 KB bss; flash
+   competes with Pico 1's already-tight bss+data — 210,764 B of 264 KB
+   as measured 2026-08-14, §0.1; flash
    staging needs a homegrown write-verify-activate protocol, since a
    partial write from power loss mid-flash can corrupt that partition).
 2. **Position-independent code, or a real relocator** — either every

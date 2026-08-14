@@ -18,6 +18,80 @@ Format:
 
 ---
 
+## D67: `AppRegistry` is two tiers, and `launch` carries its entry — plus a Phase 6 spec consistency pass
+
+**Date**: 2026-08-15
+**Status**: Accepted
+**Context**: A consistency audit of `phase6-spec.md` (1,743 lines, read
+in full and cross-checked against source) found 13 inconsistencies, one
+of which was a real design gap rather than drift. §3.1 declared
+`void (*launch)();` — a bare function pointer with no context — and
+described apps as *"statically registered at boot (compiled-in, not
+dynamically loaded)"*. §4.5 then specified a *"second, dynamically
+populated tier"* of SD-discovered MicroPython apps, each of which
+*"registers with AppRegistry"* and whose `launch()` must call
+`exec_file(entry_path)`. A stateless function pointer cannot know which
+path, and entries that don't exist until the SD scan runs cannot have a
+thunk generated per app. §3.4's stretch `.uf2` apps have the same
+shape. §1.1's *"Every app in scope here ships compiled into the same
+firmware image"* contradicted §4.5 outright. 6A.1 is the literal next
+task, so the signature had to be settled before `app_registry.hpp` gets
+written.
+**Decision**: **Two tiers, one list.** Compiled-in apps (Notepad, the
+Python program editor) are statically registered at boot via an
+explicit `register_app` list in `main.cpp`. SD-discovered apps —
+MicroPython scripts (§4.5) and, if §3.4 is built, compiled `.uf2` apps
+— are appended dynamically by `scan_sd_apps()` through a separate
+`register_sd_app` entry point. Both read back through one
+`count()`/`get()` loop. `AppEntry` gains `AppKind {kBuiltIn, kScript,
+kNative}` and a `const char* path`, and `launch` becomes
+`void (*)(const AppEntry& self)` so the entire dynamic tier runs on two
+shared thunks. SD entries' strings point into the permanent
+`SdAppManifest` table, never scan-time scratch.
+**Rationale**: Passing `self` is the smallest change that makes §4.5
+implementable at all — the alternative (a per-app generated thunk) is
+impossible for entries discovered at runtime, and a registry-side
+`void* user_data` is the same idea with less type safety. Splitting
+registration into two calls rather than one keeps a failed or absent SD
+card from being able to disturb the built-in entries, and fixes
+built-in apps ahead of SD ones in launcher order for free. Explicit
+`register_app` calls in `main.cpp` were chosen over static-initializer
+self-registration (which §3.1's prose had ambiguously implied
+*alongside* "registration happens in main.cpp" — the two are different
+patterns) so launcher ordering is visible in one place and doesn't
+depend on translation-unit init order.
+**Tradeoffs**: `AppEntry` grows from 3 fields to 5 and `launch` takes
+an argument every `kBuiltIn` app ignores — a small tax on the common
+case to make the uncommon one possible. Risk 10 (over-engineering 6A)
+argues against speculative generality, but this isn't speculative:
+§4.5's SD tier is committed 6B scope (6B.15/6B.16), not a hypothetical
+second consumer.
+**Also fixed in the same pass** (drift, not design): §3.4 cited a
+flash-write precedent this project does not have (zero hits for
+`flash_range_program`/`flash_range_erase`/`hardware/flash` in `src/`,
+`drivers/` or `docs/` — all persistence to date is SD I/O), and still
+carried a paragraph declaring P6-5 unresolved three places after D66
+resolved it; §4.2's variable and TVM examples violated the actual
+variable model (`calc.store("A", …)` writes **Ans**, not `a`, per
+`engine.hpp:27`; `solve(pv+pmt*n+fv, n, …)` used multi-letter names
+that `solve_expr.cpp:92` silently truncates to their first character,
+solved for `n` while assigning to `i_rate`, claimed to find `I%`, and
+used a TVM identity containing no interest term at all); §4.4's
+periodic-table paragraph and the preamble still said a 48 KB heap after
+D61 cut it to 40 KB; §3.4 still said 6A's committed total was 14 hrs
+(31 since D54/D55); §9.1 quoted 188.8 KB of bss against §0.1's measured
+205.8 KB; §4.5's `namespace platform` block closed with
+`// namespace scripting`; §2's file list had never been updated for
+D54/D55's widget, Notepad or file browser, while §4.6 entry 4 asserted
+it was current; §0.5 claimed no open policy calls while P6-2 and P6-15
+were both undecided; and the preamble described Phases 5.1/5.2 as still
+pending.
+**Revisit when**: 6A.1 is implemented — if `kNative` never gets built
+(§3.4 is stretch), `AppKind` collapses to two values, but `path` and
+the context-carrying `launch` are still required by §4.5 alone.
+
+---
+
 ## D66: P6-5 resolved — self-sufficient bootstrap, no `uf2loader` dependency; two corrections this surfaced
 
 **Date**: 2026-08-14
