@@ -18,6 +18,64 @@ Format:
 
 ---
 
+## D68: P6-15 resolved — `calc.plot()` clears the Y-slots on a script's first plot; P6-2 follows as buffered
+
+**Date**: 2026-08-15
+**Status**: Accepted
+**Context**: P6-15 (raised by §4.6 entry 6, D-era 2026-08-14) asked what
+`calc.plot()` does to `graph::GraphState`'s seven real, persisted Y1-Y7
+slots — clear first, append to the next free one, or take an explicit
+slot argument — and what happens when a script plots more functions than
+there are slots. §4.2's own example plots twice with no slot argument
+and no stated clearing behavior, so the question was user-facing rather
+than an implementation detail. P6-2 (inherited from phase4-spec's P4-5,
+never revisited) asked the adjacent question: does `calc.plot()` switch
+to the graph immediately, or buffer until `calc.show_graph()`. The
+2026-08-15 consistency pass flagged the two as needing one decision.
+**Decision**: **Writing to function slots clears.** The **first**
+`calc.plot()` of a script run clears all seven Y-slots, then writes
+Y1; subsequent calls in the same run append to Y2, Y3, … An **eighth**
+call raises a Python exception rather than wrapping or silently
+dropping. The "have I cleared yet" latch resets at each top-level
+`exec()`/`exec_file()` entry, so re-running a script from the editor
+without leaving the program screen starts clean rather than
+accumulating stale functions.
+
+**P6-2 follows from this as buffered** — `calc.plot()` is a *state
+write*, not a display action; it does not switch screens. `show_graph()`
+remains the explicit "now display it" call. This was not separately
+specified by the user; it is the reading the clearing decision forces,
+and §4.2's existing example already implies it (a `show_graph()` call
+after two `plot()` calls is redundant under immediate-switch
+semantics). Flagged here so it can be corrected cheaply if the intent
+was otherwise.
+**Rationale**: Clearing is the predictable option and the only one that
+keeps a script's output a function of the script alone — under
+append-to-next-free, the same script produces different graphs
+depending on what the user happened to have in Y1-Y7, and a re-run
+accumulates. An explicit `slot=` argument avoids the clobber but pushes
+bookkeeping onto every script author for a case most scripts don't
+care about. Clearing also makes the 7-slot limit legible: a script gets
+exactly seven, always, rather than "however many the user left free."
+**Tradeoffs**: **This silently destroys the user's own Y1-Y7 the moment
+any script plots anything**, and because `graph::GraphState` is
+persisted (`save_graph_state()`), the loss survives a power cycle — it
+is not confined to the script's run. That is a real cost and was chosen
+knowingly. It is consistent with the shared-state model `calc.store`/
+`calc.recall` already have (a script that stores leaves a variable
+changed), but the blast radius is larger: seven expressions rather than
+one scalar. **This must be stated plainly in app-author-facing and
+user-facing docs** — "running a script that plots will replace your Y=
+functions" — not left to be discovered. A future opt-in save/restore
+(snapshot the slots on script entry, offer to restore on exit) is the
+obvious mitigation if this bites in practice; deliberately not scoped
+into 6B.6.
+**Revisit when**: A real script gets run against real user graphs and
+the clobber is felt. If it is, the mitigation above is additive — it
+does not change the semantics decided here.
+
+---
+
 ## D67: `AppRegistry` is two tiers, and `launch` carries its entry — plus a Phase 6 spec consistency pass
 
 **Date**: 2026-08-15
@@ -86,6 +144,11 @@ D54/D55's widget, Notepad or file browser, while §4.6 entry 4 asserted
 it was current; §0.5 claimed no open policy calls while P6-2 and P6-15
 were both undecided; and the preamble described Phases 5.1/5.2 as still
 pending.
+**Confirmed 2026-08-15**: the `main.cpp` explicit-list choice was
+flagged to the user as the one part of this decision made without them,
+and confirmed — compiled-in apps aren't expected to grow significantly
+or often, so a hand-maintained registration list is not a burden worth
+automating away with static initializers.
 **Revisit when**: 6A.1 is implemented — if `kNative` never gets built
 (§3.4 is stretch), `AppKind` collapses to two values, but `path` and
 the context-carrying `launch` are still required by §4.5 alone.

@@ -134,19 +134,15 @@ final margin once 6A is real.
 
 ### 0.5 Open policy calls (not hardware-gated, just not decided)
 
-**None gate the start of 6A.** Two §8 questions are still open, both
-scoped to 6B and both about `calc.plot()`:
-
-- **P6-15** — which Y-slot `calc.plot()` writes, and whether the first
-  call clears. Needs deciding **before 6B.6**, not before 6A starts.
-- **P6-2** — whether `calc.plot()` switches to the graph immediately or
-  buffers until `show_graph()`. Carried over from phase4-spec's P4-5 and
-  never revisited; it overlaps P6-15 enough that **the two should be
-  decided together in one pass before 6B.6**, rather than P6-2 being
-  rediscovered mid-implementation.
-
-The last item that genuinely belonged in this section (P6-12, sensor
+**None open.** The last two — **P6-15** (which Y-slot `calc.plot()`
+writes, and whether it clears) and **P6-2** (immediate switch vs.
+buffered), both scoped to 6B.6 — were resolved together on 2026-08-15
+by **D68**: writing to function slots clears, and `plot()` is a state
+write that doesn't switch screens. See §0.8. Before that, P6-12 (sensor
 catalog) was resolved 2026-08-14 — see §0.7.
+
+**Every question in §8 is now answered.** What remains before 6B.6 is
+implementation, not decisions.
 
 ### 0.6 Already resolved this session (2026-08-13) — listed so they aren't re-litigated
 
@@ -194,6 +190,21 @@ paragraph left standing after D66, `calc` examples that violated the
 real single-letter variable model, a §2 file list never updated for
 D54/D55) — all corrected in place; see D67 for the itemized list.
 **Nothing here changes 6A's scope or the D64 build order.**
+D67's choice of explicit `register_app` calls in `main.cpp` over
+static-initializer self-registration was **confirmed by the user the
+same day**, on the grounds that compiled-in apps aren't expected to
+grow significantly or often — so the hand-maintained list is not a
+burden that needs automating away.
+
+**D68** — the last two open §8 questions, both about `calc.plot()`,
+resolved together: **writing to function slots clears** (first `plot()`
+of a script run clears all seven Y-slots then writes Y1, later calls
+append, an eighth raises), and P6-2 follows as **buffered** (`plot()`
+writes state, `show_graph()` displays). §8 now has no open questions at
+all. **Carries a documentation obligation**: a script that plots
+replaces the user's own Y= functions permanently, since graph state is
+persisted — this needs saying in user-facing and app-author-facing
+docs, not just here.
 
 ---
 
@@ -797,6 +808,12 @@ calc.store("a", 42)
 val = calc.recall("a")
 
 # Graphing
+# plot() is a STATE WRITE into the real, persisted Y1-Y7 slots, not a
+# display action — it does not switch screens (P6-2/D68). The FIRST
+# plot() of a script run CLEARS all seven slots, then writes Y1; the
+# calls below land in Y1 and Y2. An 8th plot() raises. This means
+# running a script that plots REPLACES the user's own Y= functions,
+# permanently (graph state is persisted) — say so in app-author docs.
 calc.plot("sin(x)", color="blue")
 calc.plot("cos(x)", color="red")
 calc.window(-10, 10, -2, 2)
@@ -1354,17 +1371,22 @@ all (entry 3 deliberately avoided it, preferring `solve()` inside
   same way a script that stores leaves a variable changed, and this is
   worth stating plainly in any app-author-facing docs rather than
   leaving it to be discovered.
-- **New requirement surfaced, recorded as P6-15 (§8)**: §4.2's
-  `calc.plot()` examples show two calls in a row
-  (`calc.plot("sin(x)", ...)`, `calc.plot("cos(x)", ...)`) with no slot
-  argument and no stated clearing behavior. With only 7 real slots
-  that persist and that the user's own graphs also live in, "which
-  slot, and does it clear first" is user-facing behavior that needs
-  deciding before 6B.6, not an implementation detail — see P6-15 for
-  the options.
+- **New requirement surfaced as P6-15 (§8) — resolved 2026-08-15
+  (D68): writing to function slots clears.** §4.2's `calc.plot()`
+  examples showed two calls in a row with no slot argument and no
+  stated clearing behavior. With only 7 real slots that persist and
+  that the user's own graphs also live in, "which slot, and does it
+  clear first" was user-facing behavior, not an implementation detail.
+  Settled: the **first** `plot()` of a script run clears all seven
+  slots and writes Y1, later calls append, an eighth raises. **The
+  bullet above is now a documentation requirement, not just an
+  observation** — a script that plots doesn't merely leave Y1-Y7
+  *changed*, it replaces them wholesale, and `save_graph_state()`
+  persists that. P6-2 followed as **buffered**: `plot()` writes state
+  and does not switch screens.
 - **Everything else already sufficient**: `calc.window`/`show_graph` as
-  specced, `calc.graph_zero`/`graph_max` need no changes once P6-15
-  settles which slot they're pointed at.
+  specced; `calc.graph_zero`/`graph_max` need no changes — under D68
+  they point at Y1..Yn in the order the script plotted them.
 
 ### 4.7 Re-verified against the unified evaluator (2026-08-13, closes issue #27)
 
@@ -1528,7 +1550,7 @@ sub-phase changed, only the order they're tackled in.
 | 6B.3 | `calc` module: eval, variables, store/recall — `calc.eval()` wraps `cas::evaluate_home` → `solveexpr::contains_solve`/`substitute` → `unified::evaluate_home` (§4.7), eager-copies list/matrix results, reentrancy-guarded | 6 | `calc.eval("sin(pi/4)")` correct |
 | 6B.4 | `calc` module: CAS bindings (incl. complex solve) | 4 | `calc.solve("x^2+1=0","x")` → `["i","-i"]` |
 | 6B.5 | `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = 5 |
-| 6B.6 | `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — P6-15 (§8, §4.6 entry 6) must be settled first, since `plot`'s Y-slot semantics are unspecified | 4 | `calc.graph_zero`, `graph_integral` work |
+| 6B.6 | `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — Y-slot semantics settled by D68 (clear-on-first-plot, append after, raise on the 8th, buffered until `show_graph()`); build to that, no open question left | 4 | `calc.graph_zero`, `graph_integral` work; a script's first `plot()` clears Y1-Y7, its 8th raises |
 | 6B.7 | `calc` module: matrix bindings | 3 | Create/multiply/invert from Python |
 | 6B.8 | `calc` module: display primitives | 4 | Script draws graphics |
 | 6B.9 | `calc` module: keyboard input — blocking (`wait_key`, `input`) and non-blocking (`key_pressed`, `key_held`, §4.6 entry 5) | 3 | Read keys, text input, poll without blocking |
@@ -1640,7 +1662,7 @@ P4-4/P4-5, renumbered into this document.)*
 | # | Question | Options | When |
 |---|----------|---------|------|
 | P6-1 | Python heap: static at boot or lazy on first use? | **Resolved 2026-08-13 (D57): lazy** — allocated on entering the program/app screen, freed on leaving (matches §4.4/§6's prose, now formalized) | 6B implementation |
-| P6-2 | `calc.plot()` from Python: immediate graph switch or buffered? | Immediate vs. buffered. **Still open** — inherited from phase4-spec's P4-5 and never revisited. Overlaps P6-15 (same call, adjacent semantics): decide the two together, since "buffered until `show_graph()`" and "which slot, cleared or not" jointly define what a script's plotting actually does | 6B.6, with P6-15 |
+| P6-2 | `calc.plot()` from Python: immediate graph switch or buffered? | **Resolved 2026-08-15 (D68): buffered** — `calc.plot()` is a state write into the Y-slots and does not switch screens; `calc.show_graph()` stays the explicit "display it now" call. Follows from P6-15's clearing decision (same row below) rather than being separately specified | 6B.6 implementation |
 | P6-3 | Launcher entry point: dedicated Home softkey, or typed-command-only like `lists`/`stats`? | **Resolved 2026-08-13 (D58): both** — a softkey and the `apps`/`app` command ship together | 6A implementation |
 | P6-4 | Does leaving an app via `HOME` (not `ESC`) skip the launcher entirely, or route through it? | **Resolved 2026-08-13 (D58): skips it** — `HOME` keeps its existing system-wide short-circuit-to-Home behavior unchanged; only `ESC` routes through the launcher | 6A implementation |
 | P6-5 | §3.4 compiled apps: depend on `uf2loader` being installed, or make the calculator self-sufficient for the flash-write/reboot step? | **Resolved 2026-08-14 (D66): self-sufficient.** `uf2loader` demoted to a purely optional, user-installed, manually-invoked recovery tool — never depended upon by the automatic boot path. Surfaced two corrections in the process: bare `watchdog_caused_reboot()` is ambiguous (needs a dedicated scratch-register marker, matching this codebase's existing `g_crash.magic`/`kBulkTestMarker` pattern); the bootstrap must be a genuinely separate, permanent component, not logic inside the calculator's own `main()` — §3.4's ~25-35 hr estimate predates this and is likely understated | Resolved; bootstrap design itself still owed at §3.4 implementation |
@@ -1653,7 +1675,7 @@ P4-4/P4-5, renumbered into this document.)*
 | P6-12 | §4.6 entry 2: which specific sensors/protocols to support | **Resolved 2026-08-14 (D63)**, against the user's actual sensor box: **DHT11**, **DS18B20**, assorted **LM393**-comparator boards. LM393 needs only the existing generic primitives plus a new `calc.adc_read(pin)`; DHT11/DS18B20 get dedicated `calc.dht11_read`/`calc.ds18b20_read` C++ bindings — single-wire timing plus this project's GC-pause exposure make pure-Python glue unreliable for those two specifically | §4.6 entry 2 implementation, if/when picked up |
 | P6-13 | §4.6 entry 4 (sound demo): playing an arbitrary tone needs one new public entry point in the vendored `pwm_sound.h`/`.c` (the ISR already computes arbitrary frequency/duration internally; only the enum-limited public API is missing it) — is editing vendored driver code acceptable here, given D-prelude-1 treats `drivers/` as read-only third-party, wrapped rather than modified? | **Resolved 2026-08-14 (D62): yes** — `drivers/README.md`'s own policy already documents this exact exception (minimal patch, recorded under Local modifications), matching the D51/tinyexpr precedent. D7's usual answer (reimplement in the wrapper) doesn't apply — the tone state is `static`/file-private to `pwm_sound.c` | §4.6 entry 4 implementation |
 | P6-14 | §3.4: does a real power-cycle actually deassert `PICO_EN` (POR on the Pico), confirming `watchdog_caused_reboot()` reliably distinguishes "user power-cycled" from "calculator deliberately handed off to an app"? | **Resolved 2026-08-14 (D65), hardware-confirmed on the Pico 1**: yes — `watchdog_caused_reboot()` read `false` after a genuine physical power-cycle and `true` after a non-power reboot. New permanent diagnostic in `main.cpp` (`boot: watchdog_caused_reboot=%d`, 30 s heartbeat) | Resolved |
-| P6-15 | §4.6 entry 6: `calc.plot()` writes into one of the real, persisted Y1-Y7 slots (`graph::GraphState`, `kFunctionSlots = 7`) — same shared-state model as `calc.store`/`recall` touching real variables. Not yet specified: does the first `calc.plot()` call in a script clear existing Y-slots first, append to the next free one, or something else? What happens on a 9th call, or if all 7 are already in use by the user's own graphs? | Auto-clear-on-first-call (predictable, but silently drops the user's own Y1-Y7 the moment a script plots anything) vs. explicit slot argument (`calc.plot(expr, slot=1, ...)`, no silent clobber but pushes bookkeeping onto script authors) vs. append-with-error-on-full (matches `calc.store`'s "touches real state" philosophy most closely, but a script re-run without clearing accumulates stale functions). **Decide alongside P6-2** — same call, adjacent semantics | 6B.6 implementation |
+| P6-15 | §4.6 entry 6: `calc.plot()` writes into one of the real, persisted Y1-Y7 slots (`graph::GraphState`, `kFunctionSlots = 7`) — same shared-state model as `calc.store`/`recall` touching real variables. Not yet specified: does the first `calc.plot()` call in a script clear existing Y-slots first, append to the next free one, or something else? What happens on a 9th call, or if all 7 are already in use by the user's own graphs? | **Resolved 2026-08-15 (D68): writing to function slots clears.** The first `calc.plot()` of a script run clears all seven slots then writes Y1; later calls in the same run append to Y2, Y3, …; an eighth raises a Python exception. The latch resets at each top-level `exec()`/`exec_file()`, so a re-run starts clean. Chosen for predictability — a script's output is then a function of the script alone, not of what the user left in Y1-Y7. **Known cost, must be documented user-facing**: this destroys the user's own Y= functions, and `save_graph_state()` makes the loss survive a power cycle | 6B.6 implementation |
 
 ---
 
