@@ -59,6 +59,21 @@ int split_args(const char* s, size_t n, const char** starts, size_t* lens, int m
     return count;
 }
 
+// The split-out arguments of one solve() call. In bss, not on the stack: at
+// 4 x 256 bytes these were the bulk of substitute()'s 1,672-byte frame — the
+// largest single frame in the firmware — and core 0 has 4 KB total.
+//
+// It never mattered on the home screen, which calls substitute from within a
+// few hundred bytes of the main loop. It mattered immediately when 6B.3's
+// calc.eval() started calling the same function from inside the MicroPython
+// VM, already ~1.5 KB deep: the stack ran off the end of SCRATCH_Y into core
+// 1's, which is D48's failure mode exactly (garbage PC, machine hangs).
+//
+// Safe as shared state because eval_solve_call is never nested — substitute
+// resolves solve() calls innermost-first, one at a time, and numeric_solve
+// below it evaluates through tinyexpr, which cannot re-enter here.
+char g_solve_args[4][kMaxLen];
+
 // One solve(inner) call -> numeric literal in num_out.
 bool eval_solve_call(const char* inner, size_t inner_len, char* num_out, size_t num_cap,
                      const char** err) {
@@ -69,7 +84,7 @@ bool eval_solve_call(const char* inner, size_t inner_len, char* num_out, size_t 
         *err = "solve needs (expr, var, guess) or (expr, var, lo, hi)";
         return false;
     }
-    char arg[4][kMaxLen];
+    auto& arg = g_solve_args;
     for (int i = 0; i < count; ++i) {
         char raw[kMaxLen];
         if (lens[i] >= sizeof(raw)) {
