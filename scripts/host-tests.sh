@@ -172,13 +172,15 @@ echo "== Compiling + linking test_units =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_units"
 
-# Phase 6A app framework. No math, no tinyexpr, no cephes — the registry
-# is deliberately free of platform and Screen dependencies.
+# Phase 6A app framework plus 6B.15's manifest parser. No math, no
+# tinyexpr, no cephes — the registry is deliberately free of platform
+# and Screen dependencies, and the parser takes a buffer rather than a
+# path so it never reaches Storage (the I/O half is sd_app_scan.cpp).
 echo "== Compiling + linking test_apps =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra \
     -Isrc \
     tests/host/test_apps.cpp \
-    src/platform/app_registry.cpp \
+    src/platform/app_registry.cpp src/platform/sd_apps.cpp \
     -o "$OUT/test_apps"
 
 # The editor's multi-line buffer, split out from TextEditorWidget so it

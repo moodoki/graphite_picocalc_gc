@@ -97,10 +97,35 @@ int g_key_head = 0;  // next to read
 int g_key_count = 0;
 bool g_esc_seen = false;
 
+// The driver fills KeyEvent::ch for printable ASCII only (keyboard.hpp) —
+// Enter, Backspace, Tab and Del all arrive as 0. A Python script has nothing
+// but `ch` and a raw `code` to work with, so "did they press Enter" was
+// unanswerable without hardcoding an enumerator value on the C side.
+//
+// Resolved HERE, where platform::Key is visible, for the same reason
+// script_key_held's name table is: a table of enum values anywhere else goes
+// quietly wrong the first time the enum gains a member. calc.input() depends
+// on it directly — on hardware 2026-08-16, ENTER simply did nothing, because
+// the loop was waiting for a '\r' the driver never produces.
+char control_char(platform::Key key, char printable) {
+    switch (key) {
+        case platform::Key::kEnter:
+            return '\r';
+        case platform::Key::kBackspace:
+            return '\b';
+        case platform::Key::kTab:
+            return '\t';
+        case platform::Key::kDel:
+            return 127;
+        default:
+            return printable;
+    }
+}
+
 void queue_push(const platform::KeyEvent& ev) {
     CalcKeyEvent e;
     e.code = static_cast<int>(ev.key);
-    e.ch = static_cast<unsigned char>(ev.ch);
+    e.ch = static_cast<unsigned char>(control_char(ev.key, ev.ch));
     e.shift = ev.shift_held ? 1 : 0;
     e.ctrl = ev.ctrl_held ? 1 : 0;
     e.alt = ev.alt_held ? 1 : 0;
@@ -282,10 +307,7 @@ void PythonInterpreter::shutdown() {
     interrupt_pending_ = false;
 }
 
-bool PythonInterpreter::exec(const char* code) {
-    if (!initialized_ || code == nullptr) {
-        return false;
-    }
+void PythonInterpreter::begin_run() {
     interrupt_pending_ = false;
     last_poll_ms_ = platform::uptime_ms();
     // Resets D68's "has this run plotted yet" latch, so a script's graph is
@@ -296,7 +318,35 @@ bool PythonInterpreter::exec(const char* code) {
     g_key_head = 0;
     g_key_count = 0;
     running_script_ = true;
+}
+
+bool PythonInterpreter::exec(const char* code) {
+    if (!initialized_ || code == nullptr) {
+        return false;
+    }
+    begin_run();
     const bool ok = picocalc_mp_exec_str(code) != 0;
+    return end_run(ok);
+}
+
+bool PythonInterpreter::exec_file(const char* path) {
+    if (!initialized_ || path == nullptr) {
+        return false;
+    }
+    begin_run();
+    const int rc = picocalc_mp_exec_file(path);
+    if (rc < 0) {
+        // Distinct from "the script raised": there is no traceback,
+        // because nothing was ever compiled. Say so, or the launcher
+        // just appears to do nothing.
+        static const char msg[] = "cannot read script\n";
+        std::printf("py: cannot read %s\n", path);
+        emit(msg, sizeof(msg) - 1);
+    }
+    return end_run(rc > 0);
+}
+
+bool PythonInterpreter::end_run(bool ok) {
     running_script_ = false;
     // Lists and matrices the run wrote are saved here, once each, rather than
     // on every binding call — D82. Before the collect, so a run that ended by

@@ -1,12 +1,19 @@
 // Host-side tests for the Phase 6A app framework: the two-tier
-// AppRegistry (6A.1, D67). Pure logic, no platform dependency — the
-// registry deliberately holds no Screen*, only a name and a launch fn,
-// which is what makes it testable off-device.
+// AppRegistry (6A.1, D67), and 6B.15's manifest parser on top of it.
+// Pure logic, no platform dependency — the registry deliberately holds
+// no Screen*, only a name and a launch fn, and parse_app_manifest takes
+// a buffer rather than a path, which is what makes both testable
+// off-device.
+//
+// The manifest cases matter here specifically because the alternative
+// is discovering them one bad app.txt at a time, on a board, with an
+// SD card that has to come out to be edited.
 
 #include <cstdio>
 #include <cstring>
 
 #include "platform/app_registry.hpp"
+#include "platform/sd_apps.hpp"
 
 namespace {
 
@@ -161,6 +168,109 @@ void test_capacity_bounds() {
     platform::AppRegistry::clear_sd_apps();
 }
 
+// ---- 6B.15: the app.txt parser ----
+
+bool parse(const char* text, platform::SdAppManifest& out,
+           const char* dir = "/picocalc/apps/finance") {
+    return platform::parse_app_manifest(text, std::strlen(text), dir, out);
+}
+
+void test_manifest_full() {
+    platform::SdAppManifest m = {};
+    check(parse("name=Finance\nicon=$\nentry=main.py\n", m), "full manifest parses");
+    check(std::strcmp(m.name, "Finance") == 0, "name read");
+    check(std::strcmp(m.icon_glyph, "$") == 0, "icon read");
+    check(std::strcmp(m.entry_path, "/picocalc/apps/finance/main.py") == 0,
+          "relative entry resolves against the app dir");
+}
+
+void test_manifest_defaults() {
+    // The common case: a directory, a main.py, and nothing said about
+    // either. Both defaults have to fire for that app to appear at all.
+    platform::SdAppManifest m = {};
+    check(parse("", m), "empty manifest still yields an app");
+    check(std::strcmp(m.name, "finance") == 0, "name defaults to the directory name");
+    check(std::strcmp(m.entry_path, "/picocalc/apps/finance/main.py") == 0,
+          "entry defaults to main.py");
+    check(m.icon_glyph[0] == 0, "icon stays empty when absent");
+
+    platform::SdAppManifest named = {};
+    check(parse("name=Loan Calc\n", named), "name-only manifest parses");
+    check(std::strcmp(named.name, "Loan Calc") == 0, "an embedded space is part of the name");
+    check(std::strcmp(named.entry_path, "/picocalc/apps/finance/main.py") == 0,
+          "entry still defaults when only the name is given");
+}
+
+void test_manifest_whitespace_and_comments() {
+    platform::SdAppManifest m = {};
+    check(parse("# a comment\r\n\r\n  name  =  Finance  \r\n"
+                "\t# indented comment\r\nentry = run.py\r\n",
+                m),
+          "CRLF, blank lines, comments and padding all survive");
+    check(std::strcmp(m.name, "Finance") == 0, "both sides of '=' are trimmed");
+    check(std::strcmp(m.entry_path, "/picocalc/apps/finance/run.py") == 0, "trimmed entry resolves");
+
+    platform::SdAppManifest last = {};
+    check(parse("name=First\nname=Second", last), "no trailing newline is fine");
+    check(std::strcmp(last.name, "Second") == 0, "a repeated key takes the last value");
+}
+
+void test_manifest_case_and_unknown_keys() {
+    platform::SdAppManifest m = {};
+    check(parse("NAME=Finance\nEntry=go.py\nauthor=someone\nversion=2\n", m),
+          "keys match case-insensitively and unknown keys are ignored");
+    check(std::strcmp(m.name, "Finance") == 0, "NAME= is name=");
+    check(std::strcmp(m.entry_path, "/picocalc/apps/finance/go.py") == 0, "Entry= is entry=");
+
+    platform::SdAppManifest junk = {};
+    check(parse("this line has no equals sign\nname=Ok\n", junk),
+          "a line with no '=' is skipped, not fatal");
+    check(std::strcmp(junk.name, "Ok") == 0, "parsing continues past the junk line");
+}
+
+void test_manifest_absolute_entry() {
+    platform::SdAppManifest m = {};
+    check(parse("name=Shared\nentry=/picocalc/programs/shared.py\n", m),
+          "an absolute entry parses");
+    check(std::strcmp(m.entry_path, "/picocalc/programs/shared.py") == 0,
+          "an absolute entry is taken as written, not appended to the dir");
+}
+
+void test_manifest_type_key() {
+    platform::SdAppManifest m = {};
+    check(parse("name=A\ntype=script\n", m), "type=script accepted");
+    check(parse("name=A\ntype=python\n", m), "type=python accepted");
+    check(parse("name=A\ntype=\n", m), "an empty type= is a half-written line, not a claim");
+    // §3.4's native apps do not exist. A manifest claiming to be one
+    // must not be handed to the Python interpreter, which would run the
+    // .uf2 as source and raise something incomprehensible.
+    check(!parse("name=A\ntype=native\n", m), "type=native refused until §3.4 exists");
+}
+
+void test_manifest_truncation_and_limits() {
+    platform::SdAppManifest m = {};
+    check(parse("name=A name far longer than the launcher row can ever show\n", m),
+          "an over-long name truncates rather than failing");
+    check(std::strlen(m.name) == sizeof(m.name) - 1, "truncated to the field width");
+
+    // entry_path is 64 bytes; a dir plus entry that cannot fit has to be
+    // refused, because a silently truncated path would name a file that
+    // either does not exist or — worse — is a different one.
+    char long_dir[80];
+    std::snprintf(long_dir, sizeof(long_dir), "/picocalc/apps/%s",
+                  "a-directory-name-long-enough-to-overflow-the-entry-path-field");
+    platform::SdAppManifest over = {};
+    check(!parse("entry=main.py\n", over, long_dir), "an over-long composed path is refused");
+
+    platform::SdAppManifest no_leaf = {};
+    check(!parse("", no_leaf, "/"), "a dir with no leaf and no name= is refused");
+    check(!platform::parse_app_manifest("", 0, nullptr, no_leaf), "a null dir is refused");
+    check(platform::parse_app_manifest(nullptr, 0, "/picocalc/apps/x", no_leaf),
+          "a null text body falls back to both defaults");
+    check(std::strcmp(no_leaf.entry_path, "/picocalc/apps/x/main.py") == 0,
+          "defaults applied with no text at all");
+}
+
 }  // namespace
 
 int main() {
@@ -171,6 +281,13 @@ int main() {
     test_clear_sd_apps_spares_builtins();
     test_launch_receives_its_entry();
     test_capacity_bounds();
+    test_manifest_full();
+    test_manifest_defaults();
+    test_manifest_whitespace_and_comments();
+    test_manifest_case_and_unknown_keys();
+    test_manifest_absolute_entry();
+    test_manifest_type_key();
+    test_manifest_truncation_and_limits();
 
     std::printf("test_apps: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -53,6 +53,16 @@ public:
     // already gone to the output callback by then.
     bool exec(const char* code);
 
+    // Same, for a script on the SD card (6B.15/6B.16 — SD apps are the
+    // first thing that needs it, which is why 6B.2 deferred it). False
+    // means it raised OR the file could not be read; either way the
+    // reason has already gone to the output callback.
+    //
+    // `path` is borrowed for the whole call: it backs the lexer's reader
+    // and names the traceback's source, so it must outlive the run. The
+    // source is streamed through a 128-byte window, never staged whole.
+    bool exec_file(const char* path);
+
     void set_output_callback(OutputCallback cb) { output_ = cb; }
 
     // Free GC heap, 0 when not running. The spec (§4.4) wants a real
@@ -78,6 +88,15 @@ public:
     bool poll_interrupt();
 
 private:
+    // The bracket every run needs, whether the source came from the
+    // editor buffer or from a file: reset the per-run latches before,
+    // persist / collect / check for fragmentation after. Factored out
+    // when exec_file arrived rather than copied, because the after half
+    // is where D77's heap rescue lives and two copies of that would
+    // drift.
+    void begin_run();
+    bool end_run(bool ok);
+
     bool initialized_ = false;
     OutputCallback output_ = nullptr;
 

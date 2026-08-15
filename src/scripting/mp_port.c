@@ -29,9 +29,11 @@
 #include "py/compile.h"
 #include "py/gc.h"
 #include "py/mphal.h"
+#include "py/reader.h"
 #include "py/runtime.h"
 #include "py/stackctrl.h"
 
+#include "scripting/calc_api.h"
 #include "scripting/mp_port.h"
 
 // ---- HAL ----
@@ -114,6 +116,102 @@ int picocalc_mp_exec_str(const char* src) {
         qstr source_name = lex->source_name;
         mp_parse_tree_t parse_tree = mp_parse(lex, MP_PARSE_FILE_INPUT);
         mp_obj_t module_fun = mp_compile(&parse_tree, source_name, true);
+        mp_call_function_0(module_fun);
+        nlr_pop();
+        return 1;
+    }
+    mp_obj_print_exception(&mp_plat_print, (mp_obj_t)nlr.ret_val);
+    return 0;
+}
+
+// ---- Running a script straight off the card (6B.15/6B.16) ----
+//
+// The source is NOT read into a buffer first. MicroPython's lexer pulls
+// through mp_reader_t a byte at a time, so a 128-byte window over the
+// file is the entire cost of an SD app's source, whatever its size —
+// which is what the spec was worried about when it deferred exec_file to
+// here ("would cost a second 4 KB staging buffer"). It costs 144 bytes,
+// and there is no cap on script length.
+//
+// What is still bounded by the 40 KB heap is the PARSE TREE and the
+// bytecode, which is inherent to running Python at all and is the same
+// bound the RUN key already has.
+//
+// The whole file is drained during mp_parse, before a line of user code
+// runs, so this reader never overlaps with a script's own calc.read_file.
+
+typedef struct {
+    const char* path;  // borrowed; must outlive the call (see below)
+    long offset;       // next byte to fetch from the file
+    int len;           // valid bytes in buf
+    int pos;           // next byte to hand out of buf
+    char buf[128];
+} picocalc_script_reader_t;
+
+// One at a time, matching the one-interpreter invariant: a script cannot
+// launch another app, so exec_file never nests.
+static picocalc_script_reader_t g_script_reader;
+
+static mp_uint_t script_readbyte(void* data) {
+    picocalc_script_reader_t* r = (picocalc_script_reader_t*)data;
+    if (r->pos >= r->len) {
+        int got = 0;
+        const char* err = NULL;
+        if (calc_api_file_read(r->path, r->offset, r->buf, (int)sizeof(r->buf), &got, &err) !=
+                kCalcOk ||
+            got <= 0) {
+            // Also the genuine end of the file: read past the end
+            // returns 0 bytes, which is EOF and not an error. A read
+            // that fails mid-file therefore truncates the script rather
+            // than reporting a fault — the parse then fails on its own,
+            // which is a diagnostic the user actually sees.
+            return MP_READER_EOF;
+        }
+        r->offset += got;
+        r->len = got;
+        r->pos = 0;
+    }
+    return (mp_uint_t)(unsigned char)r->buf[r->pos++];
+}
+
+static void script_reader_close(void* data) {
+    (void)data;  // nothing is held open; each read is a fresh open/seek
+}
+
+// 1 ok, 0 the script raised (traceback already printed), -1 the file
+// could not be read at all.
+//
+// `path` is borrowed for the duration — it becomes the traceback's
+// source name and backs the reader. Callers pass a pointer into the
+// permanent SdAppManifest table (§4.5), not a stack buffer.
+int picocalc_mp_exec_file(const char* path) {
+    if (path == NULL || calc_api_file_exists(path) == 0) {
+        return -1;
+    }
+    g_script_reader.path = path;
+    g_script_reader.offset = 0;
+    g_script_reader.len = 0;
+    g_script_reader.pos = 0;
+
+    mp_reader_t reader = {&g_script_reader, script_readbyte, script_reader_close};
+
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        // The path, not <stdin>, so a traceback from an SD app names the
+        // file it came from. Interning is idempotent, so launching the
+        // same app repeatedly does not grow the qstr pool.
+        qstr source_name = qstr_from_str(path);
+        mp_lexer_t* lex = mp_lexer_new(source_name, reader);
+        mp_parse_tree_t parse_tree = mp_parse(lex, MP_PARSE_FILE_INPUT);
+        // is_repl = FALSE, unlike exec_str above. A file is a module, not
+        // something someone just typed: in REPL mode every top-level
+        // expression statement prints its own value, so an app that calls
+        // calc.draw_text five times emitted five glyph advances
+        // ("176 192 168 168 216", HW 2026-08-16) into the output pane, with
+        // no way for the script to suppress them. exec_str keeps REPL
+        // semantics on purpose — that is what makes `py 1+1` at the home
+        // screen show 2.
+        mp_obj_t module_fun = mp_compile(&parse_tree, source_name, false);
         mp_call_function_0(module_fun);
         nlr_pop();
         return 1;

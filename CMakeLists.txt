@@ -154,6 +154,8 @@ target_compile_options(cephes PRIVATE -w)
 add_executable(picocalc_graphcalc
     src/main.cpp
     src/platform/app_registry.cpp
+    src/platform/sd_apps.cpp
+    src/platform/sd_app_scan.cpp
     src/platform/display.cpp
     src/platform/fault.cpp
     src/platform/io_scratch.cpp

@@ -38,9 +38,35 @@ public:
     // agree.
     void run_current();
 
+    // Arms an SD app (§4.5, 6B.16) and switches this screen to APP MODE
+    // for the visit. The caller pushes us straight after; the run
+    // happens in on_activate, not here, so the script is already the top
+    // screen when it draws or pushes a graph.
+    //
+    // App mode is the same screen with the editor taken out: no
+    // configure(), so an SD app never disturbs whatever the user was
+    // editing, and ESC leaves for the launcher (§3.3) instead of
+    // dropping into an editor the user never opened.
+    //
+    // `path` and `name` are borrowed and must outlive the visit — they
+    // point into the permanent SdAppManifest table.
+    void queue_app(const char* path, const char* name);
+
+    // The other entry point, and the reason it is explicit: this is one
+    // SINGLETON screen in two modes, and HOME pops to the root from
+    // anywhere — including out of a running app, without passing
+    // through exit_app(). Without this, the next visit to the editor
+    // would come up as a stale app's output pane with no editor under
+    // it. Both callers are in main.cpp's registry table, three lines
+    // apart, so the pairing is readable in one place.
+    void open_editor();
+
 private:
     bool showing_output_ = false;
     bool canvas_mode_ = false;
+    bool app_mode_ = false;
+    const char* pending_app_ = nullptr;
+    const char* app_name_ = nullptr;
     int top_line_ = 0;
 
     // Cached in run_current(), never built in render() — render() is
@@ -50,6 +76,13 @@ private:
 
     int visible_rows() const;
     void render_output(gfx::Framebuffer& fb);
+
+    // The half of a run that is the same whichever way the source
+    // arrived (RUN key or SD app): set the log up, then read back what
+    // the script left — the graph latch, the canvas flag, the header.
+    bool prepare_run();
+    void finish_run();
+    void exit_app();
 };
 
 ProgramScreen& program_screen();

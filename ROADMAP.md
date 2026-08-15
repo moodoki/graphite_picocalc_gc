@@ -22,7 +22,7 @@ significant work that turned up outside them. See
 | 5: CAS (symbolic math) | **Complete** | Engine, UI integration, exact-form display, Stage 5 stack hardening. Tagged **v0.2.0** |
 | 5.1: Serial line injection | **Complete** | Host-driven on-device test automation. Tagged **v0.3.0** |
 | 5.2: Unified evaluator | **Complete** | One tagged-value evaluator replacing three. Tagged **v0.4.0** |
-| 6: Non-calculator functions | **6A, 6C.1 and most of 6B done, HW-verified** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS, complex numbers, graphing, lists, matrices, drawing, key input and files. SD app manifests (6B.15-6B.16) are what is left. [Spec](docs/phases/phase6-spec.md) |
+| 6: Non-calculator functions | **6A, 6B and 6C.1 code-complete** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS, complex numbers, graphing, lists, matrices, drawing, key input and files — plus SD app manifests, so a directory under `/picocalc/apps/` is its own launcher tile. [Spec](docs/phases/phase6-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H.
@@ -102,9 +102,12 @@ reload it. `ESC` stops a runaway loop.
   script drawing from a key handler shared the bus and the conversion buffer
   with core 1 (issue #39, fixed). Nothing outside the render loop may touch
   the panel without `gfx::display_wait_idle()`.
-- **What is left of 6B** is the SD app manifests (6B.15-6B.16) — scripts
-  under `/picocalc/apps/` appearing as their own launcher tiles, using the
-  tier-2 registry hook that has existed unused since 6A.1.
+- **6B.15-6B.16 are done, and 6B is code-complete.** A directory under
+  `/picocalc/apps/` with an `app.txt` in it is its own launcher tile, on the
+  tier-2 registry hook that had existed unused since 6A.1. The number worth
+  keeping: `exec_file` streams its source through MicroPython's lexer reader,
+  so it costs **128 bytes**, not the 4 KB staging buffer §4.1 had assumed when
+  it deferred the work (D86). Examples in `examples/apps/`.
 
 What the 6A and 6B work established that matters for scoping the rest:
 

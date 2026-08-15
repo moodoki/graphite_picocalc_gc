@@ -305,6 +305,77 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-16 (last) — 6B.15 + 6B.16: SD app manifests, and 6B closes (D86)
+
+A directory under `/picocalc/apps/` with an `app.txt` in it is now its own
+launcher tile. That is the last committed Phase 6B work, on the tier-2
+`AppRegistry` hook that had existed unused since 6A.1, and it needed
+`exec_file`, which 6B.1 deferred to exactly here.
+
+**The deferral's premise was wrong by a factor of 28.** §4.1 put `exec_file`
+off on the grounds that reading a script would cost "a second 4 KB staging
+buffer". MicroPython's lexer pulls source through an `mp_reader_t` a byte at a
+time, so it is a **128-byte window** over the file: an SD app's length is
+bounded by the card, not by SRAM. What is still heap-bound is the parse tree
+and the bytecode, which is what the RUN key already costs.
+
+**An SD app is `ProgramScreen` in a second mode, not a new screen.** It
+already had the output pane, canvas mode, the `show_graph` hand-off and ESC.
+App mode removes the editor: no `configure()`, so **an app never touches the
+buffer the user was editing**, and ESC pops to the launcher (§3.3). The script
+runs from `on_activate` rather than the launch thunk, so the screen is already
+on top when it draws or pushes a graph — verified end to end, including
+`calc.show_graph()` pushing the graph screen from inside the outer `push()`.
+
+One singleton in two modes needs both doors explicit: `queue_app()` enters,
+`open_editor()` leaves, both called three lines apart in `main.cpp`. Without
+the second, `HOME` — which pops to the root from anywhere, bypassing the ESC
+path — would leave the screen stuck in app mode and the next visit to the
+editor would come up as a stale app's output pane.
+
+**The parser is a pure function, split into its own translation unit** and
+linked into `test_apps`. 29 host checks cover defaults, CRLF, comments,
+trimming, case, repeated keys, absolute entries, `type=native` refusal,
+truncation and the over-long path — none of which is worth learning one bad
+`app.txt` at a time, on a board, with a card that has to come out to be
+edited.
+
+**Two defects the board found, both in code 6B.8-6B.10 had already shipped:**
+
+- **A file is a module, not a REPL.** `is_repl` was `true`, copied from
+  `exec_str`, so top-level expression statements printed their own values — an
+  app calling `calc.draw_text` five times emitted `176 192 168 168 216` into
+  its output pane. `exec_str` keeps REPL semantics on purpose; that is what
+  makes `py 1+1` show `2`.
+- **`KeyEvent::ch` is printable ASCII only**, so ENTER, BACKSPACE, TAB and DEL
+  reached a script as `0`. **`calc.input()` had been waiting since 6B.9 for a
+  `'\r'` the driver never produces — ENTER did nothing.** The queue now
+  normalises the four, where `platform::Key` is visible.
+
+The second is the one to remember: 6B.9's hardware pass exercised `wait_key`,
+`key_pressed` and `key_held`, all of which report `code`, and never typed a
+line into `calc.input`. **A binding can be verified and still be unusable
+through the one entry point nobody drove.**
+
+**Verified on the Pico 2**: both example apps scanned and registered at boot
+(`sd-apps: Hello -> /picocalc/apps/hello/main.py`), both tiles in the
+launcher, `Hello` drew and its canvas survived with ESC returning to the
+launcher, `Quadratic` took three `calc.input` values, printed both roots,
+plotted, showed the graph, and ESC walked back graph → output pane (green
+`done`) → launcher. Stack peaked at **2,004 of 4,096**. 21 host suites /
+**3,275 checks**, lint clean, 51 markdown files.
+
+**Sizes**: flash 651,532 → 654,852 (+3,320). Free SRAM **15 KB** (Pico 1, down
+1) and **24 KB** (Pico 2, down 2). The cost is the manifest table's 1,536
+permanent bytes — `AppEntry` stores pointers into it, so it cannot be scratch.
+Everything transient (the directory listing, the manifest text) comes out of
+`io_scratch`, costing nothing.
+
+**Still open**: the Pico 1 has not run 6B.15/16 — deferred to the Phase 6 close
+pass under the board-swap policy, and the sizes above are already recorded for
+it. Then the close: merge `phase-6`, and issue #38 (the Python-free build,
+D78) unblocks now that both SRAM numbers are final.
+
 ## 2026-08-16 (Pico 2 bring-up) — first 6B run on the RP2350, and a two-core SPI race (issue #39)
 
 **The Pico 2 has now run Phase 6B**, for the first time. Everything passed —

@@ -20,6 +20,7 @@
 #include "platform/fault.hpp"
 #include "platform/platform.hpp"
 #include "platform/power.hpp"
+#include "platform/sd_apps.hpp"
 #include "platform/sd_card.hpp"
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
@@ -349,6 +350,10 @@ void register_builtin_apps() {
     python.name = "Python";
     python.kind = platform::AppKind::kBuiltIn;
     python.launch = [](const platform::AppEntry&) {
+        // Paired with launch_sd_app()'s queue_app() below: one singleton
+        // screen, two modes, and the mode is always chosen here rather
+        // than left over from the last visit.
+        apps::program_screen().open_editor();
         ui::screen_manager().push(&apps::program_screen());
     };
     platform::AppRegistry::register_app(python);
@@ -360,6 +365,19 @@ void register_builtin_apps() {
         ui::screen_manager().push(&apps::files_screen());
     };
     platform::AppRegistry::register_app(files);
+}
+
+// The one thunk every SD-discovered app shares (§4.5, 6B.16). They
+// differ only by path, and none of them exists until the scan runs —
+// which is exactly why AppLaunchFn takes the entry rather than being a
+// bare void(*)() (D67).
+//
+// Queue then push, in that order: ProgramScreen runs the script from
+// on_activate, so it is already the top screen by the time the script
+// draws or asks for a graph.
+void launch_sd_app(const platform::AppEntry& self) {
+    apps::program_screen().queue_app(self.path, self.name);
+    ui::screen_manager().push(&apps::program_screen());
 }
 
 }  // namespace
@@ -414,6 +432,10 @@ int main() {
     // on static-init order. The SD tier (tier 2) is appended later by
     // 6B.16's scan, and always sorts after these.
     register_builtin_apps();
+    // Tier 2 (§4.5, 6B.16). A no-op when the card has not mounted yet —
+    // the late-init loop below rescans once it does, which is the
+    // ordinary case on an RP2350 cold boot (D14).
+    platform::scan_sd_apps(&launch_sd_app);
 
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());
@@ -500,6 +522,16 @@ int main() {
                     } else {
                         printf("late-init: storage remounted at %lu ms\n",
                                static_cast<unsigned long>(now));
+                    }
+                    // Both branches: the card that just mounted may be a
+                    // different card. scan_sd_apps() clears tier 2 first,
+                    // so this replaces the launcher's SD rows rather
+                    // than duplicating them (§4.5). After the state
+                    // loads above, never during — they share
+                    // io_scratch's staging region.
+                    const int n_apps = platform::scan_sd_apps(&launch_sd_app);
+                    if (n_apps > 0) {
+                        printf("late-init: %d sd app(s) registered\n", n_apps);
                     }
                 }
                 run_self_tests();

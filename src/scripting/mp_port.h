@@ -29,6 +29,15 @@ void picocalc_mp_deinit(void);
 // printed through the output path by the time this returns.
 int picocalc_mp_exec_str(const char* src);
 
+// Same, for a script read straight off the SD card (6B.15/6B.16). 1 ok,
+// 0 raised, -1 the file could not be read. The lexer pulls the source
+// through a 128-byte window rather than staging the whole file, so the
+// script's length is bounded by the card and not by the Python heap.
+//
+// `path` is borrowed for the whole call — it backs the reader and
+// becomes the traceback's source name, so it must not be a stack buffer.
+int picocalc_mp_exec_file(const char* path);
+
 // Run a GC cycle from C. Needed because collecting from Python requires
 // compiling the call first, which allocates — so `gc.collect()` is exactly
 // what stops working when the heap is full. See the note at the definition.

@@ -54,14 +54,67 @@ void log_output(const char* text, std::size_t len) {
 }  // namespace
 
 void ProgramScreen::on_activate() {
-    // Re-configured on every activation: coming back from the file
-    // picker lands here, and configure() keeps the buffer when the owner
-    // is unchanged.
-    ui::text_editor().configure(make_config(), this);
     // Lazy bring-up (D57/D72, 6B.14). The heap bytes are static and
     // always reserved; what this avoids is interpreter state existing
     // for a user who never opens a program.
     scripting::python().init();
+
+    if (app_mode_) {
+        // Deliberately NOT configure()d: an SD app must not touch the
+        // editor's buffer, so a user who was halfway through a script
+        // still has it when they come back.
+        //
+        // Running here rather than in queue_app() is what makes
+        // calc.show_graph() work from an SD app: finish_run() pushes the
+        // graph screen, and pushing from inside our caller's push would
+        // nest screen management inside itself.
+        if (pending_app_ != nullptr) {
+            const char* path = pending_app_;
+            pending_app_ = nullptr;
+            if (prepare_run()) {
+                last_run_ok_ = scripting::python().exec_file(path);
+                finish_run();
+            }
+        }
+        // No pending app means we are being re-activated — the app
+        // pushed a graph and the user came back from it. The output
+        // pane is still what should be on screen.
+        return;
+    }
+
+    // Re-configured on every activation: coming back from the file
+    // picker lands here, and configure() keeps the buffer when the owner
+    // is unchanged.
+    ui::text_editor().configure(make_config(), this);
+}
+
+void ProgramScreen::queue_app(const char* path, const char* name) {
+    app_mode_ = true;
+    pending_app_ = path;
+    app_name_ = name;
+}
+
+void ProgramScreen::open_editor() {
+    app_mode_ = false;
+    canvas_mode_ = false;
+    showing_output_ = false;
+    pending_app_ = nullptr;
+    app_name_ = nullptr;
+    set_dirty_tracking(false);
+}
+
+void ProgramScreen::exit_app() {
+    app_mode_ = false;
+    canvas_mode_ = false;
+    showing_output_ = false;
+    pending_app_ = nullptr;
+    app_name_ = nullptr;
+    set_dirty_tracking(false);
+    // 6B.14, same as leaving the editor: the runtime comes down so the
+    // next app starts from a fully-free heap. The bytes stay reserved
+    // either way (D72).
+    scripting::python().shutdown();
+    ui::screen_manager().pop();
 }
 
 int ProgramScreen::visible_rows() const {
@@ -69,7 +122,7 @@ int ProgramScreen::visible_rows() const {
     return (bottom - kTextTop) / gfx::main_font().height();
 }
 
-void ProgramScreen::run_current() {
+bool ProgramScreen::prepare_run() {
     g_log.clear();
     top_line_ = 0;
     showing_output_ = true;
@@ -77,11 +130,21 @@ void ProgramScreen::run_current() {
     if (!scripting::python().init()) {
         last_run_ok_ = false;
         std::snprintf(header_, sizeof(header_), "interpreter unavailable");
+        return false;
+    }
+    scripting::python().set_output_callback(&log_output);
+    return true;
+}
+
+void ProgramScreen::run_current() {
+    if (!prepare_run()) {
         return;
     }
-
-    scripting::python().set_output_callback(&log_output);
     last_run_ok_ = scripting::python().exec(ui::text_editor().text());
+    finish_run();
+}
+
+void ProgramScreen::finish_run() {
     scripting::python().set_output_callback(nullptr);
 
     std::snprintf(header_, sizeof(header_), "%s   heap %u free%s", last_run_ok_ ? "done" : "raised",
@@ -134,6 +197,10 @@ bool ProgramScreen::on_key(const platform::KeyEvent& ev) {
     // key that means anything is the one that takes the panel back.
     if (canvas_mode_) {
         if (ev.pressed && ev.key == Key::kEscape) {
+            if (app_mode_) {
+                exit_app();
+                return true;
+            }
             canvas_mode_ = false;
             set_dirty_tracking(false);
             invalidate_all();
@@ -145,6 +212,13 @@ bool ProgramScreen::on_key(const platform::KeyEvent& ev) {
         switch (ev.key) {
             case Key::kEscape:
             case Key::kF1:
+                // §3.3: from an SD app, ESC goes back to the launcher.
+                // The editor underneath is not this app's — the user
+                // never opened it, and it may hold unrelated work.
+                if (app_mode_) {
+                    exit_app();
+                    return true;
+                }
                 showing_output_ = false;
                 invalidate_all();
                 return true;
@@ -204,7 +278,9 @@ void ProgramScreen::render_output(gfx::Framebuffer& fb) {
     const int fw = font.width();
 
     fb.clear(kBlack);
-    ui::draw_status_bar(fb, "PY OUTPUT");
+    // An SD app is titled with its own name, so the pane confirms which
+    // tile actually ran — the one thing the launcher cannot show.
+    ui::draw_status_bar(fb, app_mode_ && app_name_ != nullptr ? app_name_ : "PY OUTPUT");
 
     font.draw_string(fb, 2, kTextTop, header_, last_run_ok_ ? kGreen : kRed);
 
@@ -226,12 +302,15 @@ void ProgramScreen::render_output(gfx::Framebuffer& fb) {
         }
     }
 
-    const char* const keys[6] = {"EDIT", "", "", "", "", ""};
+    const char* const keys[6] = {app_mode_ ? "BACK" : "EDIT", "", "", "", "", ""};
     ui::draw_softkeys(fb, keys);
 }
 
 void ProgramScreen::render(gfx::Framebuffer& fb) {
-    if (showing_output_) {
+    // App mode never falls through to the editor: it was never
+    // configure()d for this app, and its buffer belongs to the user's
+    // own work. The output pane is all an SD app has.
+    if (showing_output_ || app_mode_) {
         render_output(fb);
         return;
     }

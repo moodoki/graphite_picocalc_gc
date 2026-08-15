@@ -802,6 +802,13 @@ RUN key executes the editor's buffer, which the widget has just written
 to disk, so nothing yet needs a file read that would cost a second 4 KB
 staging buffer.
 
+**Built 2026-08-16 (D86), and the 4 KB figure was wrong by a factor of
+28.** MicroPython's lexer pulls source through an `mp_reader_t` a byte
+at a time, so `exec_file` is a **128-byte window** over the file and a
+script's length is bounded by the card rather than by SRAM. The parse
+tree and bytecode are still heap-bound, which is the bound the RUN key
+already has.
+
 MicroPython provides an `embed` port specifically designed for hosting
 MicroPython inside a larger C/C++ application. The firmware includes the
 MicroPython interpreter as a library, not a standalone runtime.
@@ -1189,6 +1196,34 @@ instead of the generic editor's file browser. That one-thunk-for-all
 shape is why §3.1's `launch` takes the entry rather than being a bare
 `void(*)()`: the paths don't exist until the scan runs. No new
 execution model, no new failure mode beyond "bad manifest, skip it."
+
+**BUILT 2026-08-16 (6B.15/6B.16, D86).** Four differences from the
+sketch above, all deliberate:
+
+1. **`scan_sd_apps(AppLaunchFn launch)` takes the thunk.** Launching a
+   script means pushing a screen, and `platform/` must not depend on
+   `apps/`. It also returns how many it registered, and calls
+   `clear_sd_apps()` first so a card swap replaces the rows.
+2. **The parser is split from the scan** —
+   `platform::parse_app_manifest(text, len, dir, out)` is a pure
+   function in its own translation unit, linked into the host tests. Its
+   rules are 29 host checks rather than something a board teaches you
+   one bad `app.txt` at a time.
+3. **`name` and `entry` default** (to the directory's name and
+   `main.py`), so the smallest app is a directory holding an empty
+   `app.txt` and a `main.py`. `type=` is parsed and anything but
+   `script`/`python` is refused, so a §3.4 `type=native` manifest is
+   skipped with a diagnostic rather than handed to Python as source.
+4. **The apps directory is created if missing**, the same way the text
+   editor ensures its own save directory — dropping an app folder onto a
+   fresh card should not also require making the parent by hand.
+
+The launch thunk queues the app on `ProgramScreen` and pushes it; the
+script runs from `on_activate`, so the screen is already on top when it
+draws or asks for a graph. See D86 for app mode, and for why a singleton
+screen with two modes needs both entry points to be explicit.
+
+Working examples live in `examples/apps/`.
 
 ### 4.6 Candidate apps used to pressure-test the `calc` module (running list)
 
@@ -1713,14 +1748,13 @@ sub-phase changed, only the order they're tackled in.
 
 ### Sub-phase 6B: MicroPython programming (first base app)
 
-**Status 2026-08-15: 6B.1-6B.5 and 6B.11-6B.14 are done** — the
-interpreter builds and runs on both boards; a script can be written,
-saved, run, power-cycled and reloaded on the device; and it can now
-evaluate expressions, read and write the calculator's variables, and
-call the CAS and the complex helpers. 6B.1's acceptance was met **in
-full including `json`**. What is left is the rest of the `calc` module
-(6B.6-6B.10: graphing, matrices, display, keyboard, file I/O) and the
-SD app manifests (6B.15-6B.16).
+**Status 2026-08-16: 6B is code-complete.** The interpreter builds and
+runs on both boards; a script can be written, saved, run, power-cycled
+and reloaded on the device; the `calc` module reaches expressions,
+variables, the CAS, complex numbers, graphing, lists, matrices, the
+display, the keyboard and SD files; and a directory under
+`/picocalc/apps/` is its own launcher tile (D86). 6B.1's acceptance was
+met **in full including `json`**.
 
 **Gap in this table, recorded rather than fixed**: §4.2 specifies
 `calc.set_list`, `calc.stat_mean` and `calc.list_append` — the last of
@@ -1747,8 +1781,8 @@ their own (est. 3 hrs) before §4.6's entry 1 can be built, and
 | 6B.12 | Execution: output capture, error display | 4 | print output + line-numbered errors |
 | 6B.13 | Load/save scripts to SD | 3 | Save, power cycle, reload, run |
 | 6B.14 | Memory management: lazy init, cleanup | 3 | Heap freed on leaving program screen |
-| 6B.15 | SD app manifest parser + second `AppRegistry` tier (§4.5) | 6 | Malformed manifest skipped + logged, not fatal |
-| 6B.16 | Boot-time SD app scan + launcher integration (§4.5) | 6 | `/picocalc/apps/finance/` shows as a named launcher tile |
+| 6B.15 | **DONE** SD app manifest parser + second `AppRegistry` tier (§4.5, D86) | 6 | Malformed manifest skipped + logged, not fatal — **29 host checks cover the rules, so a bad `app.txt` is not something a board has to teach you** |
+| 6B.16 | **DONE** Boot-time SD app scan + launcher integration (§4.5, D86) | 6 | `/picocalc/apps/hello/` shows as a named launcher tile; **`exec_file` streams the source through a 128-byte window, not a 4 KB staging buffer** |
 | 6B.17 | **DONE** `calc` module: list bindings — `set_list`, `get_list`, `list_append`, `stat_*` (D82/D84). Numbered after 6B.16 to avoid renumbering, but belongs beside 6B.7 | 3 | **400 appends cost 16 bytes of Python heap**; the run's lists persist once at the end, verified across a reboot |
 | | **Subtotal** | **~69 hrs** | |
 

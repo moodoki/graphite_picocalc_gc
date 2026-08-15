@@ -28,8 +28,9 @@ on the Raspberry Pi Pico SDK. Runs on both the Pico 1 H (RP2040) and Pico 2 H
 > You can write a Python script on the calculator, run it, and `import calc` to
 > evaluate expressions, read and write the calculator's variables, call the
 > CAS, plot and analyse graphs, reach the calculator's lists and matrices, and
-> draw on the screen, read keys and read and write files. SD-discovered app
-> tiles are the rest of 6B. Full breakdown in [ROADMAP.md](ROADMAP.md).
+> draw on the screen, read keys and read and write files. A script folder
+> dropped under `/picocalc/apps/` becomes its own launcher tile, which
+> completes 6B. Full breakdown in [ROADMAP.md](ROADMAP.md).
 
 ## What it does
 

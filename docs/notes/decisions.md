@@ -18,6 +18,111 @@ Format:
 
 ---
 
+## D86: an SD app is the program screen without the editor, and its source is streamed, not staged
+
+**Date**: 2026-08-16
+**Status**: Accepted (implements §4.5; 6B.15/6B.16 as built)
+**Context**: §4.5 has been settled since 2026-07-21 and 6A.1 has carried the
+unused tier-2 hook since. Building it raised three questions the spec sketch
+did not answer, one of which reversed a cost the spec had used to defer the
+work in the first place.
+
+**1. `exec_file` streams; it does not stage.** §4.1 deferred `exec_file` to
+here on the grounds that reading a script would "cost a second 4 KB staging
+buffer". It costs **144 bytes**. MicroPython's lexer pulls source through an
+`mp_reader_t` a byte at a time, so a 128-byte window over the file is the
+whole cost, whatever the script's length — there is no cap on how long an SD
+app may be. What is still bounded by the 40 KB heap is the parse tree and the
+bytecode, which is inherent to running Python at all and is the same bound the
+RUN key already has. The reader is drained entirely during `mp_parse`, before
+a line of user code runs, so it never overlaps a script's own
+`calc.read_file`.
+
+The traceback's source name is the app's path rather than `<stdin>`, so a
+failing app says which file failed.
+
+**2. An SD app is `ProgramScreen` in a second mode, not a new screen.** It
+already owns everything an app needs: the output pane, canvas mode, the
+`show_graph` hand-off, ESC. What app mode removes is the editor —
+`on_activate` skips `configure()`, so **an SD app never touches the buffer the
+user was editing**, and ESC pops to the launcher (§3.3) instead of dropping
+into an editor the user never opened.
+
+The script runs from `on_activate`, not from the launch thunk, so the screen
+is already on top by the time it draws or asks for a graph. That makes
+`calc.show_graph()` work from an app: `finish_run()` pushes the graph screen
+from inside the outer `push()`, which `ScreenManager` handles because it
+finishes its own stack work before calling `activate()`.
+
+**One singleton, two modes, so the mode is always chosen explicitly.**
+`queue_app()` enters app mode and `open_editor()` leaves it, and both callers
+are three lines apart in `main.cpp`'s registry table. Without that pairing,
+`HOME` — which pops to the root from anywhere, including out of a running app,
+without passing through the ESC path — would leave the screen stuck in app
+mode, and the next visit to the editor would come up as a stale app's output
+pane with no editor beneath it.
+
+**3. The manifest defaults rather than rejects.** `name` falls back to the
+directory's own name and `entry` to `main.py`, so the smallest working app is
+a directory holding an **empty** `app.txt` and a `main.py`. A directory that
+contains an `app.txt` has already declared its intent; making it restate the
+obvious buys nothing. What *is* refused, skipped with a serial log and never
+fatal: an `entry` naming a file that does not exist (a tile that raises the
+moment it is opened is worse than a tile that never appears), a composed path
+too long for the 64-byte field (a silently truncated path names a different
+file), and `type=` anything but `script`/`python` — so a §3.4 native manifest,
+if that ever ships, is skipped with a diagnostic instead of being handed to the
+Python interpreter as source.
+
+**Rationale**: the parser is a pure function over a buffer, split from the
+scan into its own translation unit, so all of the above is a host test rather
+than something discovered one bad `app.txt` at a time on a board with a card
+that has to come out to be edited. `scan_sd_apps()` takes the launch thunk as
+an argument rather than being the bare `void scan_sd_apps()` the spec sketched:
+launching a script means pushing a screen, and `platform/` must not depend on
+`apps/`.
+
+**Tradeoffs**: the manifest table is **1,536 bytes of permanent bss** (16 slots
+x 96 B) and cannot be otherwise — `AppEntry` stores pointers into it, not
+copies, so it has to outlive the scan. Everything else transient (the
+directory listing, the manifest text) comes out of `io_scratch`'s shared
+staging region on that header's terms, costing nothing. Measured: free SRAM
+**15 KB** (Pico 1) and **24 KB** (Pico 2), down from 16/26.
+
+A card swap replaces the tier-2 rows because `scan_sd_apps()` clears them
+first, and the late-init loop rescans on every remount — but **adding an app
+to a card already in the slot needs a reboot or an eject/reinsert**. There is
+no filesystem watch, and polling for one would cost an SD listing on a
+heartbeat forever to serve an action users take once.
+
+**Two defects only the board could show**, both in code 6B.8-6B.10 had
+already shipped and neither reachable from the RUN key:
+
+- **A file is a module, not a REPL.** `mp_compile`'s `is_repl` was `true`,
+  copied from `exec_str`, so every top-level expression statement printed its
+  own value: an app calling `calc.draw_text` five times emitted
+  `176 192 168 168 216` into its output pane with no way to suppress it.
+  `exec_file` now compiles with `is_repl = false`. `exec_str` keeps REPL
+  semantics deliberately — that is what makes `py 1+1` at the home screen
+  show `2`.
+- **`KeyEvent::ch` is filled for printable ASCII only**, so ENTER, BACKSPACE,
+  TAB and DEL all reached a script as `0`. `calc.input()` had been waiting
+  since 6B.9 for a `'\r'` the driver never produces — **ENTER did nothing**.
+  The queue now normalises the four to their ASCII characters, in
+  `micropython_embed.cpp` where `platform::Key` is visible, for the same
+  reason `script_key_held`'s name table lives there.
+
+The second one is worth naming: 6B.9's hardware pass exercised `wait_key`,
+`key_pressed` and `key_held`, all of which report `code`, and never typed a
+line into `calc.input`. A binding can be verified and still be unusable
+through the one entry point nobody drove.
+
+**Revisit when**: a §3.4 native app needs `type=native` to mean something;
+or an app wants to be launched with arguments, which nothing in the manifest
+format currently carries.
+
+---
+
 ## D85: The script canvas pushes span-exact, and owning the screen means clearing the pending repaint
 
 **Date**: 2026-08-16

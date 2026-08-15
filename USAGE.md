@@ -241,6 +241,9 @@ launcher; `HOME` goes straight back to the calculator from anywhere.
 | **Python** | Write and run MicroPython. Same editor keys as Notepad, plus `F1` RUN. Files live under `/picocalc/programs/` |
 | **Files** | Browse the SD card. `ENTER` opens a directory, `F4` renames, `F5` makes a folder, `DEL` deletes |
 
+Anything you put under `/picocalc/apps/` shows up here too — see
+[your own apps on the SD card](#your-own-apps-on-the-sd-card).
+
 ### Python
 
 `F1` saves the script and runs it, then shows what it printed. `ESC` returns to
@@ -257,8 +260,9 @@ If a script prints more than the output pane holds, the **oldest** lines are
 dropped and the header says `(trimmed)`. That keeps the end of the output, which
 is where a traceback is.
 
-There is no `import` of your own modules yet, and `open()` raises — file access
-arrives in a later release. `json` is available.
+There is no `import` of your own modules yet, and `open()` raises — SD files
+are reached through `calc.read_file`/`write_file` instead (below). `json` is
+available.
 
 For one-off expressions, `py <statement>` on the home screen runs a single line
 without leaving the calculator.
@@ -402,8 +406,56 @@ power-cycle.
 cannot be read back, so text is drawn as filled character cells rather than
 letters floating over whatever was there.
 
+**A key event's `ch` covers the control keys too**: `ENTER` is `"\r"`,
+`BACKSPACE` is `"\b"`, `TAB` is `"\t"` and `DEL` is `chr(127)`. Everything
+else printable is itself, and anything with no character — the arrows, the
+function keys — is `""`, so use `k["code"]` or `calc.key_held()` for those.
+
 Colours are either a name — `black`, `white`, `blue`, `red`, `green`,
 `yellow`, `cyan`, `magenta`, `orange`, `gray` — or an `(r, g, b)` triple.
 
 `calc.read_file` reads the whole file into memory, so it is limited by the
 Python heap; a few kilobytes is comfortable, a very large data file is not.
+
+### Your own apps on the SD card
+
+A directory under `/picocalc/apps/` with an `app.txt` in it becomes its own
+tile in the launcher, next to Notepad and Python:
+
+```
+/picocalc/apps/hello/app.txt
+/picocalc/apps/hello/main.py
+```
+
+`app.txt` is one `key=value` per line — `#` starts a comment, and spacing and
+capitalisation of the key do not matter:
+
+```
+name=Hello
+icon=H
+entry=main.py
+```
+
+All three have defaults, so **an empty `app.txt` next to a `main.py` is a
+working app**: `name` falls back to the directory's name, `entry` to
+`main.py`. An `entry` may also be an absolute path, to share one script
+between tiles.
+
+Copy [`examples/apps/`](examples/apps/) onto a card to see both shapes: `hello`
+draws and keeps the screen, `quadratic` asks for numbers, prints its answers
+and plots the curve.
+
+An app is the same interpreter the `RUN` key uses, on the same calculator —
+variables it stores are still there on the home screen afterwards. Two things
+differ:
+
+- **`ESC` returns to the launcher**, not to the program editor. An app never
+  touches the editor's buffer, so whatever you were writing there is safe.
+- **The card is scanned at boot** and whenever it is re-mounted. Adding an app
+  to a card that is already in the slot needs a reboot, or an eject and
+  re-insert.
+
+An app that will not start is skipped rather than breaking the launcher, and
+says why over USB serial — usually an `entry` naming a file that is not there.
+The `Files` app (`F5` makes a folder) can create the directories on-device if
+you would rather not take the card out.

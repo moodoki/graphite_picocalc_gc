@@ -1,6 +1,64 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 (Pico 2 bring-up) — **the Pico 2 has now run
+**Last session:** 2026-08-16 (last) — **6B.15 + 6B.16: SD app manifests.
+Phase 6B is code-complete** (D86). A directory under `/picocalc/apps/`
+with an `app.txt` in it is its own launcher tile, on the tier-2
+`AppRegistry` hook unused since 6A.1. Examples in `examples/apps/`.
+
+> ## The lesson worth carrying
+>
+> **A binding can be verified and still be unusable through the one
+> entry point nobody drove.** 6B.9's hardware pass exercised `wait_key`,
+> `key_pressed` and `key_held` — all of which report `code` — and never
+> typed a line into `calc.input`. `KeyEvent::ch` is filled for printable
+> ASCII only, so `calc.input()` had been waiting since 6B.9 for a `'\r'`
+> the driver never produces: **ENTER did nothing**. The key queue now
+> normalises ENTER/BACKSPACE/TAB/DEL where `platform::Key` is visible.
+>
+> The board found a second one the same way: `exec_file` compiled with
+> `is_repl = true`, copied from `exec_str`, so every top-level
+> expression statement printed its value — five `calc.draw_text` calls
+> emitted `176 192 168 168 216` into the output pane. A file is a
+> module; `exec_str` keeps REPL semantics on purpose, which is what
+> makes `py 1+1` show `2`.
+
+**The 4 KB that was 128 bytes.** 6B.1 deferred `exec_file` to here
+because reading a script would cost "a second 4 KB staging buffer".
+MicroPython's lexer pulls source through an `mp_reader_t` a byte at a
+time, so it is a 128-byte window and an SD app's length is bounded by
+the card, not by SRAM. Worth checking the premise before paying for a
+deferral.
+
+**An SD app is `ProgramScreen` in a second mode**, not a new screen —
+the editor taken out, ESC pointed at the launcher. One singleton in two
+modes needs both doors explicit (`queue_app` / `open_editor`), because
+`HOME` pops to the root from anywhere and bypasses the ESC path.
+
+**Verified on the Pico 2**: both tiles appear, `Hello` draws and its
+canvas survives, `Quadratic` takes `calc.input` values, prints both
+roots, plots, shows the graph, and ESC walks back graph → output pane →
+launcher. Stack peak 2,004 of 4,096. 21 host suites / **3,275 checks**.
+Free SRAM **15 KB** (Pico 1) / **24 KB** (Pico 2).
+
+> ## Next: close Phase 6
+>
+> 1. **A Pico 1 pass on 6B.15/16** — deferred here under the board-swap
+>    policy (swaps only at major stage closures, and the close is one).
+>    Sizes are already recorded; what is unverified is behaviour, and
+>    the display path's one board-specific hazard is already fixed
+>    (`gfx::display_wait_idle()`).
+> 2. **Merge `phase-6`** — it has stayed unmerged for the whole phase by
+>    standing instruction.
+> 3. **Issue #38** (the Python-free build, D78) unblocks: it was
+>    deferred *by its own terms* until the final SRAM number was known,
+>    and both numbers are now final.
+>
+> CI still runs neither host tests nor clang-tidy, and has only ever
+> seen this branch through one manual dispatch.
+
+---
+
+**Previous session:** 2026-08-16 (Pico 2 bring-up) — **the Pico 2 has now run
 Phase 6B**, and it found a two-core SPI race that only it could show
 (issue #39, closed).
 
