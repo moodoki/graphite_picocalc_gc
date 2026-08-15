@@ -305,6 +305,70 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-15 — measuring the Python heap found a wedge, not a sizing answer (D77, D78)
+
+Follow-on from the session below. The question was whether the 40 KB Python
+heap could be cut to fund D70 lever C's ~6.3% render cost — the one price
+MicroPython makes every user pay. The measurement said no, and turned up a
+worse bug on the way.
+
+**The heap cannot be shrunk.** MicroPython's own baseline after init is
+**544 bytes**; a realistic mixed workload (500 samples, string building, json
+dumps/loads, 40 CAS results) has a live working set of **~8 KB** and peaks at
+**22 KB** with garbage. But the live set is not what the 40 KB buys — it buys
+churn headroom, and a 400-iteration loop building expression strings already
+exhausts it. 400 `calc.eval` calls cost 9.4 KB and returned every byte, so
+**the binding does not leak**; the churn is three throwaway strings per
+iteration. Cutting to 30 KB would make ordinary loops fail sooner. **D78**,
+and [issue #38](https://github.com/moodoki/graphite_picocalc_gc/issues/38) for
+the Python-free build that follows from it.
+
+Also settled, because it removes a tempting option: **D70 lever B costs
+nothing in normal use** — instrumented peak was 12 live slabs of 14, `miss 0`.
+Lever C is the only one of the three levers with a general price.
+
+**The bug (D77): one heap exhaustion wedged the `py` path until a power
+cycle.** Every statement afterwards failed with `MemoryError` — including
+`gc.collect()` and `import gc`. Two things were wrong with the obvious
+diagnosis:
+
+- **It was not exhaustion.** Instrumenting showed **31.5 KB free** when a
+  **512-byte** allocation failed. The GC is mark-and-sweep with no
+  compaction; 400 surviving floats scattered among 1,200 freed strings left
+  no run long enough to compile another statement.
+- **`gc.collect()` cannot be the escape hatch** — every statement is compiled
+  before it runs, and compiling allocates, so the call dies while being
+  parsed.
+
+Fixed by collecting from C after every exec (no compiler, no allocation, so
+it works exactly when Python cannot — measured recovering 6.3 KB), and by
+checking the largest *contiguous* free run and rebuilding the runtime when it
+falls below 1 KB, announced through the script's own output rather than done
+silently. The loop that used to wedge the board now prints the message and the
+next statement runs, no reboot.
+
+The first attempt — collect only — was **flashed and did not work**, which is
+what produced the 31.5 KB number and the correct diagnosis. Worth recording:
+the fix that looks obviously sufficient was not.
+
+**Also corrected: D76 overstated the usable call depth.** Measured directly —
+`calc.eval` works at top level (peak 2,828) and inside one function (peak
+3,412, 684 B spare), and is refused inside two. The rule is one level of
+nesting, not "a couple of frames"; the `solve()` path is effectively
+top-level only. D76, §4.2, USAGE.md and the binding comment all corrected.
+
+**Verified**: 21 host suites / 3,021 checks, both boards build, lint clean,
+52 markdown files validated, and the wedge repro plus recovery on the Pico 1.
+Flash +664 B, free SRAM unchanged at 17 KB.
+
+**Also this session**: CI ran against `phase-6` for the first time
+(`workflow_dispatch`, run 31891363753) — all four jobs green, so the Linux
+side of the MicroPython generation works. Worth knowing that `build.yml`
+triggers only on `main`, tags and PRs into `main`, and that **CI runs neither
+the host tests nor clang-tidy** — both are local-only gates.
+
+---
+
 ## 2026-08-15 — the `calc` module: Python reaches the calculator (D74-D76)
 
 Third session of the day, continuing directly from the one below.

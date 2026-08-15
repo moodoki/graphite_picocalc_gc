@@ -18,6 +18,119 @@ Format:
 
 ---
 
+## D78: A Python-free release build is the only way to get the render time back — deferred, not rejected
+
+**Date**: 2026-08-15
+**Status**: Deferred — tracked as [issue #38](https://github.com/moodoki/graphite_picocalc_gc/issues/38)
+**Context**: MicroPython costs the Pico 1 about **41 KB of SRAM**. Making room
+for it is what D70's recovery was for, and one of D70's three levers has a
+user-visible price: **lever C, strip height 16 → 8, costs ~6.3% of render
+time** (measured: 129.4 ms → 137.5 ms over an identical workload). Undoing it
+needs 10,240 bytes and there are 17,580 free, with 6B.6-6B.10 and the SD app
+manifests still to fit. The user raised shipping a build without Python for
+people who do not want it.
+
+**The cheaper alternative was measured first and does not work.** If the 40 KB
+Python heap were oversized, cutting it would fund lever C for everybody with
+one build and no second artifact. It is not oversized:
+
+| | |
+|---|---|
+| MicroPython's own baseline after init | **544 B** |
+| Live working set, realistic mixed workload | **~8 KB** |
+| Peak with garbage, same workload | **22 KB** |
+| 400 `calc.eval` calls | 9.4 KB, fully reclaimed — no leak |
+| 400 evals building expression strings | **exhausts the heap** |
+
+The live set is small, but that is not what the 40 KB buys — it buys **churn
+headroom**, and a 400-iteration loop already runs out (see D77). Cutting to
+30 KB would make ordinary loops fail sooner. **The heap is not a source of the
+10 KB.**
+
+**Also measured and worth recording, because it removes a tempting option**:
+D70's lever B (ArrayStore slabs 28 → 14) costs nothing in normal use —
+instrumented peak was 12 live of 14 with `miss 0`. Reverting it would buy back
+no latency. **Lever C is the only one of the three with a general price.**
+
+**Decision**: leave it deferred. A `-DPICOCALC_PYTHON=OFF` build would free
+~42 KB on the Pico 1, enough to restore `kStripHeight = 16` and still leave
+~48 KB. The scripting layer is isolated enough (D74) for the conditional to
+live in CMake and `config.hpp` rather than scattering `#ifdef` through
+application code, which is what AGENTS.md asks.
+
+**Rationale for deferring rather than building it now**: the budget is still
+moving. Five binding families and the SD app registry are unbuilt, and their
+SRAM cost is unknown; designing a release-channel split around a forecast is
+the same mistake D61 made with the heap size. It is also a **Pico 1 story
+only** — the Pico 2 uses a full framebuffer and has no strip rendering, so a
+Python-free build there buys nothing a user would feel.
+
+**Tradeoffs of doing it, when it is done**: a third and fourth release
+artifact, a wider CI matrix, and two performance profiles to test and support
+— on a project where the Pico 2 has not yet run any 6B code at all.
+
+**Revisit when**: 6B closes and the final free-SRAM number is known. If the
+remaining bindings leave under ~12 KB, the split is the only way to offer the
+faster render; if they leave more, a single build can afford lever C for
+everyone and the question disappears.
+
+---
+
+## D77: Heap "exhaustion" was fragmentation, and the interpreter now rebuilds itself
+
+**Date**: 2026-08-15
+**Status**: Accepted
+**Context**: Measuring what a script actually needs (D78) turned up something
+worse than a sizing question. After a 400-iteration loop, **every subsequent
+`py` statement failed with `MemoryError` — including `gc.collect()` and
+`import gc`** — and only a power cycle cleared it.
+
+Two things were wrong with the obvious diagnosis:
+
+1. **It was not exhaustion.** Instrumenting the heap showed **31.5 KB free**
+   when a **512-byte** allocation failed. MicroPython's GC is mark-and-sweep
+   with no compaction; 400 surviving floats scattered among 1,200 freed
+   strings left no run long enough to compile another statement.
+2. **`gc.collect()` cannot be the escape hatch.** Every statement is
+   *compiled* before it runs, and compiling allocates — so the call fails
+   while being parsed, before it could collect anything.
+
+**Decision**: two changes in `PythonInterpreter::exec()`, after every run and
+not only after a failure.
+
+- **Collect from C** (`picocalc_mp_gc_collect`). No compiler, no allocation,
+  so it works exactly when Python cannot. Measured recovering 6.3 KB after
+  the loop above.
+- **Check the largest contiguous free run** (`picocalc_mp_heap_max_free`) and
+  **rebuild the runtime when it drops below 1 KB**, announcing it through the
+  same output path a script prints on: `[heap too fragmented to continue -
+  interpreter reset, variables lost]`.
+
+Note `gc_info` reports `used` and `free` in bytes but leaves `max_free` in
+blocks (gc.c:818-819 multiplies two of the three). The conversion is real.
+
+**Rationale**: collecting alone is not sufficient and measurement said so —
+the collect ran, freed 6.3 KB, and the next statement still failed. Only
+discarding the fragmented heap restores service. Announcing it matters
+because the reset silently drops the script's variables; the alternative was
+a Python subsystem dead until the battery is pulled.
+
+**Tradeoffs**: a script's globals can vanish between one `py` line and the
+next, which is surprising. It is strictly better than the behaviour it
+replaces, and the message says what happened. The 1 KB threshold is one
+constant; the observed failure was a 512-byte request.
+
+**Verified on hardware**: the loop that used to wedge the board now prints the
+message, and `print(...)` plus `calc.eval("2+2")` work immediately afterwards
+with no reboot. `gc` being undefined after the reset is the warned-about
+state, not a second bug.
+
+**Revisit when**: a script legitimately wants to hold a large fragmented
+working set across `py` lines. `MICROPY_GC_SPLIT_HEAP` is the upstream answer
+if that ever matters.
+
+---
+
 ## D76: The calculator's own frames — not MicroPython's — are what limits a binding, so every binding checks the stack first
 
 **Date**: 2026-08-15
@@ -72,11 +185,21 @@ walkthrough. The alternative to (2) was trusting (1) to be sufficient — but
 (1) buys a fixed 1 KB and the depth *above* the binding is unbounded, since a
 script can call from any nesting level.
 
-**Tradeoffs**: `calc.eval("solve(...)")` works at a script's top level, with
-552 bytes to spare, and is **refused from about two Python frames down**. That
-is a real limitation and it is the honest one: the frames below the binding do
-not shrink to compensate. Verified on hardware — six frames down returns
-`ValueError('Not enough stack for eval')` and the board stays up.
+**Tradeoffs**: a binding is refused sooner than "a few frames down" — the
+depths were measured directly on 2026-08-15:
+
+| call site | `stack: peak` of 4,096 | outcome |
+|---|---|---|
+| `calc.eval("1+1")` at top level | 2,828 | works |
+| inside one function | **3,412** — 684 B spare | works |
+| inside two nested functions | — | **refused** |
+
+So the usable rule is **one level of nesting**, not two or three, and
+`calc.eval("solve(...)")` — which needs another 400 bytes below that — is
+effectively top-level only. That is a real limitation and the honest one: the
+frames below the binding do not shrink to compensate. Verified on hardware,
+six frames down returns `ValueError('Not enough stack for eval')` and the
+board stays up.
 
 1 KB of bss also went to (1), which is why the Pico 1's free SRAM is 17 KB
 after this chunk rather than the 18 KB the var_store extraction had briefly

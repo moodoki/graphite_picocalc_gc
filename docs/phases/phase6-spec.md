@@ -862,7 +862,9 @@ Four things differ from the sketch and are settled, not open:
    programming: `calc.eval("solve(f,x,lo,hi)")` hung the board on the first
    flash, and the depth available depends on how far into a script the call is
    made. `calc.eval` of an inline `solve()` works at a script's top level and
-   is refused from about two Python frames down.
+   is refused inside two nested functions — a plain `calc.eval` works at
+   top level and inside one function, and the `solve()` path is
+   effectively top-level only.
 4. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
    a native complex type, so the binding exists for symmetry with the rest of
    the module rather than because it was needed. `c_arg` returns radians in

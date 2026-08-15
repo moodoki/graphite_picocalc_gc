@@ -1,6 +1,50 @@
 # Start here — next session
 
-**Last session:** 2026-08-15 (third of three that day) — **the `calc`
+**Last session:** 2026-08-15 (fourth that day) — **measured the Python
+heap, found a wedge instead of a sizing answer** (D77, D78).
+
+The question was whether the 40 KB heap could be cut to fund D70 lever
+C's ~6.3% render cost. **It cannot**: MicroPython's own baseline is 544
+bytes and a realistic live working set is ~8 KB, but the 40 KB buys
+*churn headroom*, and a 400-iteration loop building expression strings
+already exhausts it. 400 `calc.eval` calls cost 9.4 KB and returned every
+byte, so the binding does not leak. D70 lever B, meanwhile, costs nothing
+in normal use (peak 12 slabs of 14, `miss 0`) — **lever C is the only one
+of the three with a general price**, which makes a Python-free build the
+only way to get it back:
+[issue #38](https://github.com/moodoki/graphite_picocalc_gc/issues/38),
+reasoning in **D78**. Revisit when 6B closes and the final SRAM number is
+known.
+
+> ## Two things fixed, one worth remembering
+>
+> **Heap exhaustion used to wedge the `py` path until a power cycle**
+> (**D77**). Not exhaustion at all — **31.5 KB free when a 512-byte
+> allocation failed**. The GC does not compact, and 400 surviving floats
+> among 1,200 freed strings left no run long enough to compile another
+> statement. `gc.collect()` cannot help: it has to be compiled first.
+> Now `exec()` collects from C after every run and rebuilds the runtime
+> when the largest contiguous run drops below 1 KB, saying so through the
+> script's own output.
+>
+> **The first fix — collect only — was flashed and did not work.** That
+> failure is what produced the 31.5 KB measurement and the right
+> diagnosis. Do not assume a GC problem is a volume problem.
+>
+> **D76 overstated the usable call depth.** Measured: `calc.eval` works
+> at top level (peak 2,828) and inside ONE function (3,412, 684 B
+> spare), refused inside two. `calc.eval("solve(...)")` is top-level
+> only.
+
+**CI has now run against `phase-6`** (`workflow_dispatch`, all four jobs
+green), so the Linux side of the MicroPython generation works. Note
+`build.yml` triggers only on `main`, tags and PRs into `main`, and **runs
+neither the host tests nor clang-tidy** — both are local-only gates, so a
+green PR means "it compiles", not "it works".
+
+---
+
+**Previous session:** 2026-08-15 (third that day) — **the `calc`
 module: Python can reach the calculator.** 6B.3, 6B.4 and 6B.5 are done
 and verified on the Pico 1. `import calc` gives a script `eval`,
 `store`, `recall`, `simplify`, `expand`, `factor`, `diff`, `integ`,
@@ -77,7 +121,7 @@ is identical; the screen path is not covered.
 
 ---
 
-**Previous session:** 2026-08-15 (second of three) — **MicroPython
+**Session before that:** 2026-08-15 (second of four) — **MicroPython
 is embedded and running on hardware.** 6B.1, 6B.2, 6B.11, 6B.12, 6B.13
 and 6B.14 are done and all six on-device checks passed. You can write a
 Python script on the device, run it, save it, power-cycle, and reload
@@ -162,7 +206,7 @@ for Phase 6 to close.
 
 ---
 
-**Session before that:** 2026-08-15 (first of three) — **Phase 6A + 6C.1
+**And before that:** 2026-08-15 (first of four) — **Phase 6A + 6C.1
 implemented and hardware-verified, and the SRAM tooling turned out to be
 wrong.** Two distinct pieces of work, and the second one matters more.
 

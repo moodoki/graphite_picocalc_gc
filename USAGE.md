@@ -299,11 +299,18 @@ Three things to know:
 - **Some answers depend on the mode.** `calc.solve("x^2+1=0","x")` finds no
   solution in REAL mode and returns `['i', '-1*i']` in a+bi. Angle mode
   applies to `calc.eval` the same way it applies to typing.
-- **Deeply nested scripts get less done.** The calculator's evaluator needs
-  more stack than Python does, so a heavy call — `calc.eval` of a `solve(...)`
-  especially — works at the top level of a script but raises
-  `ValueError: Not enough stack` from a few function calls down. Do the
-  calculating at the top level and pass the answers in.
+- **Call `calc` from the top of your script, not from deep inside it.** The
+  calculator's evaluator needs more stack than Python does. A `calc.eval`
+  works at the top level and inside one function; **inside two nested
+  functions it raises `ValueError: Not enough stack`**, and `calc.eval` of a
+  `solve(...)` is top-level only. Do the calculating up front and pass the
+  answers down.
+- **A loop that builds thousands of small strings can exhaust memory.**
+  `calc.eval("sin(" + str(i) + ")")` makes three throwaway strings every
+  time round; a few hundred iterations will fill the 40 KB Python heap. If
+  that happens the interpreter resets itself and says so — your script's
+  variables are lost, but the calculator keeps working and no power cycle is
+  needed. Building the expression once outside the loop avoids it.
 
 Graphing, matrices, lists, drawing, key input and file access are not in this
 release.

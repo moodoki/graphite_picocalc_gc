@@ -62,11 +62,13 @@ CalcStackRoomFn g_stack_room = nullptr;
 //   calc.eval("solve(f,x,lo,hi)")         3,544          1,687
 //
 // The requirements are those plus ~320 bytes, which is the margin fault.cpp's
-// kLiveMargin already assumes an ISR frame can want. Note what this implies:
-// the solve() path fits with 552 bytes to spare at top level and is REFUSED
-// from a couple of Python frames down, because nothing below the binding
-// shrinks to compensate. A clean exception is the whole point — running it
-// anyway was measured, the same day, to hang the board.
+// kLiveMargin already assumes an ISR frame can want.
+//
+// What this costs, measured rather than estimated: a plain calc.eval works at
+// top level (peak 2,828) and inside ONE function (peak 3,412, 684 B spare),
+// and is refused inside two. The solve() path needs another ~400 bytes below
+// that, so it is effectively top-level only. A clean exception is the whole
+// point — running it anyway was measured, the same day, to hang the board.
 constexpr std::size_t kEvalStackNeed = 1600;
 constexpr std::size_t kSolveStackNeed = 2000;
 
