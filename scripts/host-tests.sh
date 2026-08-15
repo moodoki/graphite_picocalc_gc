@@ -210,6 +210,7 @@ echo "== Compiling + linking test_calc_api =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr -Itests/host \
     tests/host/test_calc_api.cpp tests/host/host_psram_backend.cpp \
+    tests/host/host_canvas_stub.cpp \
     src/scripting/calc_api.cpp \
     src/graph/analysis.cpp src/graph/graph_state.cpp src/graph/viewport.cpp \
     src/graph/graph_mode.cpp src/math/numeric_solve.cpp \

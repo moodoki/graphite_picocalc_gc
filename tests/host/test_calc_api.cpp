@@ -18,6 +18,7 @@
 #include "math/engine.hpp"
 #include "math/types.hpp"
 #include "scripting/calc_api.h"
+#include "tests_canvas_capture.hpp"
 
 namespace {
 
@@ -907,6 +908,161 @@ void test_matrix_eigen_is_stack_guarded() {
     calc_api_set_stack_hook(nullptr);
 }
 
+// ---- 6B.8: canvas colours and geometry ----
+
+void test_canvas_colors() {
+    unsigned c = 0;
+    const char* err = nullptr;
+    check(calc_api_color("red", 0, 0, 0, &c, &err) == kCalcOk, "a named colour resolves");
+    check(c == 0xF800, "red is red");
+    check(calc_api_color("chartreuse", 0, 0, 0, &c, &err) == kCalcFailed,
+          "an unknown name is refused, not silently black");
+    check(err != nullptr, "and says so");
+
+    check(calc_api_color(nullptr, 255, 255, 255, &c, &err) == kCalcOk, "an rgb triple resolves");
+    check(c == 0xFFFF, "255,255,255 is white");
+    check(calc_api_color(nullptr, -50, 999, 0, &c, &err) == kCalcOk, "out-of-range rgb clamps");
+}
+
+void test_canvas_geometry() {
+    using scripting::canvas::g_capture;
+    calc_api_begin_run();
+    check(calc_api_canvas_owns_display() == 0, "a run starts without the panel");
+
+    calc_api_canvas_clear(0x1234);
+    check(calc_api_canvas_owns_display() == 1, "clear_screen takes the panel");
+    check(g_capture.clears == 1, "and clears once");
+
+    calc_api_canvas_rect(10, 20, 30, 40, 0xF800, 1);
+    check(g_capture.rects == 1 && g_capture.last_x == 10 && g_capture.last_w == 30,
+          "rect passes its geometry through");
+    check(g_capture.last_fill, "and its fill flag");
+
+    calc_api_canvas_line(0, 0, 100, 50, 0x07E0);
+    check(g_capture.lines == 1 && g_capture.last_w == 100 && g_capture.last_h == 50,
+          "line passes both endpoints");
+
+    const int w = calc_api_canvas_text(5, 6, "hello", 0xFFFF, 0x0000);
+    check(g_capture.texts == 1, "text draws");
+    check(std::strcmp(g_capture.last_text, "hello") == 0, "with the right string");
+    check(g_capture.last_bg == 0x0000, "and a background — there is no readback (D85)");
+    check(w == calc_api_canvas_text_width("hello"), "returning the width it advanced");
+
+    // A new run gives the panel back, which is what stops one script's canvas
+    // leaking into the next one's output pane.
+    calc_api_begin_run();
+    check(calc_api_canvas_owns_display() == 0, "a new run releases the panel");
+}
+
+// ---- 6B.9: keys, and 6B.10: files ----
+
+CalcKeyEvent g_fake_keys[4];
+int g_fake_count = 0;
+int g_fake_next = 0;
+
+int fake_key_poll(CalcKeyEvent* out) {
+    if (g_fake_next >= g_fake_count) {
+        return 0;
+    }
+    *out = g_fake_keys[g_fake_next++];
+    return 1;
+}
+
+int fake_key_held(const char* name) {
+    return std::strcmp(name, "left") == 0 ? 1 : 0;
+}
+
+void test_key_bindings() {
+    calc_api_set_key_hooks(&fake_key_poll, &fake_key_held);
+    g_fake_count = 2;
+    g_fake_next = 0;
+    g_fake_keys[0] = {70, 0, 0, 0, 0};
+    g_fake_keys[1] = {0, 'x', 0, 0, 0};
+
+    CalcKeyEvent e;
+    check(calc_api_key_pressed(&e) == 1 && e.code == 70, "the first queued key comes out");
+    check(calc_api_key_pressed(&e) == 1 && e.ch == 'x', "then the second, in order");
+    check(calc_api_key_pressed(&e) == 0, "and then nothing");
+
+    check(calc_api_key_held("left") == 1, "key_held resolves a name");
+    check(calc_api_key_held("right") == 0, "and reports keys that are not down");
+
+    // With no hook at all nothing is pressed and nothing is held — the host
+    // harness's own case, and it must not crash.
+    calc_api_set_key_hooks(nullptr, nullptr);
+    check(calc_api_key_pressed(&e) == 0, "no hook means no keys");
+    check(calc_api_key_held("left") == 0, "nor any held");
+}
+
+char g_fake_file[64] = "hello world";
+int g_fake_len = 11;
+bool g_fake_present = true;
+
+long fake_size(const char* path) {
+    (void)path;
+    return g_fake_present ? g_fake_len : -1;
+}
+int fake_read(const char* path, long offset, char* buf, int len) {
+    (void)path;
+    if (!g_fake_present || offset >= g_fake_len) {
+        return -1;
+    }
+    const int n = (g_fake_len - static_cast<int>(offset)) < len ? g_fake_len - static_cast<int>(offset) : len;
+    std::memcpy(buf, g_fake_file + offset, static_cast<std::size_t>(n));
+    return n;
+}
+int fake_write(const char* path, const char* buf, int len) {
+    (void)path;
+    std::memcpy(g_fake_file, buf, static_cast<std::size_t>(len));
+    g_fake_len = len;
+    g_fake_present = true;
+    return 1;
+}
+int fake_append(const char* path, const char* buf, int len) {
+    (void)path;
+    std::memcpy(g_fake_file + g_fake_len, buf, static_cast<std::size_t>(len));
+    g_fake_len += len;
+    return 1;
+}
+int fake_exists(const char* path) {
+    (void)path;
+    return g_fake_present ? 1 : 0;
+}
+
+void test_file_bindings() {
+    static const CalcFileOps kOps = {fake_size, fake_read, fake_write, fake_append, fake_exists};
+    calc_api_set_file_ops(&kOps);
+
+    long size = 0;
+    const char* err = nullptr;
+    check(calc_api_file_size("/x", &size, &err) == kCalcOk && size == 11, "size reads back");
+    check(calc_api_file_exists("/x") == 1, "exists is true");
+
+    char buf[32] = {};
+    int got = 0;
+    check(calc_api_file_read("/x", 0, buf, 32, &got, &err) == kCalcOk, "read succeeds");
+    check(got == 11 && std::strncmp(buf, "hello world", 11) == 0, "with the content");
+
+    // Offset reads are what a chunked whole-file read is built from (D83).
+    check(calc_api_file_read("/x", 6, buf, 32, &got, &err) == kCalcOk, "an offset read works");
+    check(got == 5 && std::strncmp(buf, "world", 5) == 0, "from the right place");
+
+    check(calc_api_file_write("/x", "abc", 3, 0, &err) == kCalcOk, "write succeeds");
+    check(calc_api_file_write("/x", "de", 2, 1, &err) == kCalcOk, "append succeeds");
+    calc_api_file_size("/x", &size, &err);
+    check(size == 5, "and the file grew");
+
+    g_fake_present = false;
+    check(calc_api_file_size("/x", &size, &err) == kCalcFailed, "a missing file fails");
+    check(calc_api_file_exists("/x") == 0, "and does not exist");
+    g_fake_present = true;
+
+    // No filesystem installed is a clean error, not a crash.
+    calc_api_set_file_ops(nullptr);
+    check(calc_api_file_size("/x", &size, &err) == kCalcFailed, "no file ops means a clean error");
+    check(calc_api_file_exists("/x") == 0, "and exists says no");
+}
+
 // ---- 6B.5: complex ----
 
 void test_complex_helpers() {
@@ -955,6 +1111,11 @@ int main() {
     test_solve_packing_refuses_to_truncate();
 
     test_complex_helpers();
+
+    test_canvas_colors();
+    test_canvas_geometry();
+    test_key_bindings();
+    test_file_bindings();
 
     test_list_round_trip();
     test_list_append_grows();

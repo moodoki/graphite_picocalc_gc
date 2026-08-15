@@ -21,7 +21,10 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 
+#include "py/objstr.h"
+
 #include "scripting/calc_api.h"
+#include "scripting/mp_port.h"
 
 // Four checks are switched off for the whole file, all of them arguing with
 // MicroPython's C rather than with anything this project decided:
@@ -603,6 +606,238 @@ static mp_obj_t calc_matmul(mp_obj_t m, mp_obj_t slot_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(calc_matmul_obj, calc_matmul);
 
+// ---- 6B.8: the script canvas ----
+
+// A colour argument: a name from the palette, or an (r, g, b) tuple. §4.2
+// specifies both, because ~10 category colours do not fit a 6-entry named
+// palette but a script drawing a chart still wants to say "blue".
+static unsigned calc_color_arg(mp_obj_t o) {
+    const char* name = NULL;
+    int r = 0;
+    int g = 0;
+    int b = 0;
+    if (mp_obj_is_str(o)) {
+        name = mp_obj_str_get_str(o);
+    } else {
+        size_t n = 0;
+        mp_obj_t* items = NULL;
+        mp_obj_get_array(o, &n, &items);
+        if (n != 3) {
+            mp_raise_ValueError(MP_ERROR_TEXT("colour is a name or (r, g, b)"));
+        }
+        r = mp_obj_get_int(items[0]);
+        g = mp_obj_get_int(items[1]);
+        b = mp_obj_get_int(items[2]);
+    }
+    unsigned out = 0;
+    const char* err = NULL;
+    const CalcStatus st = calc_api_color(name, r, g, b, &out, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return out;
+}
+
+static unsigned calc_opt_color(size_t n_args, const mp_obj_t* args, size_t i, unsigned dflt) {
+    return i < n_args ? calc_color_arg(args[i]) : dflt;
+}
+
+// Black and white as RGB565, so the defaults below need no lookup.
+#define CALC_BLACK 0x0000u
+#define CALC_WHITE 0xFFFFu
+
+static mp_obj_t calc_clear_screen(size_t n_args, const mp_obj_t* args) {
+    calc_api_canvas_clear(calc_opt_color(n_args, args, 0, CALC_BLACK));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_clear_screen_obj, 0, 1, calc_clear_screen);
+
+static mp_obj_t calc_draw_pixel(size_t n_args, const mp_obj_t* args) {
+    calc_api_canvas_pixel(mp_obj_get_int(args[0]), mp_obj_get_int(args[1]),
+                          calc_opt_color(n_args, args, 2, CALC_WHITE));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_draw_pixel_obj, 2, 3, calc_draw_pixel);
+
+static mp_obj_t calc_draw_line(size_t n_args, const mp_obj_t* args) {
+    calc_api_canvas_line(mp_obj_get_int(args[0]), mp_obj_get_int(args[1]), mp_obj_get_int(args[2]),
+                         mp_obj_get_int(args[3]), calc_opt_color(n_args, args, 4, CALC_WHITE));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_draw_line_obj, 4, 5, calc_draw_line);
+
+static mp_obj_t calc_draw_rect(size_t n_args, const mp_obj_t* args) {
+    const int fill = n_args > 5 && mp_obj_is_true(args[5]);
+    calc_api_canvas_rect(mp_obj_get_int(args[0]), mp_obj_get_int(args[1]), mp_obj_get_int(args[2]),
+                         mp_obj_get_int(args[3]), calc_opt_color(n_args, args, 4, CALC_WHITE),
+                         fill);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_draw_rect_obj, 4, 6, calc_draw_rect);
+
+// The background colour is not optional in spirit: the canvas cannot read the
+// panel back, so a glyph is drawn as a filled cell. It defaults to black
+// rather than being required, which is what a script clearing to black wants.
+static mp_obj_t calc_draw_text(size_t n_args, const mp_obj_t* args) {
+    const int w = calc_api_canvas_text(
+        mp_obj_get_int(args[0]), mp_obj_get_int(args[1]), mp_obj_str_get_str(args[2]),
+        calc_opt_color(n_args, args, 3, CALC_WHITE), calc_opt_color(n_args, args, 4, CALC_BLACK));
+    return MP_OBJ_NEW_SMALL_INT(w);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_draw_text_obj, 3, 5, calc_draw_text);
+
+static mp_obj_t calc_text_size(mp_obj_t s) {
+    mp_obj_t pair[2] = {MP_OBJ_NEW_SMALL_INT(calc_api_canvas_text_width(mp_obj_str_get_str(s))),
+                        MP_OBJ_NEW_SMALL_INT(calc_api_canvas_text_height())};
+    return mp_obj_new_tuple(2, pair);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_text_size_obj, calc_text_size);
+
+// ---- 6B.9: keyboard ----
+
+// A key event as a Python dict — self-describing, and a script reads
+// ev["ch"] without having to remember a tuple order.
+static mp_obj_t calc_key_obj_from(const CalcKeyEvent* e) {
+    mp_obj_t d = mp_obj_new_dict(5);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_code), MP_OBJ_NEW_SMALL_INT(e->code));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_ch),
+                      e->ch != 0 ? mp_obj_new_str((char[]){(char)e->ch}, 1) : mp_const_none);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_shift), mp_obj_new_bool(e->shift));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_ctrl), mp_obj_new_bool(e->ctrl));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_alt), mp_obj_new_bool(e->alt));
+    return d;
+}
+
+static mp_obj_t calc_key_pressed(void) {
+    CalcKeyEvent e;
+    if (calc_api_key_pressed(&e) == 0) {
+        return mp_const_none;
+    }
+    return calc_key_obj_from(&e);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(calc_key_pressed_obj, calc_key_pressed);
+
+// Blocks. The VM hook does not run while we are here, so this drives the
+// drain itself — see D81's refinement in calc_api.h. ESC ends the wait by
+// raising, so a script waiting for input is never a reason to power-cycle.
+static mp_obj_t calc_wait_key(void) {
+    for (;;) {
+        CalcKeyEvent e;
+        if (calc_api_key_pressed(&e) != 0) {
+            return calc_key_obj_from(&e);
+        }
+        if (picocalc_py_interrupt_requested() != 0) {
+            mp_raise_type(&mp_type_KeyboardInterrupt);
+        }
+        // No sleep: calc_api_key_pressed drives the keyboard's own two-phase
+        // I2C state machine, which spends >=10 ms a cycle (D7). The drain is
+        // the rate limiter, so a delay here would only add latency.
+    }
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(calc_wait_key_obj, calc_wait_key);
+
+static mp_obj_t calc_key_held(mp_obj_t name) {
+    return mp_obj_new_bool(calc_api_key_held(mp_obj_str_get_str(name)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_key_held_obj, calc_key_held);
+
+// A line editor on the canvas: echo, backspace, Enter. Deliberately minimal —
+// a script wanting more can build it from wait_key.
+static mp_obj_t calc_input(size_t n_args, const mp_obj_t* args) {
+    const char* prompt = n_args > 0 ? mp_obj_str_get_str(args[0]) : "";
+    const int y = n_args > 1 ? mp_obj_get_int(args[1]) : 0;
+    char buf[64];
+    int len = 0;
+    const int px = calc_api_canvas_text(0, y, prompt, 0xFFFFu, 0x0000u);
+    for (;;) {
+        CalcKeyEvent e;
+        if (calc_api_key_pressed(&e) == 0) {
+            if (picocalc_py_interrupt_requested() != 0) {
+                mp_raise_type(&mp_type_KeyboardInterrupt);
+            }
+            continue;
+        }
+        if (e.ch == '\r' || e.ch == '\n') {
+            break;
+        }
+        if (e.ch == 8 || e.ch == 127) {
+            if (len > 0) {
+                buf[--len] = 0;
+                // Repaint the field: no readback, so clearing means drawing
+                // background over the row (D85).
+                calc_api_canvas_rect(px, y, 320 - px, calc_api_canvas_text_height(), 0x0000u, 1);
+                calc_api_canvas_text(px, y, buf, 0xFFFFu, 0x0000u);
+            }
+            continue;
+        }
+        if (e.ch >= 32 && e.ch < 127 && len < (int)sizeof(buf) - 1) {
+            buf[len++] = (char)e.ch;
+            buf[len] = 0;
+            calc_api_canvas_text(px, y, buf, 0xFFFFu, 0x0000u);
+        }
+    }
+    buf[len] = 0;
+    return mp_obj_new_str(buf, (size_t)len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_input_obj, 0, 2, calc_input);
+
+// ---- 6B.10: file I/O ----
+
+// D83: no staging buffer. The Python string is allocated first, at the file's
+// size, and one pass fills it through read_file_range. io_scratch's one-shot
+// invariant never comes into it, and nothing is capped below the heap.
+static mp_obj_t calc_read_file(mp_obj_t path_obj) {
+    const char* path = mp_obj_str_get_str(path_obj);
+    long size = 0;
+    const char* err = NULL;
+    CalcStatus st = calc_api_file_size(path, &size, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    vstr_t vstr;
+    vstr_init_len(&vstr, (size_t)size);
+    long done = 0;
+    while (done < size) {
+        int got = 0;
+        const int want = (int)((size - done) > 4096 ? 4096 : (size - done));
+        st = calc_api_file_read(path, done, vstr.buf + done, want, &got, &err);
+        if (st != kCalcOk || got <= 0) {
+            vstr_clear(&vstr);
+            calc_raise(st == kCalcOk ? kCalcFailed : st, err != NULL ? err : "Short read");
+        }
+        done += got;
+    }
+    return mp_obj_new_str_from_vstr(&vstr);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_read_file_obj, calc_read_file);
+
+static mp_obj_t calc_write_file_impl(mp_obj_t path_obj, mp_obj_t data_obj, int append) {
+    size_t len = 0;
+    const char* data = mp_obj_str_get_data(data_obj, &len);
+    const char* err = NULL;
+    const CalcStatus st =
+        calc_api_file_write(mp_obj_str_get_str(path_obj), data, (int)len, append, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return mp_const_none;
+}
+
+static mp_obj_t calc_write_file(mp_obj_t p, mp_obj_t d) {
+    return calc_write_file_impl(p, d, 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(calc_write_file_obj, calc_write_file);
+
+static mp_obj_t calc_append_file(mp_obj_t p, mp_obj_t d) {
+    return calc_write_file_impl(p, d, 1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(calc_append_file_obj, calc_append_file);
+
+static mp_obj_t calc_file_exists(mp_obj_t p) {
+    return mp_obj_new_bool(calc_api_file_exists(mp_obj_str_get_str(p)));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_file_exists_obj, calc_file_exists);
+
 // ---- 6B.5: complex ----
 
 // Python already has complex(); this exists so `calc.complex` reads the same
@@ -678,6 +913,20 @@ static const mp_rom_map_elem_t calc_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_matmul), MP_ROM_PTR(&calc_matmul_obj)},
     {MP_ROM_QSTR(MP_QSTR_set_matrix), MP_ROM_PTR(&calc_set_matrix_obj)},
     {MP_ROM_QSTR(MP_QSTR_get_matrix), MP_ROM_PTR(&calc_get_matrix_obj)},
+    {MP_ROM_QSTR(MP_QSTR_clear_screen), MP_ROM_PTR(&calc_clear_screen_obj)},
+    {MP_ROM_QSTR(MP_QSTR_draw_pixel), MP_ROM_PTR(&calc_draw_pixel_obj)},
+    {MP_ROM_QSTR(MP_QSTR_draw_line), MP_ROM_PTR(&calc_draw_line_obj)},
+    {MP_ROM_QSTR(MP_QSTR_draw_rect), MP_ROM_PTR(&calc_draw_rect_obj)},
+    {MP_ROM_QSTR(MP_QSTR_draw_text), MP_ROM_PTR(&calc_draw_text_obj)},
+    {MP_ROM_QSTR(MP_QSTR_text_size), MP_ROM_PTR(&calc_text_size_obj)},
+    {MP_ROM_QSTR(MP_QSTR_key_pressed), MP_ROM_PTR(&calc_key_pressed_obj)},
+    {MP_ROM_QSTR(MP_QSTR_wait_key), MP_ROM_PTR(&calc_wait_key_obj)},
+    {MP_ROM_QSTR(MP_QSTR_key_held), MP_ROM_PTR(&calc_key_held_obj)},
+    {MP_ROM_QSTR(MP_QSTR_input), MP_ROM_PTR(&calc_input_obj)},
+    {MP_ROM_QSTR(MP_QSTR_read_file), MP_ROM_PTR(&calc_read_file_obj)},
+    {MP_ROM_QSTR(MP_QSTR_write_file), MP_ROM_PTR(&calc_write_file_obj)},
+    {MP_ROM_QSTR(MP_QSTR_append_file), MP_ROM_PTR(&calc_append_file_obj)},
+    {MP_ROM_QSTR(MP_QSTR_file_exists), MP_ROM_PTR(&calc_file_exists_obj)},
     {MP_ROM_QSTR(MP_QSTR_complex), MP_ROM_PTR(&calc_complex_obj)},
     {MP_ROM_QSTR(MP_QSTR_c_abs), MP_ROM_PTR(&calc_c_abs_obj)},
     {MP_ROM_QSTR(MP_QSTR_c_arg), MP_ROM_PTR(&calc_c_arg_obj)},

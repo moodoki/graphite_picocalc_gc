@@ -108,11 +108,38 @@ void ProgramScreen::run_current() {
     // even though the plot commands before the failure did take effect.
     if (last_run_ok_ && calc_api_take_show_graph() != 0) {
         ui::screen_manager().push(&graph_screen());
+        return;
+    }
+
+    // A script that drew (6B.8, D80) has already put its pixels on the panel,
+    // outside the render path. Showing the output pane over them would erase
+    // the thing the script produced, so this screen goes quiet instead: dirty
+    // tracking on, nothing marked, which makes render_frame skip the frame
+    // outright. ESC in on_key gives the panel back.
+    //
+    // Even on a failed run — the traceback went to serial, and a half-drawn
+    // canvas is more informative than the pane replacing it. `py` at the home
+    // screen still prints the error.
+    if (calc_api_canvas_owns_display() != 0) {
+        canvas_mode_ = true;
+        showing_output_ = false;
+        set_dirty_tracking(true);
     }
 }
 
 bool ProgramScreen::on_key(const platform::KeyEvent& ev) {
     using platform::Key;
+
+    // While a script's canvas is up this screen draws nothing, so the only
+    // key that means anything is the one that takes the panel back.
+    if (canvas_mode_) {
+        if (ev.pressed && ev.key == Key::kEscape) {
+            canvas_mode_ = false;
+            set_dirty_tracking(false);
+            invalidate_all();
+        }
+        return true;
+    }
 
     if (showing_output_) {
         switch (ev.key) {
@@ -155,7 +182,14 @@ bool ProgramScreen::on_key(const platform::KeyEvent& ev) {
             ui::screen_manager().push(&pick_file(kProgramsDir, kProgramsExt, on_script_picked));
             return true;
         case ui::EditorAction::kConsumed:
-            invalidate_all();
+            // NOT when the key that was consumed was RUN and the script took
+            // the panel: the editor would repaint straight over the canvas it
+            // just drew. Found on hardware 2026-08-16 — the drawing appeared
+            // and was immediately erased, and because canvas_mode_ was
+            // correctly on underneath, keys stayed dead until ESC.
+            if (!canvas_mode_) {
+                invalidate_all();
+            }
             return true;
         case ui::EditorAction::kNone:
             return false;

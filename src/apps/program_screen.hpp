@@ -20,11 +20,18 @@ namespace apps {
 // streaming would need the display pumped from the output callback, and
 // that belongs with whatever first needs it (a long-running sensor log,
 // most likely) rather than here.
+// A script that draws (6B.8, D80) takes this further: it owns the whole
+// panel until it ends. Its pixels went straight to the display, outside the
+// render path, so this screen must then repaint NOTHING — it turns dirty
+// tracking on and marks no rows, which makes ScreenManager::render_frame skip
+// the frame entirely, and reports owns_display() so the main loop leaves the
+// status bar alone too. ESC gives the panel back.
 class ProgramScreen : public ui::Screen {
 public:
     void on_activate() override;
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
+    bool owns_display() const override { return canvas_mode_; }
 
     // Runs the editor's current text. Called through the widget's
     // on_run hook once it has saved, so what runs and what is on disk
@@ -33,6 +40,7 @@ public:
 
 private:
     bool showing_output_ = false;
+    bool canvas_mode_ = false;
     int top_line_ = 0;
 
     // Cached in run_current(), never built in render() — render() is

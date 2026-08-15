@@ -46,11 +46,39 @@ public:
     // callable from outside the screen.
     void invalidate_band(int y0, int y1) { invalidate(y0, y1); }
 
+    // True when this screen has handed the whole panel to something that
+    // draws outside the render path — currently only a Python script's
+    // canvas (6B.8, D80). The main loop consults it before repainting
+    // chrome on its own clock: a script that owns the screen must not get
+    // the status bar drawn over its output a minute later.
+    virtual bool owns_display() const { return false; }
+
 protected:
-    // Opt in to partial redraws (call from the constructor). A tracking
-    // screen must invalidate() every row band its on_key changes —
-    // unmarked rows are neither re-rendered nor pushed.
-    void track_dirty() { tracks_dirty_ = true; }
+    // Opt in to partial redraws. A tracking screen must invalidate() every
+    // row band its on_key changes — unmarked rows are neither re-rendered
+    // nor pushed, and a screen that marks nothing is not rendered at all
+    // (ScreenManager::render_frame returns early on an empty band).
+    //
+    // Normally called once from a constructor. It is two-way because that
+    // empty-band case is exactly how a script's canvas survives: ProgramScreen
+    // turns tracking ON while a script owns the panel, marks nothing, and
+    // turns it OFF again on the way out. Leaving it on would mean every
+    // screen state change had to name its own rows, which ProgramScreen does
+    // not do.
+    // Turning tracking ON also clears the pending band. It has to: while
+    // tracking was off, take_dirty() reset the band to the FULL SCREEN every
+    // frame, so a screen that switches on and then marks nothing would still
+    // inherit one last full repaint — which on hardware (2026-08-16) painted
+    // the editor straight over the canvas a script had just drawn. Switching
+    // to tracking means "I name my own rows from here", and that starts now.
+    void set_dirty_tracking(bool on) {
+        tracks_dirty_ = on;
+        if (on) {
+            dirty_y0_ = 0;
+            dirty_y1_ = 0;
+        }
+    }
+    void track_dirty() { set_dirty_tracking(true); }
 
     // Mark rows [y0, y1) as needing redraw (unioned into the pending band).
     void invalidate(int y0, int y1) {

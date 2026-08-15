@@ -80,6 +80,144 @@ void persist_state(CalcPersistTarget what, int index) {
     }
 }
 
+// ---- 6B.9: the key queue (D81) ----
+//
+// The hook used to poll once every 20 ms and throw away anything that was not
+// ESC — harmless while nothing else wanted key events, and a silent loss of
+// type-ahead once something did. Now every event is queued and ESC is
+// recognised on the way past, so the interrupt still works and a script can
+// have the rest.
+//
+// D81 said "one poller". Building it showed the rule has to be ONE DRAIN, ONE
+// QUEUE: a blocking calc.wait_key() sits inside a binding where the VM hook
+// never runs, so it must be able to drive the drain itself.
+constexpr int kKeyQueueSize = 16;
+CalcKeyEvent g_key_queue[kKeyQueueSize];
+int g_key_head = 0;  // next to read
+int g_key_count = 0;
+bool g_esc_seen = false;
+
+void queue_push(const platform::KeyEvent& ev) {
+    CalcKeyEvent e;
+    e.code = static_cast<int>(ev.key);
+    e.ch = static_cast<unsigned char>(ev.ch);
+    e.shift = ev.shift_held ? 1 : 0;
+    e.ctrl = ev.ctrl_held ? 1 : 0;
+    e.alt = ev.alt_held ? 1 : 0;
+    if (g_key_count == kKeyQueueSize) {
+        // Drop the OLDEST. The newest keypress is the live one — the opposite
+        // of ui::OutputLog, which keeps the tail because a traceback is at the
+        // end.
+        g_key_head = (g_key_head + 1) % kKeyQueueSize;
+        --g_key_count;
+    }
+    g_key_queue[(g_key_head + g_key_count) % kKeyQueueSize] = e;
+    ++g_key_count;
+}
+
+// Drain the keyboard FIFO into the queue, noting ESC as we go.
+//
+// Loops until fifo_empty(): a kNone from poll() usually just means a read is
+// in flight, and breaking on the first one capped draining at a single event
+// per frame (hardware, 2026-07-18).
+void drain_keys() {
+    for (int guard = 0; guard < 64; ++guard) {
+        const platform::KeyEvent ev = platform::keyboard().poll();
+        if (ev.pressed) {
+            if (ev.key == platform::Key::kEscape) {
+                g_esc_seen = true;
+            } else {
+                queue_push(ev);
+            }
+        }
+        if (ev.key == platform::Key::kNone && platform::keyboard().fifo_empty()) {
+            return;
+        }
+    }
+}
+
+int script_key_poll(CalcKeyEvent* out) {
+    drain_keys();
+    if (g_key_count == 0) {
+        return 0;
+    }
+    *out = g_key_queue[g_key_head];
+    g_key_head = (g_key_head + 1) % kKeyQueueSize;
+    --g_key_count;
+    return 1;
+}
+
+// Names resolved HERE, where platform::Key is visible. A table of hardcoded
+// enumerator values in calc_api.cpp would go quietly wrong the first time the
+// enum gained a member.
+int script_key_held(const char* name) {
+    using platform::Key;
+    struct Named {
+        const char* name;
+        Key key;
+    };
+    static constexpr Named kNames[] = {
+        {"up", Key::kUp},       {"down", Key::kDown},   {"left", Key::kLeft},
+        {"right", Key::kRight}, {"enter", Key::kEnter}, {"esc", Key::kEscape},
+        {"space", Key::kSpace}, {"tab", Key::kTab},     {"back", Key::kBackspace},
+        {"del", Key::kDel},     {"home", Key::kHome},
+    };
+    for (const Named& n : kNames) {
+        if (std::strcmp(name, n.name) == 0) {
+            return platform::keyboard().is_held(n.key) ? 1 : 0;
+        }
+    }
+    // A single letter or digit names itself.
+    if (name[0] != 0 && name[1] == 0) {
+        const char c = name[0];
+        if (c >= 'a' && c <= 'z') {
+            return platform::keyboard().is_held(
+                       static_cast<Key>(static_cast<int>(Key::kA) + (c - 'a')))
+                       ? 1
+                       : 0;
+        }
+        if (c >= '0' && c <= '9') {
+            return platform::keyboard().is_held(
+                       static_cast<Key>(static_cast<int>(Key::k0) + (c - '0')))
+                       ? 1
+                       : 0;
+        }
+    }
+    return 0;
+}
+
+// ---- 6B.10: file I/O, over platform::Storage ----
+
+long file_size(const char* path) {
+    return platform::storage().file_size(path);
+}
+
+int file_read(const char* path, long offset, char* buf, int len) {
+    return platform::storage().read_file_range(path, static_cast<std::size_t>(offset),
+                                               reinterpret_cast<std::uint8_t*>(buf),
+                                               static_cast<std::size_t>(len));
+}
+
+int file_write(const char* path, const char* buf, int len) {
+    return platform::storage().write_file(path, reinterpret_cast<const std::uint8_t*>(buf),
+                                          static_cast<std::size_t>(len))
+               ? 1
+               : 0;
+}
+
+int file_append(const char* path, const char* buf, int len) {
+    return platform::storage().append_file(path, reinterpret_cast<const std::uint8_t*>(buf),
+                                           static_cast<std::size_t>(len))
+               ? 1
+               : 0;
+}
+
+int file_exists(const char* path) {
+    return platform::storage().file_exists(path) ? 1 : 0;
+}
+
+constexpr CalcFileOps kFileOps = {file_size, file_read, file_write, file_append, file_exists};
+
 // Is there room below us for a path that needs `need` bytes? A local's
 // address is the current stack pointer to within a few bytes, and the floor
 // is __StackTop minus the bank size — the same absolute floor
@@ -123,6 +261,8 @@ bool PythonInterpreter::init(std::size_t heap_bytes) {
     picocalc_mp_init(g_heap, heap_bytes, __StackTop, stack_limit());
     calc_api_set_persist_hook(&persist_state);
     calc_api_set_stack_hook(&stack_room);
+    calc_api_set_key_hooks(&script_key_poll, &script_key_held);
+    calc_api_set_file_ops(&kFileOps);
     initialized_ = true;
     interrupt_pending_ = false;
     return true;
@@ -151,6 +291,10 @@ bool PythonInterpreter::exec(const char* code) {
     // Resets D68's "has this run plotted yet" latch, so a script's graph is
     // a function of the script and not of what the last one left in Y1-Y7.
     calc_api_begin_run();
+    // A run starts with no stale ESC and no stale keystrokes.
+    g_esc_seen = false;
+    g_key_head = 0;
+    g_key_count = 0;
     running_script_ = true;
     const bool ok = picocalc_mp_exec_str(code) != 0;
     running_script_ = false;
@@ -219,10 +363,12 @@ bool PythonInterpreter::poll_interrupt() {
         return false;
     }
     last_poll_ms_ = now;
-    // Draining here steals events from the main loop, which is fine: the
-    // main loop is not running — it is blocked in on_key, below us.
-    const platform::KeyEvent ev = platform::keyboard().poll();
-    if (ev.pressed && ev.key == platform::Key::kEscape) {
+    // Draining here takes events from the main loop, which is fine: the main
+    // loop is not running — it is blocked in on_key, below us. Since 6B.9 the
+    // non-ESC ones are QUEUED rather than discarded (D81), so a script can
+    // read them and type-ahead is no longer silently lost.
+    drain_keys();
+    if (g_esc_seen) {
         interrupt_pending_ = true;
     }
     return interrupt_pending_;

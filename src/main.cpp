@@ -564,10 +564,12 @@ int main() {
                 last_sd_ok = sd_ok;
                 last_psram_ok = ps_ok;
                 ui::set_health_flags(sd_ok, ps_ok);
-                if (ui::Screen* s = mgr.current()) {
+                // Not while a script owns the panel (6B.8/D80) — repainting
+                // the status bar there would put chrome over its canvas.
+                if (ui::Screen* s = mgr.current(); s != nullptr && !s->owns_display()) {
                     s->invalidate_band(0, ui::kStatusBarH);
+                    dirty = true;
                 }
-                dirty = true;
             }
         }
 
@@ -694,10 +696,12 @@ int main() {
                 if (batt.percent != last_batt_percent || batt.charging != last_batt_charging) {
                     last_batt_percent = batt.percent;
                     last_batt_charging = batt.charging;
-                    if (ui::Screen* s = mgr.current()) {
+                    // See the health-flag branch above: a script's canvas is
+                    // not ours to draw on.
+                    if (ui::Screen* s = mgr.current(); s != nullptr && !s->owns_display()) {
                         s->invalidate_band(0, ui::kStatusBarH);
+                        dirty = true;
                     }
-                    dirty = true;
                 }
             }
         }

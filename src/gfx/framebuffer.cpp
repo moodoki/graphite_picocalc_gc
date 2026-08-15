@@ -229,6 +229,23 @@ void Framebuffer::draw_line(int x0, int y0, int x1, int y1, Color c) {
     }
 }
 
+uint16_t* scratch_pixels() {
+#if PICOCALC_PICO2
+    // The full framebuffer. It is idle outside render_frame like the strips
+    // are, and render_frame redraws the whole thing every pass, so scribbling
+    // in it between frames costs nothing.
+    //
+    // Not strip_buf: in full-framebuffer mode nothing else references it, so
+    // --gc-sections drops it entirely — and referencing it here resurrected
+    // 10 KB on a board with 26 KB free (measured 2026-08-16).
+    return frame_buf;
+#else
+    // Both strips, which are one contiguous array — idle outside
+    // render_frame, see the header for the terms.
+    return &strip_buf[0][0];
+#endif
+}
+
 Framebuffer& framebuffer() {
     static Framebuffer instance;
     return instance;

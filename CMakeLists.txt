@@ -218,6 +218,7 @@ add_executable(picocalc_graphcalc
     src/scripting/mp_port.c
     src/scripting/micropython_embed.cpp
     src/scripting/calc_api.cpp
+    src/scripting/calc_canvas.cpp
     src/scripting/mp_calc_module.c
     src/render/pool.cpp
     src/render/layout_builder.cpp

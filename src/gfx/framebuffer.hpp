@@ -70,6 +70,24 @@ public:
     // window; returns pointer to pixel (0, y).
     uint16_t* row(int y);
 
+    // Point this Framebuffer at a caller-owned buffer covering rows
+    // [y0, y1), so the primitives above can compose into something other
+    // than the render loop's own strips.
+    //
+    // Added for the Python script canvas (6B.8, D80), which draws outside
+    // the render path and would otherwise have to duplicate glyph decoding
+    // and line stepping. `buf` must hold (y1 - y0) * kScreenW pixels.
+    //
+    // INVARIANT: only valid while render_frame() is NOT running. It owns
+    // buf_/clip_ for the duration of a frame, and a binding that rebound
+    // them mid-render would corrupt the frame. Safe from a key handler,
+    // because render_frame drains its pushes before returning.
+    void bind(uint16_t* buf, int y0, int y1) {
+        buf_ = buf;
+        clip_y0_ = y0;
+        clip_y1_ = y1;
+    }
+
 private:
     uint16_t* buf_ = nullptr;
     int clip_y0_ = 0;
@@ -90,5 +108,21 @@ void start_display_service();
 
 // Framebuffer singleton used by the render loop.
 Framebuffer& framebuffer();
+
+// The render loop's strip buffers, lent out as scratch.
+//
+// They are idle whenever render_frame() is not running — which includes the
+// whole time a key handler is on the stack, since render_frame drains its
+// pushes before returning. The script canvas (6B.8) composes here rather than
+// adding its own multi-KB buffer, on the same "one owner at a time" terms
+// platform::io_scratch() carries.
+//
+// INVARIANT: nothing may hold this across a call that could reach the render
+// loop.
+// Both strip buffers, contiguous — 16 full-width rows, enough for one line of
+// any font this project ships.
+uint16_t* scratch_pixels();
+constexpr int kScratchPixels = platform::kScreenW * config::kStripHeight * 2;
+constexpr int kScratchRows = config::kStripHeight * 2;
 
 }  // namespace gfx

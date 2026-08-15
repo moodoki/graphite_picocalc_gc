@@ -20,6 +20,7 @@
 #include "math/var_store.hpp"
 #include "graph/analysis.hpp"
 #include "graph/graph_state.hpp"
+#include "scripting/calc_canvas.hpp"
 
 // The C++ side of the `calc` module (Phase 6B.3-6B.5). Every function here is
 // a LEAF as far as MicroPython is concerned: it is called from
@@ -674,6 +675,7 @@ CalcStatus analyze_impl(const char* op, int one_based, double lo, double hi, dou
 }  // namespace
 
 void calc_api_begin_run(void) {
+    scripting::canvas::begin_run();
     g_plotted_this_run = false;
     g_show_graph_requested = false;
     g_lists_dirty = 0;
@@ -1139,6 +1141,133 @@ CalcStatus calc_api_mat_op(const char* op, int rhs, double* scalar, int* rows, i
     const CalcStatus st = mat_op_impl(op, rhs, scalar, rows, cols, err);
     g_in_call = false;
     return st;
+}
+
+// ---- 6B.9: keyboard, and 6B.10: file I/O ----
+
+namespace {
+
+CalcKeyPollFn g_key_poll = nullptr;
+CalcKeyHeldFn g_key_held = nullptr;
+const CalcFileOps* g_files = nullptr;
+
+}  // namespace
+
+void calc_api_set_key_hooks(CalcKeyPollFn poll, CalcKeyHeldFn held) {
+    g_key_poll = poll;
+    g_key_held = held;
+}
+
+int calc_api_key_pressed(CalcKeyEvent* out) {
+    return g_key_poll != nullptr && g_key_poll(out) != 0 ? 1 : 0;
+}
+
+int calc_api_key_held(const char* name) {
+    return g_key_held != nullptr && name != nullptr && g_key_held(name) != 0 ? 1 : 0;
+}
+
+void calc_api_set_file_ops(const CalcFileOps* ops) {
+    g_files = ops;
+}
+
+CalcStatus calc_api_file_size(const char* path, long* out, const char** err) {
+    if (g_files == nullptr || path == nullptr) {
+        *err = "No filesystem";
+        return kCalcFailed;
+    }
+    const long n = g_files->size(path);
+    if (n < 0) {
+        *err = "No such file";
+        return kCalcFailed;
+    }
+    *out = n;
+    return kCalcOk;
+}
+
+CalcStatus calc_api_file_read(const char* path, long offset, char* buf, int len, int* got,
+                              const char** err) {
+    if (g_files == nullptr || path == nullptr) {
+        *err = "No filesystem";
+        return kCalcFailed;
+    }
+    const int n = g_files->read(path, offset, buf, len);
+    if (n < 0) {
+        *err = "Read failed";
+        return kCalcFailed;
+    }
+    *got = n;
+    return kCalcOk;
+}
+
+CalcStatus calc_api_file_write(const char* path, const char* buf, int len, int append,
+                               const char** err) {
+    if (g_files == nullptr || path == nullptr) {
+        *err = "No filesystem";
+        return kCalcFailed;
+    }
+    const int ok = append != 0 ? g_files->append(path, buf, len) : g_files->write(path, buf, len);
+    if (ok == 0) {
+        *err = "Write failed";
+        return kCalcFailed;
+    }
+    return kCalcOk;
+}
+
+int calc_api_file_exists(const char* path) {
+    return g_files != nullptr && path != nullptr && g_files->exists(path) != 0 ? 1 : 0;
+}
+
+// ---- 6B.8: the script canvas ----
+//
+// Thin: the drawing itself is in calc_canvas.cpp, which is where the gfx and
+// platform includes live. Keeping them out of this file is what lets
+// tests/host/test_calc_api.cpp link against math/ alone.
+
+CalcStatus calc_api_color(const char* name, int r, int g, int b, unsigned* out, const char** err) {
+    if (name != nullptr) {
+        scripting::canvas::Rgb565 c = 0;
+        if (!scripting::canvas::color_from_name(name, &c)) {
+            *err = "Unknown colour name";
+            return kCalcFailed;
+        }
+        *out = c;
+        return kCalcOk;
+    }
+    *out = scripting::canvas::color_from_rgb(r, g, b);
+    return kCalcOk;
+}
+
+void calc_api_canvas_clear(unsigned color) {
+    scripting::canvas::clear(static_cast<scripting::canvas::Rgb565>(color));
+}
+
+void calc_api_canvas_pixel(int x, int y, unsigned color) {
+    scripting::canvas::pixel(x, y, static_cast<scripting::canvas::Rgb565>(color));
+}
+
+void calc_api_canvas_line(int x0, int y0, int x1, int y1, unsigned color) {
+    scripting::canvas::line(x0, y0, x1, y1, static_cast<scripting::canvas::Rgb565>(color));
+}
+
+void calc_api_canvas_rect(int x, int y, int w, int h, unsigned color, int fill) {
+    scripting::canvas::rect(x, y, w, h, static_cast<scripting::canvas::Rgb565>(color), fill != 0);
+}
+
+int calc_api_canvas_text(int x, int y, const char* s, unsigned fg, unsigned bg) {
+    return scripting::canvas::text(x, y, s, static_cast<scripting::canvas::Rgb565>(fg),
+                                   static_cast<scripting::canvas::Rgb565>(bg));
+}
+
+int calc_api_canvas_text_width(const char* s) {
+    return scripting::canvas::text_width(s);
+}
+
+int calc_api_canvas_text_height(void) {
+    return scripting::canvas::text_height();
+}
+
+int calc_api_canvas_owns_display(void) {
+    return scripting::canvas::owns_display() ? 1 : 0;
 }
 
 // Routed through math:: rather than libm so the conventions are the

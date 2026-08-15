@@ -257,6 +257,82 @@ CalcStatus calc_api_mat_read_row(int row, int count, double* out, const char** e
 CalcStatus calc_api_mat_store(int slot, const char** err);
 CalcStatus calc_api_mat_load(int slot, int* rows, int* cols, const char** err);
 
+// ---- 6B.9: keyboard ----
+
+// One key event as a script sees it. `code` is a stable small integer
+// (platform::Key's value); `ch` is the printable character or 0.
+typedef struct CalcKeyEvent {
+    int code;
+    int ch;
+    int shift;
+    int ctrl;
+    int alt;
+} CalcKeyEvent;
+
+// Drain the keyboard into the queue and take the oldest event, if any.
+// Returns 0 when nothing is waiting.
+//
+// D81, refined by building it: the rule is ONE DRAIN ROUTINE AND ONE QUEUE,
+// not one caller. A blocking wait_key() sits inside a binding where the VM
+// hook does not run, so it cannot be the hook's job alone — both call the
+// same drain, ESC is recognised inside it, and the queue means neither
+// steals from the other. Before this, the hook simply discarded every
+// non-ESC event, which silently dropped type-ahead during a script.
+typedef int (*CalcKeyPollFn)(CalcKeyEvent* out);
+
+// Is the key called `name` down right now? Resolved on the platform side,
+// where platform::Key is actually visible — a name table over hardcoded
+// enumerator values would go quietly wrong the first time the enum gained a
+// member. Keyboard::is_held is a separate query from the event stream, so
+// this never competes with the queue.
+typedef int (*CalcKeyHeldFn)(const char* name);
+void calc_api_set_key_hooks(CalcKeyPollFn poll, CalcKeyHeldFn held);
+
+// Non-blocking: 1 and *out filled, or 0.
+int calc_api_key_pressed(CalcKeyEvent* out);
+int calc_api_key_held(const char* name);
+
+// ---- 6B.10: file I/O ----
+
+// Storage reaches the bindings through this, for the same reason the
+// persist and stack hooks exist: calc_api.cpp must keep building in the host
+// test harness, where there is no SD card.
+typedef struct CalcFileOps {
+    long (*size)(const char* path);                                  // -1 if missing
+    int (*read)(const char* path, long offset, char* buf, int len);  // bytes, or -1
+    int (*write)(const char* path, const char* buf, int len);        // 1 ok
+    int (*append)(const char* path, const char* buf, int len);       // 1 ok
+    int (*exists)(const char* path);
+} CalcFileOps;
+void calc_api_set_file_ops(const CalcFileOps* ops);
+
+CalcStatus calc_api_file_size(const char* path, long* out, const char** err);
+CalcStatus calc_api_file_read(const char* path, long offset, char* buf, int len, int* got,
+                              const char** err);
+CalcStatus calc_api_file_write(const char* path, const char* buf, int len, int append,
+                               const char** err);
+int calc_api_file_exists(const char* path);
+
+// ---- 6B.8: the script canvas ----
+
+// A colour, as RGB565. Resolved in the glue from either a name or an (r,g,b)
+// tuple so the drawing entry points below take one plain integer.
+CalcStatus calc_api_color(const char* name, int r, int g, int b, unsigned* out, const char** err);
+
+// A script that clears the screen takes the panel until it ends — D80. The
+// pixels survive because ProgramScreen then marks nothing dirty, which makes
+// the render loop skip the frame entirely.
+void calc_api_canvas_clear(unsigned color);
+void calc_api_canvas_pixel(int x, int y, unsigned color);
+void calc_api_canvas_line(int x0, int y0, int x1, int y1, unsigned color);
+void calc_api_canvas_rect(int x, int y, int w, int h, unsigned color, int fill);
+int calc_api_canvas_text(int x, int y, const char* s, unsigned fg, unsigned bg);
+int calc_api_canvas_text_width(const char* s);
+int calc_api_canvas_text_height(void);
+
+// Did this run take the panel? ProgramScreen asks after exec() returns.
+int calc_api_canvas_owns_display(void);
+
 // ---- 6B.5: complex ----
 
 // Wrappers over math::c_abs/c_arg/c_conj rather than libm, so the
