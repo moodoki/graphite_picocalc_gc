@@ -280,7 +280,7 @@ EditorAction TextEditorWidget::on_key(const platform::KeyEvent& ev) {
             buf_.move_line_start();
             break;
         case Key::kEnter:
-            buf_.insert_newline(cfg_.auto_indent_after);
+            buf_.insert_newline(cfg_.auto_indent_after, cfg_.indent_width);
             break;
         case Key::kBackspace:
             buf_.backspace();

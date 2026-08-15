@@ -13,10 +13,16 @@ namespace ui {
 // Every read site tolerates null, so a consumer only sets what it
 // cares about.
 struct TextEditorConfig {
-    const char* title = "EDIT";                  // status bar
-    const char* save_dir = "/picocalc";          // e.g. "/picocalc/notes"
-    const char* file_ext = ".txt";               // e.g. ".py"
-    char auto_indent_after = 0;                  // 0 = disabled; ':' for Python
+    const char* title = "EDIT";          // status bar
+    const char* save_dir = "/picocalc";  // e.g. "/picocalc/notes"
+    const char* file_ext = ".txt";       // e.g. ".py"
+    // Auto-indent always carries the previous line's leading blanks
+    // (see TextBuffer::insert_newline). These two only control the
+    // FURTHER level added after `auto_indent_after`: Notepad leaves
+    // indent_width at 0, which is "auto-indent with 0 extra spaces",
+    // and 6B's Python editor sets ':' / 2.
+    char auto_indent_after = 0;                  // 0 = no extra level
+    int indent_width = 0;                        // spaces per extra level
     bool has_run_key = false;                    // F1:RUN shown and wired only if true
     void (*on_run)(const char* path) = nullptr;  // called with the saved path
 };

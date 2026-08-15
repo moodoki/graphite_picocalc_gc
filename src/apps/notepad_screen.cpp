@@ -16,8 +16,13 @@ ui::TextEditorConfig make_config() {
     cfg.title = "NOTE";
     cfg.save_dir = kNotesDir;
     cfg.file_ext = kNotesExt;
-    cfg.auto_indent_after = 0;  // plain text — 6B's Python editor sets ':'
-    cfg.has_run_key = false;    // nothing to run (D54)
+    // Auto-indent stays enabled — a new line inherits the previous
+    // line's indentation, which is useful in plain notes too. What
+    // Notepad turns off is only the extra level: 0 spaces for now,
+    // and the mechanism is here if that ever wants to change.
+    cfg.auto_indent_after = 0;
+    cfg.indent_width = 0;
+    cfg.has_run_key = false;  // nothing to run (D54)
     cfg.on_run = nullptr;
     return cfg;
 }

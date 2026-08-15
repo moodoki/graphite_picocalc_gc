@@ -27,10 +27,6 @@ public:
     static constexpr int kCapacity = 4096;
     static constexpr int kMaxLines = 256;
 
-    // Two spaces per level, matching the Python convention 6B will
-    // configure this for.
-    static constexpr int kIndentWidth = 2;
-
     void clear();
 
     // Replaces the contents. Bytes past kCapacity are dropped and false
@@ -61,10 +57,16 @@ public:
 
     // All return true when they changed something.
     bool insert_char(char c);
-    // auto_indent_after: 0 disables. Otherwise, when the current line's
-    // last non-blank character is that char, the new line gets one
-    // extra indent level on top of the current line's leading blanks.
-    bool insert_newline(char auto_indent_after);
+
+    // Auto-indent is always on: the new line inherits the leading
+    // blanks of the one it was split from. That is useful in plain
+    // text too, so it is not gated on a language trigger.
+    //
+    // `trigger` adds a further level on top of that when the last
+    // non-blank before the cursor matches it (':' for Python). 0
+    // disables the extra level, which with extra_indent = 0 leaves
+    // plain indent-carrying — the Notepad default.
+    bool insert_newline(char trigger, int extra_indent);
     bool backspace();
     bool del();
 

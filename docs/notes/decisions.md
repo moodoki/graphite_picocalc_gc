@@ -18,6 +18,88 @@ Format:
 
 ---
 
+## D69: `size-report.sh` was omitting `.data` — real SRAM headroom is ~7 KB, not ~57 KB, and the MicroPython heap does not fit on either board
+
+**Date**: 2026-08-15
+**Status**: Accepted
+**Context**: 6A landed and §0.1's owed post-6A measurement came in at
++920 B against D61's ~10 KB budget — suspiciously cheap for ~5 KB of
+new static objects. A section-level cross-check found `.data` growing
+5,584 B over the same change while `.bss` grew 920, which the headline
+metric did not reflect at all. Chasing that discrepancy found the tool
+was wrong, and had been for every phase that used it.
+
+**The bug**: `scripts/size-report.sh` computed SRAM as Berkeley
+`size`'s `bss + data` columns. On the Pico, `.data` has a flash LMA and
+an **SRAM VMA**, and the SDK marks the section `READONLY, CODE`
+(it carries RAM-resident functions as well as initialised variables).
+Berkeley `size` therefore bins the whole section under **text** and
+prints `data 0`. The script summed `bss + 0` and silently omitted
+44,380 B of live SRAM. It also counted `.stack_dummy` (4 KB), which
+lives in a dedicated scratch bank rather than the main SRAM bank.
+
+**Decision**: Measure from the section table, not Berkeley columns.
+`size-report.sh` now sums every ALLOC section whose VMA falls in the
+board's main SRAM bank (`objdump -h`, parsed in python3 — BSD awk on
+macOS has no `strtonum`), prints the per-section breakdown, and states
+that the core stacks sit in the separate scratch banks. The old
+comment claiming "bss+data must fit alongside the stacks" is replaced
+with an explanation of this trap so it cannot be reintroduced.
+
+**The corrected numbers** (Pico 1, main bank = 256 KB):
+
+| | used | free |
+|---|---|---|
+| pre-6A (`564406f`), as D61 measured it | 210,764 | "58.2 KB" |
+| pre-6A, **actual** | 247,496 | **14.3 KB** |
+| after 6A + 6C.1 | 254,016 | **7.9 KB** |
+
+Both rows measured with the corrected script against real builds of
+each commit, not reconstructed. 6A + 6C.1 cost **6,520 B**, which is
+close to the ~6.2 KB the implementation plan projected — the estimate
+was fine; the baseline it was compared against was not.
+
+**Consequence, and this is the part that matters: the MicroPython heap
+does not fit on either board.** D61 cut the Pico 1 heap 48 → 40 KB to
+buy margin against a 56 KB threshold it believed was 2.2 KB away. The
+real free figure was 14.3 KB before 6A and is 7.9 KB now, so **neither
+48 KB nor 40 KB was ever reachable** — the shortfall is ~32 KB, not a
+tuning question. The Pico 2 is in the same position for the same
+reason: 83 KB free against a planned 96 KB heap.
+
+**Rationale**: The whole point of §0.1 was to stop 6B being scoped
+against a number that would collapse mid-implementation. It did its job
+— just one phase later than intended, and by catching the instrument
+rather than the value.
+
+**Tradeoffs / what this invalidates**: every headroom figure in
+`phase6-spec.md` §0.1, §4.4 and Risk 6; D61 in full; and any SRAM
+headroom claim in earlier phases that cited this script. The *deltas*
+those phases reported are still meaningful (the omission is a roughly
+constant offset within a phase), so no past decision about whether a
+change grew or shrank RAM is affected — only the absolute headroom
+claims are.
+
+**Not a lever, to head off the obvious idea**: ~24 KB of the `.data`
+section is our own screen instances (`g_image` 7,496 B,
+`graph::state()` 7,488 B, `text_editor()` 5,048 B, `file_browser()`
+2,848 B, `table_screen()` 2,216 B, …) landing there rather than in
+`.bss` because they carry non-zero default member initialisers. Moving
+them to `.bss` would return ~24 KB of **flash** (the initialiser image)
+but **zero SRAM** — both sections are resident. The real SRAM levers
+are still the ones in `pre-phase5-review.md` (ArrayStore slab cut
+~12-16 KB, persistence `g_chunk` fold ~6 KB) plus, now clearly, a
+decision about where a Python heap can live at all.
+
+**Revisit when**: before any 6B work is scoped. Risk 6 needs rewriting
+from "heap too small on Pico 1" to "heap does not fit on either board
+as specced", and 6B.1 cannot be estimated until that has an answer —
+PSRAM is not usable for a GC heap (`psram.hpp` is PIO SPI, not memory
+mapped), so the options are a much smaller heap, freeing SRAM via the
+`pre-phase5-review.md` levers, or reconsidering the embedding.
+
+---
+
 ## D68: P6-15 resolved — `calc.plot()` clears the Y-slots on a script's first plot; P6-2 follows as buffered
 
 **Date**: 2026-08-15

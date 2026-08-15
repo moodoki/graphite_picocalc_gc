@@ -109,7 +109,7 @@ void TextBuffer::set_cursor(std::size_t offset) {
 
 bool TextBuffer::insert_char(char c) {
     if (c == '\n') {
-        return insert_newline(0);
+        return insert_newline(0, 0);
     }
     if (len_ >= static_cast<std::size_t>(kCapacity)) {
         return false;
@@ -124,7 +124,7 @@ bool TextBuffer::insert_char(char c) {
     return true;
 }
 
-bool TextBuffer::insert_newline(char auto_indent_after) {
+bool TextBuffer::insert_newline(char trigger, int extra_indent) {
     if (line_count_ >= kMaxLines) {
         return false;
     }
@@ -132,25 +132,25 @@ bool TextBuffer::insert_newline(char auto_indent_after) {
     // Work out the indent before touching the buffer — the source line
     // moves once the newline goes in.
     //
-    // auto_indent_after == 0 disables the feature outright, which means
-    // no indent carrying either, not just no extra level: Notepad
-    // (§3.6) configures none and wants a plain newline.
+    // Carrying the current line's leading blanks is unconditional:
+    // it is as useful in a plain-text note as in code, and Notepad
+    // keeps it by configuring extra_indent = 0 rather than by turning
+    // the whole mechanism off.
+    const int row = cursor_row();
+    const std::size_t start = line_offset(row);
     int indent = 0;
-    if (auto_indent_after != 0) {
-        const int row = cursor_row();
-        const std::size_t start = line_offset(row);
-        while (start + static_cast<std::size_t>(indent) < cursor_ &&
-               is_blank(buf_[start + indent])) {
-            ++indent;
-        }
-        // One extra level when the last non-blank before the cursor is
-        // the trigger char.
+    while (start + static_cast<std::size_t>(indent) < cursor_ && is_blank(buf_[start + indent])) {
+        ++indent;
+    }
+    // One further level when the last non-blank before the cursor is
+    // the trigger char (':' for Python).
+    if (trigger != 0 && extra_indent > 0) {
         std::size_t scan = cursor_;
         while (scan > start && is_blank(buf_[scan - 1])) {
             --scan;
         }
-        if (scan > start && buf_[scan - 1] == auto_indent_after) {
-            indent += kIndentWidth;
+        if (scan > start && buf_[scan - 1] == trigger) {
+            indent += extra_indent;
         }
     }
 

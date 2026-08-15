@@ -102,7 +102,7 @@ void test_newline_splits() {
     b.move_line_start();
     b.move_right();
     b.move_right();
-    b.insert_newline(0);
+    b.insert_newline(0, 0);
     check_text(b, "ab\ncd", "newline splits the line at the cursor");
     check(b.line_count() == 2, "split produced two lines");
     check(b.cursor_row() == 1 && b.cursor_col() == 0, "cursor lands on the new line");
@@ -111,35 +111,49 @@ void test_newline_splits() {
 void test_auto_indent() {
     ui::TextBuffer b;
 
-    // Disabled: a plain newline carries no indent at all.
+    // Indent-carrying is unconditional — it is useful in plain text
+    // too, so it is not gated on a language trigger. This is the
+    // Notepad configuration: trigger 0, extra 0.
     load(b, "    x");
     b.set_cursor(b.length());
-    b.insert_newline(0);
-    check_text(b, "    x\n", "auto-indent disabled adds no indent");
+    b.insert_newline(0, 0);
+    check_text(b, "    x\n    ", "indent carried with no trigger configured");
 
-    // Enabled but not triggered: the leading blanks are still carried,
-    // because that is ordinary indent-preservation, not the ':' rule.
-    load(b, "    x");
+    // No indent to carry means no indent added.
+    load(b, "x");
     b.set_cursor(b.length());
-    b.insert_newline(':');
-    check_text(b, "    x\n    ", "indent preserved without the trigger char");
+    b.insert_newline(0, 0);
+    check_text(b, "x\n", "nothing carried from an unindented line");
 
-    // Triggered: one extra level on top of the current indent.
+    // A trigger with a zero width still adds no extra level — that is
+    // what "auto-indent with 0 spaces" means.
     load(b, "  if x:");
     b.set_cursor(b.length());
-    b.insert_newline(':');
+    b.insert_newline(':', 0);
+    check_text(b, "  if x:\n  ", "zero extra_indent adds no level even when triggered");
+
+    // Configured but not triggered: carry only.
+    load(b, "    x");
+    b.set_cursor(b.length());
+    b.insert_newline(':', 2);
+    check_text(b, "    x\n    ", "indent carried without the trigger char");
+
+    // Triggered: one extra level on top of the carried indent.
+    load(b, "  if x:");
+    b.set_cursor(b.length());
+    b.insert_newline(':', 2);
     check_text(b, "  if x:\n    ", "trigger char adds one indent level");
 
     // Trailing blanks after the trigger char still count.
     load(b, "if x:   ");
     b.set_cursor(b.length());
-    b.insert_newline(':');
+    b.insert_newline(':', 2);
     check_text(b, "if x:   \n  ", "trailing blanks don't hide the trigger char");
 
     // Splitting mid-line only measures the indent left of the cursor.
     load(b, "        tail");
     b.set_cursor(4);
-    b.insert_newline(':');
+    b.insert_newline(':', 2);
     check_text(b, "    \n        tail", "indent measured left of the cursor only");
 }
 
@@ -201,7 +215,7 @@ void test_capacity_bounds() {
     check(written == ui::TextBuffer::kCapacity, "insert fills exactly to kCapacity");
     check(b.length() == static_cast<std::size_t>(ui::TextBuffer::kCapacity), "length at cap");
     check(!b.insert_char('y'), "insert past capacity refused");
-    check(!b.insert_newline(0), "newline past capacity refused");
+    check(!b.insert_newline(0, 0), "newline past capacity refused");
     check(b.text()[b.length()] == 0, "buffer still NUL-terminated at the cap");
 
     // Overlong loads report the truncation rather than failing silently.
@@ -220,7 +234,7 @@ void test_line_count_bound() {
     ui::TextBuffer b;
     // insert_newline must refuse rather than overrun line_start_.
     int lines = 1;
-    while (b.insert_newline(0)) {
+    while (b.insert_newline(0, 0)) {
         ++lines;
         if (lines > ui::TextBuffer::kMaxLines + 4) {
             break;
@@ -228,7 +242,7 @@ void test_line_count_bound() {
     }
     check(lines == ui::TextBuffer::kMaxLines, "newline fills exactly to kMaxLines");
     check(b.line_count() == ui::TextBuffer::kMaxLines, "line_count at the cap");
-    check(!b.insert_newline(0), "newline past kMaxLines refused");
+    check(!b.insert_newline(0, 0), "newline past kMaxLines refused");
     // Ordinary characters must still work at the line cap.
     check(b.insert_char('a'), "typing still works once the line cap is hit");
 }
