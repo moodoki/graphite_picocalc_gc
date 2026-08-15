@@ -190,6 +190,16 @@ echo "== Compiling + linking test_text_buffer =="
     src/ui/text_buffer.cpp \
     -o "$OUT/test_text_buffer"
 
+# Script output pane buffer (6B.12). Pure logic — no interpreter, and
+# the drop-oldest/index-overflow edges are exactly what a device check
+# cannot show.
+echo "== Compiling + linking test_output_log =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_output_log.cpp \
+    src/ui/output_log.cpp \
+    -o "$OUT/test_output_log"
+
 # Entry-time paren auto-close (issue #35). Pure string logic — no math
 # engine, no tinyexpr, no cephes.
 echo "== Compiling + linking test_autoclose =="
@@ -271,6 +281,9 @@ echo "== Running test_apps =="
 
 echo "== Running test_text_buffer =="
 "$OUT/test_text_buffer"
+
+echo "== Running test_output_log =="
+"$OUT/test_output_log"
 
 echo "== Running test_autoclose =="
 "$OUT/test_autoclose"

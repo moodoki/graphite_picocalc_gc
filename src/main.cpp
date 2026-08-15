@@ -35,6 +35,7 @@
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 #include "apps/notepad_screen.hpp"
+#include "apps/program_screen.hpp"
 
 // Build id from CMake (git short hash, "-dev" when the tree is dirty).
 #ifndef PICOCALC_BUILD_ID
@@ -343,6 +344,14 @@ void register_builtin_apps() {
         ui::screen_manager().push(&apps::notepad_screen());
     };
     platform::AppRegistry::register_app(notepad);
+
+    platform::AppEntry python = {};
+    python.name = "Python";
+    python.kind = platform::AppKind::kBuiltIn;
+    python.launch = [](const platform::AppEntry&) {
+        ui::screen_manager().push(&apps::program_screen());
+    };
+    platform::AppRegistry::register_app(python);
 
     platform::AppEntry files = {};
     files.name = "Files";

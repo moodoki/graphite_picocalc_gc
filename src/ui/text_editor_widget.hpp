@@ -68,6 +68,12 @@ public:
     bool dirty() const { return buf_.dirty(); }
     const char* path() const { return path_; }
 
+    // NUL-terminated buffer contents. 6B's RUN executes this rather than
+    // re-reading the file it has just written: the text is already here,
+    // and staging another TextBuffer::kCapacity to read it back would
+    // cost 4 KB of bss to reproduce what is in front of the user.
+    const char* text() const { return buf_.text(); }
+
 private:
     // Layout: 8x16 font, so 40 columns across a 320 px screen. Four go
     // to the line-number gutter.
