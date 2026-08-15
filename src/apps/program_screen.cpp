@@ -8,6 +8,8 @@
 #include "ui/screen_manager.hpp"
 #include "ui/text_editor_widget.hpp"
 #include "apps/files_screen.hpp"
+#include "apps/graph_screen.hpp"
+#include "scripting/calc_api.h"
 #include "scripting/micropython_embed.hpp"
 
 namespace apps {
@@ -93,6 +95,19 @@ void ProgramScreen::run_current() {
     if (!last_run_ok_) {
         const int over = g_log.line_count() - visible_rows();
         top_line_ = over > 0 ? over : 0;
+    }
+
+    // calc.show_graph() (6B.6) is deferred to here rather than switching
+    // screens from inside the binding: a binding runs inside the VM, inside
+    // this on_key, so an immediate push would nest screen management inside
+    // itself and still render nothing until the script returned. Same shape
+    // as 6B.12 buffering output instead of streaming it.
+    //
+    // Only on a clean run. A script that raised has a traceback the user
+    // needs to read, and hiding it behind a graph would be the wrong call
+    // even though the plot commands before the failure did take effect.
+    if (last_run_ok_ && calc_api_take_show_graph() != 0) {
+        ui::screen_manager().push(&graph_screen());
     }
 }
 

@@ -229,6 +229,105 @@ static mp_obj_t calc_solve(size_t n_args, const mp_obj_t* args) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_solve_obj, 1, 2, calc_solve);
 
+// ---- 6B.6: graphing ----
+
+// A Y= slot argument, accepted as "Y1".."Y7" (as §4.2 writes it) or as a
+// plain 1..7. Returns 0 for anything else and lets calc_api name the range.
+static int calc_slot_arg(mp_obj_t o) {
+    if (mp_obj_is_str(o)) {
+        const char* s = mp_obj_str_get_str(o);
+        if ((s[0] == 'Y' || s[0] == 'y') && s[1] >= '1' && s[1] <= '9' && s[2] == 0) {
+            return s[1] - '0';
+        }
+        return 0;
+    }
+    return mp_obj_get_int(o);
+}
+
+static mp_obj_t calc_plot(mp_obj_t expr_obj) {
+    const char* expr = mp_obj_str_get_str(expr_obj);
+    int slot = 0;
+    const char* err = NULL;
+    const CalcStatus st = calc_api_plot(expr, &slot, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    // The slot number is worth returning: it is also which colour the curve
+    // will be, since colour is fixed per slot.
+    return MP_OBJ_NEW_SMALL_INT(slot);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_plot_obj, calc_plot);
+
+static mp_obj_t calc_window(size_t n_args, const mp_obj_t* args) {
+    (void)n_args;
+    const char* err = NULL;
+    const CalcStatus st =
+        calc_api_window((double)mp_obj_get_float(args[0]), (double)mp_obj_get_float(args[1]),
+                        (double)mp_obj_get_float(args[2]), (double)mp_obj_get_float(args[3]), &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_window_obj, 4, 4, calc_window);
+
+static mp_obj_t calc_show_graph(void) {
+    calc_api_show_graph();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(calc_show_graph_obj, calc_show_graph);
+
+// One body for all six analysis bindings. Those that describe a point
+// return a (x, y) tuple; those that produce a single number return a float.
+static mp_obj_t calc_analyze(const char* op, size_t n_args, const mp_obj_t* args) {
+    const int slot = calc_slot_arg(args[0]);
+    const double lo = (double)mp_obj_get_float(args[1]);
+    const double hi = n_args > 2 ? (double)mp_obj_get_float(args[2]) : lo;
+    double a = 0;
+    double b = 0;
+    int two = 0;
+    const char* err = NULL;
+    const CalcStatus st = calc_api_graph_analyze(op, slot, lo, hi, &a, &b, &two, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    if (two) {
+        mp_obj_t pair[2] = {mp_obj_new_float((mp_float_t)a), mp_obj_new_float((mp_float_t)b)};
+        return mp_obj_new_tuple(2, pair);
+    }
+    return mp_obj_new_float((mp_float_t)a);
+}
+
+static mp_obj_t calc_graph_zero(size_t n, const mp_obj_t* a) {
+    return calc_analyze("zero", n, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_zero_obj, 3, 3, calc_graph_zero);
+
+static mp_obj_t calc_graph_min(size_t n, const mp_obj_t* a) {
+    return calc_analyze("min", n, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_min_obj, 3, 3, calc_graph_min);
+
+static mp_obj_t calc_graph_max(size_t n, const mp_obj_t* a) {
+    return calc_analyze("max", n, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_max_obj, 3, 3, calc_graph_max);
+
+static mp_obj_t calc_graph_integral(size_t n, const mp_obj_t* a) {
+    return calc_analyze("integral", n, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_integral_obj, 3, 3, calc_graph_integral);
+
+static mp_obj_t calc_graph_deriv(size_t n, const mp_obj_t* a) {
+    return calc_analyze("deriv", n, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_deriv_obj, 2, 2, calc_graph_deriv);
+
+static mp_obj_t calc_graph_value(size_t n, const mp_obj_t* a) {
+    return calc_analyze("value", n, a);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_value_obj, 2, 2, calc_graph_value);
+
 // ---- 6B.5: complex ----
 
 // Python already has complex(); this exists so `calc.complex` reads the same
@@ -279,6 +378,15 @@ static const mp_rom_map_elem_t calc_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_diff), MP_ROM_PTR(&calc_diff_obj)},
     {MP_ROM_QSTR(MP_QSTR_integ), MP_ROM_PTR(&calc_integ_obj)},
     {MP_ROM_QSTR(MP_QSTR_solve), MP_ROM_PTR(&calc_solve_obj)},
+    {MP_ROM_QSTR(MP_QSTR_plot), MP_ROM_PTR(&calc_plot_obj)},
+    {MP_ROM_QSTR(MP_QSTR_window), MP_ROM_PTR(&calc_window_obj)},
+    {MP_ROM_QSTR(MP_QSTR_show_graph), MP_ROM_PTR(&calc_show_graph_obj)},
+    {MP_ROM_QSTR(MP_QSTR_graph_zero), MP_ROM_PTR(&calc_graph_zero_obj)},
+    {MP_ROM_QSTR(MP_QSTR_graph_min), MP_ROM_PTR(&calc_graph_min_obj)},
+    {MP_ROM_QSTR(MP_QSTR_graph_max), MP_ROM_PTR(&calc_graph_max_obj)},
+    {MP_ROM_QSTR(MP_QSTR_graph_integral), MP_ROM_PTR(&calc_graph_integral_obj)},
+    {MP_ROM_QSTR(MP_QSTR_graph_deriv), MP_ROM_PTR(&calc_graph_deriv_obj)},
+    {MP_ROM_QSTR(MP_QSTR_graph_value), MP_ROM_PTR(&calc_graph_value_obj)},
     {MP_ROM_QSTR(MP_QSTR_complex), MP_ROM_PTR(&calc_complex_obj)},
     {MP_ROM_QSTR(MP_QSTR_c_abs), MP_ROM_PTR(&calc_c_abs_obj)},
     {MP_ROM_QSTR(MP_QSTR_c_arg), MP_ROM_PTR(&calc_c_arg_obj)},

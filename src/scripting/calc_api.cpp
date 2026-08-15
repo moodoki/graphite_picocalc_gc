@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "config.hpp"
 #include "math/cas/cas_eval.hpp"
 #include "math/cas/expr.hpp"
 #include "math/cas/serialize.hpp"
@@ -13,6 +14,8 @@
 #include "math/unified_home.hpp"
 #include "math/units.hpp"
 #include "math/var_store.hpp"
+#include "graph/analysis.hpp"
+#include "graph/graph_state.hpp"
 
 // The C++ side of the `calc` module (Phase 6B.3-6B.5). Every function here is
 // a LEAF as far as MicroPython is concerned: it is called from
@@ -40,6 +43,21 @@ bool g_in_call = false;
 
 CalcPersistFn g_persist = nullptr;
 CalcStackRoomFn g_stack_room = nullptr;
+
+// D68's per-run latch: has this script plotted anything yet? False at the
+// start of every top-level exec(), which is what makes a script's graph
+// depend on the script and not on what the previous one left in Y1-Y7.
+bool g_plotted_this_run = false;
+
+// calc.show_graph() sets this; the screen that ran the script acts on it
+// once exec() returns. See calc_api.h for why it is not immediate.
+bool g_show_graph_requested = false;
+
+void persist(CalcPersistTarget what) {
+    if (g_persist != nullptr) {
+        g_persist(what);
+    }
+}
 
 // Stack a path needs below the binding, in bytes. Both come from the
 // `stack: peak N of 4096` instrument on hardware, not from adding up frames —
@@ -71,6 +89,22 @@ CalcStackRoomFn g_stack_room = nullptr;
 // point — running it anyway was measured, the same day, to hang the board.
 constexpr std::size_t kEvalStackNeed = 1600;
 constexpr std::size_t kSolveStackNeed = 2000;
+
+// Graph analysis is measured on its own because analyze_integral recurses:
+// integrate_panel is 136 bytes a frame with a depth cap of 12, so the
+// arithmetic says 1,632 bytes of recursion before the expression evaluator
+// underneath it.
+//
+// The arithmetic is a floor, and the measurement is what counts. A shallow
+// integrand hides the problem entirely — integral of x^2-4 peaked at 2,488 of
+// 4,096. The number below comes from one that actually subdivides:
+//
+//   calc.graph_integral("Y1", 0.01, 1) on sin(1/x)   peak 3,532   consumed 1,675
+//
+// 2,000 is that plus ~325, and it fits the 2,239 bytes a binding has. Anything
+// added to 6B.7-6B.10 gets its own measurement against an input chosen to be
+// hostile, not a convenient one.
+constexpr std::size_t kAnalysisStackNeed = 2000;
 
 // True when the path is safe to enter. No hook installed means yes: the host
 // test harness runs on a stack where none of this is a question.
@@ -297,9 +331,7 @@ CalcStatus store_impl(const char* name, double re, double im, const char** err) 
     } else {
         vars.set_complex(ref.index, re, im);
     }
-    if (g_persist != nullptr) {
-        g_persist();
-    }
+    persist(kCalcPersistVars);
     return kCalcOk;
 }
 
@@ -485,6 +517,174 @@ CalcStatus calc_api_solve(const char* expr, const char* var, int* count, char* o
     }
     g_in_call = true;
     const CalcStatus st = solve_impl(expr, var, count, out, out_cap, err);
+    g_in_call = false;
+    return st;
+}
+
+// ---- 6B.6: graphing ----
+
+namespace {
+
+// A Y= slot from a 1-based label, or -1. Callers use "Y1".."Y7" or 1..7;
+// the check is the same either way and the message names both.
+int graph_slot(int one_based, const char** err) {
+    if (one_based < 1 || one_based > graph::kFunctionSlots) {
+        *err = "Slot must be Y1-Y7";
+        return -1;
+    }
+    return one_based - 1;
+}
+
+CalcStatus plot_impl(const char* expr, int* slot, const char** err) {
+    if (expr == nullptr || expr[0] == 0) {
+        *err = "Empty expression";
+        return kCalcFailed;
+    }
+    if (std::strlen(expr) >= config::kMaxExprLen) {
+        *err = "Expression too long";
+        return kCalcFailed;
+    }
+    graph::GraphState& st = graph::state();
+
+    // D68: the first plot of a run wipes the slate, so what the script draws
+    // is what the script asked for. Plotting also forces FUNC mode — a
+    // script that writes Y1 and leaves the calculator in POLAR would show a
+    // blank screen and no reason why.
+    int target = 0;
+    if (!g_plotted_this_run) {
+        for (int i = 0; i < graph::kFunctionSlots; ++i) {
+            st.y.expr[i][0] = 0;
+            st.y.enabled[i] = false;
+        }
+        st.mode = graph::Mode::kFunction;
+        g_plotted_this_run = true;
+    } else {
+        while (target < graph::kFunctionSlots && st.y.expr[target][0] != 0) {
+            ++target;
+        }
+        if (target >= graph::kFunctionSlots) {
+            *err = "All 7 graph slots used";
+            return kCalcFailed;
+        }
+    }
+    std::snprintf(st.y.expr[target], config::kMaxExprLen, "%s", expr);
+    st.y.enabled[target] = true;
+    *slot = target + 1;
+    persist(kCalcPersistGraph);
+    return kCalcOk;
+}
+
+CalcStatus window_impl(double x_min, double x_max, double y_min, double y_max, const char** err) {
+    if (!(x_min < x_max) || !(y_min < y_max)) {
+        *err = "Window needs min < max";
+        return kCalcFailed;
+    }
+    graph::GraphState& st = graph::state();
+    st.window.x_min = x_min;
+    st.window.x_max = x_max;
+    st.window.y_min = y_min;
+    st.window.y_max = y_max;
+    persist(kCalcPersistGraph);
+    return kCalcOk;
+}
+
+CalcStatus analyze_impl(const char* op, int one_based, double lo, double hi, double* a, double* b,
+                        int* two_values, const char** err) {
+    const int slot = graph_slot(one_based, err);
+    if (slot < 0) {
+        return kCalcFailed;
+    }
+    const graph::GraphState& st = graph::state();
+    if (st.y.expr[slot][0] == 0) {
+        *err = "Slot is empty";
+        return kCalcFailed;
+    }
+    graph::AnalysisResult r;
+    *two_values = 0;
+    if (std::strcmp(op, "zero") == 0) {
+        r = graph::analyze_zero(st, slot, lo, hi, 0.5 * (lo + hi));
+        *two_values = 1;
+    } else if (std::strcmp(op, "min") == 0 || std::strcmp(op, "max") == 0) {
+        r = graph::analyze_extremum(st, slot, lo, hi, op[1] == 'a');
+        *two_values = 1;
+    } else if (std::strcmp(op, "value") == 0) {
+        r = graph::analyze_value(st, slot, lo);
+        *two_values = 1;
+    } else if (std::strcmp(op, "deriv") == 0) {
+        r = graph::analyze_derivative(st, slot, lo);
+    } else if (std::strcmp(op, "integral") == 0) {
+        r = graph::analyze_integral(st, slot, lo, hi);
+    } else {
+        *err = "Unknown analysis";
+        return kCalcFailed;
+    }
+    if (!r.ok) {
+        *err = r.error != nullptr ? r.error : "No result";
+        return kCalcFailed;
+    }
+    if (*two_values != 0) {
+        *a = r.x;
+        *b = r.y;
+    } else {
+        *a = r.aux;  // slope, or the definite integral
+        *b = 0;
+    }
+    return kCalcOk;
+}
+
+}  // namespace
+
+void calc_api_begin_run(void) {
+    g_plotted_this_run = false;
+    g_show_graph_requested = false;
+}
+
+void calc_api_show_graph(void) {
+    g_show_graph_requested = true;
+}
+
+int calc_api_take_show_graph(void) {
+    const bool want = g_show_graph_requested;
+    g_show_graph_requested = false;
+    return want ? 1 : 0;
+}
+
+CalcStatus calc_api_plot(const char* expr, int* slot, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = plot_impl(expr, slot, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_window(double x_min, double x_max, double y_min, double y_max,
+                           const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = window_impl(x_min, x_max, y_min, y_max, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_graph_analyze(const char* op, int slot, double lo, double hi, double* a,
+                                  double* b, int* two_values, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    // The deepest path any binding reaches. analyze_integral recurses through
+    // integrate_panel, 136 bytes a frame to a depth cap of 12 — 1,632 bytes
+    // of recursion before the expression evaluator underneath it. Measured
+    // separately from kEvalStackNeed for that reason.
+    if (!stack_room(kAnalysisStackNeed)) {
+        *err = "Not enough stack for graph analysis";
+        return kCalcFailed;
+    }
+    g_in_call = true;
+    const CalcStatus st = analyze_impl(op, slot, lo, hi, a, b, two_values, err);
     g_in_call = false;
     return st;
 }

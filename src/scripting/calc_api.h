@@ -56,14 +56,37 @@ typedef enum CalcKind {
 
 // ---- Wiring ----
 
-// Called after a successful calc_api_store, to write variables to the SD
-// card. It is a hook rather than a direct platform::storage() call because
-// that is the one dependency that would stop this file from building in the
-// host test harness — which is where the pipeline, the name rules and the
-// reentrancy guard are actually tested. scripting::PythonInterpreter::init()
-// installs the real one; tests install their own or none.
-typedef void (*CalcPersistFn)(void);
+// What a binding just changed and needs written to the SD card.
+typedef enum CalcPersistTarget {
+    kCalcPersistVars = 0,  // A-Z / theta / Ans
+    kCalcPersistGraph,     // Y1-Y7, the window, the mode row
+} CalcPersistTarget;
+
+// Called after a binding writes persistent calculator state. It is a hook
+// rather than a direct platform::storage() call because that is the one
+// dependency that would stop this file from building in the host test
+// harness — which is where the pipeline, the name rules, D68's Y-slot
+// semantics and both guards are actually tested.
+// scripting::PythonInterpreter::init() installs the real one; tests install
+// their own or none.
+typedef void (*CalcPersistFn)(CalcPersistTarget what);
 void calc_api_set_persist_hook(CalcPersistFn fn);
+
+// Called by the interpreter at the start of every top-level exec(), NOT on
+// every binding call. It resets the per-run latches — currently just D68's
+// "has this run plotted yet", which is what makes a script's graph output a
+// function of the script alone rather than of what the last one left behind.
+void calc_api_begin_run(void);
+
+// True when a script asked for the graph to be shown (calc.show_graph()).
+// Reading it clears it.
+//
+// The switch is DEFERRED rather than immediate: a binding runs inside the
+// VM, inside the screen's on_key, so pushing a screen from here would nest
+// screen management inside itself and still render nothing until the script
+// returned. The caller performs the switch once exec() is done — the same
+// shape as 6B.12's decision to buffer output rather than stream it.
+int calc_api_take_show_graph(void);
 
 // Returns nonzero when at least `need` bytes of core 0's stack remain below
 // the caller. A hook for the same reason as the one above.
@@ -123,6 +146,41 @@ CalcStatus calc_api_cas(const char* op, const char* expr, const char* var, const
 // front costs one buffer and removes the window entirely.
 CalcStatus calc_api_solve(const char* expr, const char* var, int* count, char* out, size_t out_cap,
                           const char** err);
+
+// ---- 6B.6: graphing ----
+
+// Write `expr` into a Y= slot. D68: the FIRST plot of a script run clears
+// all seven slots and writes Y1; later calls in the same run append to Y2,
+// Y3, ...; an eighth fails. The latch resets at calc_api_begin_run, so a
+// re-run starts clean and a script's graph is a function of the script.
+//
+// This DESTROYS the user's own Y= functions, and graph state is persisted,
+// so the loss survives a power cycle. That is the documented cost of D68's
+// predictability, not an oversight.
+//
+// The slot number written lands in *slot (1-based), which is also the
+// colour: slot colour is fixed per index (Y1 blue, Y2 red, ...) exactly as
+// the Y= editor shows it. There is no per-plot colour — GraphState has no
+// field for one, and adding it would bump the persistence magic and reset
+// every user's graphs.
+CalcStatus calc_api_plot(const char* expr, int* slot, const char** err);
+
+// Set the plot window. Fails rather than silently accepting an empty or
+// inverted range, which would render as a blank screen with no explanation.
+CalcStatus calc_api_window(double x_min, double x_max, double y_min, double y_max,
+                           const char** err);
+
+// Request the graph screen. Deferred — see calc_api_take_show_graph.
+void calc_api_show_graph(void);
+
+// Numeric graph analysis over a Y= slot, 1-based to match the labels.
+// `op` is one of "zero", "min", "max", "integral", "deriv", "value".
+//
+// Two outputs because the useful answer differs by op: zero and value give
+// (x, y); min and max give the extremum point; integral and deriv give a
+// single number in *a with *b unused. `two_values` says which.
+CalcStatus calc_api_graph_analyze(const char* op, int slot, double lo, double hi, double* a,
+                                  double* b, int* two_values, const char** err);
 
 // ---- 6B.5: complex ----
 

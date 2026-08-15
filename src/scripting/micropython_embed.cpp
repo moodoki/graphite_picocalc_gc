@@ -9,6 +9,7 @@
 #include "platform/storage.hpp"
 #include "platform/system.hpp"
 #include "math/var_store.hpp"
+#include "graph/graph_state.hpp"
 
 // The C boundary. Everything that includes a MicroPython header is on
 // the far side of it.
@@ -60,8 +61,15 @@ constexpr std::size_t kMinCompileBytes = 1024;
 // harness, and the harness is where the name rules and the reentrancy guard
 // are actually checked. Installing it here rather than in main() keeps it
 // next to the rest of the interpreter's bring-up.
-void persist_variables() {
-    math::save_variables(platform::storage());
+void persist_state(CalcPersistTarget what) {
+    switch (what) {
+        case kCalcPersistVars:
+            math::save_variables(platform::storage());
+            break;
+        case kCalcPersistGraph:
+            graph::state().save(platform::storage());
+            break;
+    }
 }
 
 // Is there room below us for a path that needs `need` bytes? A local's
@@ -105,7 +113,7 @@ bool PythonInterpreter::init(std::size_t heap_bytes) {
         heap_bytes = sizeof(g_heap);
     }
     picocalc_mp_init(g_heap, heap_bytes, __StackTop, stack_limit());
-    calc_api_set_persist_hook(&persist_variables);
+    calc_api_set_persist_hook(&persist_state);
     calc_api_set_stack_hook(&stack_room);
     initialized_ = true;
     interrupt_pending_ = false;
@@ -132,6 +140,9 @@ bool PythonInterpreter::exec(const char* code) {
     }
     interrupt_pending_ = false;
     last_poll_ms_ = platform::uptime_ms();
+    // Resets D68's "has this run plotted yet" latch, so a script's graph is
+    // a function of the script and not of what the last one left in Y1-Y7.
+    calc_api_begin_run();
     running_script_ = true;
     const bool ok = picocalc_mp_exec_str(code) != 0;
     running_script_ = false;

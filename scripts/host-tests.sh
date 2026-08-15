@@ -211,8 +211,10 @@ echo "== Compiling + linking test_calc_api =="
     -Isrc -Idrivers/tinyexpr -Itests/host \
     tests/host/test_calc_api.cpp tests/host/host_psram_backend.cpp \
     src/scripting/calc_api.cpp \
+    src/graph/analysis.cpp src/graph/graph_state.cpp src/graph/viewport.cpp \
+    src/graph/graph_mode.cpp src/math/numeric_solve.cpp \
     src/math/unified_compile.cpp src/math/unified_vm.cpp src/math/unified_home.cpp \
-    src/math/solve_expr.cpp src/math/numeric_solve.cpp src/math/units.cpp \
+    src/math/solve_expr.cpp src/math/units.cpp \
     src/math/cas/expr.cpp src/math/cas/parser.cpp src/math/cas/serialize.cpp \
     src/math/cas/simplify.cpp src/math/cas/derivative.cpp src/math/cas/expand.cpp \
     src/math/cas/poly.cpp src/math/cas/solve.cpp src/math/cas/factor.cpp \

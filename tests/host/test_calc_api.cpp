@@ -13,6 +13,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "config.hpp"
+#include "graph/graph_state.hpp"
 #include "math/engine.hpp"
 #include "math/types.hpp"
 #include "scripting/calc_api.h"
@@ -34,6 +36,19 @@ void check_near(double got, double want, const char* what) {
     ++g_checks;
     if (!(std::fabs(got - want) < 1e-9)) {
         std::printf("FAIL: %s — got %.17g, wanted %.17g\n", what, got, want);
+        ++g_failures;
+    }
+}
+
+// For results of a numeric search rather than an exact computation. A
+// minimiser locates the *argument* of a smooth minimum to about sqrt(eps),
+// ~1.5e-8, because the function is flat there — that is Brent working
+// correctly, not a loose answer, so holding it to check_near's 1e-9 would
+// be testing the wrong thing.
+void check_close(double got, double want, double tol, const char* what) {
+    ++g_checks;
+    if (!(std::fabs(got - want) < tol)) {
+        std::printf("FAIL: %s — got %.17g, wanted %.17g (tol %g)\n", what, got, want, tol);
         ++g_failures;
     }
 }
@@ -198,8 +213,10 @@ void test_eval_solve_set_renders_like_the_home_screen() {
 // ---- 6B.3: variables ----
 
 int g_persist_calls = 0;
-void count_persist() {
-    ++g_persist_calls;
+void count_persist(CalcPersistTarget what) {
+    if (what == kCalcPersistVars) {
+        ++g_persist_calls;
+    }
 }
 
 void test_store_and_recall() {
@@ -286,7 +303,7 @@ void test_variable_names_are_strict() {
 
 int g_reentrant_status = -1;
 
-void reenter() {
+void reenter(CalcPersistTarget) {
     // Stands in for a __del__ finalizer running inside a binding: the guard
     // is held by the store that called us.
     const char* err = nullptr;
@@ -468,6 +485,162 @@ void test_solve_packing_refuses_to_truncate() {
     check(err != nullptr, "and says so");
 }
 
+// ---- 6B.6: graphing ----
+
+int g_graph_persists = 0;
+void count_graph_persist(CalcPersistTarget what) {
+    if (what == kCalcPersistGraph) {
+        ++g_graph_persists;
+    }
+}
+
+int plot(const char* expr) {
+    int slot = 0;
+    const char* err = nullptr;
+    return calc_api_plot(expr, &slot, &err) == kCalcOk ? slot : -1;
+}
+
+void test_plot_d68_semantics() {
+    calc_api_set_persist_hook(&count_graph_persist);
+    graph::GraphState& st = graph::state();
+
+    // Something the user typed, which a script is about to destroy. This is
+    // D68's known cost and the test says so out loud.
+    std::snprintf(st.y.expr[3], config::kMaxExprLen, "%s", "x^2");
+    st.y.enabled[3] = true;
+
+    calc_api_begin_run();
+    g_graph_persists = 0;
+
+    check(plot("sin(x)") == 1, "the first plot of a run lands in Y1");
+    check(st.y.expr[3][0] == 0, "and clears what the user had in Y4");
+    check(st.y.enabled[0], "Y1 is enabled");
+    check(std::strcmp(st.y.expr[0], "sin(x)") == 0, "with the script's expression");
+    check(g_graph_persists == 1, "and it is persisted");
+
+    check(plot("cos(x)") == 2, "the second appends to Y2");
+    check(plot("tan(x)") == 3, "the third to Y3");
+    check(std::strcmp(st.y.expr[0], "sin(x)") == 0, "without disturbing Y1");
+
+    // A new run starts clean, which is the whole point of the latch.
+    calc_api_begin_run();
+    check(plot("x") == 1, "the next run's first plot clears and starts at Y1 again");
+    check(st.y.expr[1][0] == 0, "so Y2 from the previous run is gone");
+
+    calc_api_set_persist_hook(nullptr);
+}
+
+void test_plot_eighth_fails() {
+    calc_api_begin_run();
+    for (int i = 1; i <= 7; ++i) {
+        check(plot("x") == i, "seven plots fill Y1-Y7");
+    }
+    int slot = 0;
+    const char* err = nullptr;
+    check(calc_api_plot("x", &slot, &err) == kCalcFailed, "the eighth fails");
+    check(err != nullptr, "and says why");
+    check(graph::state().y.expr[6][0] != 0, "leaving the seven in place");
+}
+
+void test_plot_rejects_junk() {
+    calc_api_begin_run();
+    int slot = 0;
+    const char* err = nullptr;
+    check(calc_api_plot("", &slot, &err) == kCalcFailed, "an empty expression is refused");
+    check(calc_api_plot(nullptr, &slot, &err) == kCalcFailed, "so is a null one");
+
+    char huge[config::kMaxExprLen + 8];
+    std::memset(huge, 'x', sizeof(huge) - 1);
+    huge[sizeof(huge) - 1] = 0;
+    check(calc_api_plot(huge, &slot, &err) == kCalcFailed,
+          "an over-long expression is refused, not truncated into the slot");
+}
+
+void test_plot_forces_function_mode() {
+    graph::state().mode = graph::Mode::kPolar;
+    calc_api_begin_run();
+    plot("sin(x)");
+    check(graph::state().mode == graph::Mode::kFunction,
+          "plotting switches to FUNC, or the graph would come up blank");
+}
+
+void test_window() {
+    const char* err = nullptr;
+    check(calc_api_window(-5, 5, -2, 2, &err) == kCalcOk, "a valid window is accepted");
+    check_near(graph::state().window.x_min, -5, "x_min");
+    check_near(graph::state().window.y_max, 2, "y_max");
+
+    check(calc_api_window(5, -5, -2, 2, &err) == kCalcFailed, "an inverted x range is refused");
+    check(calc_api_window(-5, 5, 2, 2, &err) == kCalcFailed, "an empty y range is refused");
+    check_near(graph::state().window.x_min, -5, "and the window is unchanged");
+}
+
+void test_show_graph_is_a_latch() {
+    calc_api_begin_run();
+    check(calc_api_take_show_graph() == 0, "nothing requested at the start of a run");
+    calc_api_show_graph();
+    check(calc_api_take_show_graph() == 1, "the request is visible once");
+    check(calc_api_take_show_graph() == 0, "and reading it clears it");
+
+    calc_api_show_graph();
+    calc_api_begin_run();
+    check(calc_api_take_show_graph() == 0, "a new run clears a stale request");
+}
+
+void test_graph_analysis() {
+    calc_api_set_stack_hook(nullptr);
+    calc_api_begin_run();
+    calc_api_window(-10, 10, -10, 10, nullptr);
+    check(plot("x^2-4") == 1, "plot the test function");
+
+    double a = 0;
+    double b = 0;
+    int two = 0;
+    const char* err = nullptr;
+
+    check(calc_api_graph_analyze("zero", 1, 0, 5, &a, &b, &two, &err) == kCalcOk, "zero runs");
+    check(two == 1, "and reports a point");
+    check_close(a, 2, 1e-9, "x^2-4 has a root at x=2");
+
+    check(calc_api_graph_analyze("min", 1, -5, 5, &a, &b, &two, &err) == kCalcOk, "min runs");
+    check_close(a, 0, 1e-6, "the minimum is at x=0");
+    check_close(b, -4, 1e-9, "where y is -4");
+
+    check(calc_api_graph_analyze("value", 1, 3, 3, &a, &b, &two, &err) == kCalcOk, "value runs");
+    check_near(b, 5, "x^2-4 at x=3 is 5");
+
+    check(calc_api_graph_analyze("deriv", 1, 2, 2, &a, &b, &two, &err) == kCalcOk, "deriv runs");
+    check(two == 0, "and reports a single number");
+    check_near(a, 4, "d/dx(x^2-4) at x=2 is 4");
+
+    check(calc_api_graph_analyze("integral", 1, 0, 3, &a, &b, &two, &err) == kCalcOk,
+          "integral runs");
+    check_near(a, 9.0 - 12.0, "integral of x^2-4 from 0 to 3 is -3");
+
+    // Rejections.
+    check(calc_api_graph_analyze("zero", 9, 0, 5, &a, &b, &two, &err) == kCalcFailed,
+          "slot 9 is refused");
+    check(calc_api_graph_analyze("zero", 0, 0, 5, &a, &b, &two, &err) == kCalcFailed,
+          "slot 0 is refused");
+    check(calc_api_graph_analyze("nope", 1, 0, 5, &a, &b, &two, &err) == kCalcFailed,
+          "an unknown op is refused");
+    check(calc_api_graph_analyze("zero", 5, 0, 5, &a, &b, &two, &err) == kCalcFailed,
+          "an empty slot is refused");
+}
+
+void test_graph_analysis_is_stack_guarded() {
+    // The deepest binding there is: analyze_integral recurses through
+    // integrate_panel to depth 12.
+    calc_api_set_stack_hook(&refuse_stack);
+    double a = 0;
+    double b = 0;
+    int two = 0;
+    const char* err = nullptr;
+    check(calc_api_graph_analyze("integral", 1, 0, 3, &a, &b, &two, &err) == kCalcFailed,
+          "graph analysis refuses when the stack is short");
+    calc_api_set_stack_hook(nullptr);
+}
+
 // ---- 6B.5: complex ----
 
 void test_complex_helpers() {
@@ -516,6 +689,15 @@ int main() {
     test_solve_packing_refuses_to_truncate();
 
     test_complex_helpers();
+
+    test_plot_d68_semantics();
+    test_plot_eighth_fails();
+    test_plot_rejects_junk();
+    test_plot_forces_function_mode();
+    test_window();
+    test_show_graph_is_a_latch();
+    test_graph_analysis();
+    test_graph_analysis_is_stack_guarded();
 
     std::printf("test_calc_api: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

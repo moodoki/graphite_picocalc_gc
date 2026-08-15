@@ -47,6 +47,7 @@
 #include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "graph/graph_state.hpp"
+#include "scripting/calc_api.h"
 #include "scripting/micropython_embed.hpp"
 
 namespace apps {
@@ -878,6 +879,13 @@ bool HomeScreen::handle_command(const char* cmd) {
         }
         push_entry(cmd, g_py_line_len > 0 ? g_py_line : (ok ? "ok" : "error"),
                    ok ? ResultKind::kPlain : ResultKind::kError);
+        // calc.show_graph() is deferred out of the binding to here (6B.6),
+        // for the same reason ProgramScreen defers it: the binding ran inside
+        // the VM inside this on_key, and pushing a screen from there would
+        // nest screen management inside itself.
+        if (ok && calc_api_take_show_graph() != 0) {
+            ui::screen_manager().push(&graph_screen());
+        }
         return true;
     }
     // Device settings: brightness/backlight/auto-power-down (4D.19-20).
