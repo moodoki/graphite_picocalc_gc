@@ -297,9 +297,13 @@ EditorAction TextEditorWidget::on_key(const platform::KeyEvent& ev) {
     }
 
     // Any edit invalidates the "press ESC again" arming — the user has
-    // gone back to work and shouldn't lose the buffer to a stray ESC.
+    // gone back to work and shouldn't lose the buffer to a stray ESC —
+    // and retires whatever the status line was saying, which by then
+    // describes a previous action ("Saved", "Loaded") and is occupying
+    // a text row.
     if (buf_.dirty()) {
         exit_armed_ = false;
+        status_[0] = 0;
     }
     scroll_into_view();
     return EditorAction::kConsumed;
@@ -357,9 +361,9 @@ void TextEditorWidget::render(gfx::Framebuffer& fb) {
         fb.fill_rect(cx, cy, 2, fh, kCursor);
     }
 
-    // Bottom strip: the modal prompt takes precedence over the status
-    // text, which takes precedence over the softkey labels.
     const int bar_y = platform::kScreenH - kSoftkeyBarH;
+
+    // The modal prompt replaces the softkey bar outright.
     if (prompt_.active()) {
         fb.fill_rect(0, bar_y, platform::kScreenW, kSoftkeyBarH,
                      platform::Color::from_rgb(30, 30, 30));
@@ -367,13 +371,23 @@ void TextEditorWidget::render(gfx::Framebuffer& fb) {
         return;
     }
 
+    // Status gets its own band ABOVE the softkey bar, on its own
+    // background. It used to be drawn right-aligned over the bar
+    // itself, which was unreadable the moment the message was longer
+    // than a label or two — "Unsaved! F2 saves, ESC again discards" is
+    // ~296 px on a 320 px bar, so it covered every softkey. The
+    // unsaved warning is exactly when the user most needs to see that
+    // F2 is SAVE, so the two must not share a row.
+    if (status_[0] != 0) {
+        // Aligned to the text row grid so it covers the last line
+        // cleanly rather than straddling two.
+        const int band_y = kTextTop + (rows - 1) * fh;
+        fb.fill_rect(0, band_y, platform::kScreenW, fh, platform::Color::from_rgb(30, 30, 30));
+        font.draw_string(fb, 2, band_y, status_, exit_armed_ ? kRed : kGreen);
+    }
+
     const char* const keys[6] = {cfg_.has_run_key ? "RUN" : "", "SAVE", "LOAD", "NEW", "", ""};
     draw_softkeys(fb, keys);
-    if (status_[0] != 0) {
-        const int w = font.text_width(status_);
-        font.draw_string(fb, platform::kScreenW - w - 2, bar_y + 2, status_,
-                         exit_armed_ ? kRed : kGreen);
-    }
 }
 
 TextEditorWidget& text_editor() {
