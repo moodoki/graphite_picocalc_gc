@@ -49,6 +49,11 @@ constexpr std::size_t kStackReserve = 1024;
 // wasted work on the interpreter's hot path.
 constexpr std::uint32_t kPollIntervalMs = 20;
 
+// Contiguous free bytes below which the interpreter is considered unusable.
+// The observed failure was a 512-byte request; 1 KB leaves room for the
+// next statement to be a little larger than the one that noticed.
+constexpr std::size_t kMinCompileBytes = 1024;
+
 // What calc.store() calls once it has written a variable (6B.3). The `calc`
 // module deliberately knows nothing about platform::storage — that one
 // dependency is what would stop calc_api.cpp compiling in the host test
@@ -130,6 +135,38 @@ bool PythonInterpreter::exec(const char* code) {
     running_script_ = true;
     const bool ok = picocalc_mp_exec_str(code) != 0;
     running_script_ = false;
+    // Always, not only on failure. Compiling the NEXT statement allocates,
+    // so a run that leaves the heap full of garbage makes everything after
+    // it fail — including `gc.collect()`, which cannot be compiled either.
+    // Measured 2026-08-15: one MemoryError wedged the `py` path until a
+    // power cycle. A mark-sweep over 40 KB is nothing next to having just
+    // run a script, so there is no reason to make this conditional.
+    picocalc_mp_gc_collect();
+
+    // Collecting is not always enough. The GC does not compact, so a run that
+    // interleaved many small short-lived objects with a few surviving ones
+    // leaves the heap shredded: measured 2026-08-15, a 400-iteration loop
+    // ended with 31.5 KB free and no run long enough for the 512 bytes the
+    // next compile wanted. Every statement after it failed, including
+    // `gc.collect()` — which cannot help, because it has to be compiled
+    // first. Only a power cycle cleared it.
+    //
+    // So when the heap can no longer compile anything, rebuild it. This
+    // discards the script's variables, which is why it is announced rather
+    // than done quietly; the alternative is a Python subsystem that stays
+    // dead until the battery is pulled.
+    if (picocalc_mp_heap_max_free() < kMinCompileBytes) {
+        // No leading newline: whatever ran last (a traceback, or print output)
+        // already ended with one, and the home screen shows only the final
+        // line of what a `py` statement produced.
+        static const char msg[] =
+            "[heap too fragmented to continue - interpreter reset, variables lost]\n";
+        std::printf("%s", msg);
+        emit(msg, sizeof(msg) - 1);
+        shutdown();
+        init();
+        return false;
+    }
     return ok;
 }
 

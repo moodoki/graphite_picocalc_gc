@@ -122,6 +122,22 @@ int picocalc_mp_exec_str(const char* src) {
     return 0;
 }
 
+// Reclaim garbage without going through Python.
+//
+// This is what stops a heap exhaustion from being permanent. Every
+// statement has to be COMPILED before it runs, and compiling allocates —
+// so once the heap is full, `gc.collect()` fails while being parsed, long
+// before it could collect anything. Measured on 2026-08-15: after one
+// MemoryError, every subsequent `py` line failed, including `import gc`,
+// with several KB of unreachable garbage sitting in the heap and no way
+// to reach it from Python. Only a power cycle cleared it.
+//
+// Calling gc_collect() from C needs no compiler and no allocation, so it
+// works exactly in the state where Python cannot.
+void picocalc_mp_gc_collect(void) {
+    gc_collect();
+}
+
 // Free heap bytes, for the program screen's status line and for the
 // §4.4 measurement the spec asks for ("how much of the 40 KB does a
 // modest dataset actually cost").
@@ -129,4 +145,23 @@ size_t picocalc_mp_heap_free(void) {
     gc_info_t info;
     gc_info(&info);
     return info.free;
+}
+
+// The largest CONTIGUOUS free run, in bytes — a different question from
+// heap_free, and the one that decides whether anything can still run.
+//
+// MicroPython's GC is mark-and-sweep with no compaction, so a heap can be
+// mostly free and still unable to satisfy a modest request. Measured on
+// 2026-08-15: after a 400-iteration loop that built expression strings,
+// 31.5 KB was free and a 512-byte allocation failed. Every surviving float
+// pinned a block, and the freed strings between them left nothing long
+// enough to compile another statement.
+//
+// gc_info reports `used` and `free` in bytes but leaves `max_free` in
+// blocks (gc.c:818-819 multiplies the first two and not the third); the
+// conversion here is that asymmetry, not an error.
+size_t picocalc_mp_heap_max_free(void) {
+    gc_info_t info;
+    gc_info(&info);
+    return info.max_free * MICROPY_BYTES_PER_GC_BLOCK;
 }

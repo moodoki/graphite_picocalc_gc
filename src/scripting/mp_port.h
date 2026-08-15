@@ -29,7 +29,17 @@ void picocalc_mp_deinit(void);
 // printed through the output path by the time this returns.
 int picocalc_mp_exec_str(const char* src);
 
+// Run a GC cycle from C. Needed because collecting from Python requires
+// compiling the call first, which allocates — so `gc.collect()` is exactly
+// what stops working when the heap is full. See the note at the definition.
+void picocalc_mp_gc_collect(void);
+
 size_t picocalc_mp_heap_free(void);
+
+// Largest contiguous free run, in bytes. The GC does not compact, so this
+// and heap_free can be very far apart, and it is this one that says whether
+// the next statement can be compiled at all.
+size_t picocalc_mp_heap_max_free(void);
 
 // ---- Implemented in micropython_embed.cpp, called from C ----
 
