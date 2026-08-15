@@ -34,6 +34,33 @@ the editor is a single exec throughout.
 **Still unverified**: nobody has *looked* at a script-drawn graph, only
 proven the screen switches; and the Pico 2 has never run any 6B code.
 
+> ## §8 stopped being fully answered, and the pattern matters
+>
+> The spec's §8 said "every question is now answered" and that held
+> through 6B.6. Building 6B.3-6B.6 raised **four** it had never asked —
+> now **P6-16 to P6-19**. The one that blocked 6B.8 outright is settled:
+>
+> **P6-16 / D80: a drawing script owns the screen.** `calc.clear_screen()`
+> enters graphics mode — a bare screen whose `render()` paints nothing —
+> and `calc.draw_*` write straight through `push_rect()` as called. No
+> display list (it would grow in the Python heap, D77's binding
+> constraint), composition through one 320 px row buffer rather than a
+> 200 KB framebuffer, and `ESC` stays live throughout. That is 6B.8's
+> shape; it is not built.
+>
+> **Still open**: **P6-17** who owns the keyboard during a script (the VM
+> hook *steals* key events today, and `calc.wait_key()` needs them);
+> **P6-18** whether list bindings are in Phase 6 at all (§5 has no task,
+> §4.6 entry 1 needs `list_append`); **P6-19** where file I/O gets a
+> staging buffer (`io_scratch` has an invariant a script would violate).
+>
+> **The pattern**: every question §8 anticipated was about *semantics* —
+> what should `plot()` do to Y1-Y7? Every question that actually blocked
+> work was about **where the code runs**: inside the VM, inside `on_key`,
+> on 2,239 bytes of stack, against a pull-model renderer. None of those
+> are visible from a feature description, so expect more of them in
+> 6B.7-6B.10 and look for them early.
+
 ---
 
 **Previous session:** 2026-08-15 (fourth that day) — **measured the Python

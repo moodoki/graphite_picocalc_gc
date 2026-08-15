@@ -173,8 +173,22 @@ by **D68**: writing to function slots clears, and `plot()` is a state
 write that doesn't switch screens. See §0.8. Before that, P6-12 (sensor
 catalog) was resolved 2026-08-14 — see §0.7.
 
-**Every question in §8 is now answered.** What remains before 6B.6 is
-implementation, not decisions.
+~~**Every question in §8 is now answered.** What remains before 6B.6 is
+implementation, not decisions.~~
+
+**That held through 6B.6 and then stopped holding.** Building 6B.3-6B.6
+raised four questions the spec had never asked, all of them about the
+remaining bindings rather than about anything already shipped. They are
+**P6-16 to P6-19** in §8. P6-16 — can a script draw while it runs? — was
+the one that blocked 6B.8 outright, and is resolved by **D80**; the other
+three are open.
+
+The pattern is worth naming, because it will recur in 6B.7-6B.10: the
+questions §8 anticipated were about *semantics* (what should `plot()` do
+to Y1-Y7?), and every question that actually blocked work was about
+*where the code runs* — inside the VM, inside `on_key`, on 2,239 bytes of
+stack, against a pull-model renderer. None of those are visible from a
+feature description.
 
 ### 0.6 Already resolved this session (2026-08-13) — listed so they aren't re-litigated
 
@@ -1843,6 +1857,10 @@ P4-4/P4-5, renumbered into this document.)*
 | P6-13 | §4.6 entry 4 (sound demo): playing an arbitrary tone needs one new public entry point in the vendored `pwm_sound.h`/`.c` (the ISR already computes arbitrary frequency/duration internally; only the enum-limited public API is missing it) — is editing vendored driver code acceptable here, given D-prelude-1 treats `drivers/` as read-only third-party, wrapped rather than modified? | **Resolved 2026-08-14 (D62): yes** — `drivers/README.md`'s own policy already documents this exact exception (minimal patch, recorded under Local modifications), matching the D51/tinyexpr precedent. D7's usual answer (reimplement in the wrapper) doesn't apply — the tone state is `static`/file-private to `pwm_sound.c` | §4.6 entry 4 implementation |
 | P6-14 | §3.4: does a real power-cycle actually deassert `PICO_EN` (POR on the Pico), confirming `watchdog_caused_reboot()` reliably distinguishes "user power-cycled" from "calculator deliberately handed off to an app"? | **Resolved 2026-08-14 (D65), hardware-confirmed on the Pico 1**: yes — `watchdog_caused_reboot()` read `false` after a genuine physical power-cycle and `true` after a non-power reboot. New permanent diagnostic in `main.cpp` (`boot: watchdog_caused_reboot=%d`, 30 s heartbeat) | Resolved |
 | P6-15 | §4.6 entry 6: `calc.plot()` writes into one of the real, persisted Y1-Y7 slots (`graph::GraphState`, `kFunctionSlots = 7`) — same shared-state model as `calc.store`/`recall` touching real variables. Not yet specified: does the first `calc.plot()` call in a script clear existing Y-slots first, append to the next free one, or something else? What happens on a 9th call, or if all 7 are already in use by the user's own graphs? | **Resolved 2026-08-15 (D68): writing to function slots clears.** The first `calc.plot()` of a script run clears all seven slots then writes Y1; later calls in the same run append to Y2, Y3, …; an eighth raises a Python exception. The latch resets at each top-level `exec()`/`exec_file()`, so a re-run starts clean. Chosen for predictability — a script's output is then a function of the script alone, not of what the user left in Y1-Y7. **Known cost, must be documented user-facing**: this destroys the user's own Y= functions, and `save_graph_state()` makes the loss survive a power cycle | 6B.6 implementation |
+| P6-16 | §4.2's display primitives assume a script can draw *while it runs*. Nothing renders during a script: `Framebuffer::render_frame` pulls `render()` from the current screen once per strip, and that screen is blocked in `on_key` underneath the VM. Buffering (6B.12) and deferring (D79) worked for text and for the graph because both can wait for the end; drawing cannot, since a script that draws usually wants to be watched. Immediate push with no ownership loses to ProgramScreen's next repaint; buffering needs a 200 KB offscreen framebuffer against 17 KB free. | **Resolved 2026-08-16 (D80): a script-owned graphics screen.** `calc.clear_screen()` enters graphics mode — a bare screen whose `render()` paints nothing — and `calc.draw_*` then write straight through `push_rect()` as called. No display list (it would grow in the Python heap, which D77 showed is the binding constraint), composition through one 320 px row buffer rather than a framebuffer, and `ESC` stays live throughout | 6B.8 implementation |
+| P6-17 | **Who owns the keyboard while a script runs?** The VM hook drains key events every 20 ms to catch `ESC` — `poll_interrupt()`'s comment says outright that it *steals* them from the main loop, which was harmless when nothing else wanted them. §4.2's `calc.wait_key()`, `calc.input()`, `calc.key_pressed()` and `calc.key_held()` all need those same events. A script that polls keys currently fights its own interrupt handler. | **Open.** D80 points at the answer — a script that owns the screen can own the keyboard — but the mechanism is unspecified: does the hook queue non-`ESC` events for the script, or do the key bindings drive the poll themselves and re-check `ESC` on the way past? Whatever is chosen, `ESC` must survive it | 6B.9 implementation |
+| P6-18 | **Are list bindings in Phase 6 at all?** §4.2 specifies `calc.set_list`, `calc.stat_mean` and `calc.list_append`, and §4.6 entry 1's data-logging walkthrough depends on `list_append` specifically — it is what keeps an open-ended logging run *out* of the Python heap. §5's task table has no list task: it goes from complex (6B.5) to matrices (6B.7). | **Open.** Roughly 3 hrs, plus `calc.get_list`, which is also what D75 named as the point at which `calc.eval` returning a real Python list would earn its keep. D77 sharpened the case: a 400-iteration loop already exhausts the 40 KB heap, so keeping sample data out of it is not a nicety | before §4.6 entry 1 |
+| P6-19 | **Where does `calc.read_file`/`write_file` get its staging buffer?** `platform::io_scratch()` is 8 KB, but D70 lever A made it a shared one-shot region with an explicit invariant: nothing may hold it across a call that reaches another owner. A script holding it across Python execution violates that directly, and there is no spare SRAM for a second buffer. | **Open.** Chunked reads through a small stack buffer look most likely — the stack is the one budget with room, at 2,239 bytes a binding — but that changes the API shape from "read the file" to "read a chunk", which §4.2 does not describe | 6B.10 implementation |
 
 ---
 

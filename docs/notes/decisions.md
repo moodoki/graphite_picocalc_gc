@@ -18,6 +18,79 @@ Format:
 
 ---
 
+## D80: A drawing script owns the screen, and draws immediately — 6B.8's shape
+
+**Date**: 2026-08-16
+**Status**: Accepted (decides 6B.8, and settles what D79 deferred)
+**Context**: §4.2 shows `calc.clear_screen()`, `calc.draw_text(10, 10, "…")`,
+`calc.draw_line(…)`, and §4.6's periodic-table and real-time-game walkthroughs
+depend on them. None of it works under the architecture as it stands, and the
+reason is structural rather than missing code.
+
+**Pixels only reach the screen by being pulled.** `Framebuffer::render_frame`
+calls the current screen's `render()` once per 8-pixel strip, 40 times a frame
+on the Pico 1. While a script runs, that never happens: the screen is blocked
+in `on_key`, underneath the VM. That is exactly why 6B.12 buffers output and
+why D79 defers `show_graph()` — and both of those were fine, because text and
+a graph can wait for the end. **Drawing cannot**: a script that draws is
+usually drawing *because* it wants to be watched.
+
+Four ways out were considered:
+
+1. **Immediate push with no ownership** — `calc.draw_*` calls `push_rect()`
+   whenever it likes. ProgramScreen's own `render()` repaints over it on the
+   next frame, so output survives or vanishes depending on timing. Worse than
+   not drawing.
+2. **Buffer and show at the end** — consistent with 6B.12 and D79, but needs
+   an offscreen $320\times320\times2$ = 200 KB framebuffer. There are 17 KB.
+   PSRAM could hold it, at the cost of ruling out anything interactive,
+   including §4.6 entry 5.
+3. **Defer 6B.8 out of Phase 6.**
+4. **A script-owned graphics screen.**
+
+**Decision**: **(4).** `calc.clear_screen()` puts the script into graphics
+mode: a bare screen whose `render()` paints nothing, so the pull model has
+nothing to say about the pixels underneath it. From then until the script ends
+the script owns the display, and `calc.draw_*` write straight through
+`platform::display().push_rect()` as they are called.
+
+Three consequences that are part of the decision, not details:
+
+- **No display list.** Each call draws and is forgotten. A recorded list would
+  grow without bound in the one place — the Python heap — that D77 already
+  showed is the binding constraint. The cost is that nothing repaints: if
+  something else touches the screen, the script's output is gone, which is why
+  ownership has to be exclusive.
+- **Composition needs a row buffer, not a framebuffer.** `push_rect` takes
+  pixels, so filled rects and lines go out span by span through one
+  screen-width row (320 px = 640 B) and text a glyph cell at a time. Under
+  1 KB total, against the 200 KB option (2).
+- **`ESC` stays live throughout.** The VM hook still polls every 20 ms, so
+  `KeyboardInterrupt` still ends a runaway drawing loop. Owning the screen must
+  never mean owning the escape hatch.
+
+**Rationale**: it is the only option that serves what the feature is *for*.
+(1) is unpredictable, (2) buys determinism by making the interactive apps
+impossible, and (3) leaves §4.2's own examples unbuildable. Exclusive
+ownership is also the honest model — a script drawing at $320\times320$ and the
+editor's own chrome cannot both be right about what is on the screen.
+
+It also makes **6B.9 coherent**: a script that owns the screen can own the
+keyboard, which is the natural answer to who gets key events while
+`calc.wait_key()` is blocked (P6-17, still open).
+
+**Tradeoffs**: a second path to the display that bypasses the dirty-region
+system, in a codebase where D47 made "`render()` must be pure" a rule. The
+rule is not broken — the script screen's `render()` does nothing at all — but
+there are now two ways pixels get out, and a future reader has to know which
+one they are looking at.
+
+**Revisit when**: 6B.8 is built and something wants to draw *and* keep the
+editor visible — a progress bar during a long run, say. That is a third mode,
+not a change to this one.
+
+---
+
 ## D79: `calc.show_graph()` is deferred, and a plot has no colour of its own
 
 **Date**: 2026-08-16
