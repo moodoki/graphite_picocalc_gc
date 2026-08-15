@@ -22,7 +22,7 @@ significant work that turned up outside them. See
 | 5: CAS (symbolic math) | **Complete** | Engine, UI integration, exact-form display, Stage 5 stack hardening. Tagged **v0.2.0** |
 | 5.1: Serial line injection | **Complete** | Host-driven on-device test automation. Tagged **v0.3.0** |
 | 5.2: Unified evaluator | **Complete** | One tagged-value evaluator replacing three. Tagged **v0.4.0** |
-| 6: Non-calculator functions | **6A + 6C.1 done, HW-verified; 6B next** | App launcher, shared text editor, file browser, Notepad. MicroPython (6B) still to come. [Spec](docs/phases/phase6-spec.md) |
+| 6: Non-calculator functions | **6A, 6C.1 and half of 6B done, HW-verified** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device. The `calc` module (6B.3-6B.10) is what is left. [Spec](docs/phases/phase6-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H.
@@ -65,16 +65,24 @@ the before/after measurements — including the regressions — in
 
 ## Phase 6: non-calculator functions
 
-**6A (app framework) and 6C.1 (Notepad) are done and hardware-verified.**
-The calculator now has an app launcher reached from the home screen by an
-`F6` softkey or an `apps` command, a shared line-numbered text editor, a
-file browser with directory navigation and file management, and Notepad as
-the first app on the framework.
+**6A (app framework), 6C.1 (Notepad) and the first half of 6B (MicroPython)
+are done and hardware-verified.** The calculator has an app launcher reached
+from the home screen by an `F6` softkey or an `apps` command, a shared
+line-numbered text editor, a file browser with directory navigation and file
+management, Notepad, and **a working MicroPython interpreter**: write a script
+on the device, press RUN, read its output, save it, power-cycle, reload it.
+`ESC` stops a runaway loop.
 
-- **6B — MicroPython** is next: the interpreter as an app on that framework,
-  exposing a `calc` module so scripts can reach the math engine.
+- **6B.1, 6B.2, 6B.11-6B.14 are done.** MicroPython enters as a git submodule
+  pinned to v1.28.0 (D71) — the first dependency here that is not a vendored
+  copy, and the rule for large upstream projects from now on. `json` is
+  compiled in. `py <statement>` on the home screen runs a single line.
+- **What is left of 6B** is the `calc` module (6B.3-6B.10), which is what lets
+  a script reach the math engine, and the SD app manifests (6B.15-6B.16). A
+  script today can print, loop and compute in pure Python but cannot yet touch
+  the calculator.
 
-What changed under 6A that matters for scoping 6B:
+What the 6A and 6B work established that matters for scoping the rest:
 
 - **The SRAM tooling was wrong, and fixing it changed the picture.**
   `size-report.sh` computed headroom from Berkeley `size`'s `bss + data`
@@ -89,6 +97,14 @@ What changed under 6A that matters for scoping 6B:
 - **6B's `calc` bindings were re-verified** against the unified evaluator
   (D60, closing issue #27) — no dead entry points, and a concrete
   `calc.eval()` shape recorded for 6B.3 to build against.
+- **Embedding MicroPython then spent 44 KB of that**, leaving **17 KB** free
+  on the Pico 1 and 26 KB on the Pico 2. Its static cost beyond the 40 KB heap
+  turned out to be under 1 KB — the figure the spec had never estimated. 17 KB
+  is the budget the `calc` module has to fit inside.
+- **The stack risk closed without new machinery** (D73). MicroPython runs
+  inside core 0's existing 4 KB stack; deep recursion raises a catchable
+  `RuntimeError` at 3,224 of 4,096 bytes instead of walking into core 1's
+  stack. The planned stack-switching fallback was measured out of existence.
 
 ## Beyond the plan
 

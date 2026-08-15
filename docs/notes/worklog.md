@@ -305,6 +305,125 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-15 — 6B first half: MicroPython embedded and running on hardware (D71-D73)
+
+Second session of the day. The first one shipped 6A + 6C.1 and rebuilt
+the SRAM accounting (D69/D70) — its narrative is in
+[next-session.md](next-session.md); it never got a worklog entry of its
+own.
+
+**Done: 6B.1, 6B.2, 6B.11, 6B.12, 6B.13, 6B.14.** A Python script can be
+written on the device, run, saved, power-cycled and reloaded. Three
+commits on `phase-6`. What is left of 6B is the `calc` module
+(6B.3-6B.10) and the SD app manifests (6B.15-6B.16) — a script today can
+print, loop and compute in pure Python but cannot reach the calculator.
+
+**MicroPython is a git submodule** at `drivers/micropython`, pinned to
+**v1.28.0** (**D71**, direct user instruction). That is a departure from
+every other dependency here, and it generalizes into a rule
+`drivers/README.md` now states: small single-purpose C drivers stay
+vendored, large actively-maintained upstream projects come in as
+submodules pinned to a tag. The submodule is never edited;
+`drivers/micropython_port/` is the whole local configuration.
+
+Three consequences worth knowing before touching the build:
+
+- **A fresh clone needs `git submodule update --init --recursive`**, and
+  CMake stops with a pointed error rather than failing later on a
+  missing header. CI already checked out with `submodules: recursive`,
+  so nothing there changed.
+- **The build needs `make` and a HOST compiler.** MicroPython has no
+  build system we can call; its embed port *generates* the C tree we
+  compile, at CMake configure time, because CMake needs the source list
+  before it can define a target.
+- **Generation is a clean rebuild every time.** The generator's
+  incremental path leaves stale per-module fragments in
+  `genhdr/module/`, so turning `MICROPY_PY_IO` off still emitted its
+  `MP_REGISTER_MODULE` entry and the link failed on a symbol nothing
+  compiled any more. Configure is rare; a silently wrong qstr/module
+  table is not worth the seconds.
+
+**Every line that touches a MicroPython header is in C**
+(`src/scripting/mp_port.c`), not C++. MicroPython raises by `longjmp`,
+straight past every intervening frame, with no compiler diagnostic when
+that frame was C++ holding something with a destructor. Keeping the seam
+in C makes that structural rather than something to remember — which is
+what will matter in 6B.3, when `calc` bindings start calling back the
+other way. **Every binding must be an `extern "C"` leaf.**
+
+**The measurements — this is the part that changes future planning:**
+
+| | before | after |
+|---|---|---|
+| Free SRAM, Pico 1 | 61 KB | **17 KB** |
+| Free SRAM, Pico 2 | 126 KB | **26 KB** |
+| Flash text, Pico 1 | 473 KB | 633 KB (of 2 MB) |
+
+41,916 bytes of SRAM went to a 40,960-byte heap, so **MicroPython's own
+static footprint beyond the heap is under 1 KB** — the single figure
+§4.4 had no estimate for at any point. `json` and the `io` module it
+drags in cost 4 KB of flash and **zero** SRAM. **17 KB is the real
+budget for the whole `calc` module**, not the 61 KB D70's recovery
+banked; re-measure at every step.
+
+**The stack risk closed cheaply, and the contingency was not built**
+(**D73**). §4.4 had budgeted "8 KB C stack for Python calls" and there
+is no 8 KB to give — core 0 has 4 KB, hard-capped by SCRATCH_Y, and
+`PICO_STACK_SIZE=4096` is already the maximum the bank allows (D47).
+Rather than reason about it, it was measured with the paint-and-scan
+instrument D47 left behind:
+
+| Workload | `stack: peak` of 4,096 | Outcome |
+|---|---|---|
+| one-liners | 1,832 | fine |
+| 15-line script (two functions, nested loop, conditional, comprehension) | no new mark | fine |
+| Python recursion to depth 40 | **3,224** | `RuntimeError` |
+| recursion to depth 60, caught in Python | **3,288** | caught |
+| 400,000-iteration busy loop | 2,208 | fine |
+
+`RuntimeError: maximum recursion depth exceeded`, catchable, **808 bytes
+still unused**. D48's failure mode — SP crosses `__StackBottom` into
+core 1's stack and the machine hangs with a garbage PC — is now a Python
+exception. The planned fallback (a dedicated bss stack entered by
+switching to PSP, real assembly on two different cores) is not needed
+and was not written. Repeating D47/D48's lesson a third time: measure.
+
+**The heap is a static bss array, not an allocation** (**D72**, amending
+D57). D57 said "lazily allocated ... not reserved at boot"; there is no
+allocator, so that sentence could not be implemented as written. What is
+lazy is `mp_embed_init`/`deinit` on entering and leaving the program
+screen. D70 had already reached the same conclusion from the other side.
+
+**`py <statement>` at the home screen** is both a one-liner REPL and the
+harness that makes the interpreter drivable from
+`scripts/serial-console.py` — every measurement above was taken that way
+without touching the keyboard. It immediately exposed
+`submit_input()`'s `char cmd[16]`, ample while `mode <keyword>` was the
+only command with an argument, which silently dropped
+`py print(2**0.5)` into the math evaluator as "Syntax error". Widened to
+a whole input line.
+
+**`ui::OutputLog`** (6B.12) is pure and host-tested like `TextBuffer`.
+It keeps the **tail** — when a run outruns the 2 KB buffer the *oldest*
+whole lines go, because the failing case (a traceback) is the one where
+the user cannot get the information any other way. Byte buffer and
+128-entry line index overflow independently (2048 bytes of
+one-character lines is 1024 of them), so both are capped and
+`truncated()` says so on screen. 164 host checks; suite 2,733 → 2,897.
+
+**Hardware, Pico 1, all six developer checks passed**: launcher with
+three apps; write-and-run with auto-indent after `:`; a red `raised`
+header with the traceback scrolled into view; **`ESC` breaking a
+`while True:` via `KeyboardInterrupt`**; save → power-cycle → reload →
+run; and ten enter/leave cycles with no heap drift. **More extensive
+testing deferred to a soak session** (developer's call).
+
+**HW-PENDING**: the Pico 2 builds and fits (26 KB free) but has not been
+run — only the Pico 1 is connected and board swaps happen at stage
+closures.
+
+---
+
 ## 2026-08-14 — Phase 6 spec-completion continued: §0 pre-flight checklist fully cleared (D61-D66), one hardware-verified firmware diagnostic
 
 Continuation of 2026-08-13's brainstorm. Docs-only except one small,

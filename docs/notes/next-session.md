@@ -1,8 +1,93 @@
 # Start here — next session
 
-**Last session:** 2026-08-15 — **Phase 6A + 6C.1 implemented and
-hardware-verified, and the SRAM tooling turned out to be wrong.** Two
-distinct pieces of work, and the second one matters more.
+**Last session:** 2026-08-15 (second of two that day) — **MicroPython
+is embedded and running on hardware.** 6B.1, 6B.2, 6B.11, 6B.12, 6B.13
+and 6B.14 are done and all six on-device checks passed. You can write a
+Python script on the device, run it, save it, power-cycle, and reload
+it.
+
+**MicroPython came in as a git submodule** pinned to **v1.28.0**
+(**D71**, direct user instruction), not a vendored copy — and that sets
+the rule going forward: small single-purpose drivers stay vendored,
+large actively-maintained upstream projects become pinned submodules.
+`drivers/README.md` carries both halves. **The submodule is never
+edited**; `drivers/micropython_port/` is the entire local configuration
+(`mpconfigport.h`, `micropython_embed.mk`, `picocalc_mphal.h`).
+
+**A fresh clone now needs `git submodule update --init --recursive`,
+and the build needs `make` plus a HOST compiler** — MicroPython's embed
+port *generates* the C tree we compile, at CMake configure time.
+Generation is deliberately a clean rebuild every time: the incremental
+path leaves stale fragments in `genhdr/module/`, so turning a feature
+off still emitted its `MP_REGISTER_MODULE` entry and the link failed on
+a symbol nothing compiled any more.
+
+**Everything touching a MicroPython header is in C**
+(`src/scripting/mp_port.c`). MicroPython raises by `longjmp`, past every
+intervening frame, with no diagnostic when that frame was C++ holding
+something with a destructor. **This is load-bearing for 6B.3** — every
+`calc` binding must be an `extern "C"` leaf.
+
+> ## The two numbers that changed
+>
+> **Free SRAM: Pico 1 61 → 17 KB, Pico 2 126 → 26 KB.** 41,916 bytes
+> went to a 40,960-byte heap, so **MicroPython's own static cost beyond
+> the heap is under 1 KB** — the one figure §4.4 had no estimate for at
+> all. `json` plus the `io` module it drags in: +4 KB flash, **zero**
+> SRAM. Flash 473 → 633 KB of 2 MB.
+>
+> **17 KB is the real budget for the whole `calc` module**
+> (6B.3-6B.10), not the 61 KB the D70 recovery banked. Re-measure at
+> every step. If it gets tight, `MICROPY_CONFIG_ROM_LEVEL` (currently
+> `CORE_FEATURES`) and `kPythonHeapSize` are each one constant.
+
+**The stack risk is closed, and the contingency was not built** (**D73**).
+MicroPython runs inside core 0's existing 4 KB with
+`mp_stack_set_limit()` 1 KB below `__StackTop`. Measured: a 15-line
+script set no new high-water mark; Python recursion to depth 40 peaked
+at **3,224 of 4,096** and raised a catchable `RuntimeError: maximum
+recursion depth exceeded`, 808 bytes still unused. D48's failure mode
+(SP crosses into core 1's stack, machine hangs) is now a Python
+exception. No PSP switch, no custom linker script, no assembly.
+
+**Also**: the heap is a **static bss array**, not an allocation
+(**D72**, amending D57) — there is no allocator, so "lazily allocated"
+could not be implemented as written; what is lazy is `init`/`deinit`.
+And `py <statement>` at the home screen is a one-liner REPL *and* the
+harness that makes the interpreter drivable from
+`scripts/serial-console.py`, which is how every measurement above was
+taken without touching the keyboard.
+
+> ## Next: 6B.3, the `calc` module
+>
+> §4.2's `calc` bindings and §4.5's SD app manifests are what is left of
+> 6B. A script today can print, loop and compute in pure Python but
+> **cannot reach the calculator at all**. Start at `calc.eval` — §4.7
+> already traced its call path through `cas::evaluate_home`, and D68
+> settled the `plot()` Y-slot semantics, so §8 has no open questions.
+> `exec_file` was deliberately deferred to 6B.15/16 (RUN executes the
+> editor buffer, which the widget has just written to disk).
+
+**Hardware-verified on the Pico 1, all six checks passed**: launcher
+with three apps, write-and-run with auto-indent after `:`, a red
+`raised` header with the traceback scrolled into view, **`ESC` breaking
+a `while True:` via `KeyboardInterrupt`**, save → power-cycle → reload →
+run, and ten enter/leave cycles with no heap drift. A 400,000-iteration
+loop confirmed the VM hook can safely reach I2C from deep inside the
+interpreter. **More extensive testing is deferred to a soak session**
+(user's call).
+
+**Not yet run on the Pico 2** — it builds and fits (26 KB free) but only
+the Pico 1 is connected, and board swaps happen at stage closures.
+
+**`phase-6` is not pushed and not merged** — merge to `main` still waits
+for Phase 6 to close.
+
+---
+
+**Previous session:** 2026-08-15 (first of two) — **Phase 6A + 6C.1
+implemented and hardware-verified, and the SRAM tooling turned out to be
+wrong.** Two distinct pieces of work, and the second one matters more.
 
 **6A is code-complete**: `platform::AppRegistry` (two tiers per D67),
 an app launcher reached from Home by **F6** *and* the `apps`/`app`
@@ -43,7 +128,10 @@ longer fatal (+28 KB); **C** render strip height 16 → 8 (+10 KB).
 48 KB and 104 KB the two heap budgets need. Risk 6 is closed by
 recovering SRAM rather than shrinking the heap.
 
-> ## The next job is 6B, and one number gates it
+> ## ~~The next job is 6B~~, and one number gates it
+>
+> **Superseded — 6B.1 landed the same day; the real figure is 17 KB, at
+> the top of this file.** The ~13 KB estimate below was close.
 >
 > `phase6-spec.md` §0.1, §4.4 and Risk 6 are rewritten on the corrected
 > figures. 6B has **~13 KB of Pico 1 spare** to fit the interpreter
@@ -105,7 +193,8 @@ already.
 
 > ## ~~The next job is 6A.1~~ — **DONE 2026-08-15.** 6A and 6C.1
 > are code-complete and hardware-verified; see the top of this
-> file. The D64 build order was followed as written. 6B is next.
+> file. The D64 build order was followed as written. ~~6B is next.~~
+> **6B's first half also landed the same day** — see the top.
 
 **Previous session:** 2026-08-13 — **Phase 6 spec-completion brainstorm,
 docs-only.** No firmware changed — everything landed in

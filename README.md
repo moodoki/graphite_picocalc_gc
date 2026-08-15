@@ -23,10 +23,11 @@ on the Raspberry Pi Pico SDK. Runs on both the Pico 1 H (RP2040) and Pico 2 H
 
 > **Status**: feature-complete as a graphing calculator, plus a symbolic CAS.
 > Phases 0 through 5.2 are done and hardware-verified on both boards. Phase 6
-> is under way: **6A (app framework) and 6C.1 (Notepad) are code-complete and
-> hardware-verified**, with an app launcher, a shared text editor and a file
-> browser; 6B (MicroPython) is next. Full breakdown in
-> [ROADMAP.md](ROADMAP.md).
+> is under way: an app launcher, a shared text editor, a file browser, Notepad,
+> and — as of 2026-08-15 — **MicroPython, embedded and running on the device**.
+> You can write a Python script on the calculator, run it and read its output.
+> What is left of 6B is the `calc` module that lets a script reach the
+> calculator itself. Full breakdown in [ROADMAP.md](ROADMAP.md).
 
 ## What it does
 

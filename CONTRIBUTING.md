@@ -68,7 +68,7 @@ hardware and no cross-toolchain needed. **This is the primary correctness check
 between hardware sessions.**
 
 ```bash
-./scripts/host-tests.sh   # 16 suites, 2,599 checks
+./scripts/host-tests.sh   # 20 suites, 2,897 checks
 ./scripts/lint.sh         # clang-format check + clang-tidy (warnings are errors)
 ./scripts/format.sh       # apply formatting
 ```
