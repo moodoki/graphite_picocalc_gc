@@ -16,6 +16,7 @@
 #include "pico/stdlib.h"
 
 #include "config.hpp"
+#include "platform/app_registry.hpp"
 #include "platform/fault.hpp"
 #include "platform/platform.hpp"
 #include "platform/power.hpp"
@@ -29,6 +30,7 @@
 #include "math/lists.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
+#include "apps/files_screen.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
 
@@ -326,6 +328,21 @@ private:
 
 DiagScreen g_diag_screen;
 
+// ---- Built-in app registry entries (Phase 6A.1, D67 tier 1) ----
+//
+// Each launch fn is captureless, so it converts to AppLaunchFn. A
+// kBuiltIn entry ignores the AppEntry argument — only the SD tiers
+// need it, to read their own `path`.
+void register_builtin_apps() {
+    platform::AppEntry files = {};
+    files.name = "Files";
+    files.kind = platform::AppKind::kBuiltIn;
+    files.launch = [](const platform::AppEntry&) {
+        ui::screen_manager().push(&apps::files_screen());
+    };
+    platform::AppRegistry::register_app(files);
+}
+
 }  // namespace
 
 int main() {
@@ -371,6 +388,13 @@ int main() {
     // The typed `diag` command pushes the diagnostics overlay (the old
     // global F6 toggle is gone — 2026-07-18 remap).
     apps::home_screen().set_diag_screen(&g_diag_screen);
+
+    // Built-in apps for the 6A launcher (D67 tier 1). An explicit list
+    // here rather than per-translation-unit self-registration, so the
+    // launcher's row order is visible in one place and doesn't depend
+    // on static-init order. The SD tier (tier 2) is appended later by
+    // 6B.16's scan, and always sorts after these.
+    register_builtin_apps();
 
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());

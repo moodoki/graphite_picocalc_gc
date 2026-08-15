@@ -172,6 +172,15 @@ echo "== Compiling + linking test_units =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_units"
 
+# Phase 6A app framework. No math, no tinyexpr, no cephes — the registry
+# is deliberately free of platform and Screen dependencies.
+echo "== Compiling + linking test_apps =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_apps.cpp \
+    src/platform/app_registry.cpp \
+    -o "$OUT/test_apps"
+
 echo "== Compiling + linking test_seq =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -238,6 +247,9 @@ echo "== Running test_analysis =="
 
 echo "== Running test_units =="
 "$OUT/test_units"
+
+echo "== Running test_apps =="
+"$OUT/test_apps"
 
 echo "== Running test_seq =="
 "$OUT/test_seq"

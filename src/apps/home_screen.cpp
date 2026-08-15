@@ -33,6 +33,7 @@
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
 #include "apps/infer_screen.hpp"
+#include "apps/launcher_screen.hpp"
 #include "apps/list_editor.hpp"
 #include "apps/matrix_editor.hpp"
 #include "apps/mode_screen.hpp"
@@ -808,9 +809,18 @@ bool HomeScreen::handle_command(const char* cmd) {
         ui::screen_manager().push(&const_screen());
         return true;
     }
-    // CAS operations menu (Phase 5); also on the F6 softkey.
+    // CAS operations menu (Phase 5). Typed-command only since Phase 6A
+    // took F6 for the app launcher (D58's dedicated softkey — there was
+    // no free slot, and `cas` was already a typed command).
     if (std::strcmp(cmd, "cas") == 0) {
         ui::screen_manager().push(&cas_menu());
+        return true;
+    }
+    // App launcher (Phase 6A.4, D58): both entry points ship — this
+    // command and the F6 softkey. Shadows a user list named app/apps
+    // the same way list/stat/mat already do.
+    if (std::strcmp(cmd, "apps") == 0 || std::strcmp(cmd, "app") == 0) {
+        ui::screen_manager().push(&launcher_screen());
         return true;
     }
     // Device settings: brightness/backlight/auto-power-down (4D.19-20).
@@ -955,8 +965,8 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kF5:
             ui::screen_manager().push(&graph_screen());
             return true;
-        case Key::kF6:  // CAS menu (Phase 5; F6 = Shift+F1 on the unit)
-            ui::screen_manager().push(&cas_menu());
+        case Key::kF6:  // App launcher (Phase 6A.4; F6 = Shift+F1 on the unit)
+            ui::screen_manager().push(&launcher_screen());
             return true;
         default:
             if (input_.on_key(ev)) {
@@ -1072,7 +1082,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         default:
             break;
     }
-    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", "CAS"};
+    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", "APPS"};
     ui::draw_softkeys(fb, keys);
 }
 

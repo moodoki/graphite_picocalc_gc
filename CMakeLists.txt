@@ -84,6 +84,7 @@ target_compile_options(cephes PRIVATE -w)
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
     src/main.cpp
+    src/platform/app_registry.cpp
     src/platform/display.cpp
     src/platform/fault.cpp
     src/platform/keyboard.cpp
@@ -155,6 +156,7 @@ add_executable(picocalc_graphcalc
     src/graph/analysis.cpp
     src/graph/analysis_cursor.cpp
     src/apps/nav.cpp
+    src/apps/launcher_screen.cpp
     src/apps/home_screen.cpp
     src/apps/const_screen.cpp
     src/apps/settings_screen.cpp
