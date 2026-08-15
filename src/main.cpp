@@ -33,6 +33,7 @@
 #include "apps/files_screen.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
+#include "apps/notepad_screen.hpp"
 
 // Build id from CMake (git short hash, "-dev" when the tree is dirty).
 #ifndef PICOCALC_BUILD_ID
@@ -334,6 +335,14 @@ DiagScreen g_diag_screen;
 // kBuiltIn entry ignores the AppEntry argument — only the SD tiers
 // need it, to read their own `path`.
 void register_builtin_apps() {
+    platform::AppEntry notepad = {};
+    notepad.name = "Notepad";
+    notepad.kind = platform::AppKind::kBuiltIn;
+    notepad.launch = [](const platform::AppEntry&) {
+        ui::screen_manager().push(&apps::notepad_screen());
+    };
+    platform::AppRegistry::register_app(notepad);
+
     platform::AppEntry files = {};
     files.name = "Files";
     files.kind = platform::AppKind::kBuiltIn;

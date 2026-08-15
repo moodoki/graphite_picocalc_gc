@@ -99,6 +99,9 @@ add_executable(picocalc_graphcalc
     src/gfx/framebuffer.cpp
     src/ui/screen_manager.cpp
     src/ui/input_line.cpp
+    src/ui/prompt_line.cpp
+    src/ui/text_buffer.cpp
+    src/ui/text_editor_widget.cpp
     src/ui/chrome.cpp
     src/math/engine.cpp
     src/math/functions.cpp
@@ -157,6 +160,7 @@ add_executable(picocalc_graphcalc
     src/graph/analysis_cursor.cpp
     src/apps/nav.cpp
     src/apps/launcher_screen.cpp
+    src/apps/notepad_screen.cpp
     src/apps/home_screen.cpp
     src/apps/const_screen.cpp
     src/apps/settings_screen.cpp

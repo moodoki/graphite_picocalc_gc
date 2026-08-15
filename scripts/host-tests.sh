@@ -181,6 +181,15 @@ echo "== Compiling + linking test_apps =="
     src/platform/app_registry.cpp \
     -o "$OUT/test_apps"
 
+# The editor's multi-line buffer, split out from TextEditorWidget so it
+# needs no framebuffer.
+echo "== Compiling + linking test_text_buffer =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_text_buffer.cpp \
+    src/ui/text_buffer.cpp \
+    -o "$OUT/test_text_buffer"
+
 echo "== Compiling + linking test_seq =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -250,6 +259,9 @@ echo "== Running test_units =="
 
 echo "== Running test_apps =="
 "$OUT/test_apps"
+
+echo "== Running test_text_buffer =="
+"$OUT/test_text_buffer"
 
 echo "== Running test_seq =="
 "$OUT/test_seq"
