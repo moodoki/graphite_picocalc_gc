@@ -18,6 +18,79 @@ Format:
 
 ---
 
+## D84: `list_append` costs 16 bytes of Python heap, and eigenvalues is top-level-only
+
+**Date**: 2026-08-16
+**Status**: Accepted (implements D82; 6B.7 and 6B.17 as built)
+**Context**: D82 decided list bindings were in scope and that a run's lists
+save once at the end. Building them settled three things it left open, and
+produced the measurement that justifies the whole task.
+
+**1. The number.** D77 measured a 400-iteration loop accumulating samples in a
+Python list: it exhausted the 40 KB heap and fragmented it badly enough that
+the interpreter had to be rebuilt. The same 400 iterations through
+`calc.list_append`:
+
+| | free heap |
+|---|---|
+| before | 32,432 |
+| after 400 appends | 32,416 |
+
+**16 bytes.** `math::Array` moves to PSRAM above ~256 elements, so the samples
+are never in the heap at all. That is what §4.6 entry 1's data-logging app
+needs to exist, and it is now demonstrated rather than argued.
+
+**2. Matrices cross as nested Python lists, not handles.** `math::Array` is
+non-copyable and PSRAM-backed, and there are ten named slots — a chained
+calculation would exhaust them. So `calc.det([[1,2],[3,4]])` copies into one
+file-static scratch `Array`, `clear()`ed at the end of each operation so its
+slab returns to the store immediately (measured peak is 12 live of 14).
+Results land in MatAns, which is where the home screen puts a matrix result
+too. `set_matrix("A", …)`/`get_matrix("A")` are the only bindings that touch
+the persisted `[A]`-`[J]`.
+
+`calc.eigenvalues` returns a **flat** list: `matops::eigenvalues` deliberately
+produces a 1-D Array so its results can flow into l1-l6 (matrix.hpp), and a
+script wants `[3.0, 1.0]` rather than `[[3.0, 1.0]]`.
+
+**3. The eigen guard is set by margin, not by what survives.** `eigen_core` is
+1,248 bytes, the largest frame in the firmware. Measured against a $10\times10$
+Hilbert matrix — `kMaxEigen` is the size cap and ill-conditioning makes the
+shifted QR work hardest:
+
+| call site | peak of 4,096 | spare at peak |
+|---|---|---|
+| top level | 3,192 | 904 |
+| two Python functions deep | 3,864 | **232** |
+
+The two-deep call **worked**. It was still set to be refused:
+`fault.cpp`'s `kLiveMargin` assumes a TinyUSB IRQ frame can exceed 256 bytes,
+and the paint-and-scan instrument only records an ISR that actually fired
+during the measurement — so 232 bytes is a run that looked fine while being
+one interrupt from D48's overrun. `kEigenStackNeed = 1900` keeps ~400 spare
+whenever the call proceeds, which makes eigenvalues effectively top-level-only,
+like the `solve()` path and for the same reason.
+
+Unlike D79's integrator this really is the worst case: the QR iteration is
+iterative rather than recursive, and `eigen_core`'s frame is already sized for
+`kMaxEigen`, so depth does not grow with the input.
+
+**Rationale for deferring only lists and matrices**: variables and graph state
+still persist immediately. A variable image is 456 bytes; a list can be 10,000
+elements. `calc.store` in a tight loop has the same per-write cost and is
+knowingly left alone — changing shipped, tested behaviour mid-chunk buys
+nothing here.
+
+**Tradeoffs**: a script killed by `ESC`, or one that raises, loses list samples
+it had not saved. The flush runs *before* the GC collect in `exec()`, so a run
+that ended by exhausting the heap does still persist what it gathered — but a
+run that never returns does not.
+
+**Revisit when**: a logging run long enough that losing it to an `ESC` matters.
+`calc.save_lists()` is the small answer.
+
+---
+
 ## D83: `calc.read_file` reads into the Python string's own storage
 
 **Date**: 2026-08-16

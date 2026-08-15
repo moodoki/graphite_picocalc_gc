@@ -1,6 +1,43 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 — **6B.6: a script can plot and analyse
+**Last session:** 2026-08-16 (later) — **6B.7 + 6B.17: lists and
+matrices** (D84). A script can read and write the six lists and the ten
+matrices. 21 host suites / 3,203 checks; free SRAM 17 KB / 26 KB.
+
+> ## The number the whole task existed for
+>
+> D77 measured a 400-iteration loop accumulating samples in a Python list
+> **exhausting the 40 KB heap**. The same 400 iterations through
+> `calc.list_append` cost **16 bytes** (32,432 → 32,416 free), because
+> `math::Array` moves to PSRAM above ~256 elements. §4.6 entry 1's
+> data-logging app is now possible.
+>
+> **The eigen guard is set by margin, not by what survives.** A
+> $10\times10$ Hilbert matrix peaked at 3,192 (904 spare) at top level
+> and **3,864 (232 spare)** two Python functions deep. The two-deep call
+> *worked* and is still refused: `fault.cpp`'s `kLiveMargin` assumes an
+> IRQ frame can exceed 256 bytes, and paint-and-scan only records an ISR
+> that actually fired. `kEigenStackNeed = 1900` keeps ~400 spare, making
+> eigenvalues top-level-only like `solve()`. **Do this for every
+> remaining binding.**
+
+**Also settled** (D84): matrices cross as **nested Python lists**, not
+handles — `Array` is non-copyable and PSRAM-backed with ten slots, so a
+value-returning `calc.matrix()` would exhaust them. One file-static
+scratch, `clear()`ed per call. `calc.eigenvalues` returns a **flat**
+list, because `matops::eigenvalues` makes a 1-D Array on purpose so
+results flow into l1-l6.
+
+**Persistence for lists and matrices is deferred to end-of-run**
+(`calc_api_flush_run`, called from `exec()` before the GC collect) and
+verified across a reflash. Variables and graph state still save
+immediately — a variable image is 456 bytes, a list can be 10,000
+elements. `calc.store` in a tight loop has the same per-write cost and
+was knowingly left alone.
+
+---
+
+**Previous session:** 2026-08-16 — **6B.6: a script can plot and analyse
 graphs** (D79). `calc.plot`, `window`, `show_graph`, and `graph_zero` /
 `min` / `max` / `integral` / `deriv` / `value`, all verified on the
 Pico 1. Flash +2.2 KB, **free SRAM unchanged at 17 KB**.

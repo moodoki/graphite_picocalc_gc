@@ -305,6 +305,74 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-16 (later) — 6B.7 + 6B.17: lists and matrices, and the number that justifies them (D84)
+
+**Done: 6B.7 and 6B.17.** A script can read and write the six lists and the
+ten matrices. Verified on the Pico 1.
+
+**The measurement this task existed for.** D77 had shown a 400-iteration loop
+accumulating samples in a Python list exhausting the 40 KB heap and
+fragmenting it badly enough that the interpreter had to be rebuilt. The same
+400 iterations through `calc.list_append`:
+
+| | free heap |
+|---|---|
+| before | 32,432 |
+| after 400 appends | 32,416 |
+
+**16 bytes.** `math::Array` moves to PSRAM above ~256 elements, so the samples
+never enter the heap. §4.6 entry 1's data-logging app is now possible, and the
+claim is demonstrated rather than argued.
+
+**Persistence is deferred and it works.** D82 said a run's lists save once at
+the end rather than per append — otherwise a logging loop is one SD write per
+sample, the exact pattern the 2026-07-22 fix split `lists.dat` into six files
+to avoid. The persist hook grew an index, `calc_api_flush_run()` walks a dirty
+mask, and the 400 elements plus `[A]` both survived a reflash.
+
+**Matrices cross as nested Python lists, not handles** (D84). `math::Array` is
+non-copyable and PSRAM-backed with ten named slots, so a value-returning
+`calc.matrix()` would exhaust them. One file-static scratch Array, `clear()`ed
+per call so its slab returns immediately. `calc.eigenvalues` returns a **flat**
+list, because `matops::eigenvalues` produces a 1-D Array on purpose so results
+can flow into l1-l6 — the host test caught that assumption before hardware did.
+
+**The eigen guard is set by margin, not by what survives.** Measured against a
+$10\times10$ Hilbert matrix (`kMaxEigen` is the cap; ill-conditioning makes the
+shifted QR work hardest):
+
+| call site | peak of 4,096 | spare at peak |
+|---|---|---|
+| top level | 3,192 | 904 |
+| two Python functions deep | 3,864 | **232** |
+
+The two-deep call **worked** — and is still refused. `fault.cpp`'s
+`kLiveMargin` assumes a TinyUSB IRQ frame can exceed 256 bytes, and the
+paint-and-scan instrument only records an ISR that actually fired, so 232
+bytes is a run that looks fine while being one interrupt from D48's overrun.
+`kEigenStackNeed = 1900` keeps ~400 spare whenever the call proceeds, which
+makes eigenvalues top-level-only like the `solve()` path.
+
+Unlike D79's integrator this genuinely is the worst case: the QR iteration is
+iterative rather than recursive and `eigen_core`'s frame is already sized for
+`kMaxEigen`, so depth does not grow with the input.
+
+**Verified**: 21 host suites / 3,203 checks (test_calc_api 177 → 306), both
+boards, lint clean, 52 markdown files. On hardware: list round-trip, the 400
+append heap check, stats against a known dataset, reboot persistence,
+det/inverse/rref/eigenvalues on a 10x10 Hilbert matrix, the `[A]` round-trip,
+and the guard refusing two frames deep rather than hanging.
+
+**Sizes**: flash 639,452 → 644,876 (+5,424). Free SRAM 17 KB (Pico 1) and
+26 KB (Pico 2) — the Pico 2 lost 1 KB to the scratch Array's slab accounting.
+
+**Lint note worth keeping**: a `CALC_GUARDED` macro wrapping the eleven
+reentrancy guards was rejected by `cppcoreguidelines-macro-usage`, and
+expanding it was right anyway — the file's own comment argues the guard should
+be "checkable by looking at one line", which a macro undoes.
+
+---
+
 ## 2026-08-16 — 6B.6: a script can plot and analyse graphs (D79)
 
 **Done: 6B.6.** `calc.plot`, `window`, `show_graph`, and the six numeric

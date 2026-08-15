@@ -22,7 +22,7 @@ significant work that turned up outside them. See
 | 5: CAS (symbolic math) | **Complete** | Engine, UI integration, exact-form display, Stage 5 stack hardening. Tagged **v0.2.0** |
 | 5.1: Serial line injection | **Complete** | Host-driven on-device test automation. Tagged **v0.3.0** |
 | 5.2: Unified evaluator | **Complete** | One tagged-value evaluator replacing three. Tagged **v0.4.0** |
-| 6: Non-calculator functions | **6A, 6C.1 and most of 6B done, HW-verified** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS, complex numbers and graphing. Matrices, drawing, input and file bindings (6B.7-6B.10) are what is left. [Spec](docs/phases/phase6-spec.md) |
+| 6: Non-calculator functions | **6A, 6C.1 and most of 6B done, HW-verified** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS, complex numbers, graphing, lists and matrices. Drawing, input and file bindings (6B.8-6B.10) are what is left. [Spec](docs/phases/phase6-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H.
@@ -88,9 +88,13 @@ reload it. `ESC` stops a runaway loop.
   `graph_value`. Plotting **destroys the user's own Y= functions** and the
   loss is persisted, which is D68's deliberate cost and is documented
   user-facing.
-- **What is left of 6B** is 6B.7-6B.10 (matrices, display, keyboard, file
-  I/O) and the SD app manifests (6B.15-6B.16). List bindings have no task yet
-  and need one — see the note in the spec's §5.
+- **6B.7 and 6B.17 are done.** A script reaches the six lists and the ten
+  matrices. The number that justified them: 400 `calc.list_append` calls cost
+  **16 bytes** of Python heap, where the same loop into a Python list
+  exhausted all 40 KB (D77/D84).
+- **What is left of 6B** is 6B.8-6B.10 (display, keyboard, file I/O) and the
+  SD app manifests (6B.15-6B.16). All three have their design decisions
+  settled — D80, D81 and D83 — so what remains is implementation.
 
 What the 6A and 6B work established that matters for scoping the rest:
 

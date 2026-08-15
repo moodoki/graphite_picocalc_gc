@@ -297,6 +297,40 @@ calc.graph_deriv("Y1", 2)         # 4.0
 calc.graph_value("Y1", 3)         # (3.0, 5.0)
 ```
 
+### Lists and matrices
+
+```python
+calc.set_list(1, [2, 4, 4, 4, 5, 5, 7, 9])
+calc.get_list(1)                  # [2.0, 4.0, ...]
+calc.stat_mean(1)                 # 5.0 — also stat_sum/min/max/stddev
+calc.list_append(1, 12.5)         # grows l1 by one
+
+calc.det([[1, 2], [3, 4]])        # -2.0
+calc.inverse([[1, 2], [3, 4]])    # [[-2.0, 1.0], [1.5, -0.5]]
+calc.transpose(m); calc.rref(m)
+calc.eigenvalues([[2, 1], [1, 2]])# [3.0, 1.0] — a flat list
+calc.set_matrix("A", [[1, 2], [3, 4]])
+calc.get_matrix("A")
+```
+
+Lists are the six real `l1`–`l6`, so anything a script writes shows up in the
+list editor and in `stats`. Matrices are ordinary nested Python lists, except
+for `set_matrix`/`get_matrix`, which read and write the calculator's own
+`[A]`–`[J]`.
+
+**Use `calc.list_append` for logging, not a Python list.** A loop that
+collects a few hundred readings in a Python list will run the interpreter out
+of memory; the same loop through `list_append` costs essentially nothing,
+because the data lives where the calculator's lists live rather than in the
+script's own memory.
+
+**Lists and matrices are saved when the script finishes**, not on every call —
+that is what keeps a logging loop fast. The trade is that a script you stop
+with `ESC`, or one that fails, loses whatever it had not saved yet.
+
+`calc.eigenvalues` on a large matrix needs more stack than most things, so
+call it from the top level of your script rather than from inside a function.
+
 **`calc.plot()` replaces your Y= functions.** The first `plot()` a script runs
 clears all seven slots, and later calls fill Y2, Y3 and so on; an eighth is an
 error. This is deliberate — it means a script draws what it asks for and not
@@ -336,4 +370,4 @@ Three things to know:
   variables are lost, but the calculator keeps working and no power cycle is
   needed. Building the expression once outside the loop avoids it.
 
-Matrices, lists, drawing, key input and file access are not in this release.
+Drawing, key input and file access are not in this release.

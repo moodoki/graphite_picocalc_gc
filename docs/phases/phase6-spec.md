@@ -855,13 +855,15 @@ private:
 
 ### 4.2 Calculator API bindings (`calc` Python module)
 
-**6B.3-6B.6 BUILT 2026-08-15/16 and hardware-verified.** What shipped is
+**6B.3-6B.7, 6B.17 BUILT 2026-08-15/16 and hardware-verified.** What shipped is
 `calc.eval`, `store`, `recall`, `simplify`, `expand`, `factor`, `diff`,
 `integ`, `solve`, `complex`, `c_abs`, `c_arg`, `c_conj`, `plot`, `window`,
 `show_graph`, `graph_zero`, `graph_min`, `graph_max`, `graph_integral`,
-`graph_deriv` and `graph_value`. Everything else in the sketch below —
-matrices, lists, GPIO, display, input, file I/O — is 6B.7-6B.10 and not yet
-built.
+`graph_deriv`, `graph_value`, the list bindings (`set_list`, `get_list`,
+`list_append`, `stat_mean`/`sum`/`min`/`max`/`stddev`) and the matrix bindings
+(`det`, `inverse`, `transpose`, `rref`, `matmul`, `eigenvalues`, `set_matrix`,
+`get_matrix`). Everything else in the sketch below — GPIO, display, input,
+file I/O — is 6B.8-6B.10 and not yet built.
 
 Four things differ from the sketch and are settled, not open:
 
@@ -895,7 +897,18 @@ Four things differ from the sketch and are settled, not open:
    `py` line at the home screen is one: two `py calc.plot(...)` lines leave
    one curve, not two. Within a single exec — which is what a script run from
    the editor is — they accumulate.
-5. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
+5. **Matrices cross as nested Python lists, not handles** (**D84**).
+   `math::Array` is non-copyable and PSRAM-backed with ten named slots, so
+   `calc.matrix(...)` returning a value would exhaust them; `calc.det([[1,2],
+   [3,4]])` copies into one transient scratch instead, and
+   `set_matrix`/`get_matrix` reach `[A]`-`[J]`. `calc.eigenvalues` returns a
+   **flat** list, because `matops::eigenvalues` produces a 1-D Array on
+   purpose so its results flow into l1-l6.
+6. **List writes are persisted once per run, not per call** (**D82**/**D84**).
+   Measured: 400 `list_append` calls cost **16 bytes** of Python heap, where
+   the same loop into a Python list exhausted all 40 KB (D77). The stated
+   cost is that a script killed by `ESC` loses what it had not saved.
+7. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
    a native complex type, so the binding exists for symmetry with the rest of
    the module rather than because it was needed. `c_arg` returns radians in
    $-\pi..\pi$ **whatever the angle mode says** — that convention, inherited
@@ -1716,7 +1729,7 @@ their own (est. 3 hrs) before §4.6's entry 1 can be built, and
 | 6B.4 | **DONE** `calc` module: CAS bindings (incl. complex solve) | 4 | `calc.solve("x^2+1=0","x")` → **`['i', '-1*i']`** in a+bi mode |
 | 6B.5 | **DONE** `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = **5.0** |
 | 6B.6 | **DONE** `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — D68's Y-slot semantics, plus D79 for the deferred switch, the absent per-plot colour and the forced FUNC mode | 4 | `calc.graph_zero`, `graph_integral` work — **(2.0, 0.0) and -3.0 on hardware**; a script's first `plot()` clears Y1-Y7, its 8th raises |
-| 6B.7 | `calc` module: matrix bindings | 3 | Create/multiply/invert from Python |
+| 6B.7 | **DONE** `calc` module: matrix bindings — nested Python lists rather than handles (D84), one transient scratch Array, eigenvalues guarded separately at a measured 1,900 B | 3 | Create/multiply/invert from Python — **det/inverse/rref/eigenvalues verified on a 10x10 Hilbert matrix** |
 | 6B.8 | `calc` module: display primitives | 4 | Script draws graphics |
 | 6B.9 | `calc` module: keyboard input — blocking (`wait_key`, `input`) and non-blocking (`key_pressed`, `key_held`, §4.6 entry 5) | 3 | Read keys, text input, poll without blocking |
 | 6B.10 | `calc` module: file I/O | 2 | Read/write SD files |
@@ -1726,7 +1739,7 @@ their own (est. 3 hrs) before §4.6's entry 1 can be built, and
 | 6B.14 | Memory management: lazy init, cleanup | 3 | Heap freed on leaving program screen |
 | 6B.15 | SD app manifest parser + second `AppRegistry` tier (§4.5) | 6 | Malformed manifest skipped + logged, not fatal |
 | 6B.16 | Boot-time SD app scan + launcher integration (§4.5) | 6 | `/picocalc/apps/finance/` shows as a named launcher tile |
-| 6B.17 | `calc` module: list bindings — `set_list`, `get_list`, `list_append`, `stat_mean` (D82). Numbered after 6B.16 to avoid renumbering, but belongs beside 6B.7 | 3 | `calc.list_append` in a loop grows a list without touching the Python heap; the run's lists persist once at the end |
+| 6B.17 | **DONE** `calc` module: list bindings — `set_list`, `get_list`, `list_append`, `stat_*` (D82/D84). Numbered after 6B.16 to avoid renumbering, but belongs beside 6B.7 | 3 | **400 appends cost 16 bytes of Python heap**; the run's lists persist once at the end, verified across a reboot |
 | | **Subtotal** | **~69 hrs** | |
 
 ### Sub-phase 6C: Notepad (first concrete future app)
