@@ -1,6 +1,78 @@
 # Start here — next session
 
-**Last session:** 2026-08-14 — **Phase 6 spec-completion continued,
+**Last session:** 2026-08-15 — **Phase 6A + 6C.1 implemented and
+hardware-verified, and the SRAM tooling turned out to be wrong.** Two
+distinct pieces of work, and the second one matters more.
+
+**6A is code-complete**: `platform::AppRegistry` (two tiers per D67),
+an app launcher reached from Home by **F6** *and* the `apps`/`app`
+command (D58 — F6 took CAS's slot, which stays typed-only),
+`FilesScreen` generalized into a `FileBrowserScreen` with directory
+navigation, pick mode and file management, a shared
+`ui::TextEditorWidget` split over a host-testable `ui::TextBuffer`, a
+new `ui::PromptLine`, and **Notepad** as the first real app. Built in
+D64's order. New host targets `test_apps` (34 checks) and
+`test_text_buffer` (67). Suite 2350 → 2451.
+
+> ## Read this before trusting any SRAM number in this repo
+>
+> **`size-report.sh` was omitting the entire `.data` section** — every
+> headroom figure it ever printed was wrong by ~44 KB (**D69**).
+> `.data` on this target has a flash LMA, an **SRAM VMA**, and SDK
+> flags of `READONLY, CODE`, so Berkeley `size` bins it under *text*
+> and prints `data 0`. The script summed `bss + 0`.
+>
+> Real free SRAM was **14.3 KB**, not the 58.2 KB D61 acted on, so the
+> MicroPython heap **never fit on either board** — a ~32 KB shortfall,
+> not a tuning question. The script now sums every ALLOC section whose
+> VMA lands in the main SRAM bank, and prints the breakdown.
+>
+> **Past phases' RAM *deltas* still stand** (the omission is a
+> near-constant offset within a phase); their absolute headroom claims
+> do not. That includes `pre-phase5-review.md`, whose own baseline line
+> reads `data 0`.
+
+**Then 54 KB was recovered** (**D70**), each lever measured and
+hardware-tested: **A** one-shot persistence buffers folded into a
+shared `platform::io_scratch()` region (+15.3 KB); **B** ArrayStore
+slabs 28 → 14 behind a new **PSRAM fallback** so exhaustion is no
+longer fatal (+28 KB); **C** render strip height 16 → 8 (+10 KB).
+**D declined** — it returns flash, not SRAM, and flash is 22.3% used.
+
+**Pico 1 free SRAM 7.9 → 61 KB; Pico 2 83 → 126 KB**, against the
+48 KB and 104 KB the two heap budgets need. Risk 6 is closed by
+recovering SRAM rather than shrinking the heap.
+
+> ## The next job is 6B, and one number gates it
+>
+> `phase6-spec.md` §0.1, §4.4 and Risk 6 are rewritten on the corrected
+> figures. 6B has **~13 KB of Pico 1 spare** to fit the interpreter
+> wrapper, the `calc` module and the program editor — re-run
+> `size-report.sh` as **6B.1** lands rather than assuming it holds.
+> P6-2 and P6-15 were both settled by **D68** (`calc.plot()` clears the
+> Y-slots; `plot()` is a state write, `show_graph()` displays), so §8
+> has no open questions left.
+
+**Hardware-verified on the Pico 1**: persistence survives reboot across
+all the folded buffers (lists, matrices, variables, graph state);
+`ListEditorScreen::delete_row` shifts correctly and persists; the
+PSRAM fallback was exercised at a hostile `kSlabCount = 4` (11
+fallbacks, 30/30 sensitive checks clean); and a full visual pass at
+8-px strips over home, Y=, graph + trace, list editor, stats, Notepad
+and the browser found **no tearing, flicker or lockups** — the D47
+class of bug did not resurface. **Still unverified**: the launcher's
+scrolling path, which needs a third app to exercise.
+
+**Two things noted for issue #24 (D53)**: `config::kOverclockHz`
+(200 MHz) is **defined and never applied** — no `set_sys_clock*` call
+exists anywhere — so the board has run at 125 MHz for every
+measurement, and clock rate cannot explain the faults seen so far. But
+the PSRAM PIO uses **clkdiv 1.0**, pinned to `sys_clk` with no
+compensation, so anyone enabling that constant must raise the divider
+in the same change. Deliberately *varying* `sys_clk` would also be a
+sharper probe than the address hypothesis.
+
+**Previous session:** 2026-08-14 — **Phase 6 spec-completion continued,
 docs-only except one small hardware-verified diagnostic.** Six new
 decisions, **D61-D66**, all in `docs/notes/decisions.md` and
 cross-referenced in `docs/phases/phase6-spec.md`. **§0's pre-flight
@@ -31,21 +103,9 @@ committed straight to `main`; this one deliberately didn't. Merge or
 rebase onto `main` when picking this back up, if it hasn't happened
 already.
 
-> ## The next job is 6A.1 — nothing left to resolve first
->
-> Every pre-flight item is closed (see D61-D66 above and the previous
-> session's D54-D60). **Start 6A implementation now**, in the D64 build
-> order: **6A.1-6A.4** (registry, launcher, screen handoff, entry
-> points) → **6A.6** (`FileBrowserScreen` navigate+pick, moved ahead of
-> the widget so `F3:LOAD` is wired for real) → **6A.5** (shared
-> `TextEditorWidget`) → **6C.1** (Notepad — first real app, proves the
-> widget end-to-end) → **6A.7** (file management, can trail) → **6B**
-> (MicroPython). See `phase6-spec.md` §5's build-order note for the
-> full rationale. One thing to remember mid-6A: a **post-6A
-> `size-report.sh` re-run is still owed** (§0.1) to confirm the 40 KB
-> heap pre-commitment's ~10 KB of assumed headroom against 6A's real
-> static cost, not just the low-single-digit-KB comparables D61
-> reasoned from.
+> ## ~~The next job is 6A.1~~ — **DONE 2026-08-15.** 6A and 6C.1
+> are code-complete and hardware-verified; see the top of this
+> file. The D64 build order was followed as written. 6B is next.
 
 **Previous session:** 2026-08-13 — **Phase 6 spec-completion brainstorm,
 docs-only.** No firmware changed — everything landed in

@@ -141,6 +141,34 @@ would mean storing an index or enum instead of a raw pointer, which
 touches `engine.cpp`'s binding path — worth doing if SRAM ever gets
 tight again, not worth it at 61 KB free.
 
+### Hardware verification closed, 2026-08-15
+
+The two gaps flagged when A and C landed are now closed by a hands-on
+pass on the Pico 1, and both came back clean.
+
+**The 8-px strip risk did not materialise.** `render()` now runs 40
+times per frame instead of 20 and the strip boundaries moved (0, 8,
+16, … where they used to be 0, 16, 32, …), so any screen quietly
+violating the idempotent-`render()` contract could have started
+misbehaving — D47's Y=-editor lockup was exactly that class, and the
+16 px status bar that used to be one strip is now two. Walked the home
+screen, Y= editor, graph + trace, list editor, stats, Notepad and the
+file browser: no torn or duplicated bands, no flicker between redraws,
+no lockups, and nothing in the serial fault watch. The
+`refresh_cells()`-style caching the list and matrix editors already do
+is what made this a non-event.
+
+**`ListEditorScreen::delete_row` verified.** This was lever A's one
+untested path — its shift buffer now shares the io_scratch region with
+list persistence, and the ordering (loop completes before
+`save_lists()`) had only been checked by reading the code. Deleting a
+row mid-list shifts the remaining values correctly and they survive a
+reboot.
+
+**Still unverified**: the launcher's scrolling path. With only two
+built-in apps registered the list cannot overflow its ~9 visible rows,
+so that code stays untested until 6B adds a third.
+
 **Revisit when**: 6B's static cost is known. 61 KB free against a
 40 KB heap plus its 8 KB C stack leaves ~13 KB for the interpreter
 wrapper, the `calc` module and the program editor.

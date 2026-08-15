@@ -22,7 +22,7 @@ significant work that turned up outside them. See
 | 5: CAS (symbolic math) | **Complete** | Engine, UI integration, exact-form display, Stage 5 stack hardening. Tagged **v0.2.0** |
 | 5.1: Serial line injection | **Complete** | Host-driven on-device test automation. Tagged **v0.3.0** |
 | 5.2: Unified evaluator | **Complete** | One tagged-value evaluator replacing three. Tagged **v0.4.0** |
-| 6: Non-calculator functions | **Specced, not started** | App-launcher framework (6A) + MicroPython (6B). [Spec](docs/phases/phase6-spec.md) |
+| 6: Non-calculator functions | **6A + 6C.1 done, HW-verified; 6B next** | App launcher, shared text editor, file browser, Notepad. MicroPython (6B) still to come. [Spec](docs/phases/phase6-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H.
@@ -63,24 +63,32 @@ behaviour that changed is recorded in
 the before/after measurements — including the regressions — in
 [docs/notes/measurements/phase5.2/](docs/notes/measurements/phase5.2/).
 
-## Next: Phase 6
+## Phase 6: non-calculator functions
 
-Non-calculator functions, in two sub-phases:
+**6A (app framework) and 6C.1 (Notepad) are done and hardware-verified.**
+The calculator now has an app launcher reached from the home screen by an
+`F6` softkey or an `apps` command, a shared line-numbered text editor, a
+file browser with directory navigation and file management, and Notepad as
+the first app on the framework.
 
-- **6A — app-launcher framework**: a way to run things that are not the
-  calculator, with a lifecycle and a screen contract.
-- **6B — MicroPython** as the first app on that framework, exposing a `calc`
-  module so scripts can reach the math engine.
+- **6B — MicroPython** is next: the interpreter as an app on that framework,
+  exposing a `calc` module so scripts can reach the math engine.
 
-Two things worth knowing before scoping it:
+What changed under 6A that matters for scoping 6B:
 
-- 5.2's RAM win roughly **doubled the spare margin** for 6B's 48 KB
-  MicroPython heap on the Pico 1 (~5 KB → ~10 KB). Still not comfortable;
-  [pre-phase5-review.md](docs/notes/pre-phase5-review.md) lists further levers
-  if 6A's framework growth eats it.
-- 6B's `calc` module bindings were specced against the evaluator that 5.2
-  replaced, so that surface needs re-verifying against the unified evaluator
-  before the sub-phase is scoped.
+- **The SRAM tooling was wrong, and fixing it changed the picture.**
+  `size-report.sh` computed headroom from Berkeley `size`'s `bss + data`
+  columns, which bin this target's `.data` under *text* and report `data 0` —
+  omitting ~44 KB of live SRAM from every reading it had ever produced. Real
+  free SRAM was **14.3 KB**, not the ~58 KB reported, so the MicroPython heap
+  never fit on either board (D69).
+- **54 KB was then recovered** (D70): one-shot persistence buffers folded into
+  a shared region, the ArrayStore slab pool cut behind a new PSRAM fallback,
+  and the render strip height halved. Pico 1 free SRAM is now **61 KB** and
+  Pico 2 **126 KB**, against the 48 KB and 104 KB the two heap budgets need.
+- **6B's `calc` bindings were re-verified** against the unified evaluator
+  (D60, closing issue #27) — no dead entry points, and a concrete
+  `calc.eval()` shape recorded for 6B.3 to build against.
 
 ## Beyond the plan
 
