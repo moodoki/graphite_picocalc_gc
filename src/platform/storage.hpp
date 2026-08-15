@@ -5,6 +5,15 @@
 
 namespace platform {
 
+// Absolute-path buffer size, including the NUL (Phase 6A.6). Before
+// this, every caller sized its own local to the one path it knew about
+// (char path[24] / [32]); the file browser is the first component that
+// composes paths it can't predict, so the bound needs a name. DirEntry
+// names are 64 B, and the browser caps descent at 4 levels below its
+// start directory, so 128 leaves room without sizing for arbitrary
+// nesting nothing on this SD layout needs.
+constexpr size_t kMaxPath = 128;
+
 // SD card file access via FatFs. All paths are absolute ("/picocalc/...").
 class Storage {
 public:

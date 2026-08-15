@@ -1,16 +1,41 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 #include "platform/storage.hpp"
 #include "ui/screen.hpp"
 
 namespace apps {
 
-// On-device SD listing (test-drive request 2026-07-18): shows the
-// /picocalc directory — name, size, [DIR] — so persistence artifacts
-// (graphstate.dat, migrated legacy files) can be checked without
-// pulling the card. Read-only; refreshed on every activate.
-class FilesScreen : public ui::Screen {
+// SD file browser (Phase 6A.6, spec §3.7, D55 — generalized in place
+// from the read-only single-level FilesScreen added 2026-07-18).
+//
+// One component, two modes:
+//   kBrowse — the standalone `files` diagnostic. ENTER on a file is a
+//             no-op (view only), preserving the original behavior.
+//   kPick   — a caller wants a path back: ENTER on a file invokes
+//             on_picked and pops. Used by the text editor's F3:LOAD.
+//
+// Both modes navigate directories. Descent is capped (kMaxDepth) below
+// start_dir so the path buffer has a real bound; /picocalc/apps/<name>
+// is the deepest thing this SD layout defines, at 2 levels.
+enum class FileBrowserMode : std::uint8_t { kBrowse, kPick };
+
+class FileBrowserScreen : public ui::Screen {
 public:
+    using PickedFn = void (*)(const char* path);
+
+    // Deepest descent below start_dir. 4 leaves one spare level of
+    // user-created subfolder past the deepest path the layout defines.
+    static constexpr int kMaxDepth = 4;
+
+    // Applies immediately and resets navigation to start_dir. Call
+    // before pushing, not after — on_activate() re-lists from whatever
+    // is configured.
+    void configure(FileBrowserMode mode, const char* start_dir, const char* ext_filter,
+                   PickedFn on_picked);
+
     void on_activate() override;
     bool on_key(const platform::KeyEvent& ev) override;
     void render(gfx::Framebuffer& fb) override;
@@ -22,8 +47,35 @@ private:
     int count_ = 0;   // -1 = list failed / no card
     int scroll_ = 0;  // First visible entry
     int selected_ = 0;
+
+    FileBrowserMode mode_ = FileBrowserMode::kBrowse;
+    PickedFn on_picked_ = nullptr;
+    const char* ext_filter_ = nullptr;  // e.g. ".txt"; null = show everything
+
+    char start_dir_[platform::kMaxPath] = {};  // floor for ascending
+    char cur_dir_[platform::kMaxPath] = {};
+
+    void relist();
+    void descend(const char* name);
+    bool ascend();  // false when already at start_dir
+    int depth() const;
+    // Joins cur_dir_ + "/" + name into out. False if it wouldn't fit.
+    bool join(const char* name, char* out, std::size_t out_len) const;
 };
 
-FilesScreen& files_screen();
+// The single shared instance. Only one browser is ever in front of the
+// user, so the 2.3 KB entry table is not duplicated per call site.
+FileBrowserScreen& file_browser();
+
+// Configure-and-return helpers, so push() call sites stay one line.
+FileBrowserScreen& browse_files(const char* start_dir = "/picocalc");
+FileBrowserScreen& pick_file(const char* start_dir, const char* ext_filter,
+                             FileBrowserScreen::PickedFn on_picked);
+
+// Back-compat alias for the `files` typed command and the launcher's
+// Files entry, both of which want the diagnostic's original defaults.
+inline FileBrowserScreen& files_screen() {
+    return browse_files();
+}
 
 }  // namespace apps
