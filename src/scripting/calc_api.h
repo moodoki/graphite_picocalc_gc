@@ -56,10 +56,16 @@ typedef enum CalcKind {
 
 // ---- Wiring ----
 
-// What a binding just changed and needs written to the SD card.
+// What a binding just changed and needs written to the SD card. `index` is
+// the slot for the two that have slots and -1 for the two that do not —
+// matching ListStore/MatrixStore::save(storage, index), which persist one at
+// a time on purpose (the 2026-07-22 perf fix that split lists.dat into six
+// files).
 typedef enum CalcPersistTarget {
-    kCalcPersistVars = 0,  // A-Z / theta / Ans
-    kCalcPersistGraph,     // Y1-Y7, the window, the mode row
+    kCalcPersistVars = 0,  // A-Z / theta / Ans, index -1
+    kCalcPersistGraph,     // Y1-Y7, the window, the mode row, index -1
+    kCalcPersistList,      // l1-l6, index 0-5
+    kCalcPersistMatrix,    // [A]-[J], index 0-9
 } CalcPersistTarget;
 
 // Called after a binding writes persistent calculator state. It is a hook
@@ -69,14 +75,28 @@ typedef enum CalcPersistTarget {
 // semantics and both guards are actually tested.
 // scripting::PythonInterpreter::init() installs the real one; tests install
 // their own or none.
-typedef void (*CalcPersistFn)(CalcPersistTarget what);
+typedef void (*CalcPersistFn)(CalcPersistTarget what, int index);
 void calc_api_set_persist_hook(CalcPersistFn fn);
 
 // Called by the interpreter at the start of every top-level exec(), NOT on
-// every binding call. It resets the per-run latches — currently just D68's
-// "has this run plotted yet", which is what makes a script's graph output a
-// function of the script alone rather than of what the last one left behind.
+// every binding call. It resets the per-run latches — D68's "has this run
+// plotted yet", which is what makes a script's graph output a function of the
+// script alone rather than of what the last one left behind, and the dirty
+// mask below.
 void calc_api_begin_run(void);
+
+// Called by the interpreter once exec() has returned. Persists every list and
+// matrix the run touched, one save per slot.
+//
+// D82: list_append marks dirty and does NOT save. A logging loop would
+// otherwise cost one SD write per sample, which is the exact pattern the
+// 2026-07-22 fix split the list files apart to avoid. Variables and graph
+// state still persist immediately — a variable image is 456 bytes and a list
+// can be 10,000 elements, so the loop cost is not comparable.
+//
+// The stated cost of deferring: a script killed by ESC, or one that raises,
+// loses the samples it had not saved.
+void calc_api_flush_run(void);
 
 // True when a script asked for the graph to be shown (calc.show_graph()).
 // Reading it clears it.
@@ -181,6 +201,61 @@ void calc_api_show_graph(void);
 // single number in *a with *b unused. `two_values` says which.
 CalcStatus calc_api_graph_analyze(const char* op, int slot, double lo, double hi, double* a,
                                   double* b, int* two_values, const char** err);
+
+// ---- 6B.17: lists ----
+
+// Lists are l1-l6, 1-based to match how they are written everywhere else.
+// Named lists are not exposed in v1.
+//
+// A list is a math::Array: it moves to PSRAM above ~256 elements (D21), so a
+// long log lives outside both SRAM and the Python heap. That is the whole
+// point of list_append — D77 measured a 400-iteration loop exhausting the
+// 40 KB heap when the samples accumulated in a Python list instead.
+//
+// set_list and list_append mark the list dirty and DO NOT save; the run's
+// lists are written once by calc_api_flush_run (D82).
+CalcStatus calc_api_list_size(int list, int* size, const char** err);
+CalcStatus calc_api_list_resize(int list, int size, const char** err);
+
+// Bulk element access, `count` at a time from `first`. The caller supplies
+// the buffer, so nothing here holds storage across a call.
+CalcStatus calc_api_list_read(int list, int first, int count, double* out, const char** err);
+CalcStatus calc_api_list_write(int list, int first, int count, const double* src, const char** err);
+
+CalcStatus calc_api_list_append(int list, double value, const char** err);
+
+// 1-var statistics over a list. `what` is "mean", "sum", "min", "max",
+// "stddev" or "n".
+CalcStatus calc_api_list_stat(int list, const char* what, double* out, const char** err);
+
+// ---- 6B.7: matrices ----
+
+// Matrices cross as nested Python lists rather than as handles: math::Array
+// is non-copyable and PSRAM-backed, and there are only ten named slots, so a
+// chained calculation would run out of them. A list argument is copied into
+// one file-static scratch Array for the duration of the call and released
+// again; results land in MatAns, which is where the home screen puts a matrix
+// result too.
+//
+// The scratch is filled by resize-then-write, and read back the same way.
+CalcStatus calc_api_mat_begin(int rows, int cols, const char** err);
+CalcStatus calc_api_mat_write_row(int row, int count, const double* src, const char** err);
+
+// `op` is "det", "inverse", "transpose", "rref", "mul" or "eigenvalues".
+// "mul" consumes the scratch as the left operand and slot `rhs` as the right.
+// Scalar results (det) land in *scalar; everything else goes to MatAns and
+// reports its shape.
+CalcStatus calc_api_mat_op(const char* op, int rhs, double* scalar, int* rows, int* cols,
+                           const char** err);
+
+// Read MatAns back, a row at a time.
+CalcStatus calc_api_mat_read_row(int row, int count, double* out, const char** err);
+
+// Copy the scratch into [A]-[J] (0-9), or a named slot back into the scratch.
+// These are the only bindings that touch the persisted matrices; like the
+// lists they mark dirty and defer the save.
+CalcStatus calc_api_mat_store(int slot, const char** err);
+CalcStatus calc_api_mat_load(int slot, int* rows, int* cols, const char** err);
 
 // ---- 6B.5: complex ----
 

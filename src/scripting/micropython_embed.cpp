@@ -8,6 +8,8 @@
 #include "platform/keyboard.hpp"
 #include "platform/storage.hpp"
 #include "platform/system.hpp"
+#include "math/lists.hpp"
+#include "math/matrix.hpp"
 #include "math/var_store.hpp"
 #include "graph/graph_state.hpp"
 
@@ -61,13 +63,19 @@ constexpr std::size_t kMinCompileBytes = 1024;
 // harness, and the harness is where the name rules and the reentrancy guard
 // are actually checked. Installing it here rather than in main() keeps it
 // next to the rest of the interpreter's bring-up.
-void persist_state(CalcPersistTarget what) {
+void persist_state(CalcPersistTarget what, int index) {
     switch (what) {
         case kCalcPersistVars:
             math::save_variables(platform::storage());
             break;
         case kCalcPersistGraph:
             graph::state().save(platform::storage());
+            break;
+        case kCalcPersistList:
+            math::lists().save(platform::storage(), index);
+            break;
+        case kCalcPersistMatrix:
+            math::matrices().save(platform::storage(), index);
             break;
     }
 }
@@ -146,6 +154,11 @@ bool PythonInterpreter::exec(const char* code) {
     running_script_ = true;
     const bool ok = picocalc_mp_exec_str(code) != 0;
     running_script_ = false;
+    // Lists and matrices the run wrote are saved here, once each, rather than
+    // on every binding call — D82. Before the collect, so a run that ended by
+    // exhausting the heap still persists what it gathered.
+    calc_api_flush_run();
+
     // Always, not only on failure. Compiling the NEXT statement allocates,
     // so a run that leaves the heap full of garbage makes everything after
     // it fail — including `gc.collect()`, which cannot be compiled either.

@@ -328,6 +328,281 @@ static mp_obj_t calc_graph_value(size_t n, const mp_obj_t* a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(calc_graph_value_obj, 2, 2, calc_graph_value);
 
+// ---- 6B.17: lists ----
+
+// How many elements cross per calc_api call. Element-at-a-time would be one
+// boundary crossing per sample; one big buffer would be SRAM this does not
+// have. 32 doubles is 256 bytes of stack against the ~2,200 a binding gets.
+#define CALC_CHUNK 32
+
+static mp_obj_t calc_set_list(mp_obj_t list_obj, mp_obj_t seq_obj) {
+    const int list = mp_obj_get_int(list_obj);
+    size_t n = 0;
+    mp_obj_t* items = NULL;
+    mp_obj_get_array(seq_obj, &n, &items);
+
+    const char* err = NULL;
+    CalcStatus st = calc_api_list_resize(list, (int)n, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    double buf[CALC_CHUNK];
+    for (size_t i = 0; i < n; i += CALC_CHUNK) {
+        const size_t take = (n - i) < CALC_CHUNK ? (n - i) : CALC_CHUNK;
+        for (size_t k = 0; k < take; ++k) {
+            buf[k] = (double)mp_obj_get_float(items[i + k]);
+        }
+        st = calc_api_list_write(list, (int)i, (int)take, buf, &err);
+        if (st != kCalcOk) {
+            calc_raise(st, err);
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(calc_set_list_obj, calc_set_list);
+
+static mp_obj_t calc_get_list(mp_obj_t list_obj) {
+    const int list = mp_obj_get_int(list_obj);
+    int n = 0;
+    const char* err = NULL;
+    CalcStatus st = calc_api_list_size(list, &n, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    // Allocated before any of the reads, so a GC pass here cannot happen
+    // while a calc_api call is on the stack (D74).
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    double buf[CALC_CHUNK];
+    for (int i = 0; i < n; i += CALC_CHUNK) {
+        const int take = (n - i) < CALC_CHUNK ? (n - i) : CALC_CHUNK;
+        st = calc_api_list_read(list, i, take, buf, &err);
+        if (st != kCalcOk) {
+            calc_raise(st, err);
+        }
+        for (int k = 0; k < take; ++k) {
+            mp_obj_list_append(out, mp_obj_new_float((mp_float_t)buf[k]));
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_get_list_obj, calc_get_list);
+
+static mp_obj_t calc_list_append(mp_obj_t list_obj, mp_obj_t value_obj) {
+    const char* err = NULL;
+    const CalcStatus st =
+        calc_api_list_append(mp_obj_get_int(list_obj), (double)mp_obj_get_float(value_obj), &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(calc_list_append_obj, calc_list_append);
+
+static mp_obj_t calc_list_stat(const char* what, mp_obj_t list_obj) {
+    double v = 0;
+    const char* err = NULL;
+    const CalcStatus st = calc_api_list_stat(mp_obj_get_int(list_obj), what, &v, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return mp_obj_new_float((mp_float_t)v);
+}
+
+static mp_obj_t calc_stat_mean(mp_obj_t l) {
+    return calc_list_stat("mean", l);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_stat_mean_obj, calc_stat_mean);
+
+static mp_obj_t calc_stat_sum(mp_obj_t l) {
+    return calc_list_stat("sum", l);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_stat_sum_obj, calc_stat_sum);
+
+static mp_obj_t calc_stat_min(mp_obj_t l) {
+    return calc_list_stat("min", l);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_stat_min_obj, calc_stat_min);
+
+static mp_obj_t calc_stat_max(mp_obj_t l) {
+    return calc_list_stat("max", l);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_stat_max_obj, calc_stat_max);
+
+static mp_obj_t calc_stat_stddev(mp_obj_t l) {
+    return calc_list_stat("stddev", l);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_stat_stddev_obj, calc_stat_stddev);
+
+// ---- 6B.7: matrices ----
+
+// A nested Python list into the scratch matrix. Ragged input is rejected by
+// calc_api_mat_write_row, which knows the column count it agreed to.
+static void calc_matrix_in(mp_obj_t obj) {
+    size_t rows = 0;
+    mp_obj_t* row_items = NULL;
+    mp_obj_get_array(obj, &rows, &row_items);
+    if (rows == 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("matrix has no rows"));
+    }
+    size_t cols = 0;
+    mp_obj_t* first = NULL;
+    mp_obj_get_array(row_items[0], &cols, &first);
+
+    const char* err = NULL;
+    CalcStatus st = calc_api_mat_begin((int)rows, (int)cols, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    double buf[CALC_CHUNK];
+    if (cols > CALC_CHUNK) {
+        mp_raise_ValueError(MP_ERROR_TEXT("matrix too wide"));
+    }
+    for (size_t r = 0; r < rows; ++r) {
+        size_t n = 0;
+        mp_obj_t* items = NULL;
+        mp_obj_get_array(row_items[r], &n, &items);
+        for (size_t c = 0; c < n && c < CALC_CHUNK; ++c) {
+            buf[c] = (double)mp_obj_get_float(items[c]);
+        }
+        st = calc_api_mat_write_row((int)r, (int)n, buf, &err);
+        if (st != kCalcOk) {
+            calc_raise(st, err);
+        }
+    }
+}
+
+// MatAns back out as a nested Python list.
+static mp_obj_t calc_matrix_out(int rows, int cols) {
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    double buf[CALC_CHUNK];
+    for (int r = 0; r < rows; ++r) {
+        const char* err = NULL;
+        const CalcStatus st = calc_api_mat_read_row(r, cols, buf, &err);
+        if (st != kCalcOk) {
+            calc_raise(st, err);
+        }
+        mp_obj_t row = mp_obj_new_list(0, NULL);
+        for (int c = 0; c < cols; ++c) {
+            mp_obj_list_append(row, mp_obj_new_float((mp_float_t)buf[c]));
+        }
+        mp_obj_list_append(out, row);
+    }
+    return out;
+}
+
+static mp_obj_t calc_matrix_op(const char* op, mp_obj_t m, int rhs) {
+    calc_matrix_in(m);
+    double scalar = 0;
+    int rows = 0;
+    int cols = 0;
+    const char* err = NULL;
+    const CalcStatus st = calc_api_mat_op(op, rhs, &scalar, &rows, &cols, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    if (rows == 0) {
+        return mp_obj_new_float((mp_float_t)scalar);
+    }
+    return calc_matrix_out(rows, cols);
+}
+
+static mp_obj_t calc_det(mp_obj_t m) {
+    return calc_matrix_op("det", m, -1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_det_obj, calc_det);
+
+static mp_obj_t calc_inverse(mp_obj_t m) {
+    return calc_matrix_op("inverse", m, -1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_inverse_obj, calc_inverse);
+
+static mp_obj_t calc_transpose(mp_obj_t m) {
+    return calc_matrix_op("transpose", m, -1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_transpose_obj, calc_transpose);
+
+static mp_obj_t calc_rref(mp_obj_t m) {
+    return calc_matrix_op("rref", m, -1);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_rref_obj, calc_rref);
+
+// Flat, not nested: matops::eigenvalues produces a 1-D list on purpose, and
+// a script wants [3.0, 1.0] rather than [[3.0, 1.0]].
+static mp_obj_t calc_eigenvalues(mp_obj_t m) {
+    calc_matrix_in(m);
+    double scalar = 0;
+    int rows = 0;
+    int cols = 0;
+    const char* err = NULL;
+    const CalcStatus st = calc_api_mat_op("eigenvalues", -1, &scalar, &rows, &cols, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    double buf[CALC_CHUNK];
+    if (cols > CALC_CHUNK) {
+        mp_raise_ValueError(MP_ERROR_TEXT("too many eigenvalues"));
+    }
+    const CalcStatus rd = calc_api_mat_read_row(0, cols, buf, &err);
+    if (rd != kCalcOk) {
+        calc_raise(rd, err);
+    }
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    for (int c = 0; c < cols; ++c) {
+        mp_obj_list_append(out, mp_obj_new_float((mp_float_t)buf[c]));
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_eigenvalues_obj, calc_eigenvalues);
+
+// [A]-[J] as a letter, matching how they are written on the calculator.
+static int calc_mat_slot(mp_obj_t o) {
+    const char* s = mp_obj_str_get_str(o);
+    if (s[0] >= 'A' && s[0] <= 'J' && s[1] == 0) {
+        return s[0] - 'A';
+    }
+    if (s[0] >= 'a' && s[0] <= 'j' && s[1] == 0) {
+        return s[0] - 'a';
+    }
+    mp_raise_ValueError(MP_ERROR_TEXT("matrix slot must be A-J"));
+}
+
+static mp_obj_t calc_set_matrix(mp_obj_t slot_obj, mp_obj_t m) {
+    const int slot = calc_mat_slot(slot_obj);
+    calc_matrix_in(m);
+    const char* err = NULL;
+    const CalcStatus st = calc_api_mat_store(slot, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(calc_set_matrix_obj, calc_set_matrix);
+
+static mp_obj_t calc_get_matrix(mp_obj_t slot_obj) {
+    const int slot = calc_mat_slot(slot_obj);
+    int rows = 0;
+    int cols = 0;
+    const char* err = NULL;
+    CalcStatus st = calc_api_mat_load(slot, &rows, &cols, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    // mat_load puts it in the scratch; transpose twice would be silly, so
+    // read it back out through MatAns the same way every other op does.
+    double scalar = 0;
+    st = calc_api_mat_op("copy_out", -1, &scalar, &rows, &cols, &err);
+    if (st != kCalcOk) {
+        calc_raise(st, err);
+    }
+    return calc_matrix_out(rows, cols);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_get_matrix_obj, calc_get_matrix);
+
+static mp_obj_t calc_matmul(mp_obj_t m, mp_obj_t slot_obj) {
+    return calc_matrix_op("mul", m, calc_mat_slot(slot_obj));
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(calc_matmul_obj, calc_matmul);
+
 // ---- 6B.5: complex ----
 
 // Python already has complex(); this exists so `calc.complex` reads the same
@@ -387,6 +662,22 @@ static const mp_rom_map_elem_t calc_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_graph_integral), MP_ROM_PTR(&calc_graph_integral_obj)},
     {MP_ROM_QSTR(MP_QSTR_graph_deriv), MP_ROM_PTR(&calc_graph_deriv_obj)},
     {MP_ROM_QSTR(MP_QSTR_graph_value), MP_ROM_PTR(&calc_graph_value_obj)},
+    {MP_ROM_QSTR(MP_QSTR_set_list), MP_ROM_PTR(&calc_set_list_obj)},
+    {MP_ROM_QSTR(MP_QSTR_get_list), MP_ROM_PTR(&calc_get_list_obj)},
+    {MP_ROM_QSTR(MP_QSTR_list_append), MP_ROM_PTR(&calc_list_append_obj)},
+    {MP_ROM_QSTR(MP_QSTR_stat_mean), MP_ROM_PTR(&calc_stat_mean_obj)},
+    {MP_ROM_QSTR(MP_QSTR_stat_sum), MP_ROM_PTR(&calc_stat_sum_obj)},
+    {MP_ROM_QSTR(MP_QSTR_stat_min), MP_ROM_PTR(&calc_stat_min_obj)},
+    {MP_ROM_QSTR(MP_QSTR_stat_max), MP_ROM_PTR(&calc_stat_max_obj)},
+    {MP_ROM_QSTR(MP_QSTR_stat_stddev), MP_ROM_PTR(&calc_stat_stddev_obj)},
+    {MP_ROM_QSTR(MP_QSTR_det), MP_ROM_PTR(&calc_det_obj)},
+    {MP_ROM_QSTR(MP_QSTR_inverse), MP_ROM_PTR(&calc_inverse_obj)},
+    {MP_ROM_QSTR(MP_QSTR_transpose), MP_ROM_PTR(&calc_transpose_obj)},
+    {MP_ROM_QSTR(MP_QSTR_rref), MP_ROM_PTR(&calc_rref_obj)},
+    {MP_ROM_QSTR(MP_QSTR_eigenvalues), MP_ROM_PTR(&calc_eigenvalues_obj)},
+    {MP_ROM_QSTR(MP_QSTR_matmul), MP_ROM_PTR(&calc_matmul_obj)},
+    {MP_ROM_QSTR(MP_QSTR_set_matrix), MP_ROM_PTR(&calc_set_matrix_obj)},
+    {MP_ROM_QSTR(MP_QSTR_get_matrix), MP_ROM_PTR(&calc_get_matrix_obj)},
     {MP_ROM_QSTR(MP_QSTR_complex), MP_ROM_PTR(&calc_complex_obj)},
     {MP_ROM_QSTR(MP_QSTR_c_abs), MP_ROM_PTR(&calc_c_abs_obj)},
     {MP_ROM_QSTR(MP_QSTR_c_arg), MP_ROM_PTR(&calc_c_arg_obj)},

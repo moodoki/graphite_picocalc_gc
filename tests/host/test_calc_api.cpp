@@ -213,7 +213,7 @@ void test_eval_solve_set_renders_like_the_home_screen() {
 // ---- 6B.3: variables ----
 
 int g_persist_calls = 0;
-void count_persist(CalcPersistTarget what) {
+void count_persist(CalcPersistTarget what, int) {
     if (what == kCalcPersistVars) {
         ++g_persist_calls;
     }
@@ -303,7 +303,7 @@ void test_variable_names_are_strict() {
 
 int g_reentrant_status = -1;
 
-void reenter(CalcPersistTarget) {
+void reenter(CalcPersistTarget, int) {
     // Stands in for a __del__ finalizer running inside a binding: the guard
     // is held by the store that called us.
     const char* err = nullptr;
@@ -488,7 +488,7 @@ void test_solve_packing_refuses_to_truncate() {
 // ---- 6B.6: graphing ----
 
 int g_graph_persists = 0;
-void count_graph_persist(CalcPersistTarget what) {
+void count_graph_persist(CalcPersistTarget what, int) {
     if (what == kCalcPersistGraph) {
         ++g_graph_persists;
     }
@@ -641,6 +641,272 @@ void test_graph_analysis_is_stack_guarded() {
     calc_api_set_stack_hook(nullptr);
 }
 
+// ---- 6B.17: lists ----
+
+int g_list_saves = 0;
+int g_matrix_saves = 0;
+void count_data_persist(CalcPersistTarget what, int index) {
+    (void)index;
+    if (what == kCalcPersistList) {
+        ++g_list_saves;
+    } else if (what == kCalcPersistMatrix) {
+        ++g_matrix_saves;
+    }
+}
+
+void set_list(int n, const double* v, int count) {
+    const char* err = nullptr;
+    check(calc_api_list_resize(n, count, &err) == kCalcOk, "resize the list");
+    if (count > 0) {
+        check(calc_api_list_write(n, 0, count, v, &err) == kCalcOk, "fill it");
+    }
+}
+
+void test_list_round_trip() {
+    const char* err = nullptr;
+    const double v[] = {1.5, 2.5, 3.5};
+    calc_api_begin_run();
+    set_list(1, v, 3);
+
+    int n = 0;
+    check(calc_api_list_size(1, &n, &err) == kCalcOk, "size reads back");
+    check(n == 3, "three elements");
+
+    double out[3] = {};
+    check(calc_api_list_read(1, 0, 3, out, &err) == kCalcOk, "read them back");
+    check_near(out[0], 1.5, "l1[0]");
+    check_near(out[2], 3.5, "l1[2]");
+
+    // An empty list is legal, and reading zero from it must not fail.
+    check(calc_api_list_resize(1, 0, &err) == kCalcOk, "resize to empty");
+    check(calc_api_list_size(1, &n, &err) == kCalcOk && n == 0, "and it is empty");
+}
+
+void test_list_append_grows() {
+    const char* err = nullptr;
+    calc_api_begin_run();
+    check(calc_api_list_resize(2, 0, &err) == kCalcOk, "start empty");
+    for (int i = 0; i < 50; ++i) {
+        check(calc_api_list_append(2, i * 2.0, &err) == kCalcOk, "append");
+    }
+    int n = 0;
+    calc_api_list_size(2, &n, &err);
+    check(n == 50, "fifty appends give fifty elements");
+    double out[2] = {};
+    calc_api_list_read(2, 49, 1, out, &err);
+    check_near(out[0], 98, "the last one is right");
+}
+
+void test_list_persistence_is_deferred() {
+    // D82: a logging loop must not cost one SD write per sample.
+    calc_api_set_persist_hook(&count_data_persist);
+    calc_api_begin_run();
+    g_list_saves = 0;
+
+    const char* err = nullptr;
+    calc_api_list_resize(3, 0, &err);
+    for (int i = 0; i < 100; ++i) {
+        calc_api_list_append(3, i, &err);
+    }
+    check(g_list_saves == 0, "100 appends save nothing");
+
+    calc_api_flush_run();
+    check(g_list_saves == 1, "the flush saves the touched list exactly once");
+
+    // A second flush with nothing new must not re-save.
+    calc_api_flush_run();
+    check(g_list_saves == 1, "and does not repeat itself");
+
+    // Two lists touched, two saves.
+    calc_api_begin_run();
+    g_list_saves = 0;
+    calc_api_list_append(1, 1, &err);
+    calc_api_list_append(4, 2, &err);
+    calc_api_flush_run();
+    check(g_list_saves == 2, "two lists touched, two saves");
+
+    calc_api_set_persist_hook(nullptr);
+}
+
+void test_list_indices_are_checked() {
+    const char* err = nullptr;
+    int n = 0;
+    check(calc_api_list_size(0, &n, &err) == kCalcFailed, "list 0 is refused");
+    check(calc_api_list_size(7, &n, &err) == kCalcFailed, "list 7 is refused");
+    check(err != nullptr, "and says the range");
+    check(calc_api_list_append(0, 1, &err) == kCalcFailed, "append checks too");
+
+    double buf[4] = {};
+    calc_api_begin_run();
+    set_list(1, buf, 2);
+    check(calc_api_list_read(1, 0, 5, buf, &err) == kCalcFailed, "reading past the end fails");
+    check(calc_api_list_read(1, -1, 1, buf, &err) == kCalcFailed, "so does a negative index");
+}
+
+void test_list_stats() {
+    const char* err = nullptr;
+    const double v[] = {2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0};
+    calc_api_begin_run();
+    set_list(5, v, 8);
+
+    double x = 0;
+    check(calc_api_list_stat(5, "mean", &x, &err) == kCalcOk, "mean runs");
+    check_near(x, 5.0, "mean of the classic 8-sample set");
+    check(calc_api_list_stat(5, "sum", &x, &err) == kCalcOk && std::fabs(x - 40) < 1e-9, "sum");
+    check(calc_api_list_stat(5, "min", &x, &err) == kCalcOk && std::fabs(x - 2) < 1e-9, "min");
+    check(calc_api_list_stat(5, "max", &x, &err) == kCalcOk && std::fabs(x - 9) < 1e-9, "max");
+    check(calc_api_list_stat(5, "n", &x, &err) == kCalcOk && std::fabs(x - 8) < 1e-9, "n");
+    // Sample (n-1) standard deviation, which is TI's Sx.
+    check(calc_api_list_stat(5, "stddev", &x, &err) == kCalcOk, "stddev runs");
+    check_close(x, 2.13808993529939, 1e-9, "sample stddev");
+
+    check(calc_api_list_stat(5, "nope", &x, &err) == kCalcFailed, "an unknown statistic fails");
+    calc_api_list_resize(6, 0, &err);
+    check(calc_api_list_stat(6, "mean", &x, &err) == kCalcFailed, "so does an empty list");
+}
+
+// ---- 6B.7: matrices ----
+
+CalcStatus put_matrix(const double* v, int rows, int cols) {
+    const char* err = nullptr;
+    CalcStatus st = calc_api_mat_begin(rows, cols, &err);
+    for (int r = 0; r < rows && st == kCalcOk; ++r) {
+        st = calc_api_mat_write_row(r, cols, v + r * cols, &err);
+    }
+    return st;
+}
+
+void test_matrix_ops() {
+    const char* err = nullptr;
+    const double m[] = {1, 2, 3, 4};
+    double scalar = 0;
+    int rows = 0;
+    int cols = 0;
+
+    check(put_matrix(m, 2, 2) == kCalcOk, "a 2x2 goes in");
+    check(calc_api_mat_op("det", -1, &scalar, &rows, &cols, &err) == kCalcOk, "det runs");
+    check_near(scalar, -2, "det([[1,2],[3,4]]) == -2");
+    check(rows == 0, "and reports a scalar, not a shape");
+
+    check(put_matrix(m, 2, 2) == kCalcOk, "again");
+    check(calc_api_mat_op("inverse", -1, &scalar, &rows, &cols, &err) == kCalcOk, "inverse runs");
+    check(rows == 2 && cols == 2, "and is 2x2");
+    double row[2] = {};
+    calc_api_mat_read_row(0, 2, row, &err);
+    check_near(row[0], -2, "inverse[0][0]");
+    check_near(row[1], 1, "inverse[0][1]");
+    calc_api_mat_read_row(1, 2, row, &err);
+    check_near(row[0], 1.5, "inverse[1][0]");
+    check_near(row[1], -0.5, "inverse[1][1]");
+
+    // A singular matrix is 0, NOT an error — matrix.hpp says so explicitly,
+    // and a binding that raised here would be inventing a failure.
+    const double sing[] = {1, 2, 2, 4};
+    check(put_matrix(sing, 2, 2) == kCalcOk, "a singular 2x2 goes in");
+    check(calc_api_mat_op("det", -1, &scalar, &rows, &cols, &err) == kCalcOk,
+          "det of a singular matrix succeeds");
+    check_near(scalar, 0, "and is zero");
+
+    // Non-square inverse must fail.
+    const double wide[] = {1, 2, 3, 4, 5, 6};
+    check(put_matrix(wide, 2, 3) == kCalcOk, "a 2x3 goes in");
+    check(calc_api_mat_op("inverse", -1, &scalar, &rows, &cols, &err) == kCalcFailed,
+          "inverting a non-square fails");
+
+    check(put_matrix(wide, 2, 3) == kCalcOk, "again");
+    check(calc_api_mat_op("transpose", -1, &scalar, &rows, &cols, &err) == kCalcOk, "transpose");
+    check(rows == 3 && cols == 2, "2x3 transposes to 3x2");
+}
+
+void test_matrix_eigenvalues() {
+    const char* err = nullptr;
+    // [[2,1],[1,2]] has eigenvalues 3 and 1.
+    const double sym[] = {2, 1, 1, 2};
+    double scalar = 0;
+    int rows = 0;
+    int cols = 0;
+    check(put_matrix(sym, 2, 2) == kCalcOk, "a symmetric 2x2 goes in");
+    check(calc_api_mat_op("eigenvalues", -1, &scalar, &rows, &cols, &err) == kCalcOk,
+          "eigenvalues runs");
+    check(rows * cols == 2, "two of them");
+    // eigenvalues() returns them as an Array; read every row so the test does
+    // not depend on whether it came back as 1x2 or 2x1.
+    double vals[2] = {};
+    int seen = 0;
+    for (int r = 0; r < rows && seen < 2; ++r) {
+        double buf[2] = {};
+        calc_api_mat_read_row(r, cols, buf, &err);
+        for (int c = 0; c < cols && seen < 2; ++c) {
+            vals[seen++] = buf[c];
+        }
+    }
+    const double hi = vals[0] > vals[1] ? vals[0] : vals[1];
+    const double lo = vals[0] > vals[1] ? vals[1] : vals[0];
+    check_close(hi, 3.0, 1e-6, "the larger eigenvalue is 3");
+    check_close(lo, 1.0, 1e-6, "the smaller is 1");
+}
+
+void test_matrix_slots() {
+    calc_api_set_persist_hook(&count_data_persist);
+    calc_api_begin_run();
+    g_matrix_saves = 0;
+    const char* err = nullptr;
+    const double m[] = {5, 6, 7, 8};
+
+    check(put_matrix(m, 2, 2) == kCalcOk, "a matrix goes in");
+    check(calc_api_mat_store(0, &err) == kCalcOk, "store it to [A]");
+    check(g_matrix_saves == 0, "which does not save immediately");
+    calc_api_flush_run();
+    check(g_matrix_saves == 1, "the flush saves it once");
+
+    int rows = 0;
+    int cols = 0;
+    check(calc_api_mat_load(0, &rows, &cols, &err) == kCalcOk, "load [A] back");
+    check(rows == 2 && cols == 2, "with its shape");
+    double scalar = 0;
+    check(calc_api_mat_op("det", -1, &scalar, &rows, &cols, &err) == kCalcOk, "det of it");
+    check_near(scalar, -2, "det([[5,6],[7,8]]) == -2");
+
+    check(calc_api_mat_store(10, &err) == kCalcFailed, "slot 10 is refused");
+    check(calc_api_mat_load(-1, &rows, &cols, &err) == kCalcFailed, "slot -1 is refused");
+    calc_api_set_persist_hook(nullptr);
+}
+
+void test_matrix_rejects_junk() {
+    const char* err = nullptr;
+    double scalar = 0;
+    int rows = 0;
+    int cols = 0;
+    check(calc_api_mat_begin(0, 2, &err) == kCalcFailed, "zero rows is refused");
+    check(calc_api_mat_begin(100, 2, &err) == kCalcFailed, "past kMaxDim is refused");
+
+    check(calc_api_mat_begin(2, 2, &err) == kCalcOk, "a fresh 2x2");
+    const double r[] = {1, 2, 3};
+    check(calc_api_mat_write_row(0, 3, r, &err) == kCalcFailed,
+          "a row of the wrong width is refused, not truncated");
+    check(calc_api_mat_write_row(5, 2, r, &err) == kCalcFailed, "so is a row past the end");
+
+    const double m[] = {1, 2, 3, 4};
+    check(put_matrix(m, 2, 2) == kCalcOk, "a good one");
+    check(calc_api_mat_op("nope", -1, &scalar, &rows, &cols, &err) == kCalcFailed,
+          "an unknown op is refused");
+}
+
+void test_matrix_eigen_is_stack_guarded() {
+    calc_api_set_stack_hook(&refuse_stack);
+    const char* err = nullptr;
+    double scalar = 0;
+    int rows = 0;
+    int cols = 0;
+    const double m[] = {2, 1, 1, 2};
+    put_matrix(m, 2, 2);
+    check(calc_api_mat_op("eigenvalues", -1, &scalar, &rows, &cols, &err) == kCalcFailed,
+          "eigenvalues refuses when the stack is short");
+    check(calc_api_mat_op("det", -1, &scalar, &rows, &cols, &err) == kCalcFailed,
+          "so does an ordinary matrix op");
+    calc_api_set_stack_hook(nullptr);
+}
+
 // ---- 6B.5: complex ----
 
 void test_complex_helpers() {
@@ -689,6 +955,18 @@ int main() {
     test_solve_packing_refuses_to_truncate();
 
     test_complex_helpers();
+
+    test_list_round_trip();
+    test_list_append_grows();
+    test_list_persistence_is_deferred();
+    test_list_indices_are_checked();
+    test_list_stats();
+
+    test_matrix_ops();
+    test_matrix_eigenvalues();
+    test_matrix_slots();
+    test_matrix_rejects_junk();
+    test_matrix_eigen_is_stack_guarded();
 
     test_plot_d68_semantics();
     test_plot_eighth_fails();

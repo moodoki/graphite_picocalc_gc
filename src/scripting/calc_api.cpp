@@ -1,5 +1,6 @@
 #include "scripting/calc_api.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -9,7 +10,10 @@
 #include "math/cas/serialize.hpp"
 #include "math/complex.hpp"
 #include "math/engine.hpp"
+#include "math/lists.hpp"
+#include "math/matrix.hpp"
 #include "math/solve_expr.hpp"
+#include "math/stats.hpp"
 #include "math/types.hpp"
 #include "math/unified_home.hpp"
 #include "math/units.hpp"
@@ -53,9 +57,15 @@ bool g_plotted_this_run = false;
 // once exec() returns. See calc_api.h for why it is not immediate.
 bool g_show_graph_requested = false;
 
-void persist(CalcPersistTarget what) {
+// Lists and matrices this run has written, by slot. Cleared at
+// calc_api_begin_run, walked at calc_api_flush_run — see D82 for why these
+// two are deferred while variables and graph state are not.
+std::uint32_t g_lists_dirty = 0;
+std::uint32_t g_matrices_dirty = 0;
+
+void persist(CalcPersistTarget what, int index = -1) {
     if (g_persist != nullptr) {
-        g_persist(what);
+        g_persist(what, index);
     }
 }
 
@@ -105,6 +115,35 @@ constexpr std::size_t kSolveStackNeed = 2000;
 // added to 6B.7-6B.10 gets its own measurement against an input chosen to be
 // hostile, not a convenient one.
 constexpr std::size_t kAnalysisStackNeed = 2000;
+
+// Matrix eigenvalues, measured separately because eigen_core is 1,248 bytes —
+// the largest frame in the firmware.
+//
+// Measured against a 10x10 Hilbert matrix: kMaxEigen is the size cap, and an
+// ill-conditioned one makes the shifted QR work hardest. That is the whole of
+// the worst case here, unlike D79's integrator: the QR iteration is iterative,
+// not recursive, and eigen_core's frame is already sized for kMaxEigen, so
+// depth does not grow with the input.
+//
+//   call site                          peak of 4,096   spare at peak
+//   top level                              3,192            904
+//   two Python functions deep              3,864          **232**
+//
+// 232 is not enough. fault.cpp's kLiveMargin assumes a TinyUSB IRQ frame can
+// exceed 256 bytes, and the paint-and-scan instrument only shows an ISR that
+// actually fired during the measurement — so a run that looked fine can still
+// be one interrupt away from the D48 overrun.
+//
+// So the requirement is set to keep ~400 bytes spare at the peak rather than
+// to permit the deepest call that happened to survive: worst observed
+// consumption is ~1,470, and 1,900 refuses the two-deep case above while
+// guaranteeing margin whenever it does run. Effectively top-level-only, like
+// the solve() path, and for the same reason.
+//
+// Every other matrix op here is 492 or under and rides kEvalStackNeed —
+// confirmed on the same 10x10 for det, inverse and rref, none of which set a
+// new mark.
+constexpr std::size_t kEigenStackNeed = 1900;
 
 // True when the path is safe to enter. No hook installed means yes: the host
 // test harness runs on a stack where none of this is a question.
@@ -637,6 +676,23 @@ CalcStatus analyze_impl(const char* op, int one_based, double lo, double hi, dou
 void calc_api_begin_run(void) {
     g_plotted_this_run = false;
     g_show_graph_requested = false;
+    g_lists_dirty = 0;
+    g_matrices_dirty = 0;
+}
+
+void calc_api_flush_run(void) {
+    for (int i = 0; i < math::ListStore::kCount; ++i) {
+        if ((g_lists_dirty & (1U << i)) != 0) {
+            persist(kCalcPersistList, i);
+        }
+    }
+    for (int i = 0; i < math::MatrixStore::kCount; ++i) {
+        if ((g_matrices_dirty & (1U << i)) != 0) {
+            persist(kCalcPersistMatrix, i);
+        }
+    }
+    g_lists_dirty = 0;
+    g_matrices_dirty = 0;
 }
 
 void calc_api_show_graph(void) {
@@ -685,6 +741,402 @@ CalcStatus calc_api_graph_analyze(const char* op, int slot, double lo, double hi
     }
     g_in_call = true;
     const CalcStatus st = analyze_impl(op, slot, lo, hi, a, b, two_values, err);
+    g_in_call = false;
+    return st;
+}
+
+// ---- 6B.17: lists, and 6B.7: matrices ----
+
+namespace {
+
+// The scratch matrix a Python nested list is copied into. One, file-static,
+// and clear()ed at the end of every operation so its ArrayStore slab goes
+// straight back — measured peak is 12 live of 14, so a transient one fits but
+// a permanently-held one would not be free.
+math::Array g_mat_scratch;
+
+math::Array* resolve_list(int one_based, const char** err) {
+    if (one_based < 1 || one_based > math::ListStore::kCount) {
+        *err = "List must be 1-6";
+        return nullptr;
+    }
+    return &math::lists().list(one_based - 1);
+}
+
+void mark_list_dirty(int zero_based) {
+    g_lists_dirty |= 1U << zero_based;
+}
+
+CalcStatus list_size_impl(int list, int* size, const char** err) {
+    const math::Array* a = resolve_list(list, err);
+    if (a == nullptr) {
+        return kCalcFailed;
+    }
+    *size = a->size();
+    return kCalcOk;
+}
+
+CalcStatus list_resize_impl(int list, int size, const char** err) {
+    math::Array* a = resolve_list(list, err);
+    if (a == nullptr) {
+        return kCalcFailed;
+    }
+    if (size < 0 || size > math::Array::kMaxElements) {
+        *err = "List too long";
+        return kCalcFailed;
+    }
+    if (!a->resize(size)) {
+        // resize returns false when the PSRAM tier is needed and unavailable
+        // (cold boot, D14) as well as when out of range — the caller cannot
+        // tell them apart and neither can we here.
+        *err = "Out of list storage";
+        return kCalcFailed;
+    }
+    mark_list_dirty(list - 1);
+    return kCalcOk;
+}
+
+CalcStatus list_read_impl(int list, int first, int count, double* out, const char** err) {
+    const math::Array* a = resolve_list(list, err);
+    if (a == nullptr) {
+        return kCalcFailed;
+    }
+    if (first < 0 || count < 0 || first + count > a->size()) {
+        *err = "Index out of range";
+        return kCalcFailed;
+    }
+    a->read_range(first, count, out);
+    return kCalcOk;
+}
+
+CalcStatus list_write_impl(int list, int first, int count, const double* src, const char** err) {
+    math::Array* a = resolve_list(list, err);
+    if (a == nullptr) {
+        return kCalcFailed;
+    }
+    if (first < 0 || count < 0 || first + count > a->size()) {
+        *err = "Index out of range";
+        return kCalcFailed;
+    }
+    a->write_range(first, count, src);
+    mark_list_dirty(list - 1);
+    return kCalcOk;
+}
+
+CalcStatus list_append_impl(int list, double value, const char** err) {
+    math::Array* a = resolve_list(list, err);
+    if (a == nullptr) {
+        return kCalcFailed;
+    }
+    const int n = a->size();
+    if (n >= math::Array::kMaxElements) {
+        *err = "List is full";
+        return kCalcFailed;
+    }
+    if (!a->resize(n + 1)) {
+        *err = "Out of list storage";
+        return kCalcFailed;
+    }
+    a->set(n, value);
+    mark_list_dirty(list - 1);
+    return kCalcOk;
+}
+
+CalcStatus list_stat_impl(int list, const char* what, double* out, const char** err) {
+    const math::Array* a = resolve_list(list, err);
+    if (a == nullptr) {
+        return kCalcFailed;
+    }
+    if (a->size() == 0) {
+        *err = "List is empty";
+        return kCalcFailed;
+    }
+    const math::stats::OneVarStats s = math::stats::one_var(*a);
+    if (!s.ok) {
+        *err = s.error != nullptr ? s.error : "Statistics failed";
+        return kCalcFailed;
+    }
+    if (std::strcmp(what, "mean") == 0) {
+        *out = s.mean;
+    } else if (std::strcmp(what, "sum") == 0) {
+        *out = s.sum;
+    } else if (std::strcmp(what, "min") == 0) {
+        *out = s.min_val;
+    } else if (std::strcmp(what, "max") == 0) {
+        *out = s.max_val;
+    } else if (std::strcmp(what, "median") == 0) {
+        *out = s.median;
+    } else if (std::strcmp(what, "stddev") == 0) {
+        // Sample (n-1), which is what TI's Sx shows and what a script asking
+        // for "the standard deviation" of sampled data almost always wants.
+        *out = s.sample_stddev;
+    } else if (std::strcmp(what, "pop_stddev") == 0) {
+        *out = s.pop_stddev;
+    } else if (std::strcmp(what, "n") == 0) {
+        *out = static_cast<double>(s.n);
+    } else {
+        *err = "Unknown statistic";
+        return kCalcFailed;
+    }
+    return kCalcOk;
+}
+
+CalcStatus mat_begin_impl(int rows, int cols, const char** err) {
+    if (rows < 1 || cols < 1 || rows > math::matops::kMaxDim || cols > math::matops::kMaxDim) {
+        *err = "Matrix dimension out of range";
+        return kCalcFailed;
+    }
+    g_mat_scratch.clear();
+    if (!g_mat_scratch.resize(rows, cols)) {
+        *err = "Out of matrix storage";
+        return kCalcFailed;
+    }
+    return kCalcOk;
+}
+
+CalcStatus mat_write_row_impl(int row, int count, const double* src, const char** err) {
+    if (!g_mat_scratch.is_matrix() || row < 0 || row >= g_mat_scratch.dim(0) ||
+        count != g_mat_scratch.dim(1)) {
+        *err = "Ragged or out-of-range matrix row";
+        return kCalcFailed;
+    }
+    g_mat_scratch.write_range(row * count, count, src);
+    return kCalcOk;
+}
+
+CalcStatus mat_read_row_impl(int row, int count, double* out, const char** err) {
+    const math::Array& m = math::mat_ans();
+    // A 1-D result reads as a single row. matops::eigenvalues deliberately
+    // produces a list rather than a matrix, so its results can flow into
+    // l1-l6 (matrix.hpp) — the reader accommodates that instead of the
+    // operation pretending to be 2-D.
+    const int rows = m.is_matrix() ? m.dim(0) : 1;
+    const int cols = m.is_matrix() ? m.dim(1) : m.size();
+    if (m.size() == 0 || row < 0 || row >= rows || count != cols) {
+        *err = "Result row out of range";
+        return kCalcFailed;
+    }
+    m.read_range(row * cols, count, out);
+    return kCalcOk;
+}
+
+CalcStatus mat_op_impl(const char* op, int rhs, double* scalar, int* rows, int* cols,
+                       const char** err) {
+    if (!g_mat_scratch.is_matrix()) {
+        *err = "No matrix given";
+        return kCalcFailed;
+    }
+    *rows = 0;
+    *cols = 0;
+    bool ok = false;
+    if (std::strcmp(op, "det") == 0) {
+        math::calc_t d = 0;
+        ok = math::matops::determinant(g_mat_scratch, &d, err);
+        *scalar = d;
+        // A singular matrix is 0, not an error — matrix.hpp says so, and a
+        // binding that turned it into an exception would be lying.
+        return ok ? kCalcOk : kCalcFailed;
+    }
+    math::Array& out = math::mat_ans_mutable();
+    if (std::strcmp(op, "inverse") == 0) {
+        ok = math::matops::inverse(g_mat_scratch, out, err);
+    } else if (std::strcmp(op, "transpose") == 0) {
+        ok = math::matops::transpose(g_mat_scratch, out, err);
+    } else if (std::strcmp(op, "rref") == 0) {
+        ok = math::matops::rref(g_mat_scratch, out, err);
+    } else if (std::strcmp(op, "copy_out") == 0) {
+        // Scratch -> MatAns, so get_matrix reads its result through the same
+        // path every other op does rather than having a second reader.
+        ok = math::matops::copy(g_mat_scratch, out);
+        if (!ok) {
+            *err = "Out of matrix storage";
+        }
+    } else if (std::strcmp(op, "eigenvalues") == 0) {
+        ok = math::matops::eigenvalues(g_mat_scratch, out, err);
+    } else if (std::strcmp(op, "mul") == 0) {
+        if (rhs < 0 || rhs >= math::MatrixStore::kCount) {
+            *err = "Matrix slot must be A-J";
+            return kCalcFailed;
+        }
+        ok = math::matops::mul(g_mat_scratch, math::matrices().matrix(rhs), out, err);
+    } else {
+        *err = "Unknown matrix operation";
+        return kCalcFailed;
+    }
+    if (!ok) {
+        return kCalcFailed;
+    }
+    // eigenvalues yields a 1-D list; report it as a single row so the caller
+    // has one shape convention to read back through.
+    *rows = out.is_matrix() ? out.dim(0) : 1;
+    *cols = out.is_matrix() ? out.dim(1) : out.size();
+    return kCalcOk;
+}
+
+CalcStatus mat_store_impl(int slot, const char** err) {
+    if (slot < 0 || slot >= math::MatrixStore::kCount) {
+        *err = "Matrix slot must be A-J";
+        return kCalcFailed;
+    }
+    if (!g_mat_scratch.is_matrix()) {
+        *err = "No matrix given";
+        return kCalcFailed;
+    }
+    if (!math::matops::copy(g_mat_scratch, math::matrices().matrix(slot))) {
+        *err = "Out of matrix storage";
+        return kCalcFailed;
+    }
+    g_matrices_dirty |= 1U << slot;
+    return kCalcOk;
+}
+
+CalcStatus mat_load_impl(int slot, int* rows, int* cols, const char** err) {
+    if (slot < 0 || slot >= math::MatrixStore::kCount) {
+        *err = "Matrix slot must be A-J";
+        return kCalcFailed;
+    }
+    const math::Array& src = math::matrices().matrix(slot);
+    if (!src.is_matrix() || src.size() == 0) {
+        *err = "Matrix slot is empty";
+        return kCalcFailed;
+    }
+    if (!math::matops::copy(src, g_mat_scratch)) {
+        *err = "Out of matrix storage";
+        return kCalcFailed;
+    }
+    *rows = g_mat_scratch.dim(0);
+    *cols = g_mat_scratch.dim(1);
+    return kCalcOk;
+}
+
+}  // namespace
+
+CalcStatus calc_api_list_size(int list, int* size, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = list_size_impl(list, size, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_list_resize(int list, int size, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = list_resize_impl(list, size, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_list_read(int list, int first, int count, double* out, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = list_read_impl(list, first, count, out, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_list_write(int list, int first, int count, const double* src,
+                               const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = list_write_impl(list, first, count, src, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_list_append(int list, double value, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = list_append_impl(list, value, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_list_stat(int list, const char* what, double* out, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = list_stat_impl(list, what, out, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_mat_begin(int rows, int cols, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = mat_begin_impl(rows, cols, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_mat_write_row(int row, int count, const double* src, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = mat_write_row_impl(row, count, src, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_mat_read_row(int row, int count, double* out, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = mat_read_row_impl(row, count, out, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_mat_store(int slot, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = mat_store_impl(slot, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_mat_load(int slot, int* rows, int* cols, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = mat_load_impl(slot, rows, cols, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_mat_op(const char* op, int rhs, double* scalar, int* rows, int* cols,
+                           const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    // eigen_core is 1,248 bytes, the largest frame in the firmware, and the
+    // QR iteration below it runs to kMaxEigen = 10x10. Everything else here
+    // is 492 or under, so only this one op needs the bigger reservation.
+    const bool is_eigen = std::strcmp(op, "eigenvalues") == 0;
+    if (!stack_room(is_eigen ? kEigenStackNeed : kEvalStackNeed)) {
+        *err = is_eigen ? "Not enough stack for eigenvalues" : "Not enough stack for matrix op";
+        return kCalcFailed;
+    }
+    g_in_call = true;
+    const CalcStatus st = mat_op_impl(op, rhs, scalar, rows, cols, err);
     g_in_call = false;
     return st;
 }
