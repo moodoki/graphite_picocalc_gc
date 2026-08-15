@@ -40,7 +40,17 @@ constexpr bool kHasHardwareFpu = false;
 #endif
 
 // ---- Render strip size (line-buffer mode only) ----
-constexpr int kStripHeight = 16;  // 16 scanlines per buffer
+// 16 -> 8 (D70 lever C, 2026-08-15): halves strip_buf to 10,240 B.
+// CHOSEN BY MEASUREMENT, not argument. Three configs were flashed and
+// timed over an identical 32-evaluation workload on the Pico 1:
+//   16px double-buffered (was)  avg 129.4 ms  max 147.2 ms  51 KB free
+//   8px  double-buffered (now)  avg 137.5 ms  max 152.5 ms  60 KB free
+//   16px SINGLE-buffered        avg 140.5 ms  max 160.8 ms  61 KB free
+// Single-buffering serialises core-0 render against core-1 DMA and is
+// both the slowest and barely roomier, so 8px keeps D10s pipeline
+// overlap and pays ~6.3% instead of ~8.6%. One run each; the ordering
+// is consistent across avg and max.
+constexpr int kStripHeight = 8;
 constexpr size_t kStripBytes =
     static_cast<size_t>(kScreenWidth) * kStripHeight * 2;  // RGB565 = 2 bytes/px
 
