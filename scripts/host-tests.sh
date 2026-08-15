@@ -201,6 +201,30 @@ echo "== Compiling + linking test_output_log =="
     -o "$OUT/test_output_log"
 
 # Entry-time paren auto-close (issue #35). Pure string logic — no math
+# The `calc` Python module's C++ side (6B.3-6B.5). No interpreter: calc_api.cpp
+# depends on math/ and nothing else, which is exactly what makes the pipeline,
+# the variable name rules and the reentrancy guard testable here rather than
+# only on a board. Links the union of the unified evaluator, the CAS, the
+# numeric solver and the unit converter, because calc.eval() calls all four.
+echo "== Compiling + linking test_calc_api =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr -Itests/host \
+    tests/host/test_calc_api.cpp tests/host/host_psram_backend.cpp \
+    src/scripting/calc_api.cpp \
+    src/math/unified_compile.cpp src/math/unified_vm.cpp src/math/unified_home.cpp \
+    src/math/solve_expr.cpp src/math/numeric_solve.cpp src/math/units.cpp \
+    src/math/cas/expr.cpp src/math/cas/parser.cpp src/math/cas/serialize.cpp \
+    src/math/cas/simplify.cpp src/math/cas/derivative.cpp src/math/cas/expand.cpp \
+    src/math/cas/poly.cpp src/math/cas/solve.cpp src/math/cas/factor.cpp \
+    src/math/cas/integrate.cpp src/math/cas/cas_eval.cpp \
+    src/math/array.cpp src/math/scratch.cpp src/math/lists.cpp src/math/list_ops.cpp \
+    src/math/named_lists.cpp src/math/stats.cpp src/math/matrix.cpp \
+    src/math/array_format.cpp src/math/frac.cpp src/math/complex.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_calc_api"
+
 # engine, no tinyexpr, no cephes.
 echo "== Compiling + linking test_autoclose =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra \
@@ -284,6 +308,9 @@ echo "== Running test_text_buffer =="
 
 echo "== Running test_output_log =="
 "$OUT/test_output_log"
+
+echo "== Running test_calc_api =="
+"$OUT/test_calc_api"
 
 echo "== Running test_autoclose =="
 "$OUT/test_autoclose"

@@ -1,14 +1,18 @@
 #include "scripting/micropython_embed.hpp"
 
+#include <cstdio>
 #include <cstring>
 
 #include "config.hpp"
 #include "platform/fault.hpp"
 #include "platform/keyboard.hpp"
+#include "platform/storage.hpp"
 #include "platform/system.hpp"
+#include "math/var_store.hpp"
 
 // The C boundary. Everything that includes a MicroPython header is on
 // the far side of it.
+#include "scripting/calc_api.h"
 #include "scripting/mp_port.h"
 
 // Linker-provided top of core 0's stack (SCRATCH_Y). Absolute symbol, so
@@ -45,6 +49,38 @@ constexpr std::size_t kStackReserve = 1024;
 // wasted work on the interpreter's hot path.
 constexpr std::uint32_t kPollIntervalMs = 20;
 
+// What calc.store() calls once it has written a variable (6B.3). The `calc`
+// module deliberately knows nothing about platform::storage — that one
+// dependency is what would stop calc_api.cpp compiling in the host test
+// harness, and the harness is where the name rules and the reentrancy guard
+// are actually checked. Installing it here rather than in main() keeps it
+// next to the rest of the interpreter's bring-up.
+void persist_variables() {
+    math::save_variables(platform::storage());
+}
+
+// Is there room below us for a path that needs `need` bytes? A local's
+// address is the current stack pointer to within a few bytes, and the floor
+// is __StackTop minus the bank size — the same absolute floor
+// picocalc_mp_init hands MicroPython, so the two agree.
+//
+// This exists because the calculator's evaluator has deeper frames than
+// MicroPython does, and MICROPY_STACK_CHECK cannot see them: it guards the
+// VM's own recursion, and by the time a binding is running, control has left
+// the VM. calc.eval("solve(x^2-4,x,0,10)") overran SCRATCH_Y into core 1's
+// stack on 2026-08-15 and hung the board — the D48 failure mode, reached from
+// a new direction.
+int stack_room(std::size_t need) {
+    const char probe = 0;
+    const auto sp = reinterpret_cast<std::uintptr_t>(&probe);
+    const auto floor = reinterpret_cast<std::uintptr_t>(__StackTop) - platform::stack_total();
+#if PICOCALC_STACK_PROBE
+    std::printf("py-stack: free %u, need %u\n", static_cast<unsigned>(sp - floor),
+                static_cast<unsigned>(need));
+#endif
+    return sp > floor && sp - floor > need ? 1 : 0;
+}
+
 }  // namespace
 
 std::size_t PythonInterpreter::heap_capacity() {
@@ -64,6 +100,8 @@ bool PythonInterpreter::init(std::size_t heap_bytes) {
         heap_bytes = sizeof(g_heap);
     }
     picocalc_mp_init(g_heap, heap_bytes, __StackTop, stack_limit());
+    calc_api_set_persist_hook(&persist_variables);
+    calc_api_set_stack_hook(&stack_room);
     initialized_ = true;
     interrupt_pending_ = false;
     return true;

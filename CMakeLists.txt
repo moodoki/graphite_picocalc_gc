@@ -106,6 +106,10 @@ endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     ${MPY_PORT_DIR}/mpconfigport.h
     ${MPY_PORT_DIR}/micropython_embed.mk
+    # Our own module (6B.3): the generator scans it for MP_QSTR_* and
+    # MP_REGISTER_MODULE, so adding a binding means regenerating the qstr pool
+    # even though CMake compiles the file itself as ordinary firmware source.
+    ${CMAKE_SOURCE_DIR}/src/scripting/mp_calc_module.c
 )
 
 # Globbing is normally a smell; here the sources are generated, so there is no
@@ -116,7 +120,11 @@ file(GLOB_RECURSE MPY_SOURCES ${MPY_EMBED_DIR}/*.c)
 list(REMOVE_ITEM MPY_SOURCES ${MPY_EMBED_DIR}/port/mphalport.c)
 
 add_library(micropython STATIC ${MPY_SOURCES})
-target_include_directories(micropython PUBLIC ${MPY_EMBED_DIR} ${MPY_PORT_DIR})
+# SYSTEM: our own src/scripting/*.c include py/*.h, and those headers do not
+# survive this project's -Wall -Wextra -Wpedantic (zero-size arrays, unused
+# parameters, ISO C complaints). -isystem silences third-party headers without
+# lowering the bar for the file including them, which is the whole point.
+target_include_directories(micropython SYSTEM PUBLIC ${MPY_EMBED_DIR} ${MPY_PORT_DIR})
 set_target_properties(micropython PROPERTIES C_STANDARD 99)
 # Third-party C against this project's -Wall -Wextra -Wshadow -Wpedantic:
 # same treatment as the cephes target below, for the same reason.
@@ -206,8 +214,11 @@ add_executable(picocalc_graphcalc
     src/math/cas/integrate.cpp
     src/math/cas/cas_eval.cpp
     src/math/cas/exact.cpp
+    src/math/var_store.cpp
     src/scripting/mp_port.c
     src/scripting/micropython_embed.cpp
+    src/scripting/calc_api.cpp
+    src/scripting/mp_calc_module.c
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -315,6 +326,13 @@ option(PICOCALC_SERIAL_INJECT "Accept expression lines over USB serial (dev tool
 # this option.
 option(PICOCALC_EVAL_PROBE "Time evaluation and report it on the inject echo (measurement only)" OFF)
 
+# Reports free stack at every `calc` binding entry, on serial (6B.3). The
+# constants those checks compare against have to come off hardware — the
+# firmware's deepest frames are on this path and `stack: peak` is a high-water
+# mark since boot, so it cannot answer "how much was free at THIS call".
+# **Default OFF**: a printf on the binding path is a measurement tool.
+option(PICOCALC_STACK_PROBE "Report free stack at each calc binding (measurement only)" OFF)
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
@@ -322,6 +340,7 @@ target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_PHASE="${PICOCALC_PHASE}"
     $<$<BOOL:${PICOCALC_SERIAL_INJECT}>:PICOCALC_SERIAL_INJECT=1>
     $<$<BOOL:${PICOCALC_EVAL_PROBE}>:PICOCALC_EVAL_PROBE=1>
+    $<$<BOOL:${PICOCALC_STACK_PROBE}>:PICOCALC_STACK_PROBE=1>
     # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
     # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
     # SDK default declares only 2 KB of it, so __StackBottom sat in the

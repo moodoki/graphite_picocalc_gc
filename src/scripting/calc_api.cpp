@@ -1,0 +1,506 @@
+#include "scripting/calc_api.h"
+
+#include <cstdio>
+#include <cstring>
+
+#include "math/cas/cas_eval.hpp"
+#include "math/cas/expr.hpp"
+#include "math/cas/serialize.hpp"
+#include "math/complex.hpp"
+#include "math/engine.hpp"
+#include "math/solve_expr.hpp"
+#include "math/types.hpp"
+#include "math/unified_home.hpp"
+#include "math/units.hpp"
+#include "math/var_store.hpp"
+
+// The C++ side of the `calc` module (Phase 6B.3-6B.5). Every function here is
+// a LEAF as far as MicroPython is concerned: it is called from
+// mp_calc_module.c and never calls back, so no longjmp can pass through this
+// file. calc_api.h says why that matters.
+//
+// It also means this translation unit depends on nothing but math/, which is
+// what lets tests/host/test_calc_api.cpp exercise the pipeline, the variable
+// name rules and the reentrancy guard with no interpreter and no hardware.
+
+namespace {
+
+// The reentrancy guard (phase6-spec.md §4.7 point 3). math::unified's
+// compile()/run() share bss state — one Program buffer, one 64-slot operand
+// stack — and a second run() started while the first is live corrupts it
+// silently rather than failing. Nothing in the expression language can
+// re-enter, but MicroPython's GC can: an allocation inside a binding may
+// collect, a __del__ finalizer may run arbitrary Python during the collection,
+// and that Python can call calc.eval again.
+//
+// A flag rather than an RAII guard, and set in one wrapper per entry point
+// rather than inline, so "cleared on every path" is checkable by looking at
+// one line instead of every return.
+bool g_in_call = false;
+
+CalcPersistFn g_persist = nullptr;
+CalcStackRoomFn g_stack_room = nullptr;
+
+// Stack a path needs below the binding, in bytes. Both come from the
+// `stack: peak N of 4096` instrument on hardware, not from adding up frames —
+// D47 and D48 are two occasions when the arithmetic was wrong and the board
+// was right.
+//
+// kEvalStackNeed covers the CAS probe and the unified evaluator, which is
+// every calc.eval() call. kSolveStackNeed additionally covers
+// solveexpr::substitute -> numeric_solve -> tinyexpr; substitute still owns
+// the deepest frame in the firmware even after its argument buffers moved to
+// bss, so the solve path is checked separately rather than making every
+// eval() pay for it.
+// Measured on the Pico 1, 2026-08-15, with -DPICOCALC_STACK_PROBE=ON (which
+// reports free stack at each binding) and the `stack: peak` instrument. From
+// a top-level `py` line the VM leaves **2,239 bytes** free at the binding:
+//
+//   path                            peak of 4,096   consumed below the binding
+//   calc.eval("1+1")                     2,848            991
+//   calc.diff / factor / solve            3,240          1,279
+//   calc.eval("solve(f,x,lo,hi)")         3,544          1,687
+//
+// The requirements are those plus ~320 bytes, which is the margin fault.cpp's
+// kLiveMargin already assumes an ISR frame can want. Note what this implies:
+// the solve() path fits with 552 bytes to spare at top level and is REFUSED
+// from a couple of Python frames down, because nothing below the binding
+// shrinks to compensate. A clean exception is the whole point — running it
+// anyway was measured, the same day, to hang the board.
+constexpr std::size_t kEvalStackNeed = 1600;
+constexpr std::size_t kSolveStackNeed = 2000;
+
+// True when the path is safe to enter. No hook installed means yes: the host
+// test harness runs on a stack where none of this is a question.
+bool stack_room(std::size_t need) {
+    return g_stack_room == nullptr || g_stack_room(need) != 0;
+}
+
+// A variable reference resolved from a Python-supplied name.
+struct VarRef {
+    int index = -1;
+    const char* err = nullptr;
+};
+
+// Exactly one character 'a'..'z', or "theta"/"ans". Everything else is an
+// error, deliberately: math::Variables::operator[] maps an unrecognized name
+// to Ans (engine.hpp:27) and solve_expr.cpp:92 reads only the first character
+// of its variable argument, so both would accept calc.store("A", 1) and do
+// something the caller did not ask for.
+VarRef resolve_var(const char* name) {
+    VarRef ref;
+    if (name == nullptr || name[0] == 0) {
+        ref.err = "Variable name is empty";
+        return ref;
+    }
+    if (std::strcmp(name, "theta") == 0) {
+        ref.index = math::Variables::kTheta;
+        return ref;
+    }
+    if (std::strcmp(name, "ans") == 0) {
+        ref.index = math::Variables::kAns;
+        return ref;
+    }
+    if (name[1] != 0 || name[0] < 'a' || name[0] > 'z') {
+        ref.err = "Variable must be a-z, theta or ans";
+        return ref;
+    }
+    ref.index = name[0] - 'a';
+    return ref;
+}
+
+// The same check, for a CAS operation's variable argument. Narrower than
+// resolve_var: theta and ans are not things you differentiate with respect to.
+bool valid_cas_var(const char* var, const char** err) {
+    if (var == nullptr) {
+        return true;  // the op's own default ('x') applies
+    }
+    if (var[0] < 'a' || var[0] > 'z' || var[1] != 0) {
+        *err = "Variable must be a-z";
+        return false;
+    }
+    return true;
+}
+
+// Copy `src` into a caller-provided buffer, failing rather than truncating.
+bool copy_out(const char* src, char* out, size_t out_cap, const char** err) {
+    if (out == nullptr || out_cap == 0) {
+        *err = "No output buffer";
+        return false;
+    }
+    const size_t len = std::strlen(src);
+    if (len + 1 > out_cap) {
+        *err = "Result too long";
+        return false;
+    }
+    std::memcpy(out, src, len + 1);
+    return true;
+}
+
+// A CAS result as either a number or text. A bare numeric literal becomes a
+// Python float, which is what a definite integral or a constant-folded
+// simplify() should give back; anything else is serialized NOW, because cas
+// Expr nodes only live until the next top-level CAS operation
+// (cas_eval.hpp) and the caller may well run one.
+//
+// The negation check is not pedantry: the parser builds -2 as kNeg over
+// kNum(2), so is_num() alone would send half the constants down the text path.
+bool cas_result(const math::cas::Expr* e, CalcKind* kind, double* re, char* out, size_t out_cap,
+                const char** err) {
+    if (e == nullptr) {
+        *err = "No result";
+        return false;
+    }
+    if (e->is_num()) {
+        *kind = kCalcReal;
+        *re = e->num_val;
+        return true;
+    }
+    if (e->is_neg() && e->child != nullptr && e->child->is_num()) {
+        *kind = kCalcReal;
+        *re = -e->child->num_val;
+        return true;
+    }
+    char buf[kCalcTextMax];
+    const size_t len = math::cas::expr_to_string(e, buf, sizeof(buf));
+    if (len + 1 >= sizeof(buf)) {
+        *err = "Result too long";  // truncated: see the note in solve_impl
+        return false;
+    }
+    *kind = kCalcText;
+    return copy_out(buf, out, out_cap, err);
+}
+
+// ---- Implementations, all called with the guard already held ----
+
+CalcStatus eval_impl(const char* expr, CalcKind* kind, double* re, double* im, char* text,
+                     size_t text_cap, const char** err) {
+    if (expr == nullptr || expr[0] == 0) {
+        *err = "Empty expression";
+        return kCalcFailed;
+    }
+    if (!stack_room(kEvalStackNeed)) {
+        *err = "Not enough stack for eval";
+        return kCalcFailed;
+    }
+    *im = 0;
+
+    // The four steps HomeScreen::evaluate_input runs, in its order. All four
+    // are standalone math:: functions, which is what phase6-spec.md §4.7
+    // established: calc.eval reproduces the home screen's pipeline by calling
+    // the same things, not by re-deriving one.
+
+    // 1. Inline CAS (home_screen.cpp:430). Returns kNone for anything that is
+    //    not a recognized CAS call, including solve() carrying numeric bounds,
+    //    which belongs to step 2.
+    const bool allow_complex = math::number_mode() != math::NumberMode::kReal;
+    const math::cas::HomeResult cr = math::cas::evaluate_home(expr, allow_complex);
+    if (cr.kind == math::cas::HomeKind::kError) {
+        *err = cr.error;
+        return kCalcFailed;
+    }
+    if (cr.kind == math::cas::HomeKind::kExpr) {
+        return cas_result(cr.result, kind, re, text, text_cap, err) ? kCalcOk : kCalcFailed;
+    }
+    if (cr.kind == math::cas::HomeKind::kSolutions) {
+        // "x = {-2,2}", the shape the home screen shows (home_screen.cpp:441).
+        // calc.solve() is the binding that hands back a real Python list;
+        // eval() of a solve() call reproduces what the user would see typing
+        // the same thing.
+        char buf[kCalcTextMax];
+        size_t w = 0;
+        const int n = std::snprintf(buf, sizeof(buf), "%c = {", cr.var);
+        w += n > 0 ? static_cast<size_t>(n) : 0;
+        for (int i = 0; i < cr.count && w + 2 < sizeof(buf); ++i) {
+            if (i > 0) {
+                buf[w++] = ',';
+            }
+            w += math::cas::expr_to_string(cr.solutions[i], buf + w, sizeof(buf) - w);
+        }
+        if (w + 1 < sizeof(buf)) {
+            buf[w++] = '}';
+        }
+        buf[w] = 0;
+        *kind = kCalcText;
+        return copy_out(buf, text, text_cap, err) ? kCalcOk : kCalcFailed;
+    }
+
+    // 2/3. solve() and convert() calls become numeric literals, in that order
+    //      (home_screen.cpp:471 and :483). Both rewrite in place.
+    char buf[kCalcTextMax];
+    if (std::snprintf(buf, sizeof(buf), "%s", expr) >= static_cast<int>(sizeof(buf))) {
+        *err = "Expression too long";
+        return kCalcFailed;
+    }
+    if (math::solveexpr::contains_solve(buf)) {
+        // Checked separately, and before the call rather than inside it:
+        // substitute() has the deepest frame in the firmware and its callees
+        // are recursive. Refusing here is a Python exception; not refusing was
+        // measured, on 2026-08-15, to be a hang.
+        if (!stack_room(kSolveStackNeed)) {
+            *err = "Not enough stack for solve()";
+            return kCalcFailed;
+        }
+        if (!math::solveexpr::substitute(buf, sizeof(buf), err)) {
+            return kCalcFailed;
+        }
+    }
+    if (math::unitexpr::contains_convert(buf) &&
+        !math::unitexpr::substitute(buf, sizeof(buf), err)) {
+        return kCalcFailed;
+    }
+
+    // 4. The unified evaluator (home_screen.cpp:525). to_frac is false: a
+    //    script wants a value, and ">frac" is a display suffix.
+    const math::unified::HomeResult ur = math::unified::evaluate_home(buf, false);
+    if (ur.kind == math::unified::HomeKind::kError) {
+        *err = ur.error;
+        return kCalcFailed;
+    }
+    if (ur.kind != math::unified::HomeKind::kScalar) {
+        // List, matrix, or "Done (n lists)". evaluate_home hands back
+        // FORMATTED TEXT, never a live Value, so there is no Array* whose
+        // lifetime could outlast the next run() — the hazard §4.7 point 2
+        // flagged is avoided by construction rather than by copying carefully.
+        *kind = kCalcText;
+        return copy_out(ur.text, text, text_cap, err) ? kCalcOk : kCalcFailed;
+    }
+
+    // HomeResult::scalar_value is the REAL PART ONLY (unified_home.cpp:134).
+    // The imaginary part is recoverable from Ans, which the VM writes for
+    // every scalar result, store or no store (unified_eval.hpp:207), using
+    // set_real when the result is real — so a stale imaginary part from an
+    // earlier evaluation cannot be mistaken for this one's.
+    const math::Variables& vars = math::engine().vars();
+    if (vars.is_complex(math::Variables::kAns)) {
+        *kind = kCalcComplex;
+        *re = vars.vars[math::Variables::kAns];
+        *im = vars.imag[math::Variables::kAns];
+    } else {
+        *kind = kCalcReal;
+        *re = ur.scalar_value;
+    }
+    return kCalcOk;
+}
+
+CalcStatus store_impl(const char* name, double re, double im, const char** err) {
+    const VarRef ref = resolve_var(name);
+    if (ref.index < 0) {
+        *err = ref.err;
+        return kCalcFailed;
+    }
+    math::Variables& vars = math::engine().vars();
+    if (im == 0) {
+        vars.set_real(ref.index, re);  // clears the imaginary part
+    } else {
+        vars.set_complex(ref.index, re, im);
+    }
+    if (g_persist != nullptr) {
+        g_persist();
+    }
+    return kCalcOk;
+}
+
+CalcStatus recall_impl(const char* name, double* re, double* im, int* is_complex,
+                       const char** err) {
+    const VarRef ref = resolve_var(name);
+    if (ref.index < 0) {
+        *err = ref.err;
+        return kCalcFailed;
+    }
+    const math::Variables& vars = math::engine().vars();
+    *re = vars.vars[ref.index];
+    *im = vars.imag[ref.index];
+    *is_complex = vars.is_complex(ref.index) ? 1 : 0;
+    return kCalcOk;
+}
+
+// Compose the call syntax math::cas::evaluate_home already parses, rather than
+// reaching into derivative.cpp / integrate.cpp / factor.cpp separately. One
+// CAS entry point means the bindings inherit its argument rules, its
+// simplification and its error messages instead of drifting from them, and
+// each binding costs a snprintf.
+CalcStatus cas_impl(const char* op, const char* expr, const char* var, const char* arg3,
+                    const char* arg4, CalcKind* kind, double* re, char* out, size_t out_cap,
+                    const char** err) {
+    if (expr == nullptr || expr[0] == 0) {
+        *err = "Empty expression";
+        return kCalcFailed;
+    }
+    if (!valid_cas_var(var, err)) {
+        return kCalcFailed;
+    }
+    if (!stack_room(kEvalStackNeed)) {
+        *err = "Not enough stack for CAS";
+        return kCalcFailed;
+    }
+    char call[kCalcTextMax];
+    int n = 0;
+    if (var == nullptr) {
+        n = std::snprintf(call, sizeof(call), "%s(%s)", op, expr);
+    } else if (arg3 == nullptr) {
+        n = std::snprintf(call, sizeof(call), "%s(%s,%s)", op, expr, var);
+    } else if (arg4 == nullptr) {
+        n = std::snprintf(call, sizeof(call), "%s(%s,%s,%s)", op, expr, var, arg3);
+    } else {
+        n = std::snprintf(call, sizeof(call), "%s(%s,%s,%s,%s)", op, expr, var, arg3, arg4);
+    }
+    if (n < 0 || n >= static_cast<int>(sizeof(call))) {
+        *err = "Expression too long";
+        return kCalcFailed;
+    }
+
+    const bool allow_complex = math::number_mode() != math::NumberMode::kReal;
+    const math::cas::HomeResult cr = math::cas::evaluate_home(call, allow_complex);
+    if (cr.kind == math::cas::HomeKind::kError) {
+        *err = cr.error;
+        return kCalcFailed;
+    }
+    if (cr.kind != math::cas::HomeKind::kExpr) {
+        // kNone means evaluate_home did not recognize the call at all, which
+        // at this point is a malformed argument rather than a wrong op name.
+        *err = cr.kind == math::cas::HomeKind::kNone ? "Bad argument" : "Wrong result kind";
+        return kCalcFailed;
+    }
+    return cas_result(cr.result, kind, re, out, out_cap, err) ? kCalcOk : kCalcFailed;
+}
+
+CalcStatus solve_impl(const char* expr, const char* var, int* count, char* out, size_t out_cap,
+                      const char** err) {
+    *count = 0;
+    if (expr == nullptr || expr[0] == 0) {
+        *err = "Empty expression";
+        return kCalcFailed;
+    }
+    if (!valid_cas_var(var, err)) {
+        return kCalcFailed;
+    }
+    if (!stack_room(kEvalStackNeed)) {
+        *err = "Not enough stack for solve";
+        return kCalcFailed;
+    }
+    char call[kCalcTextMax];
+    const int n = var == nullptr ? std::snprintf(call, sizeof(call), "solve(%s)", expr)
+                                 : std::snprintf(call, sizeof(call), "solve(%s,%s)", expr, var);
+    if (n < 0 || n >= static_cast<int>(sizeof(call))) {
+        *err = "Expression too long";
+        return kCalcFailed;
+    }
+    const bool allow_complex = math::number_mode() != math::NumberMode::kReal;
+    const math::cas::HomeResult cr = math::cas::evaluate_home(call, allow_complex);
+    if (cr.kind == math::cas::HomeKind::kError) {
+        *err = cr.error;
+        return kCalcFailed;
+    }
+    if (cr.kind != math::cas::HomeKind::kSolutions) {
+        *err = "No solution";
+        return kCalcFailed;
+    }
+
+    // Pack every solution now, while the pool is still ours — see calc_api.h.
+    const int n_sol = cr.count < kCalcMaxSolutions ? cr.count : kCalcMaxSolutions;
+    size_t w = 0;
+    for (int i = 0; i < n_sol; ++i) {
+        if (w >= out_cap) {
+            *err = "Result too long";
+            return kCalcFailed;
+        }
+        const size_t len = math::cas::expr_to_string(cr.solutions[i], out + w, out_cap - w);
+        // expr_to_string TRUNCATES rather than failing, and reports the
+        // truncated length, so "it fit exactly" and "it was cut off" look
+        // identical from here. Rejecting both beats handing Python a silently
+        // shortened expression.
+        if (len + 1 >= out_cap - w) {
+            *err = "Result too long";
+            return kCalcFailed;
+        }
+        w += len + 1;
+    }
+    *count = n_sol;
+    return kCalcOk;
+}
+
+}  // namespace
+
+void calc_api_set_persist_hook(CalcPersistFn fn) {
+    g_persist = fn;
+}
+
+void calc_api_set_stack_hook(CalcStackRoomFn fn) {
+    g_stack_room = fn;
+}
+
+// Each entry point sets the guard, calls exactly one _impl, and clears it.
+
+CalcStatus calc_api_eval(const char* expr, CalcKind* kind, double* re, double* im, char* text,
+                         size_t text_cap, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = eval_impl(expr, kind, re, im, text, text_cap, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_store(const char* name, double re, double im, const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = store_impl(name, re, im, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_recall(const char* name, double* re, double* im, int* is_complex,
+                           const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = recall_impl(name, re, im, is_complex, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_cas(const char* op, const char* expr, const char* var, const char* arg3,
+                        const char* arg4, CalcKind* kind, double* re, char* out, size_t out_cap,
+                        const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = cas_impl(op, expr, var, arg3, arg4, kind, re, out, out_cap, err);
+    g_in_call = false;
+    return st;
+}
+
+CalcStatus calc_api_solve(const char* expr, const char* var, int* count, char* out, size_t out_cap,
+                          const char** err) {
+    if (g_in_call) {
+        return kCalcBusy;
+    }
+    g_in_call = true;
+    const CalcStatus st = solve_impl(expr, var, count, out, out_cap, err);
+    g_in_call = false;
+    return st;
+}
+
+// Routed through math:: rather than libm so the conventions are the
+// calculator's — notably c_arg is always radians in -pi..pi, whatever the
+// angle mode says (math/complex.hpp:31). That is the reason these exist
+// alongside Python's own abs() on a complex.
+double calc_api_c_abs(double re, double im) {
+    return math::c_abs(math::Complex{re, im});
+}
+
+double calc_api_c_arg(double re, double im) {
+    return math::c_arg(math::Complex{re, im});
+}
+
+void calc_api_c_conj(double re, double im, double* out_re, double* out_im) {
+    const math::Complex z = math::c_conj(math::Complex{re, im});
+    *out_re = z.re;
+    *out_im = z.im;
+}

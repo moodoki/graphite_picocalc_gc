@@ -38,6 +38,25 @@ MICROPYTHON_TOP = ../micropython
 EXTMOD_SRC = extmod/modjson.c
 SRC_QSTR = $(addprefix $(MICROPYTHON_TOP)/,$(EXTMOD_SRC))
 
+# Our own `calc` module (Phase 6B.3). Unlike the extmod entry above it is
+# NOT copied into the package: CMake compiles it from src/ as part of the
+# firmware, alongside every other .c we own. Only the generator needs to
+# see it, and for exactly two things — MP_QSTR_* (so the names it uses
+# exist in the qstr pool) and MP_REGISTER_MODULE (so `calc` appears in
+# genhdr/moduledefs.h, which py/objmodule.c includes). The resulting
+# reference to `calc_user_cmodule` from the micropython lib resolves
+# against our object at link.
+#
+# makeqstrdefs.py sanitizes ".." to "@@" and "/" to "__" when it names its
+# per-source fragments, so a source outside MICROPYTHON_TOP is fine.
+#
+# -I is needed because the generator preprocesses this file with the HOST
+# compiler: everything it includes must be reachable and host-clean, which
+# is why calc_api.h is plain C over <stddef.h> and nothing else.
+GRAPHITE_SRC = ../../src
+CFLAGS += -I$(GRAPHITE_SRC)
+SRC_QSTR += $(GRAPHITE_SRC)/scripting/mp_calc_module.c
+
 include $(MICROPYTHON_TOP)/ports/embed/embed.mk
 
 # Append to the package after upstream's copy step has created the dirs.

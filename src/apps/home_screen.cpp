@@ -24,6 +24,7 @@
 #include "math/solve_expr.hpp"
 #include "math/unified_home.hpp"
 #include "math/units.hpp"
+#include "math/var_store.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/calc_menu.hpp"
@@ -68,7 +69,6 @@ void capture_py_line(const char* text, std::size_t len) {
 }
 
 constexpr const char* kHistoryPath = "/picocalc/history.txt";
-constexpr const char* kVarsPath = "/picocalc/variables.dat";
 // Shown as the "expression" on the history line the `mode` command pushes.
 constexpr const char* kModeCommandName = "mode";
 
@@ -290,45 +290,17 @@ void HomeScreen::compact_history() {
     fs.write_file(kHistoryPath, reinterpret_cast<const uint8_t*>(start), std::strlen(start));
 }
 
-namespace {
-
-// variables.dat image (4D.15): versioned since complex storage widened
-// Variables — the pre-PCV1 file was a raw 224-byte vars[] dump with no
-// header, so it simply fails the magic check and is ignored (one-time
-// variable reset on first boot, same precedent as PCL/PCM/PCG bumps).
-struct VarsImage {
-    char magic[4];
-    math::calc_t vars[math::Variables::kCount];
-    math::calc_t imag[math::Variables::kCount];
-};
-constexpr char kVarsMagic[4] = {'P', 'C', 'V', '1'};
-
-}  // namespace
-
+// The image format and both halves of it moved to math/var_store.cpp in 6B.3,
+// when calc.store() became a second writer — a value a script stores has to
+// survive a power cycle the same way a typed one does, and scripting/ cannot
+// reach into apps/. These stay as methods because a dozen call sites read
+// better for it, and because load_state() below is where the ordering lives.
 void HomeScreen::save_variables() {
-    auto& fs = platform::storage();
-    if (!fs.mounted()) {
-        return;
-    }
-    const auto& v = math::engine().vars();
-    static VarsImage img;
-    std::memcpy(img.magic, kVarsMagic, sizeof(img.magic));
-    std::memcpy(img.vars, v.vars, sizeof(img.vars));
-    std::memcpy(img.imag, v.imag, sizeof(img.imag));
-    fs.write_file(kVarsPath, reinterpret_cast<const uint8_t*>(&img), sizeof(img));
+    math::save_variables(platform::storage());
 }
 
 void HomeScreen::load_variables() {
-    auto& fs = platform::storage();
-    auto& v = math::engine().vars();
-    static VarsImage img;
-    const int n = fs.read_file(kVarsPath, reinterpret_cast<uint8_t*>(&img), sizeof(img));
-    if (n != static_cast<int>(sizeof(img)) ||
-        std::memcmp(img.magic, kVarsMagic, sizeof(img.magic)) != 0) {
-        return;  // Missing, old-format, or truncated: keep defaults
-    }
-    std::memcpy(v.vars, img.vars, sizeof(v.vars));
-    std::memcpy(v.imag, img.imag, sizeof(v.imag));
+    math::load_variables(platform::storage());
 }
 
 void HomeScreen::load_state() {
