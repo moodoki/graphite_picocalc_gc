@@ -698,8 +698,15 @@ static MP_DEFINE_CONST_FUN_OBJ_1(calc_text_size_obj, calc_text_size);
 // A key event as a Python dict — self-describing, and a script reads
 // ev["ch"] without having to remember a tuple order.
 static mp_obj_t calc_key_obj_from(const CalcKeyEvent* e) {
-    mp_obj_t d = mp_obj_new_dict(5);
+    mp_obj_t d = mp_obj_new_dict(6);
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_code), MP_OBJ_NEW_SMALL_INT(e->code));
+    // The field that makes an arrow key usable: `code` is an enum value Python
+    // has no names for and `ch` is None for anything that is not a character,
+    // so "which arrow was that" had no answer before this. "" for a key with
+    // no name, never None, so a script can compare it directly.
+    mp_obj_dict_store(
+        d, MP_OBJ_NEW_QSTR(MP_QSTR_name),
+        mp_obj_new_str(e->name != NULL ? e->name : "", e->name != NULL ? strlen(e->name) : 0));
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_ch),
                       e->ch != 0 ? mp_obj_new_str((char[]){(char)e->ch}, 1) : mp_const_none);
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_shift), mp_obj_new_bool(e->shift));

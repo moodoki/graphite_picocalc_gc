@@ -1,6 +1,60 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 (last) — **6B.15 + 6B.16: SD app manifests.
+**Last session:** 2026-08-16 (last) — **the periodic table app**
+(`examples/apps/periodic/`), §4.6 entry 1, built as the pressure test
+for the `calc` module. It found the gap it existed to find, and the
+measurement §4.4 has wanted since before 6B.1.
+
+> ## The gap
+>
+> **A script could not tell which arrow had been pressed.** A key event
+> reported `code` — a `platform::Key` enumerator Python has no names for
+> — and `ch`, which is `None` for every arrow. `key_held("up")` resolves
+> a name but asks a *different* question, and by the time a blocking
+> `wait_key()` returns the key may be up again. Events now carry `name`
+> ("up", "enter", "f1", …) from the same table `key_held` reads, so the
+> two cannot drift (D87).
+>
+> 6B.9's keyboard bindings had passed their own hardware pass. This is
+> the same shape as the `calc.input` ENTER bug the session before: **an
+> API can be verified through every path that reports a raw value and
+> still be unusable by anything that tries to act on one.**
+
+**The §4.4 number**: a 118-element reference dataset costs **11,504
+bytes** of Python heap (~97 bytes an element), held as parallel lists
+indexed by atomic number. About 3x the spec's estimate, and it still
+leaves ~21 KB of the Pico 1's 40 KB — interpreter overhead measures at
+~8.5 KB with the app compiled. **JSON was the wrong call** and the
+entry's own reason for it (user-editability) is better served by CSV.
+
+**Worth reusing: the app's logic was verified on the host first**, with
+a stubbed `calc` module checking that all 118 cells land in unique
+in-range positions, no arrow leaves the table, and every element is
+reachable from hydrogen. That caught the real trap for free — straight
+up from a lanthanide is column 3, empty in every main row, because it is
+the column the f-block was pulled out of. Every SD app can be tested
+this way; only drawing needs a panel.
+
+**Phase 6B remains code-complete.** Free SRAM **15 KB** (Pico 1) /
+**24 KB** (Pico 2); 21 host suites / **3,277 checks**.
+
+> ## Next: close Phase 6
+>
+> 1. **A Pico 1 pass** on 6B.15/16 and the periodic app — deferred under
+>    the board-swap policy (swaps only at major stage closures, and the
+>    close is one). The app's heap headroom on 40 KB is computed, not
+>    measured, so it is worth actually running there.
+> 2. **Merge `phase-6`** — unmerged for the whole phase by standing
+>    instruction.
+> 3. **Issue #38** (the Python-free build, D78) unblocks: deferred by
+>    its own terms until the final SRAM numbers were known, and they are.
+>
+> CI still runs neither host tests nor clang-tidy, and has only ever
+> seen this branch through one manual dispatch.
+
+---
+
+**Previous session:** 2026-08-16 (6B close) — **6B.15 + 6B.16: SD app manifests.
 Phase 6B is code-complete** (D86). A directory under `/picocalc/apps/`
 with an `app.txt` in it is its own launcher tile, on the tier-2
 `AppRegistry` hook unused since 6A.1. Examples in `examples/apps/`.

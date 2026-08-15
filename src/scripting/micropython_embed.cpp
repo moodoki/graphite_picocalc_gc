@@ -97,6 +97,53 @@ int g_key_head = 0;  // next to read
 int g_key_count = 0;
 bool g_esc_seen = false;
 
+// Names resolved HERE, where platform::Key is visible. A table of hardcoded
+// enumerator values in calc_api.cpp would go quietly wrong the first time the
+// enum gained a member.
+//
+// ONE table, read in both directions: script_key_held() looks a name up, and
+// queue_push() looks a key's name up on the way out. Two tables would let
+// `ev["name"] == "up"` and `calc.key_held("up")` disagree, which is precisely
+// the sort of thing that is never noticed until an app behaves differently
+// depending on which of the two it happened to use.
+struct NamedKey {
+    const char* name;
+    platform::Key key;
+};
+constexpr NamedKey kNamedKeys[] = {
+    {"up", platform::Key::kUp},
+    {"down", platform::Key::kDown},
+    {"left", platform::Key::kLeft},
+    {"right", platform::Key::kRight},
+    {"enter", platform::Key::kEnter},
+    {"esc", platform::Key::kEscape},
+    {"space", platform::Key::kSpace},
+    {"tab", platform::Key::kTab},
+    {"back", platform::Key::kBackspace},
+    {"del", platform::Key::kDel},
+    {"home", platform::Key::kHome},
+    // The function keys are here because an app drawing its own softkey bar
+    // has no other way to read them: they carry no character, so `ch` is 0.
+    {"f1", platform::Key::kF1},
+    {"f2", platform::Key::kF2},
+    {"f3", platform::Key::kF3},
+    {"f4", platform::Key::kF4},
+    {"f5", platform::Key::kF5},
+    {"f6", platform::Key::kF6},
+};
+
+// "" rather than null for a key with no name, so a script can compare without
+// a None check first. Static storage in every case — the name outlives the
+// queued event by construction.
+const char* key_name(platform::Key key) {
+    for (const NamedKey& n : kNamedKeys) {
+        if (n.key == key) {
+            return n.name;
+        }
+    }
+    return "";
+}
+
 // The driver fills KeyEvent::ch for printable ASCII only (keyboard.hpp) —
 // Enter, Backspace, Tab and Del all arrive as 0. A Python script has nothing
 // but `ch` and a raw `code` to work with, so "did they press Enter" was
@@ -126,6 +173,7 @@ void queue_push(const platform::KeyEvent& ev) {
     CalcKeyEvent e;
     e.code = static_cast<int>(ev.key);
     e.ch = static_cast<unsigned char>(control_char(ev.key, ev.ch));
+    e.name = key_name(ev.key);
     e.shift = ev.shift_held ? 1 : 0;
     e.ctrl = ev.ctrl_held ? 1 : 0;
     e.alt = ev.alt_held ? 1 : 0;
@@ -172,22 +220,9 @@ int script_key_poll(CalcKeyEvent* out) {
     return 1;
 }
 
-// Names resolved HERE, where platform::Key is visible. A table of hardcoded
-// enumerator values in calc_api.cpp would go quietly wrong the first time the
-// enum gained a member.
 int script_key_held(const char* name) {
     using platform::Key;
-    struct Named {
-        const char* name;
-        Key key;
-    };
-    static constexpr Named kNames[] = {
-        {"up", Key::kUp},       {"down", Key::kDown},   {"left", Key::kLeft},
-        {"right", Key::kRight}, {"enter", Key::kEnter}, {"esc", Key::kEscape},
-        {"space", Key::kSpace}, {"tab", Key::kTab},     {"back", Key::kBackspace},
-        {"del", Key::kDel},     {"home", Key::kHome},
-    };
-    for (const Named& n : kNames) {
+    for (const NamedKey& n : kNamedKeys) {
         if (std::strcmp(name, n.name) == 0) {
             return platform::keyboard().is_held(n.key) ? 1 : 0;
         }

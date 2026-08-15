@@ -40,7 +40,15 @@ Everything the `RUN` key can: an SD app is the same interpreter, on the
 same calculator, with the same `calc` module (see [USAGE.md](../../USAGE.md)).
 Variables it stores are still there on the home screen afterwards.
 
-Two conventions are worth knowing, one for each example here:
+Three examples ship here:
+
+| App | What it shows |
+|---|---|
+| `hello` | The smallest thing that works — draws, keeps the screen, reads a variable back out of the calculator |
+| `quadratic` | `calc.input` for numbers, printed results, and a plot handed to the graph screen |
+| `periodic` | A full interactive app: an 18-column table walked with the arrow keys, coloured by element series, with its data in an editable CSV next to it |
+
+Two conventions are worth knowing, one for each of the first two:
 
 - **`calc.clear_screen()` takes the screen** (`hello`). Your drawing is
   what stays up when the script ends. `ESC` gives the screen back — and

@@ -976,12 +976,17 @@ void test_key_bindings() {
     calc_api_set_key_hooks(&fake_key_poll, &fake_key_held);
     g_fake_count = 2;
     g_fake_next = 0;
-    g_fake_keys[0] = {70, 0, 0, 0, 0};
-    g_fake_keys[1] = {0, 'x', 0, 0, 0};
+    g_fake_keys[0] = {70, 0, 0, 0, 0, "up"};
+    g_fake_keys[1] = {0, 'x', 0, 0, 0, ""};
 
     CalcKeyEvent e;
     check(calc_api_key_pressed(&e) == 1 && e.code == 70, "the first queued key comes out");
+    // The name rides along with the event rather than being a second lookup:
+    // an arrow key has no character, so this is the only thing a script can
+    // compare (§4.6 entry 1 found it).
+    check(std::strcmp(e.name, "up") == 0, "and carries its name");
     check(calc_api_key_pressed(&e) == 1 && e.ch == 'x', "then the second, in order");
+    check(e.name != nullptr && e.name[0] == 0, "a key with no name reports \"\", not null");
     check(calc_api_key_pressed(&e) == 0, "and then nothing");
 
     check(calc_api_key_held("left") == 1, "key_held resolves a name");

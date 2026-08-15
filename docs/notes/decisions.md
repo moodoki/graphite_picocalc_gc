@@ -18,6 +18,57 @@ Format:
 
 ---
 
+## D87: a key event carries its name, because `code` and `ch` cannot answer "which arrow"
+
+**Date**: 2026-08-16
+**Status**: Accepted (extends D81; found by §4.6 entry 1)
+**Context**: 6B.9 gave a script three ways to read the keyboard —
+`wait_key()`, `key_pressed()` and `key_held(name)` — and all three passed
+their hardware check. Writing the periodic table app, the first thing that
+actually navigates a grid, found that **none of them can tell you which arrow
+was pressed**:
+
+- `ev["code"]` is a `platform::Key` enumerator value. A script has no names
+  for it, and hardcoding `70` would break the moment the enum gained a member.
+- `ev["ch"]` is `None` for every key that is not a character, which is every
+  arrow and every function key.
+- `key_held("up")` resolves a name, but asks a different question — is it down
+  *now* — and by the time a blocking `wait_key()` has returned, it may not be.
+
+**Decision**: the event carries `name`, filled where `platform::Key` is
+visible and taken from **the same table `key_held` reads**. `"up"`, `"down"`,
+`"left"`, `"right"`, `"enter"`, `"esc"`, `"space"`, `"tab"`, `"back"`,
+`"del"`, `"home"`, and `"f1"`–`"f6"`. It is `""` for a key with no name, never
+`None`, so a script compares it without a guard first.
+
+**Rationale**: one table read in both directions, rather than a second one
+that could disagree — `ev["name"] == "up"` and `calc.key_held("up")` must mean
+the same key, and two tables would let them drift silently until an app
+behaved differently depending on which it happened to use. The alternative,
+exporting `calc.KEY_UP` constants, adds a module attribute per key and still
+leaves `key_held` taking strings, so the module would speak two dialects.
+
+The function keys are included even though nothing needed them yet: they carry
+no character either, so an app drawing its own softkey bar has exactly the
+same problem, and adding them later would be a second decision about the same
+thing.
+
+**Tradeoffs**: a pointer per queued event (the queue is 16 deep) and a linear
+scan of 17 entries per keypress — at human typing rates, nothing. The names
+are static strings, so nothing is owned or freed.
+
+**The lesson is the one D86 already recorded, arriving from the other side**:
+6B.9 was verified through the paths that report `code`, and the gap only
+appeared when something tried to *use* the result. §4.6 exists precisely to
+walk real apps through the API before the API is frozen, and it earned its
+keep here — the fix is one field, found before release rather than after.
+
+**Revisit when**: an app needs a key this table does not name (the modifier
+keys and `kSym` are deliberately absent — they arrive as their own events and
+as the `shift`/`ctrl`/`alt` flags).
+
+---
+
 ## D86: an SD app is the program screen without the editor, and its source is streamed, not staged
 
 **Date**: 2026-08-16

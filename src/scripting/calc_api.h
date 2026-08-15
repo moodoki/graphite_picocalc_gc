@@ -261,12 +261,21 @@ CalcStatus calc_api_mat_load(int slot, int* rows, int* cols, const char** err);
 
 // One key event as a script sees it. `code` is a stable small integer
 // (platform::Key's value); `ch` is the printable character or 0.
+//
+// `name` is what makes the event usable from Python. `code` is an enum value
+// a script has no names for, and `ch` is 0 for every key that is not a
+// character — so before this, **a script could not tell which arrow had been
+// pressed** (found building the periodic table app, §4.6 entry 1, which is
+// exactly what that list exists for). It is a static string, never owned, and
+// "" for keys with no name; it uses the same table as calc_api_key_held, so
+// `ev["name"] == "up"` and `calc.key_held("up")` cannot drift apart.
 typedef struct CalcKeyEvent {
     int code;
     int ch;
     int shift;
     int ctrl;
     int alt;
+    const char* name;
 } CalcKeyEvent;
 
 // Drain the keyboard into the queue and take the oldest event, if any.

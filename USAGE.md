@@ -385,7 +385,7 @@ calc.draw_pixel(160, 160, (255, 140, 0))       # names or (r, g, b)
 calc.draw_text(45, 70, "Hello", "black", "white")
 calc.text_size("Hello")              # (40, 16)
 
-k = calc.wait_key()                  # blocks; k["ch"], k["code"], k["shift"]…
+k = calc.wait_key()                  # blocks; k["name"], k["ch"], k["shift"]…
 calc.key_pressed()                   # None if nothing is waiting
 calc.key_held("left")                # True while the key is down
 name = calc.input("Your name? ")
@@ -406,10 +406,15 @@ power-cycle.
 cannot be read back, so text is drawn as filled character cells rather than
 letters floating over whatever was there.
 
-**A key event's `ch` covers the control keys too**: `ENTER` is `"\r"`,
-`BACKSPACE` is `"\b"`, `TAB` is `"\t"` and `DEL` is `chr(127)`. Everything
-else printable is itself, and anything with no character — the arrows, the
-function keys — is `""`, so use `k["code"]` or `calc.key_held()` for those.
+**`k["name"]` is how you read a key that is not a character.** The arrows
+are `"up"`, `"down"`, `"left"`, `"right"`; then `"enter"`, `"space"`, `"tab"`,
+`"back"`, `"del"`, `"home"`, and `"f1"`–`"f6"`. It is `""` for anything else,
+never `None`, so you can compare it without checking first — and it is the
+same set of names `calc.key_held()` takes.
+
+**`k["ch"]` covers the control keys too**: `ENTER` is `"\r"`, `BACKSPACE` is
+`"\b"`, `TAB` is `"\t"` and `DEL` is `chr(127)`. Everything else printable is
+itself, and `None` for keys with no character.
 
 Colours are either a name — `black`, `white`, `blue`, `red`, `green`,
 `yellow`, `cyan`, `magenta`, `orange`, `gray` — or an `(r, g, b)` triple.

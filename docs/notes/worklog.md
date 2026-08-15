@@ -305,7 +305,74 @@ Still to verify on hardware:
 
 ---
 
-## 2026-08-16 (last) — 6B.15 + 6B.16: SD app manifests, and 6B closes (D86)
+## 2026-08-16 (last) — the periodic table app, and the key field it was missing (D87)
+
+`examples/apps/periodic/` — a TI-83-shaped periodic table: an 18-column grid
+walked with the arrow keys, coloured by element series, with a detail panel
+and an `F1` legend. Data lives in an editable CSV beside it. This is §4.6
+entry 1, the app that list has been holding open since 2026-08-13 as the
+pressure test for the `calc` module.
+
+**It found the gap it existed to find.** A key event reported `code` — a
+`platform::Key` enumerator a script has no names for — and `ch`, which is
+`None` for every arrow. `key_held("up")` resolves a name but asks a different
+question, and by the time a blocking `wait_key()` has returned the key may be
+up again. **So a script could not tell which arrow had been pressed**: the
+most basic thing a navigable app does, missing from an API whose keyboard
+half had already passed its own hardware check. Events now carry `name`, from
+the same table `key_held` reads, so the two cannot drift (D87). The function
+keys are in the table too — nothing needed them yet, but they have the
+identical problem and would have been a second decision about the same thing.
+
+**Three predictions in §4.6 entry 1 were wrong, all in the cheap direction:**
+
+- **The small font was not needed.** The entry assumed ~17 px cells with the
+  5x8 font; a 16 px cell holds a two-character symbol exactly in the ordinary
+  8x16 font, and 18 columns come to 288 of 320. A `calc` binding avoided
+  rather than deferred.
+- **JSON was the wrong data format.** The entry specified it for
+  user-editability. CSV parsed with `split` is *more* hand-editable, and
+  avoids holding the source string and an object tree live at the same
+  moment — which on the Pico 1's 40 KB heap is the difference between working
+  and not.
+- **No layout helper was needed**, because the grid is drawn once and an
+  arrow press repaints only the two cells that changed plus the panel.
+  Redrawing 118 cells per keypress would have been the slow version the entry
+  worried about; not doing it makes the question moot.
+
+**The measurement §4.4 has wanted since before 6B.1 exists now**, and it is
+the reason to build reference-data apps this way:
+
+```
+periodic: start, heap 87760 free
+periodic: 118 elements loaded, heap 76256 free
+```
+
+**11,504 bytes for a 118-element dataset** — ~97 bytes an element for a
+symbol, name, mass, series and grid position, held as parallel lists indexed
+by atomic number. About 3x §4.4's "low single-digit KB" estimate, and still
+leaves ~21 KB of the Pico 1's 40 KB free (the interpreter's own overhead
+measures at ~8.5 KB, with the app already compiled).
+
+**Layout and navigation were verified on the host before the board saw them** —
+a stubbed `calc` module checking that all 118 cells land in unique in-range
+positions, that no arrow leaves the table, and that every element is reachable
+from hydrogen. That last one caught the real trap while it was still cheap:
+straight up from a lanthanide is **column 3, which is empty in every row of
+the main block** — it is the column the f-block was pulled out of — so a naive
+column scan strands the cursor in the strip. Vertical movement falls back to
+the nearest occupied cell in the target row.
+
+**Verified on the Pico 2**: tile appears, table draws, `Ba` -> RIGHT jumps the
+f-block notch to `Hf`, UP escapes the lanthanide strip, `F1` shows the legend
+and returns, `ESC` exits. Stack peak **1,988 of 4,096** (1,396 before) — an
+app that touches gfx and Storage rather than the evaluator, as expected.
+
+**Verified**: 21 host suites / **3,277 checks**, lint clean, 52 markdown
+files. Free SRAM unchanged at **15 KB** (Pico 1) / **24 KB** (Pico 2) — the
+firmware change is one pointer per queued event.
+
+## 2026-08-16 (6B close) — 6B.15 + 6B.16: SD app manifests, and 6B closes (D86)
 
 A directory under `/picocalc/apps/` with an `app.txt` in it is now its own
 launcher tile. That is the last committed Phase 6B work, on the tier-2

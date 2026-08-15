@@ -1154,8 +1154,32 @@ actually cost," not just working-variable/script-buffer usage.
 
 **The instrument for that now exists**: the program screen's output pane
 prints `heap N free` after every run, and `json` is compiled in, so the
-check is "paste the dataset into a script, run it, read the header." It
-has not been done — no dataset has been built yet.
+check is "paste the dataset into a script, run it, read the header."
+
+**MEASURED 2026-08-16, by §4.6 entry 1's periodic table app** (Pico 2,
+96 KB heap, both figures after an explicit `gc.collect()`):
+
+```
+periodic: start, heap 87760 free
+periodic: 118 elements loaded, heap 76256 free
+```
+
+**A 118-element reference dataset costs 11,504 bytes** — about 97 bytes
+per element for a symbol, a name, a mass, a series and a grid position.
+That is roughly 3x the "low single-digit KB" estimated above, and it
+still fits the Pico 1 comfortably: the interpreter's own overhead is
+~8.5 KB (96 KB heap, 87.8 KB free at the app's first line, with the app
+already compiled), so the same dataset leaves ~21 KB of the Pico 1's
+40 KB free.
+
+**What the number depends on**, and the reason it is not worse: the data
+is held as **parallel lists indexed by atomic number**, not as 118 dicts
+and not as parsed JSON. A dict per element would have cost more than the
+whole rest of the app, and the JSON the entry below originally specified
+would have had to hold the source string and the object tree live at the
+same moment. The file on the card is CSV, parsed with `split` — which is
+*more* hand-editable than JSON, not less, so the entry's actual goal is
+better served than by its stated means.
 
 ### 4.5 SD-discovered app manifests
 
@@ -1255,6 +1279,36 @@ and what changed because of it.
   plain per-cell `draw_rect`/`draw_text` calls in a Python loop are
   expected to be fine for a one-time render (~118 cells, not a hot
   loop). Revisit only if that turns out too slow on hardware.
+
+**BUILT 2026-08-16** (`examples/apps/periodic/`), and this is what
+walking it through for real changed:
+
+- **The one thing genuinely missing was a key's NAME** (D87). A key event
+  reported `code` — a `platform::Key` enum value Python has no names for
+  — and `ch`, which is `None` for every arrow. So **a script could not
+  tell which arrow had been pressed**: the single most basic thing a
+  navigable app does. Events now carry `name` ("up", "enter", "f1", …)
+  from the same table `calc.key_held()` already used. This is exactly
+  what this list exists to catch, and it had survived 6B.9's own
+  hardware pass.
+- **The 8x16 main font was enough after all.** The entry above assumed
+  the small font and ~17 px cells; a 16 px cell holds a two-character
+  symbol exactly and 18 columns come to 288 of 320, so no small-font
+  binding was needed. That is a `calc` addition avoided, not deferred.
+- **RGB tuples were the right call.** Ten series colours, and the text
+  colour per cell is computed from each colour's luminance rather than
+  being a second hand-maintained table.
+- **Per-cell draws are fine, with one rule**: the initial 118-cell
+  render is drawn once, and an arrow press repaints **only the two cells
+  that changed** plus the detail panel. Redrawing the grid per keypress
+  would have been the slow version the entry was worried about; not
+  doing so makes the question moot. No layout helper was needed.
+- **Data is CSV, not JSON** — see §4.4 for the measurement that decided
+  it and for what the dataset actually costs.
+- Verified on hardware: table draws, arrows navigate (including over the
+  ten-column gap in periods 2-3 and out of the f-block strips, which is
+  the one navigation trap — column 3 is empty in every main row), `F1`
+  shows the series legend, `ESC` exits. Stack peak **1,988 of 4,096**.
 
 **2. Sensor / data-logging app (GPIO and/or I2C → lists)**
 
