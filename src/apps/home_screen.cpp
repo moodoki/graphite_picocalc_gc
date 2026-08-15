@@ -46,10 +46,27 @@
 #include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "graph/graph_state.hpp"
+#include "scripting/micropython_embed.hpp"
 
 namespace apps {
 
 namespace {
+
+// One line of captured Python output, for the `py` command below. Sized
+// to a home-screen result line, not to a script's full output — that is
+// the program screen's output pane, which has its own ring buffer.
+// Overflow is dropped rather than wrapped: this is a one-liner REPL.
+char g_py_line[128];
+std::size_t g_py_line_len = 0;
+
+void capture_py_line(const char* text, std::size_t len) {
+    const std::size_t room = sizeof(g_py_line) - 1 - g_py_line_len;
+    const std::size_t n = len < room ? len : room;
+    std::memcpy(g_py_line + g_py_line_len, text, n);
+    g_py_line_len += n;
+    g_py_line[g_py_line_len] = 0;
+}
+
 constexpr const char* kHistoryPath = "/picocalc/history.txt";
 constexpr const char* kVarsPath = "/picocalc/variables.dat";
 // Shown as the "expression" on the history line the `mode` command pushes.
@@ -561,7 +578,15 @@ void HomeScreen::evaluate_input(bool force_decimal) {
 // typed one; two copies would drift.
 void HomeScreen::submit_input() {
     // Trimmed command match first (cls, help, ...).
-    char cmd[16];
+    //
+    // Sized to a whole input line, not to a command word. This was
+    // char[16], which was ample while `mode <keyword>` was the only
+    // command taking an argument — but `py <statement>` (6B) means the
+    // argument is arbitrary Python, and a 16-byte cap silently dropped
+    // anything longer into the math evaluator, where `py print(2**0.5)`
+    // came back as "Syntax error". No command word is anywhere near this
+    // long, so widening it changes nothing else.
+    char cmd[ui::InputLine::kCapacity];
     const char* t = input_.text();
     while (*t == ' ') {
         ++t;
@@ -844,6 +869,43 @@ bool HomeScreen::handle_command(const char* cmd) {
     // the same way list/stat/mat already do.
     if (std::strcmp(cmd, "apps") == 0 || std::strcmp(cmd, "app") == 0) {
         ui::screen_manager().push(&launcher_screen());
+        return true;
+    }
+    // `py <line>` — one line of Python at the home screen (Phase 6B).
+    // Two jobs: a genuine one-liner REPL, and the harness that makes the
+    // interpreter drivable from scripts/serial-console.py, so "does
+    // MicroPython still work on both boards" is a scripted check rather
+    // than a manual one.
+    //
+    // The runtime is brought up on first use and left up, so `py a=1`
+    // followed by `py a` sees the same globals. ProgramScreen's own
+    // teardown (6B.14) may pull it down underneath; the next `py` just
+    // brings it back.
+    if (std::strncmp(cmd, "py", 2) == 0 && (cmd[2] == 0 || cmd[2] == ' ')) {
+        const char* src = cmd[2] == 0 ? cmd + 2 : cmd + 3;
+        while (*src == ' ') {
+            ++src;
+        }
+        if (*src == 0) {
+            push_entry("py", "usage: py <statement>", ResultKind::kError);
+            return true;
+        }
+        if (!scripting::python().init()) {
+            push_entry("py", "interpreter unavailable", ResultKind::kError);
+            return true;
+        }
+        g_py_line_len = 0;
+        g_py_line[0] = 0;
+        scripting::python().set_output_callback(&capture_py_line);
+        const bool ok = scripting::python().exec(src);
+        scripting::python().set_output_callback(nullptr);
+        // Trailing newline from print() is noise in a one-line result.
+        while (g_py_line_len > 0 &&
+               (g_py_line[g_py_line_len - 1] == '\n' || g_py_line[g_py_line_len - 1] == '\r')) {
+            g_py_line[--g_py_line_len] = 0;
+        }
+        push_entry(cmd, g_py_line_len > 0 ? g_py_line : (ok ? "ok" : "error"),
+                   ok ? ResultKind::kPlain : ResultKind::kError);
         return true;
     }
     // Device settings: brightness/backlight/auto-power-down (4D.19-20).

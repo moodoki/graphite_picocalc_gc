@@ -42,6 +42,17 @@ as an issue versus what stays in the repo is settled in
 
 ## Building
 
+**First clone only:** this repo has one git submodule (MicroPython, Phase 6B).
+The build fails with a pointed error if it is missing.
+
+```bash
+git submodule update --init --recursive
+```
+
+The MicroPython embed package is *generated* at CMake configure time, so the
+build also needs `make` and a host C compiler. Both are already present in any
+working toolchain setup.
+
 ```bash
 ./scripts/build-all.sh          # both boards (--clean to reconfigure)
 ./scripts/size-report.sh        # flash/RAM budget per section

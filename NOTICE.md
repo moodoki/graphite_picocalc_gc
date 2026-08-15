@@ -27,6 +27,7 @@ portions remain individually reusable under MIT.
 | tinyexpr — expression parser | `drivers/tinyexpr/` | zlib | [codeplea/tinyexpr](https://github.com/codeplea/tinyexpr) |
 | cephes special functions (`cprob` subset: ndtr, ndtri, incbet, incbi, igam, igami + deps) | `drivers/cephes/` | Free use per author's statement (© 1984-1995 Stephen L. Moshier; `drivers/cephes/readme-netlib.txt`) | [netlib cephes](https://www.netlib.org/cephes/) |
 | rp2040-psram — PIO SPI PSRAM driver | `drivers/rp2040-psram/` | MIT (© 2023 Ian Scott) | via Coyote OS, upstream [polpo/rp2040-psram](https://github.com/polpo/rp2040-psram) |
+| MicroPython — embedded Python interpreter (Phase 6B) | `drivers/micropython/` (git submodule, v1.28.0) | MIT | [micropython/micropython](https://github.com/micropython/micropython) by Damien P. George and contributors |
 | Raspberry Pi Pico SDK (incl. TinyUSB) | cloned alongside, linked | BSD-3-Clause (TinyUSB: MIT) | [raspberrypi/pico-sdk](https://github.com/raspberrypi/pico-sdk) |
 
 ## Fonts — the bitmap headers in `src/gfx/fonts/`

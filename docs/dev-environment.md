@@ -73,7 +73,22 @@ Verify:
 # arm-none-eabi-gcc (Arm GNU Toolchain 15.3.Rel1 ...) 15.3.1
 ```
 
-### 3. Pico SDK and picotool
+### 3. Submodules
+
+One submodule, MicroPython (Phase 6B), pinned to a release tag. CMake stops
+with an explicit error if it is empty rather than failing later on a missing
+header.
+
+```bash
+git submodule update --init --recursive
+```
+
+Its embed package is **generated at configure time** from that checkout, which
+is why the build needs `make` and a host C compiler in addition to the cross
+toolchain. See [drivers/README.md](../drivers/README.md) for what
+`drivers/micropython_port/` is and why the submodule itself is never edited.
+
+### 4. Pico SDK and picotool
 
 The SDK is checked out **inside this repo** at `./pico-sdk` (gitignored), currently at tag **2.2.0** with submodules initialized. `./pico-examples` sits alongside it for reference and toolchain smoke tests. To recreate:
 
@@ -87,7 +102,7 @@ The SDK supports both RP2040 and RP2350 from a single tree. Submodule init pulls
 
 SDK 2.x also requires **picotool** to generate `.uf2` files. Install it via Homebrew (`brew install picotool` — v2.3.0 on this host); otherwise the first build tries to fetch and compile it from GitHub.
 
-### 4. Environment variables
+### 5. Environment variables
 
 Add to `~/.zshrc`:
 
@@ -105,7 +120,7 @@ export CMAKE_GENERATOR="Ninja"
 
 Reload: `source ~/.zshrc`.
 
-### 5. Verify the toolchain
+### 6. Verify the toolchain
 
 Run a smoke-test build from the in-repo `pico-examples` checkout:
 

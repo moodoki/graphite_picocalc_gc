@@ -18,6 +18,106 @@ Format:
 
 ---
 
+## D72: The MicroPython heap is statically reserved, and lazily *initialized* — D57 amended
+
+**Date**: 2026-08-15
+**Status**: Accepted (amends D57)
+**Context**: D57 (§8 P6-1) says the Python heap is "lazily allocated ... not
+reserved at boot", freed on leaving the program screen. Implementing 6B.2 made
+it clear that sentence cannot be satisfied as written: **there is no
+allocator**. `AGENTS.md` forbids heap allocation in application code and none
+exists — every buffer in this firmware is a fixed static, an arena view, or a
+PSRAM region. There is nothing for "allocate" to mean.
+
+**Decision**: `scripting::(anonymous)::g_heap` is a static
+`alignas(8) uint8_t[config::kPythonHeapSize]` in bss — 40 KB on the Pico 1,
+96 KB on the Pico 2 — reserved for the life of the image. What is lazy is
+`mp_embed_init()` / `mp_embed_deinit()`, which run on entering and leaving the
+program screen (6B.14). The observable behaviour D57 wanted is preserved: no
+interpreter state exists until a script screen is open, and a second entry
+starts from a fully-free heap. What is *not* preserved is the implication that
+the bytes are available to anything else in between.
+
+**Rationale**: D70 had already reached this conclusion from the other
+direction — "lazy allocation ... does not shrink the number that has to be
+found; nothing large is idle while a script runs, because `calc.eval()` reaches
+into the CAS scratch". The SRAM recovery work was undertaken *because* the full
+40 KB has to exist. So this amendment changes no plan and no budget; it corrects
+a sentence that reads as though it did.
+
+The measured cost, Pico 1, `size-report.sh` before and after 6B.1/6B.2:
+
+| | free SRAM | flash text |
+|---|---|---|
+| before (6A + 6C.1) | 61 KB | 473,220 |
+| after | **20 KB** | 628,428 |
+
+41,916 bytes of SRAM for a 40,960-byte heap: MicroPython's own static
+footprint beyond the heap is **under 1 KB**, which is the number that had no
+estimate anywhere in the spec. Pico 2: 126 KB → 29 KB free, against a 96 KB
+heap. `json` + the `io` module it drags in cost 4 KB of flash and **zero**
+SRAM.
+
+**Tradeoffs**: 20 KB of Pico 1 spare is the real remaining budget for the
+program screen, the output pane and every `calc` binding in 6B.3-6B.10. That is
+workable but it is not comfortable, and it is now the number to re-measure at
+each step rather than the 61 KB the recovery work banked.
+
+**Revisit when**: the Pico 1 spare drops under ~8 KB. The lever then is
+`MICROPY_CONFIG_ROM_LEVEL` (currently `CORE_FEATURES`) or the heap size itself
+— both single constants, both measurable.
+
+---
+
+## D71: MicroPython enters as a git submodule, and large upstream projects will from now on
+
+**Date**: 2026-08-15
+**Status**: Accepted (direct user instruction)
+**Context**: Every third-party dependency in this repo so far is a **vendored
+copy** under `drivers/`, and `drivers/README.md` argues for that: stability, a
+self-contained build, and local fixes living with our own commits. 6B.1 needed
+MicroPython, which is ~60 MB, has ~40 contributors a release, and ships a
+release every few months.
+
+**Decision**: MicroPython is a **git submodule** at `drivers/micropython`,
+pinned to **v1.28.0**. The rule generalizes, per direct user instruction:
+small, single-purpose, rarely-updated C drivers stay vendored; large, actively
+maintained upstream projects come in as submodules pinned to a release tag.
+`drivers/README.md` now states both halves.
+
+The submodule is **never edited**. All local configuration lives in
+`drivers/micropython_port/`: `mpconfigport.h` (what the on-device Python
+actually is), `micropython_embed.mk` (the generation entry point, plus the
+`extmod/` modules the embed package does not ship), and `picocalc_mphal.h`
+(HAL declarations the one-line upstream `mphalport.h` omits). Implementations
+are in `src/scripting/mp_port.c`.
+
+**Rationale**: The vendoring rationale assumed a dependency small enough that
+hand-porting an upstream fix is cheaper than tracking a tag. MicroPython is not
+that. Hand-porting it once would be a bad day; hand-porting each upstream fix
+is not a maintenance model. Pinning to a tag keeps the *stability* half of the
+vendoring argument fully intact — the pin only moves when we move it.
+
+The self-contained-build half is the real cost, and it is paid: a fresh clone
+needs `git submodule update --init --recursive`. CI already checks out with
+`submodules: recursive`, so nothing there changed; `CONTRIBUTING.md` and
+`docs/dev-environment.md` gained the step, and CMake stops with a pointed error
+rather than failing later on a missing header.
+
+**Tradeoffs**: The build now needs `make` and a **host** C compiler in addition
+to the cross toolchain, because MicroPython's embed port *generates* the C tree
+we compile rather than shipping one. That generation runs at CMake configure
+time and is deliberately a **clean** build every time: the generator's
+incremental path leaves stale per-module fragments in `genhdr/module/`, so
+turning a feature off in `mpconfigport.h` still emitted its
+`MP_REGISTER_MODULE` entry and the link failed on a symbol nothing compiled any
+more. Configure is rare; a silently wrong qstr table is not worth the seconds.
+
+**Revisit when**: a second large dependency arrives — the rule should hold, but
+two data points are worth more than one.
+
+---
+
 ## D70: SRAM recovery plan — four levers, ~40 KB without PSRAM and ~69 KB with it
 
 **Date**: 2026-08-15
