@@ -135,11 +135,33 @@ public:
     // matrix expression/work temps. Slabs are SRAM (kSlabCount * 2 KB
     // of bss); regions are PSRAM bookkeeping only — a region's 80 KB
     // is bump-allocated on first use.
-    static constexpr int kSlabCount = 28;
+    //
+    // 28 -> 14 (D70 lever B, 2026-08-15): -28 KB of bss. Sized from a
+    // device measurement, not a guess — instrumented hardware runs
+    // peaked at **12** live slabs across lists, matrices, list
+    // arithmetic, cumsum and stats, with 11 live in steady state, so 14
+    // keeps ordinary use entirely in SRAM with margin.
+    //
+    // Exhaustion is no longer fatal: slab_alloc() returning null now
+    // makes the caller fall back to PSRAM (see Array::set_shape), which
+    // was verified on hardware at a deliberately hostile kSlabCount = 4
+    // — 11 fallbacks fired, every result stayed correct, and a
+    // 30-repeat sensitive check came back 30/30 clean.
+    //
+    // Cutting to 8 would return a further 12 KB and does work, but
+    // steady-state live is 11, so the calculator would permanently run
+    // several of its built-in lists out of PSRAM. That trades ordinary-
+    // path speed and extra exposure to D53 (open, un-root-caused
+    // intermittent PSRAM read fault) for headroom the budget does not
+    // need. Revisit only if 6B's own growth actually demands it.
+    static constexpr int kSlabCount = 14;
     static constexpr size_t kRegionBytes =
         static_cast<size_t>(Array::kMaxElements) * sizeof(calc_t);
     static constexpr int kMaxPsramRegions = 24;
 
+    // Null when the pool is exhausted. Callers must treat that as
+    // "use PSRAM instead", not as an error (D70 lever B) — the pool is
+    // sized to the common case, not the worst one.
     uint8_t* slab_alloc();
     void slab_free(const uint8_t* p);
     uint32_t region_alloc();  // psram_backend::kInvalid on failure
@@ -148,9 +170,19 @@ public:
     size_t sram_used() const;
     size_t psram_used() const;
 
+    // Instrumentation for sizing kSlabCount from a device measurement
+    // rather than a guess. peak = high-water live slabs; misses = times
+    // the pool was exhausted and a caller fell back to PSRAM.
+    int slabs_peak() const { return slabs_peak_; }
+    int slabs_live() const { return slabs_live_; }
+    uint32_t slab_misses() const { return slab_misses_; }
+
 private:
     uint8_t slabs_[kSlabCount][kSlabBytes];
     bool slab_used_[kSlabCount] = {};
+    int slabs_live_ = 0;
+    int slabs_peak_ = 0;
+    uint32_t slab_misses_ = 0;
     uint32_t regions_[kMaxPsramRegions] = {};
     bool region_exists_[kMaxPsramRegions] = {};
     bool region_used_[kMaxPsramRegions] = {};

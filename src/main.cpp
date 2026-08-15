@@ -26,6 +26,7 @@
 #include "ui/chrome.hpp"
 #include "ui/input_line.hpp"  // kCapacity bounds the serial-injection buffer
 #include "ui/screen_manager.hpp"
+#include "math/array.hpp"
 #include "math/functions.hpp"
 #include "math/lists.hpp"
 #include "math/matrix.hpp"
@@ -588,6 +589,16 @@ int main() {
                 last_peak = peak;
                 printf("stack: peak %lu of %lu\n", static_cast<unsigned long>(peak),
                        static_cast<unsigned long>(platform::stack_total()));
+                // ArrayStore slab high-water, on the same event (D70
+                // lever B): kSlabCount must be sized from what real use
+                // actually peaks at, not from a guess. `miss` counts
+                // allocations that fell back to PSRAM because the pool
+                // was empty — nonzero is not an error, it is the
+                // fallback working, but it is what costs speed.
+                auto& store = math::array_store();
+                printf("slabs: peak %d of %d, live %d, miss %lu\n", store.slabs_peak(),
+                       math::ArrayStore::kSlabCount, store.slabs_live(),
+                       static_cast<unsigned long>(store.slab_misses()));
             }
         }
 
