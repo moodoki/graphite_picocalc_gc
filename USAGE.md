@@ -258,7 +258,52 @@ dropped and the header says `(trimmed)`. That keeps the end of the output, which
 is where a traceback is.
 
 There is no `import` of your own modules yet, and `open()` raises — file access
-arrives with the `calc` module in a later release. `json` is available.
+arrives in a later release. `json` is available.
 
 For one-off expressions, `py <statement>` on the home screen runs a single line
 without leaving the calculator.
+
+### The `calc` module
+
+`import calc` gives a script the calculator itself.
+
+```python
+import calc
+
+calc.eval("2 + 3 * sin(pi/4)")   # 4.121320343559642
+calc.eval("2+3i")                 # (2+3j), in a+bi mode
+calc.eval("{1,2,3}+1")            # "{2,3,4}" — a list comes back as text
+
+calc.store("a", 42)               # same A-Z variables the calculator uses,
+calc.recall("a")                  #   and they survive a power cycle
+
+calc.diff("x^3-2*x", "x")         # "3*x^2 - 2"
+calc.integ("sin(x)", "x")         # "-1*cos(x)"
+calc.integ("sin(x)", "x", 0, "pi")# 2.0 — bounds make it a number
+calc.factor("x^2-4")              # "(x - 2)*(x + 2)"
+calc.solve("x^2-4=0", "x")        # ['2', '-2']
+
+calc.c_abs(complex(3, 4))         # 5.0
+calc.c_arg(complex(0, 1))         # 1.5707... — always radians
+```
+
+`calc.eval` takes anything you could type on the home screen, and gives back a
+number when the answer is one, a string when it is a list, a matrix or an
+algebraic expression.
+
+Three things to know:
+
+- **Variable names are strict.** One lowercase letter, or `"theta"` or
+  `"ans"`. `calc.store("A", 1)` is an error rather than quietly writing
+  somewhere else.
+- **Some answers depend on the mode.** `calc.solve("x^2+1=0","x")` finds no
+  solution in REAL mode and returns `['i', '-1*i']` in a+bi. Angle mode
+  applies to `calc.eval` the same way it applies to typing.
+- **Deeply nested scripts get less done.** The calculator's evaluator needs
+  more stack than Python does, so a heavy call — `calc.eval` of a `solve(...)`
+  especially — works at the top level of a script but raises
+  `ValueError: Not enough stack` from a few function calls down. Do the
+  calculating at the top level and pass the answers in.
+
+Graphing, matrices, lists, drawing, key input and file access are not in this
+release.

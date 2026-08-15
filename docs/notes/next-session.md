@@ -1,6 +1,83 @@
 # Start here — next session
 
-**Last session:** 2026-08-15 (second of two that day) — **MicroPython
+**Last session:** 2026-08-15 (third of three that day) — **the `calc`
+module: Python can reach the calculator.** 6B.3, 6B.4 and 6B.5 are done
+and verified on the Pico 1. `import calc` gives a script `eval`,
+`store`, `recall`, `simplify`, `expand`, `factor`, `diff`, `integ`,
+`solve`, `complex`, `c_abs`, `c_arg`, `c_conj`.
+
+> ## The finding that should change how you build 6B.6-6B.10
+>
+> **`calc.eval("solve(x^2-4,x,0,10)")` hung the board on the first
+> flash** — `sp=0x20040ff0`, sixteen bytes below `__StackBottom`, which
+> is D48's failure mode exactly. **D73 was right about MicroPython and
+> that was the wrong question.** The deep frames belong to the
+> *calculator*, and `MICROPY_STACK_CHECK` cannot see them: it guards the
+> VM's own recursion, and a binding has left the VM.
+> `solveexpr::substitute` alone was **1,672 bytes**, the largest frame in
+> the binary, called from a VM already 1,857 bytes deep.
+>
+> Fixed twice: 1 KB of that frame moved to bss (1,672 → 696), and every
+> binding now checks headroom and raises instead of running (**D76**).
+> A binding has **~2,239 bytes** to work with from a script's top level,
+> and less from every frame down.
+>
+> **Measure every new binding with `-DPICOCALC_STACK_PROBE=ON`**, which
+> reports free stack at each binding entry. `stack: peak` cannot answer
+> this — it is a high-water mark since boot. 6B.6's `calc.plot` reaches
+> graph state; 6B.7's `calc.det` reaches `eigen_core`, whose 1,248-byte
+> frame is now the largest in the firmware.
+
+**The three-file split is not organization, it is the safety property**
+(**D74**). `mp_calc_module.c` converts arguments and builds Python
+objects; `calc_api.cpp` calls `math::` and never calls back;
+`calc_api.h` is the plain-C boundary. It is not only `mp_raise_*` that
+longjmps — `mp_obj_new_*` can trigger a GC, a `__del__` finalizer can
+run arbitrary Python during it, and a `MemoryError` leaves from there.
+So allocation happens only after the C++ leaf has returned. Follow the
+same shape for every 6B.6-6B.10 binding.
+
+That split also bought host testability: `calc_api.cpp` depends on
+`math/` and nothing else, so `tests/host/test_calc_api.cpp` covers the
+pipeline, the name rules and both guards with **124 checks** and no
+board. The one dependency that would have broken it — persisting
+variables after `calc.store` — is a function pointer the interpreter
+installs.
+
+**`calc.eval` returns a float, a Python complex, or a string** by result
+kind (**D75**). A list or matrix comes back as formatted text, because
+that is what `unified::evaluate_home` produces; real list data waits for
+`calc.get_list`. The imaginary part is not in `HomeResult` — it comes
+from **Ans**, which the VM writes for every scalar result.
+
+**Sizes are flat**: free SRAM still 17 KB (Pico 1) and 27 KB (Pico 2);
+flash +3.8 KB. The module's tables are const, so its SRAM cost is zero;
+the two bss moves (−452 from the `var_store` extraction, +1,024 from
+`substitute`) cancelled.
+
+> ## Next: 6B.6-6B.10, and one gap to close first
+>
+> §4.2's remaining bindings are graphing (6B.6), matrices (6B.7),
+> display (6B.8), keyboard (6B.9) and file I/O (6B.10). **6B.6 is the
+> one that destroys user state**: per D68 a script's first `plot()`
+> clears all seven Y= slots and `save_graph_state()` makes the loss
+> survive a power cycle. Give it its own hardware session.
+>
+> **The spec has no list-bindings task at all.** §4.2 specifies
+> `calc.set_list`, `calc.stat_mean` and `calc.list_append` — the last
+> load-bearing for §4.6's data-logging walkthrough, since it is what
+> keeps a logging run out of the Python heap — but §5's table goes
+> straight from complex (6B.5) to matrices (6B.7). Add the task (~3 hrs,
+> plus `calc.get_list`) before building §4.6 entry 1.
+
+**Two things this session did not verify**: the Pico 2 has still never
+been run, and the `calc` module has only been exercised through `py`
+over serial, never through the ProgramScreen's RUN key. The binding path
+is identical; the screen path is not covered.
+
+---
+
+**Previous session:** 2026-08-15 (second of three) — **MicroPython
 is embedded and running on hardware.** 6B.1, 6B.2, 6B.11, 6B.12, 6B.13
 and 6B.14 are done and all six on-device checks passed. You can write a
 Python script on the device, run it, save it, power-cycle, and reload
@@ -58,15 +135,15 @@ harness that makes the interpreter drivable from
 `scripts/serial-console.py`, which is how every measurement above was
 taken without touching the keyboard.
 
-> ## Next: 6B.3, the `calc` module
+> ## ~~Next: 6B.3, the `calc` module~~ — DONE, see the top of this file
 >
-> §4.2's `calc` bindings and §4.5's SD app manifests are what is left of
+> ~~§4.2's `calc` bindings and §4.5's SD app manifests are what is left of
 > 6B. A script today can print, loop and compute in pure Python but
 > **cannot reach the calculator at all**. Start at `calc.eval` — §4.7
 > already traced its call path through `cas::evaluate_home`, and D68
-> settled the `plot()` Y-slot semantics, so §8 has no open questions.
-> `exec_file` was deliberately deferred to 6B.15/16 (RUN executes the
-> editor buffer, which the widget has just written to disk).
+> settled the `plot()` Y-slot semantics, so §8 has no open questions.~~
+> `exec_file` is still deferred to 6B.15/16 (RUN executes the editor
+> buffer, which the widget has just written to disk).
 
 **Hardware-verified on the Pico 1, all six checks passed**: launcher
 with three apps, write-and-run with auto-indent after `:`, a red
@@ -85,7 +162,7 @@ for Phase 6 to close.
 
 ---
 
-**Previous session:** 2026-08-15 (first of two) — **Phase 6A + 6C.1
+**Session before that:** 2026-08-15 (first of three) — **Phase 6A + 6C.1
 implemented and hardware-verified, and the SRAM tooling turned out to be
 wrong.** Two distinct pieces of work, and the second one matters more.
 

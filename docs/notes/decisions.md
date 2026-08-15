@@ -18,6 +18,203 @@ Format:
 
 ---
 
+## D76: The calculator's own frames — not MicroPython's — are what limits a binding, so every binding checks the stack first
+
+**Date**: 2026-08-15
+**Status**: Accepted (found on hardware, three hours after D73 said the stack question was closed)
+**Context**: D73 measured MicroPython's stack use and concluded 4 KB was
+enough: one-liners peaked at 1,832 of 4,096, and Python recursion to depth 40
+raised a catchable `RuntimeError` with 808 bytes to spare. That conclusion was
+correct and is unchanged.
+
+It was also incomplete, and 6B.3 found out how within an hour of first flashing
+the `calc` module. `calc.eval("solve(x^2-4,x,0,10)")` **hung the board**:
+`fault: pc=0x998c9015 sp=0x20040ff0`, sixteen bytes below `__StackBottom` —
+core 0's stack had run off the end of SCRATCH_Y into core 1's. D48's exact
+failure mode, reached from a direction D48 never considered.
+
+The reason is structural. `MICROPY_STACK_CHECK` guards **MicroPython's own**
+recursion, at its own check points. A binding leaves the VM, and everything
+below it — the CAS parser, the unified evaluator, `solveexpr::substitute`,
+`numeric_solve`, tinyexpr — is checked by nothing. And those frames are the
+deepest in the firmware: `substitute` alone was **1,672 bytes**, the single
+largest frame in the binary, called from a VM already 1,857 bytes deep.
+
+**Decision**: two changes, one to remove the cliff and one to fence it.
+
+1. **`eval_solve_call`'s argument buffers moved to bss.** `char arg[4][256]`
+   was 1,024 of `substitute`'s 1,672 bytes; the frame is now **696**. Safe as
+   shared state because substitute resolves `solve()` calls innermost-first,
+   one at a time, and nothing below it can re-enter. Costs 1 KB of bss and
+   makes the home-screen path shallower too.
+2. **A stack-headroom check at every binding**, through a hook the interpreter
+   installs (`calc_api_set_stack_hook`). Not enough room means a Python
+   `ValueError`, not a hang.
+
+The thresholds are measured, not derived — `-DPICOCALC_STACK_PROBE=ON` was
+added to report free stack at each binding, because `stack: peak` is a
+high-water mark since boot and cannot answer "how much was free at *this*
+call":
+
+| path | free at binding | peak of 4,096 | consumed below |
+|---|---|---|---|
+| `calc.eval("1+1")` | 2,239 | 2,848 | 991 |
+| `calc.diff` / `factor` / `solve` | 2,135 | 3,240 | 1,279 |
+| `calc.eval("solve(f,x,lo,hi)")` | 2,239 | 3,544 | **1,687** |
+
+`kEvalStackNeed = 1600` and `kSolveStackNeed = 2000` are those plus ~320 bytes
+— the margin `fault.cpp`'s `kLiveMargin` already assumes an ISR frame can
+want.
+
+**Rationale**: the alternative to (1) was refusing the solve path outright,
+which kills §4.2's second documented example and §4.6 entry 3's TVM
+walkthrough. The alternative to (2) was trusting (1) to be sufficient — but
+(1) buys a fixed 1 KB and the depth *above* the binding is unbounded, since a
+script can call from any nesting level.
+
+**Tradeoffs**: `calc.eval("solve(...)")` works at a script's top level, with
+552 bytes to spare, and is **refused from about two Python frames down**. That
+is a real limitation and it is the honest one: the frames below the binding do
+not shrink to compensate. Verified on hardware — six frames down returns
+`ValueError('Not enough stack for eval')` and the board stays up.
+
+1 KB of bss also went to (1), which is why the Pico 1's free SRAM is 17 KB
+after this chunk rather than the 18 KB the var_store extraction had briefly
+bought.
+
+**Revisit when**: 6B.6-6B.10 add bindings. **Every new one must be measured
+with `PICOCALC_STACK_PROBE`, not reasoned about** — that is what this entry
+exists to say. `calc.plot` reaches the graph state and `calc.det` reaches
+`eigen_core`, whose 1,248-byte frame is now the largest in the firmware.
+
+---
+
+## D75: `calc.eval()` returns a number when it has one and a string when it does not
+
+**Date**: 2026-08-15
+**Status**: Accepted
+**Context**: §4.2 shows `result = calc.eval("2 + 3 * sin(pi/4)")`, which
+implies Python gets a *number* back. But the expression language returns four
+kinds of thing — scalars, complex scalars, lists and matrices — and 6B.3 had
+to say what each becomes in Python before any script depended on it.
+
+The layer `calc.eval` calls, `math::unified::evaluate_home`, returns
+**formatted text** plus a `scalar_value`. It does not hand back the underlying
+`Value`, and §4.7 point 2 was explicit that anything reaching past the
+formatted-text layer into an `Array*` has to copy it out synchronously or it
+is reading freed memory by the next `run()`.
+
+**Decision**:
+
+| Result | Python |
+|---|---|
+| real scalar | `float` |
+| complex scalar | `complex` |
+| list, matrix, `"Done (n lists)"` | `str` — the formatted text |
+| a CAS result that folded to a constant | `float` |
+| any other CAS result | `str` |
+| error | raises `ValueError` with the calculator's own message |
+
+Real list data reaches Python through `calc.get_list`/`set_list` when those
+are built, not through `eval`.
+
+**Rationale**: the string case costs nothing and *cannot* violate the lifetime
+rule — there is no reference to mismanage, because `evaluate_home` already
+copied into its own buffer. The alternative, an eager Python list built from
+the `Array*`, needs a second entry point beside `evaluate_home` that exposes
+the live `Value`, and puts the one hazard §4.7 flagged back on the table in
+exchange for convenience that `get_list` will provide anyway.
+
+The complex case needed one non-obvious step and is worth recording: the
+imaginary part is **not** in `HomeResult`. `scalar_value` is the real part
+only (`unified_home.cpp:134`). It comes from **Ans**, which the VM writes for
+every scalar result, store or no store, using `set_real` when the result is
+real — so a stale imaginary part from an earlier evaluation cannot be
+mistaken for this one's (`unified_vm.cpp:1914`).
+
+**Tradeoffs**: `type(calc.eval(e))` depends on the expression, which is
+un-Pythonic; a script that wants one shape must ask for it. Accepted because
+the alternative — always returning a string — would make the common case
+(`calc.eval("2+2") + 1`) require a `float()` call, and always returning a
+float is impossible.
+
+**Revisit when**: `calc.get_list` lands and a script wants `eval` to give it a
+list directly. That is the point at which the second entry point earns its
+keep, because the copy-out has a caller.
+
+---
+
+## D74: The `calc` module is three files, and the split is the safety property
+
+**Date**: 2026-08-15
+**Status**: Accepted (extends D71's boundary to the binding direction)
+**Context**: 6B.1 confined every MicroPython header to `mp_port.c`, in C,
+because MicroPython raises by `longjmp` and a C++ frame with a destructor in
+that path leaks silently. 6B.3 is where traffic starts flowing the other way —
+Python calling into `math::` — and the same hazard reappears from the other
+side.
+
+It is also worse than "don't call `mp_raise_*` from C++". `mp_obj_new_float`
+can trigger a GC pass; a Python `__del__` finalizer can run arbitrary code
+during that pass; a `MemoryError` longjmps out of it. So **allocation**, not
+just raising, is a non-local exit.
+
+**Decision**: three files with one rule.
+
+```
+src/scripting/calc_api.h       plain C, extern "C" — the boundary
+src/scripting/calc_api.cpp     C++ leaves: math:: lives here
+src/scripting/mp_calc_module.c MicroPython glue: args, objects, raising
+```
+
+The glue converts arguments, calls **exactly one** `calc_api_*` function that
+returns a status code and fills caller-provided buffers, and only then builds
+Python objects or raises. Nothing in `calc_api.cpp` calls MicroPython, so no
+longjmp can cross a C++ frame — by construction, not by discipline.
+
+Two consequences worth stating because they are not obvious:
+
+- **Error strings are static.** Every `calc_api_*` reports failure through a
+  `const char**` pointing at a literal or at the evaluator's own static
+  message. Nothing crosses the boundary with a lifetime.
+- **Result sets are packed up front.** `calc_api_solve` writes all its
+  solutions into one caller buffer in a single call rather than offering
+  "give me solution *i*". Building the Python list is exactly the window in
+  which a GC finalizer could run another CAS operation and reset the pool the
+  unread solutions live in. One call, no window.
+
+Getting our own module through MicroPython's build was the other half. The
+generator has to see `mp_calc_module.c` for its `MP_QSTR_*` names and its
+`MP_REGISTER_MODULE`, but the file is compiled by CMake as ordinary firmware
+source and is **not** copied into the generated package. Two lines in
+`micropython_embed.mk` — `CFLAGS += -I../../src` and `SRC_QSTR +=` the file —
+do it; `makeqstrdefs.py` sanitizes `..` and `/` out of its fragment names, so
+an out-of-tree source is fine, and `builtinimport.c`'s reduced `__import__`
+finds builtin modules with `MICROPY_ENABLE_EXTERNAL_IMPORT` off.
+
+**Rationale**: the alternative is one file that both allocates Python objects
+and calls C++, with a comment asking future readers to check every path. That
+is the shape D71 already rejected once for the runtime glue, and the failure
+mode is a silent leak with no diagnostic.
+
+The split pays a second dividend that justified itself immediately:
+`calc_api.cpp` depends on `math/` and nothing else, so
+`tests/host/test_calc_api.cpp` exercises the eval pipeline, the variable-name
+rules, the CAS composition and the reentrancy guard on the host — 117 checks
+that would otherwise need a board. The one dependency that would have broken
+that, persisting variables after `calc.store`, is a function pointer the
+interpreter installs (`calc_api_set_persist_hook`).
+
+**Tradeoffs**: three files and a status-code protocol where one file and
+direct raising would be shorter. Argument conversion and result construction
+are separated by a call, so a binding reads in two places.
+
+**Revisit when**: never for the boundary itself. The *shape* — `op` as a
+string into `calc_api_cas`, buffers sized by `kCalcTextMax` — can change
+freely; 6B.6-6B.10 will stress it.
+
+---
+
 ## D73: MicroPython runs on core 0's existing 4 KB stack — no stack switching, measured not argued
 
 **Date**: 2026-08-15
@@ -74,6 +271,12 @@ any IRQ live at the deepest moment, since the instrument counts actual writes.
 reasonable, or the `calc` bindings (6B.3-6B.10) push the peak past ~3,600.
 `kStackReserve` in `micropython_embed.cpp` is one constant, and (3) is still
 there if it is ever earned.
+
+> **Revisited the same day — see D76.** The peak did reach 3,544, and the
+> reason was not MicroPython: the calculator's own evaluator frames, which
+> `MICROPY_STACK_CHECK` cannot see, are what a binding has to be checked
+> against. The conclusion above is unchanged; it was just answering a
+> narrower question than 6B.3 turned out to ask.
 
 ---
 

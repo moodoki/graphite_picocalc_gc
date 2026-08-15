@@ -46,10 +46,10 @@ MicroPython has no build system this project can call directly. Its **embed port
 | File | What it is |
 |------|------------|
 | `mpconfigport.h` | The one file that decides what the on-device Python *is*. Read twice — once by the host compiler during qstr generation, once by `arm-none-eabi` when the tree is compiled — so it lives here rather than in CMake defines |
-| `micropython_embed.mk` | Runs upstream's `ports/embed/embed.mk`, and adds the `extmod/` modules the embed package does not ship by default (currently `json`) |
+| `micropython_embed.mk` | Runs upstream's `ports/embed/embed.mk`, and adds two things it does not ship: the `extmod/` modules we want (currently `json`), and our own `calc` module. The two are added differently — an extmod source is both scanned *and* copied into the package, while `src/scripting/mp_calc_module.c` is only **scanned** (`SRC_QSTR`), because CMake compiles it as ordinary firmware source. Scanning is what produces its `MP_QSTR_*` names and its `MP_REGISTER_MODULE` entry; the resulting reference resolves against our object at link |
 | `picocalc_mphal.h` | The embed port's own `mphalport.h` is one line and declares none of the HAL functions the core calls above the minimum ROM level. `mpconfigport.h` repoints `MICROPY_MPHALPORT_H` here |
 
-The functions those headers declare are implemented in `src/scripting/mp_port.c`, which is also where the reasoning about MicroPython's longjmp-based exceptions lives.
+The functions those headers declare are implemented in `src/scripting/mp_port.c`, which is also where the reasoning about MicroPython's longjmp-based exceptions lives. The same reasoning shapes the `calc` module's three-file split (`src/scripting/calc_api.{h,cpp}` + `mp_calc_module.c`, D74): argument conversion and object construction on one side, `math::` on the other, so a longjmp can never unwind a C++ frame.
 
 ## Why vendor instead of submodule
 

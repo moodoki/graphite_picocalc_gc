@@ -839,6 +839,43 @@ private:
 
 ### 4.2 Calculator API bindings (`calc` Python module)
 
+**6B.3-6B.5 BUILT 2026-08-15 and hardware-verified.** What shipped is
+`calc.eval`, `store`, `recall`, `simplify`, `expand`, `factor`, `diff`,
+`integ`, `solve`, `complex`, `c_abs`, `c_arg`, `c_conj`. Everything else in
+the sketch below — graphing, matrices, lists, GPIO, display, input, file I/O —
+is 6B.6-6B.10 and not yet built.
+
+Four things differ from the sketch and are settled, not open:
+
+1. **The module is three files** (`calc_api.h` / `calc_api.cpp` /
+   `mp_calc_module.c`) and the split is a safety property, not organization —
+   **D74**. Argument conversion and object construction happen only in the
+   `.c`; `math::` is reached only from the `.cpp`; nothing that can `longjmp`
+   ever runs with a C++ frame on the stack.
+2. **`calc.eval` returns a float, a Python complex, or a string**, by result
+   kind — **D75**. A list or matrix comes back as the formatted text, because
+   that is what `unified::evaluate_home` produces and reaching past it for the
+   live `Value` is the lifetime hazard §4.7 point 2 flagged. Real list data
+   will arrive with `calc.get_list`/`set_list`.
+3. **Every binding checks stack headroom first and can raise
+   `ValueError('Not enough stack ...')`** — **D76**. This is not defensive
+   programming: `calc.eval("solve(f,x,lo,hi)")` hung the board on the first
+   flash, and the depth available depends on how far into a script the call is
+   made. `calc.eval` of an inline `solve()` works at a script's top level and
+   is refused from about two Python frames down.
+4. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
+   a native complex type, so the binding exists for symmetry with the rest of
+   the module rather than because it was needed. `c_arg` returns radians in
+   $-\pi..\pi$ **whatever the angle mode says** — that convention, inherited
+   from `math::c_arg`, is the reason `c_abs`/`c_arg`/`c_conj` exist alongside
+   Python's builtins at all.
+
+Two cosmetic differences from the examples below, both the CAS's own
+serializer rather than a binding: `calc.solve("x^2+1=0","x")` returns
+`['i', '-1*i']`, not `["i","-i"]`, and `calc.factor("x^2-4")` returns
+`(x - 2)*(x + 2)` with spaces. Both match what the home screen displays for
+the same input.
+
 User scripts import a `calc` module that exposes calculator functionality:
 
 ```python
@@ -1621,21 +1658,31 @@ sub-phase changed, only the order they're tackled in.
 
 ### Sub-phase 6B: MicroPython programming (first base app)
 
-**Status 2026-08-15: 6B.1, 6B.2, 6B.11, 6B.12, 6B.13 and 6B.14 are
-done** — the interpreter builds and runs on both boards, and a script
-can be written, saved, run, power-cycled and reloaded on the device.
-6B.1's acceptance was met **in full including `json`**. What is left is
-the `calc` module (6B.3-6B.10) and the SD app manifests
-(6B.15-6B.16); a script in the shipped cut can print, loop and compute
-in pure Python, but cannot yet reach the calculator.
+**Status 2026-08-15: 6B.1-6B.5 and 6B.11-6B.14 are done** — the
+interpreter builds and runs on both boards; a script can be written,
+saved, run, power-cycled and reloaded on the device; and it can now
+evaluate expressions, read and write the calculator's variables, and
+call the CAS and the complex helpers. 6B.1's acceptance was met **in
+full including `json`**. What is left is the rest of the `calc` module
+(6B.6-6B.10: graphing, matrices, display, keyboard, file I/O) and the
+SD app manifests (6B.15-6B.16).
+
+**Gap in this table, recorded rather than fixed**: §4.2 specifies
+`calc.set_list`, `calc.stat_mean` and `calc.list_append` — the last of
+which §4.6's data-logging walkthrough depends on, because it is what
+keeps an open-ended logging run out of the Python heap — but **no task
+below covers list bindings**. 6B.7 is matrices. They need a task of
+their own (est. 3 hrs) before §4.6's entry 1 can be built, and
+`calc.get_list` belongs with them (D75 defers real list data out of
+`calc.eval` to exactly that binding).
 
 | # | Task | Est. hrs | Acceptance |
 |---|------|---|---|
 | 6B.1 | Build MicroPython embed lib (both boards), incl. deciding which stdlib modules are compiled in (`json` needed per §4.6's periodic-table walkthrough — not just a bare interpreter) | 8 | `print(1+1)` → "2" on serial; `import json; json.loads("{}")` works |
 | 6B.2 | `PythonInterpreter` wrapper | 4 | Init/exec/shutdown clean |
-| 6B.3 | `calc` module: eval, variables, store/recall — `calc.eval()` wraps `cas::evaluate_home` → `solveexpr::contains_solve`/`substitute` → `unified::evaluate_home` (§4.7), eager-copies list/matrix results, reentrancy-guarded | 6 | `calc.eval("sin(pi/4)")` correct |
-| 6B.4 | `calc` module: CAS bindings (incl. complex solve) | 4 | `calc.solve("x^2+1=0","x")` → `["i","-i"]` |
-| 6B.5 | `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = 5 |
+| 6B.3 | **DONE** `calc` module: eval, variables, store/recall — `calc.eval()` wraps `cas::evaluate_home` → `solveexpr::contains_solve`/`substitute` → `unified::evaluate_home` (§4.7), returns text for list/matrix results (D75), reentrancy- and stack-guarded (D74, D76) | 6 | `calc.eval("sin(pi/4)")` correct — **0.7071067811865475 on hardware** |
+| 6B.4 | **DONE** `calc` module: CAS bindings (incl. complex solve) | 4 | `calc.solve("x^2+1=0","x")` → **`['i', '-1*i']`** in a+bi mode |
+| 6B.5 | **DONE** `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = **5.0** |
 | 6B.6 | `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — Y-slot semantics settled by D68 (clear-on-first-plot, append after, raise on the 8th, buffered until `show_graph()`); build to that, no open question left | 4 | `calc.graph_zero`, `graph_integral` work; a script's first `plot()` clears Y1-Y7, its 8th raises |
 | 6B.7 | `calc` module: matrix bindings | 3 | Create/multiply/invert from Python |
 | 6B.8 | `calc` module: display primitives | 4 | Script draws graphics |

@@ -22,7 +22,7 @@ significant work that turned up outside them. See
 | 5: CAS (symbolic math) | **Complete** | Engine, UI integration, exact-form display, Stage 5 stack hardening. Tagged **v0.2.0** |
 | 5.1: Serial line injection | **Complete** | Host-driven on-device test automation. Tagged **v0.3.0** |
 | 5.2: Unified evaluator | **Complete** | One tagged-value evaluator replacing three. Tagged **v0.4.0** |
-| 6: Non-calculator functions | **6A, 6C.1 and half of 6B done, HW-verified** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device. The `calc` module (6B.3-6B.10) is what is left. [Spec](docs/phases/phase6-spec.md) |
+| 6: Non-calculator functions | **6A, 6C.1 and most of 6B done, HW-verified** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS and complex numbers. Graphing, matrices, drawing, input and file bindings (6B.6-6B.10) are what is left. [Spec](docs/phases/phase6-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H.
@@ -65,22 +65,27 @@ the before/after measurements — including the regressions — in
 
 ## Phase 6: non-calculator functions
 
-**6A (app framework), 6C.1 (Notepad) and the first half of 6B (MicroPython)
-are done and hardware-verified.** The calculator has an app launcher reached
-from the home screen by an `F6` softkey or an `apps` command, a shared
-line-numbered text editor, a file browser with directory navigation and file
-management, Notepad, and **a working MicroPython interpreter**: write a script
-on the device, press RUN, read its output, save it, power-cycle, reload it.
-`ESC` stops a runaway loop.
+**6A (app framework), 6C.1 (Notepad) and most of 6B (MicroPython) are done and
+hardware-verified.** The calculator has an app launcher reached from the home
+screen by an `F6` softkey or an `apps` command, a shared line-numbered text
+editor, a file browser with directory navigation and file management, Notepad,
+and **a working MicroPython interpreter that can reach the calculator**: write
+a script on the device, press RUN, read its output, save it, power-cycle,
+reload it. `ESC` stops a runaway loop.
 
 - **6B.1, 6B.2, 6B.11-6B.14 are done.** MicroPython enters as a git submodule
   pinned to v1.28.0 (D71) — the first dependency here that is not a vendored
   copy, and the rule for large upstream projects from now on. `json` is
   compiled in. `py <statement>` on the home screen runs a single line.
-- **What is left of 6B** is the `calc` module (6B.3-6B.10), which is what lets
-  a script reach the math engine, and the SD app manifests (6B.15-6B.16). A
-  script today can print, loop and compute in pure Python but cannot yet touch
-  the calculator.
+- **6B.3-6B.5 are done.** `import calc` gives a script `eval`, `store`,
+  `recall`, the six CAS operations and the complex helpers. `calc.eval` runs
+  the same four-stage pipeline the home screen does, so anything you can type
+  a script can evaluate, and it returns a float, a Python complex or a string
+  by result kind (D75).
+- **What is left of 6B** is the rest of the `calc` module (6B.6-6B.10:
+  graphing, matrices, display, keyboard, file I/O) and the SD app manifests
+  (6B.15-6B.16). List bindings have no task yet and need one — see the note in
+  the spec's §5.
 
 What the 6A and 6B work established that matters for scoping the rest:
 
@@ -105,6 +110,14 @@ What the 6A and 6B work established that matters for scoping the rest:
   inside core 0's existing 4 KB stack; deep recursion raises a catchable
   `RuntimeError` at 3,224 of 4,096 bytes instead of walking into core 1's
   stack. The planned stack-switching fallback was measured out of existence.
+- **...and then reopened from the other side** (D76). The bindings showed that
+  MicroPython was never the deep part: the calculator's own evaluator frames
+  are, and `MICROPY_STACK_CHECK` cannot see them. `calc.eval` of an inline
+  `solve()` hung the board on the first flash. Fixed by moving 1 KB of
+  `solveexpr::substitute`'s frame to bss and adding a measured headroom check
+  to every binding, so a call that will not fit raises instead. **Every
+  binding added in 6B.6-6B.10 has to be measured the same way** —
+  `-DPICOCALC_STACK_PROBE=ON` exists for it.
 
 ## Beyond the plan
 

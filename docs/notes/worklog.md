@@ -305,6 +305,95 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-15 — the `calc` module: Python reaches the calculator (D74-D76)
+
+Third session of the day, continuing directly from the one below.
+
+**Done: 6B.3, 6B.4, 6B.5.** `import calc` now gives a script `eval`,
+`store`, `recall`, `simplify`, `expand`, `factor`, `diff`, `integ`,
+`solve`, `complex`, `c_abs`, `c_arg`, `c_conj`. All of it verified on
+the Pico 1 over serial. What is left of 6B is 6B.6-6B.10 (graphing,
+matrices, display, keyboard, file I/O) and the SD app manifests
+(6B.15-6B.16).
+
+**The module reaches MicroPython's build without being part of it.** Our
+`.c` has to be seen by the generator (for `MP_QSTR_*` and
+`MP_REGISTER_MODULE`) while being compiled by CMake as ordinary firmware
+source. Two lines in `micropython_embed.mk` do it — `CFLAGS += -I../../src`
+and `SRC_QSTR +=` the file. `makeqstrdefs.py` sanitizes `..` and `/` out
+of its fragment names, so an out-of-tree source is fine, and
+`builtinimport.c`'s reduced `__import__` still finds builtin modules with
+external import off. It worked first try.
+
+**Three files, and the split is the safety property (D74).** The glue
+converts arguments and builds objects; the C++ leaves call `math::` and
+never call back. It is not only `mp_raise_*` that longjmps — `mp_obj_new_*`
+can trigger a GC, a `__del__` finalizer can run arbitrary Python during
+it, and a `MemoryError` leaves from there. The split also made
+`calc_api.cpp` depend on `math/` alone, which is why **124 of this
+session's checks run on the host** rather than needing a board.
+
+**Then hardware found what static analysis had not (D76).**
+`calc.eval("solve(x^2-4,x,0,10)")` hung the board on the first flash:
+`sp=0x20040ff0`, sixteen bytes below `__StackBottom` — D48's failure
+mode, reached from a direction D48 never considered. D73 had measured
+MicroPython's stack use and been right about it; the deep frames turned
+out to belong to the **calculator**, which `MICROPY_STACK_CHECK` cannot
+see. `solveexpr::substitute` alone was 1,672 bytes — the largest frame in
+the binary — called from a VM already 1,857 bytes deep.
+
+Fixed twice over: 1 KB of `substitute`'s frame moved to bss (1,672 → 696,
+which helps the home screen too), and every binding now checks headroom
+first and raises rather than running. The thresholds came off hardware
+via a new `-DPICOCALC_STACK_PROBE=ON`, because `stack: peak` is a
+high-water mark since boot and cannot answer "how much was free at *this*
+call":
+
+| path | free at binding | peak of 4,096 | consumed below |
+|---|---|---|---|
+| `calc.eval("1+1")` | 2,239 | 2,848 | 991 |
+| `calc.diff` / `factor` / `solve` | 2,135 | 3,240 | 1,279 |
+| `calc.eval("solve(f,x,lo,hi)")` | 2,239 | 3,544 | **1,687** |
+
+Verified both ways on the board: at a script's top level the solve path
+returns `2.0` with 552 bytes to spare; six Python frames down it returns
+`ValueError('Not enough stack for eval')` and the machine stays up.
+**Every binding added in 6B.6-6B.10 must be measured this way.**
+
+**Sizes**, exact bytes rather than the mixed-unit KB the entry below used:
+
+| | before | after |
+|---|---|---|
+| Flash text, Pico 1 | 632,828 | 636,596 (+3,768) |
+| Flash text, Pico 2 | 615,300 | 619,164 (+3,864) |
+| Free SRAM, Pico 1 | 17 KB | 17 KB |
+| Free SRAM, Pico 2 | 27 KB | 27 KB |
+
+The module's own SRAM cost is **zero** — its tables are const, in flash.
+bss moved twice and cancelled: −452 bytes from extracting
+`HomeScreen::save_variables` into `math::save_variables` (two 456-byte
+statics became one), +1,024 from `substitute`'s buffers.
+
+**Verified**: 21 host suites / 3,021 checks, both boards build, lint
+clean, 51 markdown files validated. On hardware: eval through all four
+pipeline stages, a real vs complex scalar, list results as text, every
+rejected variable name, store/recall surviving a reboot, all six CAS
+ops, mode-dependent `solve`, the complex helpers, and 50 `calc.eval` +
+20 `calc.diff` calls in loops.
+
+**Not done**: the Pico 2 still has not been run — it builds and fits but
+only the Pico 1 is on the desk. The `calc` module is **not** exercised
+through the ProgramScreen's RUN key yet, only through `py` over serial;
+the binding path is identical, but the screen path is unverified.
+
+**Spec gap recorded, not fixed**: §4.2 specifies `calc.set_list`,
+`calc.stat_mean` and `calc.list_append` — the last load-bearing for
+§4.6's data-logging walkthrough — but §5's task table has no list-bindings
+task at all. Noted in the spec; needs a task before §4.6 entry 1 can be
+built.
+
+---
+
 ## 2026-08-15 — 6B first half: MicroPython embedded and running on hardware (D71-D73)
 
 Second session of the day. The first one shipped 6A + 6C.1 and rebuilt
