@@ -53,31 +53,58 @@ be checked, decided, or built *before* (or right at the start of) 6A/6B
 work, so scoping doesn't rest on stale numbers or unconfirmed hardware
 assumptions.
 
-### 0.1 The one that actually gates 6B — Pico 1 SRAM headroom
+### 0.1 The one that actually gates 6B — SRAM headroom on BOTH boards
 
-**Re-measure before sizing 6B's heap. Do not trust either stale
-number.** `pre-phase5-review.md` (2026-08-02, **before** Phase 5 CAS and
-Phase 5.2 landed) measured ~12 KB spare after the shared scratch arena.
-The `picocalc-phase5.2-state` memory separately put it at ~5-10 KB
-post-5.2. Those two numbers come from different points in the
-codebase's history and were never directly comparable.
+> **Every headroom figure this section carried before 2026-08-15 was
+> wrong, including the ones D61 acted on.** `size-report.sh` computed
+> SRAM from Berkeley `size`'s `bss + data` columns, but `.data` on this
+> target has a flash LMA, an **SRAM VMA**, and SDK flags of
+> `READONLY, CODE` — so Berkeley bins it under *text* and prints
+> `data 0`. The script summed `bss + 0` and omitted ~44 KB of live
+> SRAM. Full account in **D69**; the script now sums every ALLOC
+> section whose VMA lands in the main SRAM bank.
 
-**Measured 2026-08-14, current `main` (`564406f`, pre-6A):**
-`./scripts/size-report.sh build/pico` → **bss+data = 210,764 B
-(205.8 KB) → 58.2 KB nominal headroom** on the Pico 1. This reconciles
-the stale ~5-10 KB figure rather than contradicting it — that number
-was already netting out the 48 KB heap (58.2 − 48 ≈ 10.2 KB), just
-computed against an earlier point in the codebase.
+**Corrected figures.** Both rows are real builds measured with the
+fixed script — the pre-6A commit was rebuilt in a worktree, not
+reconstructed arithmetically.
 
-**This is only 2.2 KB above the 56 KB threshold** (48 KB heap + 8 KB
-C-stack) — with **zero 6A code written yet**. Rather than build 6A
-against 48 KB and hope, **D61 (2026-08-14) pre-committed the Pico 1
-heap to 40 KB now**: §4.4's table and Risk 6 (§7) reflect this as the
-shipped number, not a conditional lever. **A post-6A `size-report.sh`
-re-run is still owed** once 6A's static footprint actually lands — this
-pre-commit removes the *scoping* risk (6B no longer depends on a number
-that doesn't exist yet), it doesn't remove the need to confirm the
-final margin once 6A is real.
+| Pico 1 (main bank = 256 KB) | used | free |
+|---|---|---|
+| pre-6A (`564406f`), *as D61 read it* | 210,764 | *"58.2 KB"* |
+| pre-6A (`564406f`), **actual** | 247,496 | **14.3 KB** |
+| after 6A + 6C.1 | 254,016 | **7.9 KB** |
+
+6A + 6C.1 cost **6,520 B**, against ~6.2 KB projected — the estimate
+was sound, the baseline was not.
+
+**The consequence: the MicroPython heap does not fit on either board.**
+D61 cut the Pico 1 heap 48 → 40 KB to buy margin against a threshold it
+believed was 2.2 KB away. Real free space was 14.3 KB *before* 6A, so
+**neither 48 KB nor 40 KB was ever reachable** — a ~32 KB shortfall,
+not a tuning question. The Pico 2 is in the same position: **83 KB free
+against a planned 96 KB heap**.
+
+**This is not a blocker, it is a prerequisite with a costed plan.**
+**D70** surveys what can be recovered, measured against the real image:
+
+| Lever | Recovers | Risk |
+|---|---|---|
+| **A** fold one-shot persistence buffers into a shared arena | ~18 KB | low — same pattern as `math::scratch` |
+| **B** ArrayStore slab cut behind a PSRAM fallback | ~41 KB (~12 KB without) | stakes the budget on the PSRAM path; D53/#24 is open |
+| **C** `strip_buf` single-buffer *or* 8-px strips | ~10 KB, Pico 1 only | a real frame-time trade — decided by measurement |
+| **D** `.data` → `.bss` | 0 KB SRAM (~24 KB flash) | none; listed so it is not mistaken for a lever |
+
+A alone fixes the Pico 2. A + B + C targets ~48 KB free on the Pico 1,
+which is what a 40 KB heap plus its 8 KB C stack needs.
+
+**A structural correction that changes how 6B must be scoped: D57's
+lazy allocation does not reduce the static budget.** A static array is
+reserved whether used or not, and a `malloc` from `.heap` (2,048 B
+today) still needs the free SRAM to exist at that moment. Lazy
+allocation means 40 KB must be free *when the program screen opens*
+rather than permanently — the same number, unless something large is
+genuinely idle then, and nothing is, because `calc.eval()` reaches into
+the CAS scratch.
 
 ### 0.2 Cross-phase blocker already on the issue tracker
 
@@ -948,26 +975,25 @@ the line number and exception message.
 | C stack for Python calls | 8 KB | 8 KB |
 | **Total SRAM impact** | **~48 KB** | **~104 KB** |
 
-On Pico 1, a fresh 2026-08-14 measurement (§0.1) puts pre-6A headroom at
-58.2 KB — this leaves **~10 KB** of that free for 6A's own static
-footprint plus whatever else lands before the heap allocates, after the
-48 KB → 40 KB heap cut. Tight, but workable, because the CAS pool lives
-in PSRAM and the framebuffer uses line-buffer rendering, and because the
-cut was taken deliberately rather than discovered as a shortfall. The
-MicroPython interpreter is only initialized when the user enters the
-program screen — it doesn't consume memory when doing normal calculator
-work. **Formalized as D57 (§8 P6-1): lazy allocation** — the Python heap
-comes up on entering the program/app screen and is freed on leaving
-(6B.14), not reserved at boot; this applies to any SD-discovered Python
-app (§4.5) too, since they all run through the same `PythonInterpreter`.
-Notepad (6C) never touches this budget at all — it has no interpreter.
-**A post-6A `size-report.sh` re-run (§0.1) is still owed** once 6A's
-static footprint actually exists, to confirm the ~10 KB estimate above
-against 6A's real cost rather than the low-single-digit-KB comparables
-D61 reasoned from.
+**Neither column fits today (§0.1, D69).** Measured after 6A + 6C.1,
+the Pico 1 has **7.9 KB** free against the 48 KB this table needs, and
+the Pico 2 has **83 KB** free against 104 KB. The heap sizes above are
+**targets contingent on D70's recovery levers landing**, not
+descriptions of the current image. Do not scope 6B.1 against them until
+A-C have been measured in.
 
-On Pico 2, it's comfortable — 520 KB SRAM minus ~104 KB for Python minus
-~200 KB for framebuffer still leaves ~216 KB.
+The MicroPython interpreter is only initialized when the user enters the
+program screen. **Formalized as D57 (§8 P6-1): lazy allocation** — the
+Python heap comes up on entering the program/app screen and is freed on
+leaving (6B.14), not reserved at boot; this applies to any
+SD-discovered Python app (§4.5) too, since they all run through the same
+`PythonInterpreter`. **But note what lazy allocation does and does not
+buy (D70)**: it avoids a permanent reservation, yet still requires the
+full 40 KB to be *free at that moment*. It does not shrink the number
+that has to be found — nothing large is idle while a script runs,
+because `calc.eval()` reaches into the CAS scratch.
+
+Notepad (6C) never touches this budget at all — it has no interpreter.
 
 **A data point from §4.6's periodic-table walkthrough**: a ~118-record
 dataset parsed into Python objects (dicts/lists from `json.loads`) is a
@@ -1615,17 +1641,34 @@ existing cross-references. Risks 10 and 11 are this document's own,
 numbered to continue that sequence rather than restart it; there is no
 Risk 8 or 9 here, and the gap is deliberate, not a dropped entry.)*
 
-### Risk 6: MicroPython heap too small on Pico 1
+### Risk 6: the MicroPython heap does not fit on either board
 
-**Resolved 2026-08-14 (D61): pre-committed to 40 KB**, down from the
-original 48 KB, ahead of 6A landing — a fresh pre-6A `size-report.sh`
-measurement found only 2.2 KB of margin above the threshold this risk's
-lever was meant to guard, with no 6A code written yet (§0.1). The lever
-that used to be conditional ("drop to 40 KB if headroom is tight") is
-now just what 6B is scoped against. **Mitigation, otherwise unchanged**:
-document the limit; store large data in `calc`-module lists/matrices
-(PSRAM, outside the Python heap); Pico 2 doubles the heap (unaffected —
-its headroom was never close).
+**Reopened and re-scoped 2026-08-15 (D69/D70).** This risk previously
+read "heap too small on Pico 1" and was marked resolved by D61's
+48 → 40 KB pre-commitment. Both the framing and the resolution were
+built on a headroom figure that was wrong by ~44 KB (D69): the real
+free SRAM was **14.3 KB before 6A** and is **7.9 KB now**, so 40 KB was
+never reachable and neither was 48 KB. The Pico 2 is affected too —
+**83 KB free against a planned 96 KB** — which the old wording
+explicitly ruled out ("its headroom was never close").
+
+**This is now a prerequisite, not a sizing risk.** ~40 KB has to be
+recovered on the Pico 1 before 6B.1 can be estimated at all.
+
+**Mitigation**: D70's levers, in order — **A** fold the one-shot
+persistence buffers (~18 KB, low risk, and enough on its own to fix the
+Pico 2); **B** cut the ArrayStore slab pool behind a PSRAM fallback
+(~41 KB, or ~12 KB without the fallback); **C** halve `strip_buf`
+(~10 KB, Pico 1 only, decided by measured frame time). Unchanged from
+before: document whatever limit is finally shipped, and keep large data
+in `calc`-module lists/matrices (PSRAM-backed, outside the Python heap).
+
+**What is explicitly not a mitigation**: lazy allocation (D57). It
+avoids a permanent reservation but still needs the full heap free at
+the moment the program screen opens — see §4.4 and D70.
+
+**Also not a mitigation**: moving objects from `.data` to `.bss`. That
+returns flash, not SRAM (D69).
 
 ### Risk 7: Building MicroPython for both RP2040 and RP2350
 

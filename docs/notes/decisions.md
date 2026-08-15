@@ -18,6 +18,83 @@ Format:
 
 ---
 
+## D70: SRAM recovery plan — four levers, ~40 KB without PSRAM and ~69 KB with it
+
+**Date**: 2026-08-15
+**Status**: Accepted (A-D sequenced; B's depth is measurement-gated)
+**Context**: D69 established that the Pico 1 has **7.9 KB** of free SRAM,
+not the ~57 KB the tooling had been reporting, and that the MicroPython
+heap does not fit on either board as specced. This is the survey of what
+can actually be recovered, measured against the real image rather than
+estimated. Target is roughly **48 KB free** on the Pico 1 (40 KB heap
+plus the 8 KB C stack §4.4 budgets), i.e. ~40 KB to find. The Pico 2
+needs ~13 KB (83 free against a planned 96).
+
+**A hypothesis that did not survive checking**: `strip_buf` is not
+guarded by `#if PICOCALC_PICO2`, so it looked like 20 KB wasted on the
+Pico 2. It is absent from the Pico 2 image — `config::kUseFullFramebuffer`
+is a compile-time constant, so `--gc-sections` drops the strip path
+entirely. No win there.
+
+**Decision**: four levers, in this order.
+
+**A. Fold the one-shot persistence buffers into a shared arena — ~18 KB,
+lowest risk.** Four buffers that are never live simultaneously:
+`apps::g_hist_io` (8,192 — home history file I/O), `graph::g_image`
+(7,496 — graph state save/load), `math::g_chunk` x4 (8,192 — four
+separate copies across the lists/named_lists/matrices persistence TUs),
+and `ListEditorScreen::delete_row()::buf` (2,048). 25,928 B collapsing
+to one ~8 KB slot. This is the same pattern and the same one-owner-at-a-
+time discipline as `math::scratch::g_arena`, which reclaimed 21.8 KB the
+same way in the pre-Phase-5 pass; `pre-phase5-review.md` even flagged the
+`g_chunk` duplication as "~6 KB, lower priority" and it is still there.
+
+**B. ArrayStore slab pool — ~41 KB with a PSRAM fallback, ~12 KB
+without.** `math::array_store()::instance` is 57,516 B (28 x 2 KB slabs),
+the single largest SRAM object and 22% of the main bank. `slab_alloc()`
+hard-fails on exhaustion today, so a deep cut requires a PSRAM-fallback
+path first. **User decision 2026-08-15: take the PSRAM option, and test
+extensively; fall back to the safe ~22-slab cut if PSRAM read errors
+appear.** The risk being accepted is D53 / issue #24 — an open,
+un-root-caused intermittent per-element PSRAM read fault on the Pico 1.
+
+**C. `strip_buf` — ~10 KB, Pico 1 only.** `uint16_t strip_buf[2][320*16]`
+= 20,480 B, double-buffered so core 0 renders strip N+1 while core 1
+DMAs strip N (D10). Two options return the same 10 KB: single-buffering
+(loses the overlap) or `kStripHeight` 16 -> 8 (keeps the pipeline but
+doubles `render()` calls to 40/frame, and `render()` is the path the
+strip-safety rule exists to protect). **Decided by measurement on
+hardware, not by argument** — build both, keep the lower frame time.
+
+**D. `.data` -> `.bss` — ~24 KB of flash, zero SRAM.** Screen instances
+land in `.data` because of non-zero default member initialisers. Worth
+taking for flash; explicitly not a lever for this problem.
+
+**Rationale**: A is nearly free and fixes the Pico 2 on its own. B is
+where the real SRAM is. C is a genuine performance trade and so should
+be measured rather than reasoned about. D is unrelated to SRAM and is
+sequenced last so it cannot be confused with one.
+
+**Tradeoffs**: A + B(safe) + C lands at ~40 KB recovered, i.e. ~48 KB
+free — exactly at the line with nothing spare. A + B(PSRAM) + C lands at
+~69 KB, which is comfortable but stakes the budget on the PSRAM path
+being sound.
+
+**A structural correction this survey surfaced, and it matters for 6B**:
+**D57's lazy heap allocation does not reduce the static budget.** A
+static array is reserved whether used or not, and a `malloc` from
+`.heap` (2,048 B today) still needs the free SRAM to exist at that
+moment. Lazy allocation means 40 KB must be free *when the program
+screen opens* rather than permanently — the same number, unless
+something large is genuinely idle then, and nothing is, because
+`calc.eval()` reaches into the CAS scratch. This is the same shape of
+error as D61: reasoning about a budget without checking what actually
+reserves the memory.
+
+**Revisit when**: each lever lands, with a measured before/after.
+
+---
+
 ## D69: `size-report.sh` was omitting `.data` — real SRAM headroom is ~7 KB, not ~57 KB, and the MicroPython heap does not fit on either board
 
 **Date**: 2026-08-15
@@ -983,6 +1060,42 @@ it is right, but indistinguishable from a real arithmetic bug to whoever sees it
 2026-08-09 investigation below**, which ran 40,000 per-element reads clean and
 makes a concurrency explanation unlikely. Start from the address hypothesis
 instead.
+
+### Amendment 2026-08-15 — clock rate, raised as a candidate cause, and a latent trap found while checking it
+
+The question raised was whether running the Pico 1 **overclocked** could
+explain intermittent single-bit PSRAM read errors. It is a good instinct —
+the PSRAM driver is **PIO-driven SPI**, and a PIO state machine's clock is
+`sys_clk / clkdiv`, so the SPI bit rate scales directly with the system
+clock. Marginal PIO/PSRAM timing is exactly the kind of fault that shows up
+as rare single-bit corruption rather than as an outright failure, which is
+D53's signature.
+
+**But the premise does not hold as stated, and that is itself worth
+recording**: `config::kOverclockHz = 200'000'000` (Pico 1) is **defined and
+never applied**. There is no `set_sys_clock*` call anywhere in `src/` or
+`drivers/`, and nothing in `CMakeLists.txt` sets a system clock. The
+constant is dead configuration, so the board has been running at the SDK
+default (125 MHz) for every measurement this project has taken, D53's
+included. Clock rate therefore cannot be the cause of the faults observed
+so far.
+
+**The latent trap**: `platform::psram()` initialises with
+`psram_spi_init(pio1, -1)`, which the vendored driver documents as
+**clkdiv 1.0**, and its header states that "at RP2040 speeds greater than
+280 MHz, a clkdiv >1.0 is needed". So the PSRAM SPI rate is pinned to
+`sys_clk` with no compensation. If anyone ever wires `kOverclockHz` up —
+and the constant sitting there invites exactly that — the PSRAM bus speeds
+up by the same factor with no divider adjustment, and D53's symptom is
+what a marginal bus produces. **Anyone enabling the overclock must raise
+the PSRAM clkdiv in the same change.**
+
+Two follow-ups for whoever picks up #24: confirm the running clock on
+hardware (`clock_get_hz(clk_sys)` on the diag screen or the boot log) so
+this rests on a measurement rather than on source reading; and consider
+deliberately *varying* the clock as a probe — if the fault rate moves with
+`sys_clk`, that is a far sharper signal than the address hypothesis and
+cheap to test.
 
 ## D52: Phase 5.2 on-device verification — §9's measurement method did not survive contact with the hardware
 
