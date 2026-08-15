@@ -18,6 +18,146 @@ Format:
 
 ---
 
+## D83: `calc.read_file` reads into the Python string's own storage
+
+**Date**: 2026-08-16
+**Status**: Accepted (resolves P6-19, decides 6B.10)
+**Context**: §4.2 writes file I/O as `content = calc.read_file(path)` — whole
+file, one call. The obvious staging buffer is `platform::io_scratch()`, and
+D70 lever A gave that region an invariant: **no owner holds a pointer into it
+across a call that could reach another owner**. A binding that read into it
+and then handed control back to Python would violate that outright, and there
+is no spare SRAM for a second buffer.
+
+**Decision**: there is no staging buffer. The glue allocates the Python string
+first — `vstr_init_len()` for the file's size — and **one** `calc_api_*` call
+fills it through `Storage::read_file_range()` in chunks. The destination *is*
+the result object.
+
+**Rationale**: it removes the question rather than answering it. No
+`io_scratch` involvement, so the D70 invariant is never in play; no size cap
+beyond the Python heap; and §4.2's API shape is preserved exactly. It also
+respects D74 without special pleading — the allocation happens in the glue,
+before the leaf call, which is already the rule.
+
+The two alternatives both cost something real. Borrowing `io_scratch` inside a
+single call *is* legal under the invariant as written, but it caps a readable
+file at 8 KB, adds a fifth owner to a region whose own comment lists four and
+names two hand-checked edges, and copies the data twice. A chunked
+`read_file(path, offset, n)` has the smallest C surface but pushes assembly
+into Python, where string concatenation walks straight into D77's
+fragmentation.
+
+**Tradeoffs**: a file larger than the free heap fails at the allocation rather
+than being streamable. That is the honest failure — the caller asked for the
+whole thing as one object — but it is a real ceiling, and a low one: the heap
+is 40 KB on the Pico 1 and D77 showed churn eats it faster than the live set
+suggests.
+
+**Revisit when — expected, not hypothetical.** The first thing likely to hit
+this is **§4.6's periodic-table walkthrough**, which parses a bundled JSON
+dataset; `json.loads()` needs the source string *and* the parsed objects live
+at once, so the practical file ceiling is well under the free heap. Anything
+that reads or parses a data file of real size lands in the same place.
+
+The answer then is **chunked or seeking reads** — `calc.read_file(path,
+offset, n)`, or a small file handle with `seek`/`read` — and the important
+thing is that it is **additive**. `Storage::read_file_range()` already exists
+and is what this decision calls underneath, so the streaming form is a second
+binding over the same primitive, not a rework of this one. Nothing here has to
+be undone to add it.
+
+Do not pre-build it: a chunked API that nobody uses invites scripts to
+assemble strings by concatenation, which is exactly D77's fragmentation
+failure. Wait for a real file that does not fit.
+
+---
+
+## D82: List bindings are in Phase 6, and `list_append` persists at script end
+
+**Date**: 2026-08-16
+**Status**: Accepted (resolves P6-18, adds task 6B.17)
+**Context**: §4.2 specifies `calc.set_list`, `calc.stat_mean` and
+`calc.list_append`; §5's task table has none of them, going straight from
+complex (6B.5) to matrices (6B.7). §4.6 entry 1's data-logging walkthrough
+depends on `list_append` specifically — it is what keeps an open-ended logging
+run *out* of the Python heap.
+
+D77 turned that from a nicety into the point: a 400-iteration loop building
+expression strings already exhausts the 40 KB heap. A logging script that
+accumulates samples in a Python list will die. `math::Array` moves to **PSRAM
+above ~256 elements** (D21), so a list-backed log lives outside both SRAM and
+the Python heap entirely.
+
+**Decision**: build `set_list`, `get_list`, `list_append` and `stat_mean` as
+**task 6B.17** (~3 hrs; numbered after 6B.16 to avoid renumbering, but it
+belongs beside 6B.7). `list_append` writes into the `Array` only — **the lists
+a run touched are saved once, when `exec()` returns**, through the persist
+hook that already exists.
+
+`get_list` also settles D75's revisit condition: it is the binding that gives
+Python real list data, which is why `calc.eval` was free to return a formatted
+string for a list result.
+
+**Rationale**: persisting per append is one SD write per sample. In a logging
+loop that is the dominant cost, and it is the exact pattern the 2026-07-22
+perf fix split `lists.dat` into six files to avoid. Saving once per run keeps
+the loop free of I/O while still making the data durable without the script
+having to remember anything.
+
+**Tradeoffs**: a script killed by `ESC`, or one that raises, loses the samples
+it had not saved. Stated plainly rather than hidden — and a script that wants
+a checkpoint can call `calc.set_list` on what it has, which does persist.
+
+**Revisit when**: a logging run long enough that losing it to an `ESC` matters
+in practice. A `calc.save_lists()` binding is the small answer; a
+persist-every-N-appends latch is the fussier one.
+
+---
+
+## D81: The VM hook queues key events instead of discarding them
+
+**Date**: 2026-08-16
+**Status**: Accepted (resolves P6-17, decides 6B.9; fixes an existing defect)
+**Context**: `poll_interrupt()` runs from the VM hook every 20 ms, calls
+`platform::Keyboard::poll()` once, and keeps only `ESC`. Its own comment says
+it steals events from the main loop, which was harmless when nothing else
+wanted them. §4.2's `calc.wait_key()`, `calc.input()` and `calc.key_pressed()`
+all need exactly those discarded events.
+
+Two facts narrowed this. `Keyboard` has **two independent surfaces** — the
+event stream and `is_held()`, a direct query — so `calc.key_held()` never had
+a conflict. And a drainer must loop until `fifo_empty()`, not stop on the
+first `kNone`: the two-phase I2C machine spends $\geq 10$ ms per cycle, and breaking
+early capped draining at one event per frame (hardware, 2026-07-18).
+
+**Decision**: the hook keeps polling — it stays the **single** caller of
+`poll()` — but non-`ESC` events go into a small static ring (16 entries,
+~128 B) instead of the bin. `wait_key`, `input` and `key_pressed` drain that
+ring. `key_held` continues to query directly.
+
+**Rationale**: one poller means there is no race to reason about. The
+alternative — letting the bindings poll and suspending the hook during
+blocking reads — needs no ring, but `key_pressed()` is non-blocking and cannot
+suspend anything, so the hook can still steal an event between two calls to
+it. That is precisely the polling shape §4.6 entry 5's game loop uses.
+
+**This also fixes a defect that already ships**: type-ahead during a running
+script is silently dropped today. Nothing depended on it, so nobody noticed;
+the ring makes it work by construction.
+
+**Tradeoffs**: 128 bytes of bss, and a ring that can overflow — a script that
+ignores input while the user leans on a key loses the oldest events. Dropping
+oldest is right here (the newest keypress is the live one), and it is the
+opposite of `ui::OutputLog`, which keeps the tail because a traceback is at
+the end.
+
+**Revisit when**: 6B.9 is built and something wants key events *and* the main
+loop's own handling — a script running under a visible editor, say. That
+needs a routing decision this does not make.
+
+---
+
 ## D80: A drawing script owns the screen, and draws immediately — 6B.8's shape
 
 **Date**: 2026-08-16

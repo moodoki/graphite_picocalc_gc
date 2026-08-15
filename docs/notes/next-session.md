@@ -48,11 +48,32 @@ proven the screen switches; and the Pico 2 has never run any 6B code.
 > 200 KB framebuffer, and `ESC` stays live throughout. That is 6B.8's
 > shape; it is not built.
 >
-> **Still open**: **P6-17** who owns the keyboard during a script (the VM
-> hook *steals* key events today, and `calc.wait_key()` needs them);
-> **P6-18** whether list bindings are in Phase 6 at all (§5 has no task,
-> §4.6 entry 1 needs `list_append`); **P6-19** where file I/O gets a
-> staging buffer (`io_scratch` has an invariant a script would violate).
+> **All four are now resolved**, so 6B.7-6B.10 and 6B.17 are
+> implementation:
+>
+> - **D81 (P6-17)**: the VM hook **queues** non-`ESC` key events into a
+>   16-entry ring rather than discarding them, and stays the single
+>   caller of `poll()`. `wait_key`/`input`/`key_pressed` drain the ring;
+>   `key_held` queries directly and never had a conflict. Also fixes an
+>   existing defect — type-ahead during a script is dropped today. Note
+>   a drainer must loop until `fifo_empty()`, not stop on the first
+>   `kNone` (hardware, 2026-07-18).
+> - **D82 (P6-18)**: list bindings are in scope as **new task 6B.17**
+>   (~3 hrs) — `set_list`, `get_list`, `list_append`, `stat_mean`.
+>   `list_append` writes the `Array` only; the run's lists save **once**
+>   when `exec()` returns. `Array` goes to PSRAM past ~256 elements, so
+>   a log avoids both SRAM and the Python heap — which D77 made urgent.
+> - **D83 (P6-19)**: there is **no staging buffer**. The glue allocates
+>   the Python string with `vstr_init_len()` and one call fills it via
+>   `read_file_range()`. `io_scratch`'s invariant never comes up.
+>   **Expect to want chunked or seeking reads eventually** — a whole-file
+>   read is capped by the 40 KB heap, and §4.6's JSON dataset needs
+>   source *and* parsed objects live at once. That form is additive over
+>   the same `read_file_range()` primitive; do not pre-build it, because
+>   a chunked API nobody needs invites string concatenation and D77's
+>   fragmentation.
+>
+> Committed 6B is now ~69 hrs, phase total ~103.
 >
 > **The pattern**: every question §8 anticipated was about *semantics* —
 > what should `plot()` do to Y1-Y7? Every question that actually blocked
