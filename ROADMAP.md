@@ -96,6 +96,12 @@ reload it. `ESC` stops a runaway loop.
   draw on its own canvas, read keys, and read and write SD files. Drawing
   takes the panel until the script ends (D80/D85), and `ESC` both stops the
   script and gives the screen back.
+- **Both boards are verified.** The Pico 2 ran Phase 6B for the first time on
+  2026-08-16 and found a two-core SPI race the Pico 1 could not show: its
+  async full-frame push returns while core 1 is still transferring, so a
+  script drawing from a key handler shared the bus and the conversion buffer
+  with core 1 (issue #39, fixed). Nothing outside the render loop may touch
+  the panel without `gfx::display_wait_idle()`.
 - **What is left of 6B** is the SD app manifests (6B.15-6B.16) — scripts
   under `/picocalc/apps/` appearing as their own launcher tiles, using the
   tier-2 registry hook that has existed unused since 6A.1.

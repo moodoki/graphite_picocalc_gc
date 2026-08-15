@@ -121,6 +121,18 @@ Framebuffer& framebuffer();
 // loop.
 // Both strip buffers, contiguous — 16 full-width rows, enough for one line of
 // any font this project ships.
+// Block until core 1 has finished any push it is still doing.
+//
+// REQUIRED before anything outside the render loop touches the panel or the
+// scratch buffers. render_frame does NOT always leave core 1 idle: strip mode
+// (Pico 1) ends with a drain, but the Pico 2's async full-frame push
+// deliberately returns while core 1 is still transferring and drains at the
+// START of the next frame instead (D10 leg A). Pushing from a key handler
+// without this means two cores driving one SPI peripheral and one staging
+// buffer — issue #39, which desynchronised the panel and cost it colour
+// depth until reboot.
+void display_wait_idle();
+
 uint16_t* scratch_pixels();
 constexpr int kScratchPixels = platform::kScreenW * config::kStripHeight * 2;
 constexpr int kScratchRows = config::kStripHeight * 2;

@@ -41,8 +41,31 @@ text. **If a script ever needs real compositing, that is the door** — and it
 is additive, not a rewrite.
 
 **2. Nothing new was allocated.** Composition borrows the render loop's own
-buffers, idle whenever a key handler is on the stack because `render_frame`
-drains its pushes before returning. That needed a board split worth recording:
+buffers.
+
+> **Correction, 2026-08-16 (issue #39).** This entry originally said those
+> buffers are "idle whenever a key handler is on the stack, because
+> `render_frame` drains its pushes before returning". **That is true on the
+> Pico 1 and false on the Pico 2.** The core-1 display service runs on *both*
+> boards (D10 leg A); strip mode ends with `drain_acks()`, but the Pico 2's
+> async full-frame push deliberately returns while core 1 is still
+> transferring and drains at the *start* of the next frame.
+>
+> So a binding that pushed drove the same SPI peripheral and the same
+> `staging` conversion buffer as core 1, concurrently. The panel lost colour
+> depth **globally and until reboot** after a single `calc.draw_rect` —
+> the drawing itself came out correct, which is what made it hard to see.
+>
+> Every canvas entry point now calls **`gfx::display_wait_idle()`** first.
+> The right rule is: *nothing outside the render loop may touch the panel or
+> the scratch buffers without waiting for core 1*, and that is now stated at
+> the function rather than assumed.
+>
+> Three plausible causes were built and tested before this one — a `staging`
+> overrun, the Pico 2 composing in the live `frame_buf`, and a stale address
+> window — and all three were wrong. The asymmetry that mattered was not
+> geometry (a full-width push degraded it identically) but *which core was
+> using the bus*. That needed a board split worth recording:
 the Pico 1 lends `strip_buf`, but the **Pico 2 lends the full framebuffer**.
 In full-framebuffer mode nothing else references `strip_buf`, so
 `--gc-sections` drops it — and referencing it from the scratch accessor

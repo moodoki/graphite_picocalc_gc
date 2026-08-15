@@ -1,6 +1,41 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 (later still) — **6B.8-6B.10: the `calc`
+**Last session:** 2026-08-16 (Pico 2 bring-up) — **the Pico 2 has now run
+Phase 6B**, and it found a two-core SPI race that only it could show
+(issue #39, closed).
+
+> ## The rule that came out of it
+>
+> **Nothing outside the render loop may touch the panel or the scratch
+> buffers without calling `gfx::display_wait_idle()` first.**
+>
+> D85 had asserted that `render_frame` always leaves core 1 idle before
+> returning. True on the Pico 1 (strip mode ends with `drain_acks()`);
+> **false on the Pico 2**, whose async full-frame push returns while core
+> 1 is still transferring and drains at the *start* of the next frame.
+> A 6B.8 binding therefore shared the SPI peripheral and the `staging`
+> buffer with core 1, and one `calc.draw_rect` cost the panel its colour
+> depth globally until reboot. D85 is corrected in place.
+>
+> **Three hypotheses were built and disproved first.** What broke it was
+> a negative result: a full-width push degraded the panel identically to
+> a narrow one, so geometry was irrelevant and the difference had to be
+> *which core held the bus*. Look for the asymmetry that is not the
+> obvious one.
+
+**Two Pico 2 differences, both benign and worth knowing**: the M33's FPU
+makes frames shallower, so the stack guard *permits deeper nesting there*
+(a 10x10 eigen four frames down peaks at 3,440 of 4,096 and runs, where
+the Pico 1 refuses it two frames down) — which is the runtime-bytes check
+working as designed. And the 96 KB heap means D77's churn loop simply
+completes instead of triggering the fragmentation reset.
+
+**Phase 6B is verified on both boards.** Free SRAM 16 KB (Pico 1) and
+26 KB (Pico 2).
+
+---
+
+**Previous session:** 2026-08-16 (later still) — **6B.8-6B.10: the `calc`
 module is complete** (D85). A script can draw on its own canvas, read
 keys, and read and write SD files. 21 host suites / 3,241 checks; free
 SRAM **16 KB** (Pico 1) and 26 KB (Pico 2).

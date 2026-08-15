@@ -879,6 +879,19 @@ bool HomeScreen::handle_command(const char* cmd) {
         }
         push_entry(cmd, g_py_line_len > 0 ? g_py_line : (ok ? "ok" : "error"),
                    ok ? ResultKind::kPlain : ResultKind::kError);
+        // A script that drew (6B.8) has scribbled straight onto the panel,
+        // and this screen tracks dirty bands — submit_input's own
+        // invalidate() covers rows 0..kSoftkeyY, so the softkey bar below it
+        // would keep the script's pixels until something else repainted the
+        // whole screen. Found on the Pico 2, 2026-08-16.
+        //
+        // Unlike ProgramScreen there is no canvas MODE here: `py` is a
+        // one-liner REPL at the calculator, so a drawing is transient by
+        // definition and the home screen takes its display straight back.
+        if (calc_api_canvas_owns_display() != 0) {
+            invalidate_all();
+        }
+
         // calc.show_graph() is deferred out of the binding to here (6B.6),
         // for the same reason ProgramScreen defers it: the binding ran inside
         // the VM inside this on_key, and pushing a screen from there would

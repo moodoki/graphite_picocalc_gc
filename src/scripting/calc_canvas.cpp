@@ -34,6 +34,14 @@ constexpr NamedColor kNamed[] = {
     {"grey", platform::Color::from_rgb(128, 128, 128)},
 };
 
+// Core 1 may still be pushing the last frame when a binding runs — see
+// gfx::display_wait_idle(). Every entry point below waits first, because
+// every one of them either writes the shared scratch buffer or drives the
+// SPI bus, and core 1 is doing both.
+void ensure_idle() {
+    gfx::display_wait_idle();
+}
+
 int clampi(int v, int lo, int hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
@@ -133,6 +141,7 @@ bool owns_display() {
 }
 
 void clear(Rgb565 color) {
+    ensure_idle();
     // Taking the panel is what clear_screen means. Everything else assumes it
     // has already happened, but does not require it — a script that draws
     // without clearing first still gets its pixels, on top of the editor.
@@ -141,10 +150,12 @@ void clear(Rgb565 color) {
 }
 
 void pixel(int x, int y, Rgb565 color) {
+    ensure_idle();
     push_run(x, y, 1, color);
 }
 
 void line(int x0, int y0, int x1, int y1, Rgb565 color) {
+    ensure_idle();
     // Horizontal and vertical are the cases worth having exact: one push and
     // h pushes respectively.
     if (y0 == y1) {
@@ -194,6 +205,7 @@ void line(int x0, int y0, int x1, int y1, Rgb565 color) {
 }
 
 void rect(int x, int y, int w, int h, Rgb565 color, bool fill) {
+    ensure_idle();
     if (w <= 0 || h <= 0) {
         return;
     }
@@ -213,6 +225,7 @@ int text(int x, int y, const char* s, Rgb565 fg, Rgb565 bg) {
     if (s == nullptr || *s == 0) {
         return 0;
     }
+    ensure_idle();
     const gfx::Font& font = gfx::main_font();
     const int ch = font.height();
     if (ch > gfx::kScratchRows) {

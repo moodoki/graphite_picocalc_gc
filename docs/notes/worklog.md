@@ -305,6 +305,68 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-16 (Pico 2 bring-up) — first 6B run on the RP2350, and a two-core SPI race (issue #39)
+
+**The Pico 2 has now run Phase 6B**, for the first time. Everything passed —
+after a real bug that only this board could show.
+
+**The bug.** One `calc.draw_rect` left the panel with visibly fewer shades
+(greys collapsing to black) **globally and until reboot**, on every screen.
+The drawing itself came out correct, which is what made it hard to see.
+
+**The cause**: the core-1 display service runs on **both** boards (D10 leg A),
+and strip mode ends `render_frame` with `drain_acks()` — but the Pico 2's
+async full-frame push *deliberately returns while core 1 is still
+transferring*, draining at the start of the next frame instead. So a 6B.8
+binding, running from `on_key`, drove the same SPI peripheral and the same
+`staging` conversion buffer as core 1, concurrently.
+
+**D85 asserted the opposite** — "render_frame drains its pushes before
+returning" — which is true on the Pico 1 and false on the Pico 2. Corrected in
+place. Fixed with `gfx::display_wait_idle()` at the top of every canvas entry
+point, and the rule now stated at the function: nothing outside the render
+loop may touch the panel or the scratch buffers without waiting for core 1.
+
+**Three hypotheses were built, flashed and disproved first** — a `staging`
+overrun, the Pico 2 composing in the live `frame_buf`, and a stale address
+window. Each cost a hardware check. What broke the deadlock was a *negative*
+result: a full-width push degraded the panel identically to a narrow one, so
+geometry was irrelevant and the difference had to be context, not shape. Worth
+remembering — the misleading part was that width looked relevant.
+
+Two corrections came from the user rather than from me: the degradation
+appeared **after the draw**, not after flashing (my first issue write-up blamed
+the reset path and was wrong), and the Pico 1 had **never been checked** for
+it, so "Pico 2 only" was an assumption. It does turn out to be Pico 2 only,
+for the drain reason above — but that was luck, not evidence, at the time.
+
+**Also fixed**: drawing from the home screen's `py` left the softkey bar
+showing script pixels forever, because the home screen tracks dirty bands and
+`submit_input` invalidates rows 0..kSoftkeyY only. The `py` path now
+`invalidate_all()`s when a script took the panel — unlike ProgramScreen there
+is no canvas mode at the home screen, since a REPL drawing is transient by
+definition.
+
+**Verified on the Pico 2**: boot, PSRAM, `sqrt(8)` symbolic; the whole calc
+module — eval/CAS/solve/complex, graph analysis, 10x10 Hilbert
+det/inverse/eigenvalues, 400 `list_append` calls costing **32 bytes** of a
+96 KB heap, 5,000-byte chunked file read, canvas, keys, and both demo scripts
+including ESC stopping an infinite drawing loop.
+
+**Two board differences worth recording**, both benign:
+
+- The **stack guard adapts correctly**. The M33's hardware FPU removes
+  softfloat frames, so the same requirements in bytes permit deeper nesting
+  here: `calc.eval("solve(...)")` peaks at 3,228 vs 3,544 on the Pico 1, and a
+  10x10 eigen call four Python frames deep peaks at 3,440 of 4,096 and is
+  *allowed*, where the Pico 1 refuses it two frames down. That is the point of
+  checking free bytes at runtime rather than hardcoding a depth.
+- The **96 KB heap changes D77's behaviour**: the 400-iteration string-churn
+  loop that exhausted the Pico 1's 40 KB heap and triggered the fragmentation
+  reset simply completes here, with 80 KB still free.
+
+---
+
 ## 2026-08-16 (later still) — 6B.8-6B.10: the calc module is complete (D85)
 
 **Done: 6B.8, 6B.9, 6B.10.** A script can draw on its own canvas, read keys
