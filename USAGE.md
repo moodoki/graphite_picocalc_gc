@@ -63,6 +63,7 @@ the home screen:
 | `settings`, `setup` | Power and brightness settings |
 | `diag` | Hardware diagnostics |
 | `files` | SD file browser |
+| `py <statement>` | Runs one line of Python and shows what it printed. State persists between calls, so `py a=6*7` then `py print(a)` works |
 | `mode`, `mode <setting>` | Mode settings — bare opens the screen, with an argument sets it directly |
 | `cls` | Clear the screen, keeping input history |
 | `clrhist` | Erase all history |
@@ -228,3 +229,36 @@ than `NaN`; `a+bi` and `r∠θ` display the complex value in that form.
 
 `simplify`, `expand`, `factor`, `diff`, `integ` and `solve` are also ordinary
 functions you can call inline — `diff(x^2, x)` works without opening a menu.
+
+## Apps (`F6`, or `apps`)
+
+`F6` on the home screen opens the launcher. `ESC` from an app returns to the
+launcher; `HOME` goes straight back to the calculator from anywhere.
+
+| App | What it does |
+|-----|--------------|
+| **Notepad** | Plain-text notes under `/picocalc/notes/`. `F2` saves, `F3` loads, `F4` starts a new file |
+| **Python** | Write and run MicroPython. Same editor keys as Notepad, plus `F1` RUN. Files live under `/picocalc/programs/` |
+| **Files** | Browse the SD card. `ENTER` opens a directory, `F4` renames, `F5` makes a folder, `DEL` deletes |
+
+### Python
+
+`F1` saves the script and runs it, then shows what it printed. `ESC` returns to
+the editor, `ESC` again leaves for the launcher; `UP`/`DOWN` scroll the output.
+An error shows its traceback with the failing line number, and the view scrolls
+to it.
+
+`ENTER` after a line ending in `:` indents the next line, as you would expect.
+
+**`ESC` stops a running script** — it raises `KeyboardInterrupt`, so a loop that
+never ends is not a reason to power-cycle the machine.
+
+If a script prints more than the output pane holds, the **oldest** lines are
+dropped and the header says `(trimmed)`. That keeps the end of the output, which
+is where a traceback is.
+
+There is no `import` of your own modules yet, and `open()` raises — file access
+arrives with the `calc` module in a later release. `json` is available.
+
+For one-off expressions, `py <statement>` on the home screen runs a single line
+without leaving the calculator.

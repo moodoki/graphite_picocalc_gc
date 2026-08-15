@@ -32,6 +32,7 @@ rejoined below, everything else is kept as its own line verbatim.
 - `test     inference (infer ok)`
 - `plot     stat plot setup`
 - `calc     graph analysis menu`
+- `py <stmt> run one line of Python; state is kept`
 - `cls      clear screen (keeps input history)`
 - `clrhist  erase all history`
 

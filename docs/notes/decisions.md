@@ -18,6 +18,65 @@ Format:
 
 ---
 
+## D73: MicroPython runs on core 0's existing 4 KB stack — no stack switching, measured not argued
+
+**Date**: 2026-08-15
+**Status**: Accepted (measurement closed an open risk)
+**Context**: §4.4 budgeted "8 KB C stack for Python calls". There is no 8 KB
+to give: core 0's stack is **4 KB**, hard-capped by SCRATCH_Y, and
+`PICO_STACK_SIZE=4096` is already the maximum the bank allows (D47). Both of
+MicroPython's stack-hungry phases — the parser and the compiler — recurse, and
+so does Python-level recursion. This was the single biggest unknown in 6B.
+
+Three ways out were on the table, in increasing cost:
+
+1. Run inside the existing 4 KB with `mp_stack_set_limit()`.
+2. Relocate core 0's stack into the main SRAM bank with a custom linker script.
+3. A dedicated `g_py_stack[]` in bss, entered by switching to PSP around the
+   interpreter call, with its own paint/scan so the existing MSP guard stays
+   intact.
+
+**Decision**: **(1).** `mp_stack_set_limit()` is set 1 KB below the linker's
+`__StackTop` — an absolute floor in SCRATCH_Y, not a depth relative to
+wherever the UI happened to be when the interpreter came up. Neither (2) nor
+(3) is being built.
+
+**Rationale**: it was measured, on the Pico 1, with the paint-and-scan
+instrument D47 already left in place:
+
+| Workload | `stack: peak` of 4,096 | Outcome |
+|---|---|---|
+| one-liners (`print`, comprehensions, `2**0.5`) | 1,832 | fine |
+| 15-line script: two functions, nested loop, conditional, comprehension | no new mark | fine |
+| Python recursion to depth 40 | **3,224** | `RuntimeError` |
+| recursion to depth 60, caught in Python | **3,288** | `RuntimeError`, caught |
+
+`RuntimeError: maximum recursion depth exceeded`, catchable from Python, with
+**808 bytes** still unused. The whole D48 failure mode — SP crosses
+`__StackBottom` into core 1's stack and the machine hangs with a garbage PC —
+is converted into an exception a script can handle. Options (2) and (3) both
+spend SRAM we are short of (17 KB free on the Pico 1) to buy depth that
+measurement says is not needed, and (3) is real assembly on two different
+cores.
+
+Note what the 4 KB is *not* short of: a realistic script never approached the
+limit. The limit binds on **Python-level recursion**, which is the one case
+where the user has an obvious workaround and an explicit error message.
+
+**Tradeoffs**: recursion past ~35 frames raises where CPython would keep
+going. That is a genuine behavioural difference and it is the right one to
+accept — the alternative was a hang. The 1 KB reserve also has to cover
+whatever ISR frame lands on top; `kLiveMargin` in `fault.cpp` assumes a
+TinyUSB IRQ can exceed 256 B, and 808 B of measured headroom already includes
+any IRQ live at the deepest moment, since the instrument counts actual writes.
+
+**Revisit when**: a real script hits the recursion limit doing something
+reasonable, or the `calc` bindings (6B.3-6B.10) push the peak past ~3,600.
+`kStackReserve` in `micropython_embed.cpp` is one constant, and (3) is still
+there if it is ever earned.
+
+---
+
 ## D72: The MicroPython heap is statically reserved, and lazily *initialized* — D57 amended
 
 **Date**: 2026-08-15

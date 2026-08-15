@@ -758,6 +758,34 @@ mode).
 
 ### 4.1 Embedding strategy
 
+**BUILT 2026-08-15.** What follows is the plan as written; the shipped
+shape differs in three ways worth stating before the sketch, because the
+sketch is what a reader will otherwise take as current:
+
+1. **MicroPython is a git submodule** (`drivers/micropython`, pinned to
+   **v1.28.0**), not a vendored copy — **D71**, which also sets the rule
+   for large third-party dependencies from here on. Its embed port
+   *generates* the C tree we compile, at CMake configure time, so the
+   build needs `make` and a host compiler. Our whole local configuration
+   is `drivers/micropython_port/`.
+2. **Every line that touches a MicroPython header is in C**
+   (`src/scripting/mp_port.c`). MicroPython raises by `longjmp`, past
+   every intervening frame, with no diagnostic when that frame was C++
+   holding something with a destructor. Keeping the seam in C makes that
+   structural rather than something to remember — which is what matters
+   when §4.2's bindings start calling back the other way.
+3. **`register_function` does not exist yet.** It arrives with 6B.3, and
+   is likely to be a module table rather than the one-function-at-a-time
+   shape sketched below.
+
+The interface as built (`src/scripting/micropython_embed.hpp`) is
+`init`/`shutdown`/`is_running`/`exec`/`set_output_callback`/`heap_free`,
+plus `emit`/`poll_interrupt` for the C boundary to call back through.
+`exec_file` is deferred to 6B.15/6B.16, where SD apps first need it — the
+RUN key executes the editor's buffer, which the widget has just written
+to disk, so nothing yet needs a file read that would cost a second 4 KB
+staging buffer.
+
 MicroPython provides an `embed` port specifically designed for hosting
 MicroPython inside a larger C/C++ application. The firmware includes the
 MicroPython interpreter as a library, not a standalone runtime.
@@ -973,30 +1001,44 @@ the line number and exception message.
 
 ### 4.4 Memory budget for MicroPython
 
-| Component | Pico 1 (SRAM) | Pico 2 (SRAM) |
-|-----------|---------------|---------------|
-| MicroPython interpreter + stdlib | ~60 KB flash | ~60 KB flash |
-| Python heap (GC-managed) | **40 KB** (D61, 2026-08-14) | 96 KB |
-| C stack for Python calls | 8 KB | 8 KB |
-| **Total SRAM impact** | **~48 KB** | **~104 KB** |
+**MEASURED 2026-08-15, on hardware, once 6B.1-6B.14 shipped.** The table
+below is now a record, not an estimate. Every figure came off
+`size-report.sh` and the on-device `stack: peak` instrument.
 
-**Both columns fit as of 2026-08-15 (§0.1, D70).** After the recovery
-levers, the Pico 1 has **61 KB** free against the 48 KB this table
-needs, and the Pico 2 has **126 KB** against 104 KB. These heap sizes
-are now descriptions of what the image can actually serve, not targets
-— but the ~13 KB of Pico 1 spare has to absorb all of 6B's own static
-cost, so re-measure as 6B.1 lands rather than assuming it holds.
+| Component | Pico 1 | Pico 2 |
+|-----------|--------|--------|
+| Python heap (GC-managed, static bss) | **40 KB** | **96 KB** |
+| MicroPython's own static footprint beyond the heap | **<1 KB** | **<1 KB** |
+| Interpreter + `json` + `io` (flash) | **+155 KB** | **+134 KB** |
+| Program screen + output pane | **2.4 KB** | **2.4 KB** |
+| **Free SRAM after all of it** | **17 KB** | **26 KB** |
 
-The MicroPython interpreter is only initialized when the user enters the
-program screen. **Formalized as D57 (§8 P6-1): lazy allocation** — the
-Python heap comes up on entering the program/app screen and is freed on
-leaving (6B.14), not reserved at boot; this applies to any
-SD-discovered Python app (§4.5) too, since they all run through the same
-`PythonInterpreter`. **But note what lazy allocation does and does not
-buy (D70)**: it avoids a permanent reservation, yet still requires the
-full 40 KB to be *free at that moment*. It does not shrink the number
-that has to be found — nothing large is idle while a script runs,
-because `calc.eval()` reaches into the CAS scratch.
+The number that had no estimate anywhere in this spec was MicroPython's
+non-heap static cost, and it turned out to be **under 1 KB** — 41,916
+bytes of SRAM went to a 40,960-byte heap. `json` and the `io` module it
+drags in cost 4 KB of flash and **zero** SRAM.
+
+The C stack does **not** appear in this table, and the earlier version's
+"8 KB C stack for Python calls" row was wrong in a way worth naming:
+there is no 8 KB to give. Core 0 has **4 KB**, hard-capped by SCRATCH_Y,
+and `PICO_STACK_SIZE=4096` is already the maximum the bank allows (D47).
+MicroPython runs inside that 4 KB with `mp_stack_set_limit()` set 1 KB
+below `__StackTop`, and the measurements say that is enough — see D73.
+
+The interpreter is only initialized when the user enters the program
+screen. **D57 (§8 P6-1) called this lazy allocation**; **D72 corrects
+it** — there is no allocator, so the heap is a static bss array reserved
+for the life of the image, and what is lazy is `mp_embed_init()` /
+`mp_embed_deinit()`. The observable behaviour D57 wanted survives (no
+interpreter state until a program screen is open, a fully-free heap on
+re-entry); the implication that the bytes are available to anything else
+in between does not. D70 had already said as much from the other
+direction.
+
+**17 KB of Pico 1 spare is the real budget for 6B.3-6B.10's `calc`
+bindings**, not the 61 KB the recovery work banked. Re-measure at each
+step. If it gets tight, `MICROPY_CONFIG_ROM_LEVEL` (currently
+`CORE_FEATURES`) and `kPythonHeapSize` are both single constants.
 
 Notepad (6C) never touches this budget at all — it has no interpreter.
 
@@ -1010,6 +1052,11 @@ in the low single-digit KB, but this is an estimate, not a measurement.
 Worth an actual `gc.mem_free()` check once 6B.1 exists, as the first
 real test of "how much of the 40 KB does a modest reference dataset
 actually cost," not just working-variable/script-buffer usage.
+
+**The instrument for that now exists**: the program screen's output pane
+prints `heap N free` after every run, and `json` is compiled in, so the
+check is "paste the dataset into a script, run it, read the header." It
+has not been done — no dataset has been built yet.
 
 ### 4.5 SD-discovered app manifests
 
@@ -1573,6 +1620,14 @@ sub-phase changed, only the order they're tackled in.
 | | **Subtotal** | **~31 hrs** | |
 
 ### Sub-phase 6B: MicroPython programming (first base app)
+
+**Status 2026-08-15: 6B.1, 6B.2, 6B.11, 6B.12, 6B.13 and 6B.14 are
+done** — the interpreter builds and runs on both boards, and a script
+can be written, saved, run, power-cycled and reloaded on the device.
+6B.1's acceptance was met **in full including `json`**. What is left is
+the `calc` module (6B.3-6B.10) and the SD app manifests
+(6B.15-6B.16); a script in the shipped cut can print, loop and compute
+in pure Python, but cannot yet reach the calculator.
 
 | # | Task | Est. hrs | Acceptance |
 |---|------|---|---|
