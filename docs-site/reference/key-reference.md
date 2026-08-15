@@ -15,14 +15,17 @@ rejoined below, everything else is kept as its own line verbatim.
 - `F3 MODE  mode settings`
 - `F4 TRC   trace (opens graph)`
 - `F5 GRPH  graph <-> table`
+- `F6 APPS  app launcher (home)`
 - `HOME     back to home screen`
 - `ESC      back / cancel edit`
 
 ## COMMANDS (type on home)
 
 - `help (?) this help`
+- `apps     app launcher (also F6; app also ok)`
 - `diag     diagnostics screen`
-- `files    SD file list`
+- `files    SD file browser`
+- `cas      CAS operations menu`
 - `lists    data list editor`
 - `stats    statistics screen (list/stat also ok)`
 - `dist     distribution helper`
@@ -82,6 +85,31 @@ rejoined below, everything else is kept as its own line verbatim.
 - `SPACE    toggle enable`
 - `DEL      clear field`
 - `F5       graph`
+
+## APPS (F6 or apps cmd)
+
+- `UP/DOWN  select app`
+- `ENTER    open (1-9 also ok)`
+- `ESC      back to home`
+- `in an app, ESC returns to`
+- `the launcher, HOME to home`
+
+## NOTEPAD (Apps > Notepad)
+
+- `arrows   move cursor`
+- `F2 SAVE  F3 LOAD  F4 NEW`
+- `ESC      leave (twice if unsaved)`
+- `notes are .txt files in`
+- `/picocalc/notes`
+
+## FILES (files cmd)
+
+- `UP/DOWN  select entry`
+- `ENTER    open folder`
+- `LEFT     up one folder`
+- `F4 REN   rename`
+- `F5 MKDIR new folder`
+- `DEL      delete (confirms; folders must be empty)`
 
 ## LIST EDITOR (lists cmd)
 

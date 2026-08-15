@@ -126,6 +126,47 @@ bool Storage::ensure_dir(const char* path) const {
     return rc == FR_OK || rc == FR_EXIST;
 }
 
+bool Storage::rename_file(const char* old_path, const char* new_path) const {
+    if (!mounted_ || old_path == nullptr || new_path == nullptr) {
+        return false;
+    }
+    // Refuse rather than clobber: f_rename already fails on an existing
+    // destination, but checking first makes the contract explicit and
+    // independent of FatFs configuration.
+    if (f_stat(new_path, nullptr) == FR_OK) {
+        return false;
+    }
+    return f_rename(old_path, new_path) == FR_OK;
+}
+
+bool Storage::delete_dir(const char* path) const {
+    if (!mounted_ || path == nullptr) {
+        return false;
+    }
+    // Deliberately non-recursive (D55): emptying a populated directory
+    // is a separate, explicit step, not the side effect of one delete
+    // keypress. f_unlink removes an empty directory and reports
+    // FR_DENIED for a populated one, but check first so the refusal
+    // does not depend on that behaviour.
+    DIR dir;
+    if (f_opendir(&dir, path) != FR_OK) {
+        return false;
+    }
+    FILINFO info;
+    bool empty = true;
+    while (f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
+        if (std::strcmp(info.fname, ".") != 0 && std::strcmp(info.fname, "..") != 0) {
+            empty = false;
+            break;
+        }
+    }
+    f_closedir(&dir);
+    if (!empty) {
+        return false;
+    }
+    return f_unlink(path) == FR_OK;
+}
+
 int Storage::list_dir(const char* path, DirEntry* entries, int max_entries) const {
     if (!mounted_) {
         return -1;

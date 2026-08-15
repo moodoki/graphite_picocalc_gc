@@ -30,7 +30,11 @@ constexpr bool kHasHardwareFpu = true;
 constexpr bool kUseFullFramebuffer = false;
 // (CAS ExprPool overlays the shared math scratch kCompute region — see
 // src/math/cas/expr.cpp and math::scratch — so no dedicated pool constant.)
-constexpr size_t kPythonHeapSize = 48 * 1024;
+// 40 KB, not 48: D61 (2026-08-14) pre-committed the cut ahead of 6A
+// landing, after a size-report found only 2.2 KB of margin above the
+// 56 KB threshold with no 6A code written. Phase 6 spec §4.4/Risk 6
+// state this as the shipped number, not a conditional lever.
+constexpr size_t kPythonHeapSize = 40 * 1024;
 constexpr int kOverclockHz = 200'000'000;  // 200 MHz
 constexpr bool kHasHardwareFpu = false;
 #endif

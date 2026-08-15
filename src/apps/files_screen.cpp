@@ -57,6 +57,11 @@ void FileBrowserScreen::configure(FileBrowserMode mode, const char* start_dir,
     on_picked_ = on_picked;
     copy_path(start_dir_, start_dir);
     copy_path(cur_dir_, start_dir_);
+    // A new caller must not inherit the previous one's half-finished
+    // rename prompt or its "Deleted" status line.
+    prompt_.close();
+    prompt_kind_ = Prompt::kNone;
+    status_[0] = 0;
 }
 
 int FileBrowserScreen::depth() const {
@@ -142,6 +147,133 @@ bool FileBrowserScreen::ascend() {
     return true;
 }
 
+void FileBrowserScreen::set_status(const char* msg) {
+    std::snprintf(status_, sizeof(status_), "%s", msg != nullptr ? msg : "");
+}
+
+const platform::Storage::DirEntry* FileBrowserScreen::current() const {
+    if (selected_ < 0 || selected_ >= count_) {
+        return nullptr;
+    }
+    return &entries_[selected_];
+}
+
+void FileBrowserScreen::begin_rename() {
+    const auto* e = current();
+    if (e == nullptr) {
+        return;
+    }
+    prompt_kind_ = Prompt::kRename;
+    prompt_.open("rename=", e->name);
+}
+
+void FileBrowserScreen::begin_new_folder() {
+    prompt_kind_ = Prompt::kNewFolder;
+    prompt_.open("newdir=");
+}
+
+void FileBrowserScreen::begin_delete() {
+    const auto* e = current();
+    if (e == nullptr) {
+        return;
+    }
+    prompt_kind_ = Prompt::kConfirmDelete;
+    // Confirm-gated (D55). A typed y/n rather than a second keypress:
+    // deletion is the one irreversible action here, so it should not be
+    // reachable by a repeated stray press of the same key.
+    prompt_.open(e->is_dir ? "delete dir? y/n " : "delete file? y/n ");
+}
+
+void FileBrowserScreen::do_delete() {
+    const auto* e = current();
+    if (e == nullptr) {
+        return;
+    }
+    char path[platform::kMaxPath];
+    if (!join(e->name, path, sizeof(path))) {
+        set_status("Path too long");
+        return;
+    }
+    const bool is_dir = e->is_dir;
+    const bool ok =
+        is_dir ? platform::storage().delete_dir(path) : platform::storage().delete_file(path);
+    if (ok) {
+        const int keep = selected_;
+        relist();
+        // Stay where the user was rather than jumping to the top.
+        selected_ = keep < count_ ? keep : (count_ > 0 ? count_ - 1 : 0);
+        set_status("Deleted");
+    } else {
+        set_status(is_dir ? "Dir not empty" : "Delete failed");
+    }
+}
+
+void FileBrowserScreen::commit_prompt() {
+    const char* name = prompt_.text();
+
+    if (prompt_kind_ == Prompt::kConfirmDelete) {
+        const bool yes = name[0] == 'y' || name[0] == 'Y';
+        prompt_.close();
+        prompt_kind_ = Prompt::kNone;
+        if (yes) {
+            do_delete();
+        }
+        return;
+    }
+
+    if (name[0] == 0) {
+        prompt_.set_error("Empty");
+        return;
+    }
+    for (const char* p = name; *p != 0; ++p) {
+        if (*p == '/' || *p == '\\' || *p == ':') {
+            prompt_.set_error("Bad name");
+            return;
+        }
+    }
+
+    char dest[platform::kMaxPath];
+    if (!join(name, dest, sizeof(dest))) {
+        prompt_.set_error("Too long");
+        return;
+    }
+
+    if (prompt_kind_ == Prompt::kNewFolder) {
+        if (platform::storage().file_exists(dest)) {
+            prompt_.set_error("Exists");
+            return;
+        }
+        if (!platform::storage().ensure_dir(dest)) {
+            prompt_.set_error("Failed");
+            return;
+        }
+        set_status("Folder created");
+    } else if (prompt_kind_ == Prompt::kRename) {
+        const auto* e = current();
+        if (e == nullptr) {
+            prompt_.close();
+            prompt_kind_ = Prompt::kNone;
+            return;
+        }
+        char src[platform::kMaxPath];
+        if (!join(e->name, src, sizeof(src))) {
+            prompt_.set_error("Too long");
+            return;
+        }
+        if (!platform::storage().rename_file(src, dest)) {
+            // rename_file refuses an existing destination, which is the
+            // overwhelmingly likely cause here.
+            prompt_.set_error("Exists or failed");
+            return;
+        }
+        set_status("Renamed");
+    }
+
+    prompt_.close();
+    prompt_kind_ = Prompt::kNone;
+    relist();
+}
+
 void FileBrowserScreen::on_activate() {
     if (cur_dir_[0] == 0) {
         // Never configured — the diagnostic's original defaults.
@@ -155,7 +287,31 @@ bool FileBrowserScreen::on_key(const platform::KeyEvent& ev) {
     if (!ev.pressed) {
         return false;
     }
+
+    // The prompt is modal and swallows everything, so a stray softkey
+    // can't act on a selection while a delete is being confirmed.
+    if (prompt_.active()) {
+        bool submitted = false;
+        bool cancelled = false;
+        prompt_.on_key(ev, &submitted, &cancelled);
+        if (submitted) {
+            commit_prompt();
+        } else if (cancelled) {
+            prompt_kind_ = Prompt::kNone;
+        }
+        return true;
+    }
+
     switch (ev.key) {
+        case Key::kF4:
+            begin_rename();
+            return true;
+        case Key::kF5:
+            begin_new_folder();
+            return true;
+        case Key::kDel:
+            begin_delete();
+            return true;
         case Key::kUp:
             if (selected_ > 0) {
                 --selected_;
@@ -242,10 +398,20 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
         font.draw_string(fb, platform::kScreenW - font.text_width(line) - 8, 2, line, kGrayLine);
     }
 
-    const char* const keys[6] = {"", "", "", "", "", ""};
+    const int bar_y = platform::kScreenH - ui::kSoftkeyBarH;
+    if (prompt_.active()) {
+        fb.fill_rect(0, bar_y, platform::kScreenW, ui::kSoftkeyBarH,
+                     platform::Color::from_rgb(30, 30, 30));
+        prompt_.render(fb, 2, bar_y + 2, platform::kScreenW - 4, font);
+        return;
+    }
+
+    const char* const keys[6] = {"", "", "", "REN", "MKDIR", ""};
     ui::draw_softkeys(fb, keys);
-    const char* hint = depth() > 0 ? "ENTER:OPEN  LEFT:UP  ESC:BACK" : "ENTER:OPEN  ESC:BACK";
-    font.draw_string(fb, 2, platform::kScreenH - ui::kSoftkeyBarH + 4, hint, kGrayLine);
+    if (status_[0] != 0) {
+        font.draw_string(fb, platform::kScreenW - font.text_width(status_) - 2, bar_y + 2, status_,
+                         kGreen);
+    }
 }
 
 FileBrowserScreen& file_browser() {

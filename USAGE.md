@@ -37,6 +37,10 @@ The same five keys mean the same thing on every screen:
 | `HOME` | Back to the home screen |
 | `ESC` | Back, or cancel an edit |
 
+On the **home screen only**, `F6` opens the app launcher. Inside an app, `ESC`
+returns to the launcher rather than to the home screen — `HOME` still goes
+straight home from anywhere, as it always has.
+
 ## Typed commands
 
 Several screens have no key of their own and are opened by typing their name on
@@ -52,12 +56,14 @@ the home screen:
 | `plot`, `plots` | Stat plot setup |
 | `calc`, `analyze` | Graph analysis menu |
 | `mat`, `matrix` | Matrix editor |
-| `cas` | CAS menu (also `F6`) |
+| `cas` | CAS menu |
+| `apps`, `app` | App launcher (also `F6`) |
 | `solve`, `solver` | Numeric equation solver |
 | `const`, `constants` | Scientific constants |
 | `settings`, `setup` | Power and brightness settings |
 | `diag` | Hardware diagnostics |
-| `files` | SD file list |
+| `files` | SD file browser |
+| `mode`, `mode <setting>` | Mode settings — bare opens the screen, with an argument sets it directly |
 | `cls` | Clear the screen, keeping input history |
 | `clrhist` | Erase all history |
 

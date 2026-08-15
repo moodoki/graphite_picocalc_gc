@@ -10,6 +10,8 @@ namespace ui {
 
 // Everything app-specific about the editor (spec §3.5). Notepad
 // (§3.6) and 6B's Python program editor (§4.3) differ only in this.
+// Every read site tolerates null, so a consumer only sets what it
+// cares about.
 struct TextEditorConfig {
     const char* title = "EDIT";                  // status bar
     const char* save_dir = "/picocalc";          // e.g. "/picocalc/notes"

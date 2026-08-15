@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "platform/storage.hpp"
+#include "ui/prompt_line.hpp"
 #include "ui/screen.hpp"
 
 namespace apps {
@@ -55,12 +56,26 @@ private:
     char start_dir_[platform::kMaxPath] = {};  // floor for ascending
     char cur_dir_[platform::kMaxPath] = {};
 
+    // ---- Management (6A.7, D55), available in both modes ----
+    ui::PromptLine prompt_;
+    enum class Prompt : std::uint8_t { kNone, kRename, kNewFolder, kConfirmDelete };
+    Prompt prompt_kind_ = Prompt::kNone;
+    char status_[40] = {};  // transient result/error text
+
     void relist();
     void descend(const char* name);
     bool ascend();  // false when already at start_dir
     int depth() const;
     // Joins cur_dir_ + "/" + name into out. False if it wouldn't fit.
     bool join(const char* name, char* out, std::size_t out_len) const;
+
+    void set_status(const char* msg);
+    const platform::Storage::DirEntry* current() const;
+    void begin_rename();
+    void begin_new_folder();
+    void begin_delete();
+    void commit_prompt();
+    void do_delete();
 };
 
 // The single shared instance. Only one browser is ever in front of the

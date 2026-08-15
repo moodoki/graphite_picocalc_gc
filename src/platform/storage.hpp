@@ -45,6 +45,17 @@ public:
     // Creates the directory if missing (no error if it exists).
     bool ensure_dir(const char* path) const;
 
+    // Renames or moves a file or directory (Phase 6A.7, D55). False if
+    // the destination already exists or the source doesn't — never
+    // clobbers.
+    bool rename_file(const char* old_path, const char* new_path) const;
+
+    // Removes an EMPTY directory. False if it doesn't exist or still
+    // has entries — deliberately non-recursive (D55), so emptying a
+    // populated directory stays an explicit, separate act rather than
+    // the side effect of one delete keypress.
+    bool delete_dir(const char* path) const;
+
     struct DirEntry {
         char name[64];
         bool is_dir;
