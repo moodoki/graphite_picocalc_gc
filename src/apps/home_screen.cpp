@@ -11,6 +11,7 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "math/autoclose.hpp"
 #include "math/cas/cas_eval.hpp"
 #include "math/cas/exact.hpp"
 #include "math/cas/serialize.hpp"
@@ -580,6 +581,21 @@ void HomeScreen::submit_input() {
             return;
         }
     }
+    // Auto-close trailing parens (issue #35, TI-style): `sin(90` runs
+    // as `sin(90)`. Done on the input line itself, before evaluation,
+    // so the history echoes the completed form — the previous behaviour
+    // *displayed* a balanced expression (the layout builder tolerates a
+    // missing paren) while the parser rejected it, which read as the
+    // calculator correcting itself and then refusing its own
+    // correction.
+    {
+        char closed[ui::InputLine::kCapacity];
+        std::snprintf(closed, sizeof(closed), "%s", input_.text());
+        if (math::close_open_parens(closed, sizeof(closed)) > 0) {
+            input_.set_text(closed);
+        }
+    }
+
     evaluate_input();
     invalidate(0, kSoftkeyY);  // History + input + status bar
 }

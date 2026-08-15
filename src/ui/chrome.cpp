@@ -17,6 +17,25 @@ const platform::Color kBattLow = platform::Color::from_rgb(255, 180, 0);
 const platform::Color kBattCrit = platform::colors::kRed;
 const platform::Color kBattChg = platform::Color::from_rgb(0, 200, 220);
 
+// A switch rather than a ternary chain: DisplayMode gained kEng and the
+// old chain's default silently labelled it "FLT" (issue #36) while the
+// MODE screen showed ENG correctly, so the two disagreed on screen.
+// -Wswitch now catches the next value added to the enum instead of
+// mislabelling it.
+const char* display_mode_label() {
+    switch (math::display_mode()) {
+        case math::DisplayMode::kFloat:
+            return "FLT";
+        case math::DisplayMode::kFix:
+            return "FIX";
+        case math::DisplayMode::kSci:
+            return "SCI";
+        case math::DisplayMode::kEng:
+            return "ENG";
+    }
+    return "FLT";  // unreachable for a valid enum value
+}
+
 // Battery icon (body + tip) with a level-colored fill and percent text.
 // Returns the leftmost x used, so other indicators can right-align to it.
 int draw_battery(gfx::Framebuffer& fb, const gfx::Font& font) {
@@ -85,12 +104,10 @@ void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags)
     // Battery, rightmost; other indicators right-align to its left edge.
     const int batt_x = draw_battery(fb, font);
 
-    // Right-aligned indicators: [2nd] [A] RAD/DEG FLOAT/FIX/SCI
+    // Right-aligned indicators: [2nd] [A] RAD/DEG FLT/FIX/SCI/ENG
     char right[32];
     const char* angle = math::angle_mode() == math::AngleMode::kRadians ? "RAD" : "DEG";
-    const char* disp = math::display_mode() == math::DisplayMode::kFix   ? "FIX"
-                       : math::display_mode() == math::DisplayMode::kSci ? "SCI"
-                                                                         : "FLT";
+    const char* disp = display_mode_label();
     std::snprintf(right, sizeof(right), "%s%s%s %s", flags.second ? "2nd " : "",
                   flags.alpha ? "A " : "", angle, disp);
     const int rx = batt_x - 6 - font.text_width(right);

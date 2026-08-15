@@ -190,6 +190,15 @@ echo "== Compiling + linking test_text_buffer =="
     src/ui/text_buffer.cpp \
     -o "$OUT/test_text_buffer"
 
+# Entry-time paren auto-close (issue #35). Pure string logic — no math
+# engine, no tinyexpr, no cephes.
+echo "== Compiling + linking test_autoclose =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_autoclose.cpp \
+    src/math/autoclose.cpp \
+    -o "$OUT/test_autoclose"
+
 echo "== Compiling + linking test_seq =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
     -Isrc -Idrivers/tinyexpr \
@@ -262,6 +271,9 @@ echo "== Running test_apps =="
 
 echo "== Running test_text_buffer =="
 "$OUT/test_text_buffer"
+
+echo "== Running test_autoclose =="
+"$OUT/test_autoclose"
 
 echo "== Running test_seq =="
 "$OUT/test_seq"

@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 include(pico_sdk_import.cmake)
 
 project(picocalc_graphcalc
-    VERSION   0.4.0
+    VERSION   0.4.1
     LANGUAGES C CXX ASM
 )
 
@@ -108,6 +108,7 @@ add_executable(picocalc_graphcalc
     src/math/functions.cpp
     src/math/format.cpp
     src/math/frac.cpp
+    src/math/autoclose.cpp
     src/math/catalog.cpp
     src/math/scratch.cpp
     src/math/array.cpp

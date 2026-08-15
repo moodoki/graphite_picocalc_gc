@@ -1,5 +1,6 @@
 #include "math/array.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>

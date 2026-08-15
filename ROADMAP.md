@@ -1,8 +1,8 @@
 # Roadmap and status
 
-Current release: **[v0.4.0](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.4.0)**
+Current release: **[v0.4.1](https://github.com/moodoki/graphite_picocalc_gc/releases/tag/v0.4.1)**
 — prebuilt UF2s for both boards. Both targets build clean; the host suite is
-16 files / 2,599 checks, green.
+17 files / 2,632 checks, green.
 
 ## Phases
 

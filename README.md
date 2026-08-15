@@ -10,7 +10,7 @@ TI-83/84-inspired graphing calculator firmware for the
 on the Raspberry Pi Pico SDK. Runs on both the Pico 1 H (RP2040) and Pico 2 H
 (RP2350) modules from one source tree.
 
-**[Download v0.4.0](https://github.com/moodoki/graphite_picocalc_gc/releases/latest)**
+**[Download v0.4.1](https://github.com/moodoki/graphite_picocalc_gc/releases/latest)**
 · [Features](FEATURES.md) · [How to use it](USAGE.md) ·
 [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
