@@ -370,4 +370,40 @@ Three things to know:
   variables are lost, but the calculator keeps working and no power cycle is
   needed. Building the expression once outside the loop avoids it.
 
-Drawing, key input and file access are not in this release.
+### Drawing, keys and files
+
+```python
+calc.clear_screen("blue")            # the script now owns the screen
+calc.draw_rect(30, 50, 260, 140, "white", True)
+calc.draw_rect(30, 50, 260, 140, "red")        # outline
+calc.draw_line(30, 190, 290, 50, "green")
+calc.draw_pixel(160, 160, (255, 140, 0))       # names or (r, g, b)
+calc.draw_text(45, 70, "Hello", "black", "white")
+calc.text_size("Hello")              # (40, 16)
+
+k = calc.wait_key()                  # blocks; k["ch"], k["code"], k["shift"]…
+calc.key_pressed()                   # None if nothing is waiting
+calc.key_held("left")                # True while the key is down
+name = calc.input("Your name? ")
+
+calc.write_file("/picocalc/data.txt", "hello")
+calc.append_file("/picocalc/data.txt", " again")
+calc.read_file("/picocalc/data.txt")
+calc.file_exists("/picocalc/data.txt")
+```
+
+**A script that draws owns the screen.** `clear_screen()` hands it over: your
+drawing stays up when the script finishes, instead of the output pane
+appearing. **`ESC` gives the screen back** to the editor — and `ESC` also stops
+a running script, so a drawing loop that never ends is not a reason to
+power-cycle.
+
+**`draw_text` needs a background colour** (it defaults to black). The screen
+cannot be read back, so text is drawn as filled character cells rather than
+letters floating over whatever was there.
+
+Colours are either a name — `black`, `white`, `blue`, `red`, `green`,
+`yellow`, `cyan`, `magenta`, `orange`, `gray` — or an `(r, g, b)` triple.
+
+`calc.read_file` reads the whole file into memory, so it is limited by the
+Python heap; a few kilobytes is comfortable, a very large data file is not.

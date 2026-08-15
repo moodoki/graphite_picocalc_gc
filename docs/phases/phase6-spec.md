@@ -855,15 +855,19 @@ private:
 
 ### 4.2 Calculator API bindings (`calc` Python module)
 
-**6B.3-6B.7, 6B.17 BUILT 2026-08-15/16 and hardware-verified.** What shipped is
+**6B.3-6B.10 and 6B.17 BUILT 2026-08-15/16 and hardware-verified — the
+`calc` module is complete.** What shipped is
 `calc.eval`, `store`, `recall`, `simplify`, `expand`, `factor`, `diff`,
 `integ`, `solve`, `complex`, `c_abs`, `c_arg`, `c_conj`, `plot`, `window`,
 `show_graph`, `graph_zero`, `graph_min`, `graph_max`, `graph_integral`,
 `graph_deriv`, `graph_value`, the list bindings (`set_list`, `get_list`,
 `list_append`, `stat_mean`/`sum`/`min`/`max`/`stddev`) and the matrix bindings
 (`det`, `inverse`, `transpose`, `rref`, `matmul`, `eigenvalues`, `set_matrix`,
-`get_matrix`). Everything else in the sketch below — GPIO, display, input,
-file I/O — is 6B.8-6B.10 and not yet built.
+`get_matrix`), the canvas (`clear_screen`, `draw_pixel`, `draw_line`,
+`draw_rect`, `draw_text`, `text_size`), input (`wait_key`, `key_pressed`,
+`key_held`, `input`) and files (`read_file`, `write_file`, `append_file`,
+`file_exists`). Only the GPIO/sensor bindings from the sketch below are
+unbuilt, and those were never a Phase 6 task — they belong with §4.6 entry 2.
 
 Four things differ from the sketch and are settled, not open:
 
@@ -908,7 +912,13 @@ Four things differ from the sketch and are settled, not open:
    Measured: 400 `list_append` calls cost **16 bytes** of Python heap, where
    the same loop into a Python list exhausted all 40 KB (D77). The stated
    cost is that a script killed by `ESC` loses what it had not saved.
-7. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
+7. **The canvas is span-exact and takes the panel** (**D85**). Each primitive
+   pushes only its own pixels, so `draw_text` takes a **background colour**
+   and a diagonal line goes out as horizontal runs — there is no framebuffer
+   to read back into. `clear_screen()` gives the script the panel until it
+   ends; `ESC` gives it back. The vendored `read_buffer_spi()` is the
+   recorded upgrade path if real compositing is ever wanted.
+8. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
    a native complex type, so the binding exists for symmetry with the rest of
    the module rather than because it was needed. `c_arg` returns radians in
    $-\pi..\pi$ **whatever the angle mode says** — that convention, inherited
@@ -1730,9 +1740,9 @@ their own (est. 3 hrs) before §4.6's entry 1 can be built, and
 | 6B.5 | **DONE** `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = **5.0** |
 | 6B.6 | **DONE** `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — D68's Y-slot semantics, plus D79 for the deferred switch, the absent per-plot colour and the forced FUNC mode | 4 | `calc.graph_zero`, `graph_integral` work — **(2.0, 0.0) and -3.0 on hardware**; a script's first `plot()` clears Y1-Y7, its 8th raises |
 | 6B.7 | **DONE** `calc` module: matrix bindings — nested Python lists rather than handles (D84), one transient scratch Array, eigenvalues guarded separately at a measured 1,900 B | 3 | Create/multiply/invert from Python — **det/inverse/rref/eigenvalues verified on a 10x10 Hilbert matrix** |
-| 6B.8 | `calc` module: display primitives | 4 | Script draws graphics |
-| 6B.9 | `calc` module: keyboard input — blocking (`wait_key`, `input`) and non-blocking (`key_pressed`, `key_held`, §4.6 entry 5) | 3 | Read keys, text input, poll without blocking |
-| 6B.10 | `calc` module: file I/O | 2 | Read/write SD files |
+| 6B.8 | **DONE** `calc` module: display primitives — a script-owned canvas, span-exact pushes, composing in the render loop's own idle buffers (D80/D85) | 4 | Script draws graphics — **verified on the panel; the canvas survives the run and ESC gives it back** |
+| 6B.9 | **DONE** `calc` module: keyboard input — one drain, one 16-entry queue (D81 as refined by D85); key names resolved where `platform::Key` is visible | 3 | Read keys, text input, poll without blocking — **and ESC still stops an infinite drawing loop** |
+| 6B.10 | **DONE** `calc` module: file I/O — no staging buffer, the Python string is allocated first and filled through `read_file_range` (D83) | 2 | Read/write SD files — **5,000-byte chunked read verified; a missing file raises** |
 | 6B.11 | Python program editor: thin `TextEditorWidget` wrapper (§4.3) — RUN wiring, `.py` ext/dir, auto-indent-after-`:` config, syntax highlighting stretch, registered as a 6A app | 3 | Write a 20-line script on-device |
 | 6B.12 | Execution: output capture, error display | 4 | print output + line-numbered errors |
 | 6B.13 | Load/save scripts to SD | 3 | Save, power cycle, reload, run |

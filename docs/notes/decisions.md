@@ -18,6 +18,81 @@ Format:
 
 ---
 
+## D85: The script canvas pushes span-exact, and owning the screen means clearing the pending repaint
+
+**Date**: 2026-08-16
+**Status**: Accepted (implements D80; 6B.8-6B.10 as built)
+**Context**: D80 settled that a drawing script owns the panel. Building it
+answered three things D80 could not have known, one of which was a bug that
+only hardware could show.
+
+**1. Span-exact, and `read_buffer_spi` is the recorded upgrade path.** There
+is no framebuffer to read back into on the Pico 1 — a full one is 200 KB
+against 17 KB free — so each primitive pushes only the pixels it owns. Two
+consequences that are API rather than implementation: **`draw_text` takes a
+background colour** (transparent text would be one push per lit pixel), and a
+diagonal line goes out as horizontal runs.
+
+The vendored driver *does* expose `read_buffer_spi()`
+(`drivers/lcdspi/lcdspi.c:106`), so genuine read-modify-write compositing is
+available. It is deliberately not built: every draw would cost a panel read
+before its write, at a readback speed nobody has measured, to buy transparent
+text. **If a script ever needs real compositing, that is the door** — and it
+is additive, not a rewrite.
+
+**2. Nothing new was allocated.** Composition borrows the render loop's own
+buffers, idle whenever a key handler is on the stack because `render_frame`
+drains its pushes before returning. That needed a board split worth recording:
+the Pico 1 lends `strip_buf`, but the **Pico 2 lends the full framebuffer**.
+In full-framebuffer mode nothing else references `strip_buf`, so
+`--gc-sections` drops it — and referencing it from the scratch accessor
+resurrected **10 KB on a board with 26 KB free**. Measured, reverted, and the
+accessor is now `#if`-split.
+
+**3. The bug hardware found: turning dirty tracking ON must clear the pending
+band.** A script's pixels survive because `ScreenManager::render_frame` skips a
+frame whose dirty band is empty. But while tracking was *off*, `take_dirty()`
+reset the band to the **full screen** every frame — so a screen that switched
+tracking on and then marked nothing still inherited one last full repaint. On
+the device the canvas appeared and was immediately painted over by the editor,
+and because canvas mode was correctly on underneath, **keys stayed dead until
+`ESC`** — a confusing pair of symptoms with one cause.
+
+`set_dirty_tracking(true)` now clears the band: switching to tracking means "I
+name my own rows from here", and that has to start immediately.
+
+A second, smaller one alongside it: `ProgramScreen::on_key` called
+`invalidate_all()` whenever the editor reported a key consumed — and the RUN
+key *is* consumed, so it repainted over the canvas the script had just drawn.
+It now skips that when the run took the panel.
+
+**Also settled, for 6B.9**: D81 said "one poller". Building it showed the rule
+has to be **one drain routine and one queue** — a blocking `calc.wait_key()`
+sits inside a binding where the VM hook never runs, so it must be able to
+drive the drain itself. `ESC` is recognised inside the drain, so it works on
+both paths. Key *names* are resolved where `platform::Key` is visible rather
+than through a table of enumerator values in `calc_api.cpp`, which would have
+gone quietly wrong the first time the enum gained a member.
+
+**Rationale**: every one of these follows from where the code runs rather than
+from preference — the same pattern §8 named after 6B.6.
+
+**Tradeoffs**: a second path to the panel now exists, and `Framebuffer::bind`
+plus a lent scratch buffer are two more invariants of the "one owner at a
+time" kind this codebase already carries for `io_scratch`. Both are documented
+at their definitions.
+
+**Verified on hardware**: the canvas draws and survives; `ESC` stops an
+infinite drawing loop cleanly and the canvas stays up; `wait_key` returns the
+pressed character; file round-trip including a 5,000-byte chunked read;
+missing file raises `ValueError('No such file')`.
+
+**Revisit when**: something wants to draw *and* keep the editor visible — a
+progress bar during a long run. That is a third mode, not a change to this
+one.
+
+---
+
 ## D84: `list_append` costs 16 bytes of Python heap, and eigenvalues is top-level-only
 
 **Date**: 2026-08-16

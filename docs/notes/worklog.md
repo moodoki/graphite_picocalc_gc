@@ -305,6 +305,71 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-16 (later still) — 6B.8-6B.10: the calc module is complete (D85)
+
+**Done: 6B.8, 6B.9, 6B.10.** A script can draw on its own canvas, read keys
+and read and write SD files. Verified on the panel, which this chunk needed —
+it is the first that could not be checked over serial alone.
+
+**Three things D80 could not have known, found by building it:**
+
+**The canvas is span-exact, and `read_buffer_spi` is the recorded upgrade
+path.** No framebuffer to read back into on the Pico 1, so each primitive
+pushes only its own pixels: `draw_text` takes a **background colour** and a
+diagonal line goes out as horizontal runs. The vendored driver *does* expose
+`read_buffer_spi()`, so real compositing is available and additive if a script
+ever needs it — deliberately not built.
+
+**Nothing new was allocated**, but that needed a board split. Composition
+borrows the render loop's own buffers, idle whenever a key handler is on the
+stack. The Pico 1 lends `strip_buf`; the **Pico 2 lends the full
+framebuffer** — because in full-framebuffer mode nothing else references
+`strip_buf`, so `--gc-sections` drops it, and referencing it from the scratch
+accessor **resurrected 10 KB on a board with 26 KB free**. Measured, reverted,
+`#if`-split.
+
+**The bug only hardware could show.** A script's pixels survive because
+`render_frame` skips a frame whose dirty band is empty. But while tracking was
+*off*, `take_dirty()` reset the band to the **full screen** every frame — so a
+screen that switched tracking on and then marked nothing still inherited one
+last full repaint. On the device the canvas appeared and was instantly painted
+over by the editor, and because canvas mode was correctly on underneath, keys
+stayed dead until `ESC`. Two symptoms, one cause. `set_dirty_tracking(true)`
+now clears the band.
+
+That took **two attempts**. The first fix — `ProgramScreen::on_key` skipping
+`invalidate_all()` when the run took the panel — was necessary and not
+sufficient; the RUN key is consumed by the editor, so it did repaint, but the
+stale band repainted too. Worth remembering: a symptom with two causes looks
+like a fix that did not work.
+
+**D81 needed a refinement too.** It said "one poller"; a blocking
+`calc.wait_key()` sits inside a binding where the VM hook never runs, so the
+rule is **one drain routine and one queue**. `ESC` is recognised inside the
+drain, so it works on both paths — verified by stopping an infinite drawing
+loop. Key *names* resolve where `platform::Key` is visible; a table of
+enumerator values in `calc_api.cpp` would have gone quietly wrong the first
+time the enum gained a member.
+
+**Stack**: nothing here needed a guard. The canvas, key and file bindings
+peaked at 1,748-2,156 of 4,096, against 2,848 for a plain `calc.eval` — they
+are shallow by nature, reaching gfx and Storage rather than the evaluator.
+
+**Verified**: 21 host suites / 3,241 checks (`test_calc_api` 306 → 344, with a
+recording canvas stub so geometry is testable without a panel), both boards,
+lint clean, 52 markdown files. On hardware: the canvas draws and survives;
+`ESC` stops an infinite drawing loop and the canvas stays up; `wait_key`
+returns the pressed character; file round-trip including a **5,000-byte
+chunked read**; a missing file raises `ValueError('No such file')`.
+
+**Sizes**: flash 644,876 → 651,532 (+6,656). Free SRAM **16 KB** on the Pico 1
+(down 1 KB) and 26 KB on the Pico 2 (unchanged, after the gc-sections fix).
+
+**Still not done**: the Pico 2 has never run any 6B code, and 6B.15/16 (SD app
+manifests) are the last committed Phase 6 work.
+
+---
+
 ## 2026-08-16 (later) — 6B.7 + 6B.17: lists and matrices, and the number that justifies them (D84)
 
 **Done: 6B.7 and 6B.17.** A script can read and write the six lists and the

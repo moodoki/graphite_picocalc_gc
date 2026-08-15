@@ -1,6 +1,53 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 (later) — **6B.7 + 6B.17: lists and
+**Last session:** 2026-08-16 (later still) — **6B.8-6B.10: the `calc`
+module is complete** (D85). A script can draw on its own canvas, read
+keys, and read and write SD files. 21 host suites / 3,241 checks; free
+SRAM **16 KB** (Pico 1) and 26 KB (Pico 2).
+
+> ## Two traps this chunk walked into
+>
+> **A symptom with two causes looks like a fix that did not work.** The
+> canvas drew and was instantly repainted by the editor. Fix one —
+> `ProgramScreen::on_key` skipping `invalidate_all()` when the run took
+> the panel — was necessary and *not sufficient*: while dirty tracking
+> was off, `take_dirty()` had been resetting the band to the full screen
+> every frame, so switching tracking on inherited one last full repaint.
+> `set_dirty_tracking(true)` now clears the band. Only hardware showed
+> either.
+>
+> **`--gc-sections` makes an unused buffer free until you touch it.**
+> The canvas borrows the render loop's buffers rather than allocating.
+> Referencing `strip_buf` from the scratch accessor **resurrected 10 KB
+> on the Pico 2**, where full-framebuffer mode had left it unreferenced
+> and the linker had dropped it. The accessor is now `#if`-split: Pico 1
+> lends `strip_buf`, Pico 2 lends the full framebuffer.
+
+**D85 also records**: the canvas is **span-exact** (no readback, so
+`draw_text` takes a background colour and diagonal lines are horizontal
+runs) with the vendored `read_buffer_spi()` noted as the additive
+upgrade path; and D81's "one poller" is really **one drain, one queue**,
+because a blocking `wait_key()` sits where the VM hook never runs.
+
+**Nothing here needed a stack guard** — canvas, key and file bindings
+peaked at 1,748-2,156 of 4,096 against 2,848 for a plain `calc.eval`.
+They reach gfx and Storage, not the evaluator.
+
+> ## Next: 6B.15 + 6B.16, the last committed Phase 6 work
+>
+> SD app manifests — scripts under `/picocalc/apps/<name>/` appearing as
+> their own launcher tiles, on the tier-2 `AppRegistry` hook that has
+> existed unused since 6A.1. ~12 hrs. `exec_file` was deferred to here
+> from 6B.1, and now has everything it needs.
+>
+> After that, Phase 6 closes: the **Pico 2 has still never run a line of
+> 6B code**, CI has only ever seen the branch via one manual dispatch,
+> and issue #38 (the Python-free build, D78) is deferred *by its own
+> terms* until the final SRAM number is known — which it nearly is.
+
+---
+
+**Previous session:** 2026-08-16 (later) — **6B.7 + 6B.17: lists and
 matrices** (D84). A script can read and write the six lists and the ten
 matrices. 21 host suites / 3,203 checks; free SRAM 17 KB / 26 KB.
 
