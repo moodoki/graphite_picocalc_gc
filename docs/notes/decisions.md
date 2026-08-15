@@ -91,7 +91,59 @@ something large is genuinely idle then, and nothing is, because
 error as D61: reasoning about a budget without checking what actually
 reserves the memory.
 
-**Revisit when**: each lever lands, with a measured before/after.
+### Outcome, 2026-08-15 — A, B and C landed; D declined
+
+| | | Pico 1 free |
+|---|---|---|
+| start (after 6A + 6C.1) | 254,016 B used | **7.9 KB** |
+| **A** persistence buffers folded | 238,340 | **23 KB** |
+| **B** slabs 28 → 14 + PSRAM fallback | 209,668 | **51 KB** |
+| **C** strip height 16 → 8 | 199,668 | **61 KB** |
+
+**54 KB recovered**, against the ~40 KB the target needed. The Pico 2
+went 83 → 126 KB free; lever A alone cleared it, as predicted.
+
+Two of the three came in off their estimates and the reasons are worth
+keeping. **A returned 15.3 KB, not 18**: `math::Array`'s own `g_chunk`
+had to stay private, because tier migration can fire from inside
+`resize()`, which the persistence *load* paths call while holding the
+region — the one candidate that genuinely can overlap. **B returned
+28 KB, not 41**: instrumented hardware peaked at **12** live slabs with
+**11** live in steady state, so cutting to 8 would have permanently run
+several built-in lists out of PSRAM. That trades ordinary-path speed
+and extra D53 exposure for headroom the budget does not need; 14 keeps
+normal use entirely in SRAM at `peak 12 of 14, miss 0`. The PSRAM
+fallback itself was still built and is what makes any count safe — it
+was verified at a deliberately hostile `kSlabCount = 4`, where 11
+fallbacks fired and a 30-repeat sensitive check came back 30/30 clean.
+
+**C was decided by measurement, and the measurement overturned the
+intuition.** Single-buffering looked like the obvious way to halve
+`strip_buf`; it is both the slowest option *and* only 260 B roomier
+than halving the strip height. Timed over an identical workload:
+16px double 129.4 ms avg, 8px double 137.5 ms, 16px single 140.5 ms.
+
+**D declined (user decision, 2026-08-15).** It returns flash, not SRAM,
+and flash is **22.3% used — 456 KB of 2048 KB**, so ~20 KB is 1% of a
+resource with 1.6 MB free. The mechanism is removing non-zero default
+member initialisers — a single `TextBuffer::line_count_ = 1` is what
+drags the 5 KB editor into `.data`, and `GraphState`'s window bounds
+drag 7.5 KB — and applying them at runtime instead, which leaves six
+classes invalid until something remembers to call a reset(). That is a
+use-before-init trap bought with 1% of an abundant resource. Recorded
+here so it is not re-proposed as an SRAM lever: **it never was one.**
+
+**One real SRAM item found while checking D, left open**:
+`math::kCatalog` is a `const FnDescriptor[]` (1,320 B) sitting in
+`.data` rather than `.rodata`, so it costs SRAM for a read-only table.
+It is stuck there because `void* fn` needs a relocation. Moving it
+would mean storing an index or enum instead of a raw pointer, which
+touches `engine.cpp`'s binding path — worth doing if SRAM ever gets
+tight again, not worth it at 61 KB free.
+
+**Revisit when**: 6B's static cost is known. 61 KB free against a
+40 KB heap plus its 8 KB C stack leaves ~13 KB for the interpreter
+wrapper, the `calc` module and the program editor.
 
 ---
 
