@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/io_scratch.hpp"
 #include "platform/storage.hpp"
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
@@ -60,9 +61,15 @@ constexpr const char* kModeCommandName = "mode";
 // bound and, once past the read window, reboots would restore stale old
 // lines instead of the newest. g_hist_io backs both paths (single-threaded
 // UI, never reentrant) so neither carries its own multi-KB static.
+// D70 lever A: this is now a view over the shared one-shot I/O staging
+// region rather than its own 8 KB static. See platform/io_scratch.hpp
+// for the invariant — nothing may hold this across a call that reaches
+// another owner of the region.
 constexpr size_t kHistoryTailBytes = 8192;
 constexpr long kHistoryMaxBytes = 24576;  // 3x tail: compaction stays rare
-char g_hist_io[kHistoryTailBytes];
+static_assert(kHistoryTailBytes <= platform::kIoScratchBytes,
+              "history tail must fit the shared I/O scratch region");
+char* g_hist_io = reinterpret_cast<char*>(platform::io_scratch());
 
 // evaluate_input's per-branch string scratch, in bss rather than on its
 // stack frame (D47). Each result branch declared its own buffers and
@@ -252,7 +259,7 @@ void HomeScreen::compact_history() {
     // (line-aligned: drop the partial leading fragment). Appends are
     // human-paced so this rare O(file) rewrite is cheap; kMaxBytes = 3x the
     // tail keeps it to roughly one rewrite per two tail-buffers of writes.
-    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t cap = kHistoryTailBytes - 1;
     const size_t offset = static_cast<size_t>(fsize) - cap;
     const int n =
         fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
@@ -322,7 +329,7 @@ void HomeScreen::load_state() {
     if (fsize <= 0) {
         return;
     }
-    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t cap = kHistoryTailBytes - 1;
     const size_t offset = static_cast<size_t>(fsize) > cap ? static_cast<size_t>(fsize) - cap : 0;
     const int n =
         fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);

@@ -87,6 +87,7 @@ add_executable(picocalc_graphcalc
     src/platform/app_registry.cpp
     src/platform/display.cpp
     src/platform/fault.cpp
+    src/platform/io_scratch.cpp
     src/platform/keyboard.cpp
     src/platform/platform.cpp
     src/platform/psram.cpp

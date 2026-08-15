@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/io_scratch.hpp"
 #include "platform/storage.hpp"
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
@@ -334,7 +335,12 @@ void ListEditorScreen::delete_row() {
             lst.cset(at - 1, lst.cget(at));
         }
     } else {
-        static double buf[256];
+        // D70 lever A: view over the shared one-shot I/O region. This
+        // loop must finish before save_lists() below, which takes the
+        // same region — see platform/io_scratch.hpp's invariant.
+        static_assert(256 * sizeof(double) <= platform::kIoScratchBytes,
+                      "delete_row shift buffer must fit the shared I/O scratch region");
+        auto* buf = reinterpret_cast<double*>(platform::io_scratch());
         for (int at = cur_row_ + 1; at < count; at += 256) {
             const int m = count - at < 256 ? count - at : 256;
             lst.read_range(at, m, buf);
