@@ -1,6 +1,42 @@
 # Start here — next session
 
-**Last session:** 2026-08-15 (fourth that day) — **measured the Python
+**Last session:** 2026-08-16 — **6B.6: a script can plot and analyse
+graphs** (D79). `calc.plot`, `window`, `show_graph`, and `graph_zero` /
+`min` / `max` / `integral` / `deriv` / `value`, all verified on the
+Pico 1. Flash +2.2 KB, **free SRAM unchanged at 17 KB**.
+
+> ## The lesson to carry into 6B.7-6B.10
+>
+> **Measure a new binding against a hostile input, not a convenient one.**
+> `analyze_integral` recurses through `integrate_panel` — 136 bytes a
+> frame, depth cap 12. Integrating `x^2-4` peaked at 2,488 of 4,096 and
+> looked completely safe. Integrating `sin(1/x)`, which actually
+> subdivides, peaked at **3,532 — 564 bytes spare**. The first number
+> would have set the guard far too low.
+>
+> 6B.7's `calc.det` reaches `eigen_core`, whose **1,248-byte frame is the
+> largest in the firmware**. Assume it does not fit until measured, with
+> `-DPICOCALC_STACK_PROBE=ON`.
+
+**D79** records three things D68 did not cover: `show_graph()` is
+**deferred** to after `exec()` (a binding runs inside the VM inside
+`on_key`, so pushing a screen there nests screen management inside
+itself); there is **no per-plot colour** (slot colour is fixed per index,
+and a field for one would bump the persistence magic and reset every
+user's graphs — `plot()` returns the slot number instead); and plotting
+**forces FUNC mode**.
+
+**Surprising but specified**: D68's latch resets at each top-level
+`exec()`, and each `py` line is one — so two `py calc.plot(...)` lines
+leave one curve, not two. Within one exec they accumulate. A script from
+the editor is a single exec throughout.
+
+**Still unverified**: nobody has *looked* at a script-drawn graph, only
+proven the screen switches; and the Pico 2 has never run any 6B code.
+
+---
+
+**Previous session:** 2026-08-15 (fourth that day) — **measured the Python
 heap, found a wedge instead of a sizing answer** (D77, D78).
 
 The question was whether the 40 KB heap could be cut to fund D70 lever

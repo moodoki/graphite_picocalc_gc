@@ -839,11 +839,13 @@ private:
 
 ### 4.2 Calculator API bindings (`calc` Python module)
 
-**6B.3-6B.5 BUILT 2026-08-15 and hardware-verified.** What shipped is
+**6B.3-6B.6 BUILT 2026-08-15/16 and hardware-verified.** What shipped is
 `calc.eval`, `store`, `recall`, `simplify`, `expand`, `factor`, `diff`,
-`integ`, `solve`, `complex`, `c_abs`, `c_arg`, `c_conj`. Everything else in
-the sketch below — graphing, matrices, lists, GPIO, display, input, file I/O —
-is 6B.6-6B.10 and not yet built.
+`integ`, `solve`, `complex`, `c_abs`, `c_arg`, `c_conj`, `plot`, `window`,
+`show_graph`, `graph_zero`, `graph_min`, `graph_max`, `graph_integral`,
+`graph_deriv` and `graph_value`. Everything else in the sketch below —
+matrices, lists, GPIO, display, input, file I/O — is 6B.7-6B.10 and not yet
+built.
 
 Four things differ from the sketch and are settled, not open:
 
@@ -865,7 +867,19 @@ Four things differ from the sketch and are settled, not open:
    is refused inside two nested functions — a plain `calc.eval` works at
    top level and inside one function, and the `solve()` path is
    effectively top-level only.
-4. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
+4. **The graph bindings differ from the sketch in three ways, all D79.**
+   `show_graph()` is **deferred** — it requests the switch, and the screen
+   performs it once the script ends, because a binding runs inside the VM
+   inside `on_key`. There is **no `color=` argument**: slot colour is fixed
+   per index (Y1 blue, Y2 red, …) and `GraphState` has no field for one, so
+   `plot()` returns the slot number instead. And plotting **forces FUNC
+   mode**, or a script's graph would come up blank in POLAR.
+
+   Note also that D68's latch resets at each top-level `exec()`, and each
+   `py` line at the home screen is one: two `py calc.plot(...)` lines leave
+   one curve, not two. Within a single exec — which is what a script run from
+   the editor is — they accumulate.
+5. **`calc.complex(re, im)` is just Python's own `complex`.** MicroPython has
    a native complex type, so the binding exists for symmetry with the rest of
    the module rather than because it was needed. `c_arg` returns radians in
    $-\pi..\pi$ **whatever the angle mode says** — that convention, inherited
@@ -1685,7 +1699,7 @@ their own (est. 3 hrs) before §4.6's entry 1 can be built, and
 | 6B.3 | **DONE** `calc` module: eval, variables, store/recall — `calc.eval()` wraps `cas::evaluate_home` → `solveexpr::contains_solve`/`substitute` → `unified::evaluate_home` (§4.7), returns text for list/matrix results (D75), reentrancy- and stack-guarded (D74, D76) | 6 | `calc.eval("sin(pi/4)")` correct — **0.7071067811865475 on hardware** |
 | 6B.4 | **DONE** `calc` module: CAS bindings (incl. complex solve) | 4 | `calc.solve("x^2+1=0","x")` → **`['i', '-1*i']`** in a+bi mode |
 | 6B.5 | **DONE** `calc` module: complex bindings | 3 | `calc.c_abs(calc.complex(3,4))` = **5.0** |
-| 6B.6 | `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — Y-slot semantics settled by D68 (clear-on-first-plot, append after, raise on the 8th, buffered until `show_graph()`); build to that, no open question left | 4 | `calc.graph_zero`, `graph_integral` work; a script's first `plot()` clears Y1-Y7, its 8th raises |
+| 6B.6 | **DONE** `calc` module: graph-analysis + `plot`/`window`/`show_graph` bindings — D68's Y-slot semantics, plus D79 for the deferred switch, the absent per-plot colour and the forced FUNC mode | 4 | `calc.graph_zero`, `graph_integral` work — **(2.0, 0.0) and -3.0 on hardware**; a script's first `plot()` clears Y1-Y7, its 8th raises |
 | 6B.7 | `calc` module: matrix bindings | 3 | Create/multiply/invert from Python |
 | 6B.8 | `calc` module: display primitives | 4 | Script draws graphics |
 | 6B.9 | `calc` module: keyboard input — blocking (`wait_key`, `input`) and non-blocking (`key_pressed`, `key_held`, §4.6 entry 5) | 3 | Read keys, text input, poll without blocking |

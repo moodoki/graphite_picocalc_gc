@@ -18,6 +18,60 @@ Format:
 
 ---
 
+## D79: `calc.show_graph()` is deferred, and a plot has no colour of its own
+
+**Date**: 2026-08-16
+**Status**: Accepted (implements D68, which settled the Y-slot semantics)
+**Context**: 6B.6 gives a script `plot`, `window`, `show_graph` and the numeric
+graph analysis. D68 had already decided the hard part — the first `plot()` of
+a run clears all seven Y= slots, later calls append, the eighth raises — but
+three things it did not cover turned up in the building.
+
+**1. Showing the graph cannot happen inside the binding.** A binding runs
+inside the VM, inside the screen's `on_key`. Pushing a screen from there
+nests screen management inside itself, and would render nothing anyway until
+the script returned to the main loop. So `calc.show_graph()` **sets a
+request**, and the screen that ran the script performs the switch once
+`exec()` returns — the same shape as 6B.12 buffering output instead of
+streaming it. Only on a clean run: a script that raised has a traceback the
+user needs to read, and hiding it behind a graph would be wrong even though
+the plots before the failure did take effect.
+
+**2. There is no per-plot colour.** §4.2 shows `calc.plot("sin(x)",
+color="blue")`. `GraphState` has no colour field — slot colour is fixed per
+index (Y1 blue, Y2 red, …) in `function_color()`, exactly as the Y= editor
+shows it. Adding one means a persistence magic bump and a one-time graph
+reset for every existing user, to make a script's curve a different colour
+from what the same slot shows when typed. **Dropped**, and `plot()` returns
+the slot number instead — which *is* the colour, and is also what the
+analysis bindings take.
+
+**3. Plotting forces FUNC mode.** A script that writes Y1 while the
+calculator sits in POLAR would show a blank screen and no reason why.
+
+**Also worth stating because it surprises**: D68's latch resets at each
+top-level `exec()`, and each `py` line at the home screen is its own exec.
+So `py calc.plot("sin(x)")` followed by `py calc.plot("cos(x)")` leaves one
+curve, not two — the second line is a new run and clears first. Within one
+exec they accumulate: `py calc.plot("sin(x)"); calc.plot("cos(x)")` gives
+slots 1 and 2, and a script run from the editor is a single exec throughout.
+That is the specified behaviour, not a defect, but it is not guessable.
+
+**Rationale**: all three follow from where the code actually runs rather than
+from preference. The alternative to (1) is re-entrant screen management for
+no visible benefit; to (2), resetting every user's graphs for a cosmetic
+option; to (3), a blank screen with no diagnosis.
+
+**Tradeoffs**: a long-running script cannot show a graph part-way through.
+Nothing in 6B renders mid-script — the display belongs to the screen that is
+blocked in `on_key` — so this is the existing constraint, not a new one.
+6B.8's display primitives are where that question actually has to be answered.
+
+**Revisit when**: 6B.8 gives a script the framebuffer. If drawing mid-script
+works there, `show_graph()` should probably become immediate for consistency.
+
+---
+
 ## D78: A Python-free release build is the only way to get the render time back — deferred, not rejected
 
 **Date**: 2026-08-15

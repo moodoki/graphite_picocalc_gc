@@ -26,9 +26,9 @@ on the Raspberry Pi Pico SDK. Runs on both the Pico 1 H (RP2040) and Pico 2 H
 > is under way: an app launcher, a shared text editor, a file browser, Notepad,
 > and — as of 2026-08-15 — **MicroPython, embedded and running on the device**.
 > You can write a Python script on the calculator, run it, and `import calc` to
-> evaluate expressions, read and write the calculator's variables, and call the
-> CAS from Python. Graphing, matrices, drawing and key input are the rest of
-> 6B. Full breakdown in [ROADMAP.md](ROADMAP.md).
+> evaluate expressions, read and write the calculator's variables, call the
+> CAS, and plot and analyse graphs from Python. Matrices, drawing and key
+> input are the rest of 6B. Full breakdown in [ROADMAP.md](ROADMAP.md).
 
 ## What it does
 

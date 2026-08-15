@@ -305,6 +305,64 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-16 — 6B.6: a script can plot and analyse graphs (D79)
+
+**Done: 6B.6.** `calc.plot`, `window`, `show_graph`, and the six numeric
+analysis bindings (`graph_zero`, `graph_min`, `graph_max`, `graph_integral`,
+`graph_deriv`, `graph_value`). All verified on the Pico 1.
+
+**D76's discipline earned itself back immediately.** `analyze_integral`
+recurses through `integrate_panel` — 136 bytes a frame, depth cap 12, so
+1,632 bytes of recursion before the expression evaluator underneath it, against
+the 2,239 a binding has. The first measurement was reassuring and **wrong to
+trust**: integrating `x^2-4` peaked at 2,488 of 4,096, because a smooth
+integrand never subdivides. Integrating `sin(1/x)` over 0.01..1 — which does —
+peaked at **3,532, leaving 564 bytes**. `kAnalysisStackNeed = 2000` comes from
+that, not from the first number. **Measure new bindings against a hostile
+input, not a convenient one.**
+
+**Three things D68 did not cover, now D79:**
+
+- **`show_graph()` is deferred.** A binding runs inside the VM inside the
+  screen's `on_key`; pushing a screen there nests screen management inside
+  itself and renders nothing until the script returns anyway. It sets a
+  request and the screen switches once `exec()` ends — the same shape as
+  6B.12 buffering output. Only on a clean run, so a traceback is never hidden
+  behind a graph.
+- **No per-plot colour.** §4.2 shows `color="blue"`; `GraphState` has no field
+  for one, and adding it means a persistence bump and a one-time graph reset
+  for every user, to make a script's curve differ from what the same slot
+  shows when typed. `plot()` returns the slot number instead — which *is* the
+  colour.
+- **Plotting forces FUNC mode**, or a script's graph comes up blank in POLAR.
+
+**A behaviour worth knowing about**: D68's latch resets at each top-level
+`exec()`, and each `py` line is one. Two `py calc.plot(...)` lines leave one
+curve; `py calc.plot("sin(x)"); calc.plot("cos(x)")` gives slots 1 and 2, and
+a script run from the editor is a single exec throughout. Verified both ways
+(`1 2 3` from one line). Spec-conformant, not guessable, so it is documented
+user-facing.
+
+**Verified on hardware**: `plot` returns its slot; `graph_zero("Y1",0,5)` on
+`x^2-4` gives `(2.0, 0.0)`; `graph_deriv` at 2 gives 3.9999999999995;
+`graph_integral` 0..3 gives `-3.0`; and `show_graph()` switched screens,
+confirmed by the next injection reporting `popped to home`. Host suite gained
+53 checks (124 → 177) covering D68's clear/append/eighth-fails, the latch
+reset, window validation, the show-graph latch and every analysis op.
+
+One test of my own was wrong and worth noting: I held the minimum of `x^2-4`
+to 1e-9 and Brent returned 1.35e-8. That is correct — a minimiser locates the
+*argument* of a smooth minimum to about sqrt(eps), because the function is
+flat there. The tolerance was the bug.
+
+**Sizes**: flash 637,260 → 639,452 (+2,192). **Free SRAM unchanged at 17 KB**
+— the graph bindings write into state that already exists.
+
+**Not verified**: the graph itself has not been looked at on the screen, only
+proven to switch to it; and the Pico 2 still has never run any 6B code.
+
+---
+
 ## 2026-08-15 — measuring the Python heap found a wedge, not a sizing answer (D77, D78)
 
 Follow-on from the session below. The question was whether the 40 KB Python

@@ -285,7 +285,31 @@ calc.solve("x^2-4=0", "x")        # ['2', '-2']
 
 calc.c_abs(complex(3, 4))         # 5.0
 calc.c_arg(complex(0, 1))         # 1.5707... — always radians
+
+calc.plot("x^2-4")                # writes Y1, returns 1
+calc.window(-10, 10, -10, 10)
+calc.show_graph()                 # shown when the script finishes
+
+calc.graph_zero("Y1", 0, 5)       # (2.0, 0.0)
+calc.graph_max("Y1", -5, 5)       # (x, y) of the maximum
+calc.graph_integral("Y1", 0, 3)   # -3.0
+calc.graph_deriv("Y1", 2)         # 4.0
+calc.graph_value("Y1", 3)         # (3.0, 5.0)
 ```
+
+**`calc.plot()` replaces your Y= functions.** The first `plot()` a script runs
+clears all seven slots, and later calls fill Y2, Y3 and so on; an eighth is an
+error. This is deliberate — it means a script draws what it asks for and not
+whatever was left over — but it is **permanent**: graph state is saved, so
+your own functions do not come back after a power cycle. Keep anything you
+care about in a note before running someone else's plotting script.
+
+Each `py` line at the home screen counts as its own script, so two separate
+`py calc.plot(...)` lines leave one curve, not two. Put them on one line, or
+in a real script, to get both.
+
+A plot's colour is its slot's colour — Y1 blue, Y2 red, and so on, the same as
+the Y= editor shows. `plot()` returns the slot it used.
 
 `calc.eval` takes anything you could type on the home screen, and gives back a
 number when the answer is one, a string when it is a list, a matrix or an
@@ -312,5 +336,4 @@ Three things to know:
   variables are lost, but the calculator keeps working and no power cycle is
   needed. Building the expression once outside the loop avoids it.
 
-Graphing, matrices, lists, drawing, key input and file access are not in this
-release.
+Matrices, lists, drawing, key input and file access are not in this release.
