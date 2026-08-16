@@ -305,7 +305,77 @@ Still to verify on hardware:
 
 ---
 
-## 2026-08-16 (last) — the periodic table app, and the key field it was missing (D87)
+## 2026-08-16 (last) — a design for §3.4's native `.uf2` apps, left open on purpose (D88-D91)
+
+Docs only; no firmware changed, nothing built. §3.4 (compiled `.uf2` launcher
+entries) has been a stretch goal since 2026-07-21. This session worked it up
+into a full draft contract — `docs/phases/phase6.3-spec.md`, a candidate dotted
+sub-phase **6.3** — and then **left every decision in it open at the developer's
+call**. D88, D89, D90 and D91 are all marked **PROPOSED, not accepted**; §3.4 is
+still a stretch goal; D59 and D66 still stand as written, each carrying a note
+naming the open challenge rather than a withdrawal. The set can be dropped
+whole without touching anything else, which is why the amendments were written
+that way.
+
+**Why it was worth working up at all**: issue #38. D78 deferred the
+Python-free build until Phase 6's SRAM numbers were final — they now are — and
+as framed it is a straight loss: give up scripting entirely for D70 lever C's
+~6.3% render cost. The draft's route out (D90) is a Python-free calculator plus
+a `Python` tile that chain-loads a MicroPython build of this same repo. That
+only works because **no user state lives in flash** — everything persists to SD
+through `platform::Storage`, so the hop between two firmware images is
+invisible to the data. Nothing designed that; it falls out of every persistence
+decision already made.
+
+**The structural argument (D88)**: D66 required a standalone permanent
+bootstrap at the reset vector, because the calculator cannot make the boot
+decision when an app has overwritten it. True — but only for the
+one-payload-region layout §3.4 assumed. Give the app its own non-overlapping
+slot and the calculator is always what the boot ROM starts, so the chain-load
+is ~15 lines in `main()`, returning writes no flash at all, and D59/P6-6's
+`/picocalc/firmware.uf2` self-snapshot stops being needed. The safety property
+§3.4 calls non-negotiable would become structural rather than a property of
+correct re-flash code: the only image the boot ROM can start is the one the
+loader never writes to.
+
+**The developer's upfront requirement (D89)**: one SD card moves between both
+boards, so a wrong-board `.uf2` on the card is the normal case, not an edge
+case. Three independent gates, none of which guess — UF2 family ID (absent →
+refuse; foreign-family blocks skipped *but counted*, so a universal `.uf2`
+serves both boards and "wrong board" stays distinguishable from "not a UF2"),
+target-address range (independent by construction, since the slot base differs
+per board), and our own header. Nothing erased until all three pass, and the
+parser is pure in 6B.15's shape, so the requirement is provable on the host
+with no hardware at all.
+
+**Then the third-party question was investigated (D91), and two of its three
+answers were already in this repo unread.** The RP2350 has eight XIP
+address-translation apertures (`QMI_ATRANS0..7`) documented for exactly this
+use — a stock image runs from the app slot with the calculator untouched, and
+`ATRANS0.SIZE` bounds it in hardware. The RP2040 has no equivalent. And
+"impossible with a resident chooser" was wrong: `uf2loader` already does it on
+RP2040, with the loader in the top 16 KB and stock UF2s at flash start. So the
+draft takes the Pico 2 path and delegates the Pico 1.
+
+**The finding worth carrying regardless of how this is decided**: §3.4's
+original bootstrap-at-flash-start layout would not have delivered third-party
+support either, because it collides with a stock image's link address exactly
+as the calculator does. **The layout choice and third-party support are
+independent.** It looks like a trade and is not one — worth checking for that
+shape before paying for a constraint.
+
+Two claims written earlier in the session had to be narrowed the same day, and
+both are marked in place rather than quietly edited: "a stock `.uf2` cannot
+run" (false on the Pico 2) and "gate 3 refuses" (it classifies, or
+"third-party images never run" would have been baked into the design).
+
+Issue #38 carries a comment recording the native-app route as a possibility
+under review. Phase 6's close is untouched: the Pico 1 pass, the merge, and #38
+are exactly as they were.
+
+---
+
+## 2026-08-16 (earlier) — the periodic table app, and the key field it was missing (D87)
 
 `examples/apps/periodic/` — a TI-83-shaped periodic table: an 18-column grid
 walked with the arrow keys, coloured by element series, with a detail panel

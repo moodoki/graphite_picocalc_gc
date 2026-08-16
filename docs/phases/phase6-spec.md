@@ -155,10 +155,14 @@ the CAS scratch.
   equivalent. Confirmed zero hits anywhere in `CMakeLists.txt` today.
   Needed by D59 (§3.4's self-snapshot mismatch check) and generically
   useful (this project currently has no way to ask its own firmware
-  "what version is this" at all).
+  "what version is this" at all). *Note: the proposed D88 would remove
+  the D59 need, but not the general one — Phase 6.3's app header carries
+  a build stamp for the same reason.*
 - **An exposed build-size symbol** — linker-provided or baked into a
   fixed flash offset at build time. Also needed by D59; also doesn't
-  exist yet.
+  exist yet. *The proposed D88 would remove this need entirely, since
+  returning from an app would write no flash and there would be no image
+  to snapshot.*
 - **MicroPython embed build must include `json`** — confirmed required
   by §4.6 entry 1's periodic-table walkthrough; 6B.1's acceptance
   criteria already reflects this, listed here so it isn't only visible
@@ -263,6 +267,7 @@ docs, not just here.
 | 6A: App framework | Launcher screen, app registration/lifecycle, screen-ownership handoff, shared text-editing widget (§3.5), generalized file browser incl. management (§3.7) | Phase 4 |
 | 6B: MicroPython (first base app) | Embedded interpreter, `calc` module bindings, program editor (thin wrapper on 6A's widget), SD card scripts | 6A |
 | 6C: Notepad (first concrete future app) | Thin wrapper on 6A's shared text-editing widget, `.txt` files, no execution | 6A |
+| **6.3: native compiled apps** — ***proposed 2026-08-16, not committed*** (**[draft spec](phase6.3-spec.md)**) | A `.uf2` on the card becomes a launcher tile. The calculator chain-loads a separate, non-overlapping flash slot (D88); three gates keep a wrong-board image off the flash (D89). **D88-D91 are all open.** Dotted, so it would not gate Phase 6's completion — see §3.4 | 6A, 6B.15/16, **and Phase 6 closed** |
 | 6C+: further future apps (unscoped) | Remaining candidates in §9 — additional apps riding the 6A framework, plus §9.3's home-screen convenience scripts (candidate 6.1, not app-launcher-shaped, reuses Phase 5.1's `submit_line()` instead) and §9.4's PCM sampler audio engine (candidate 6.2, real driver work, spun off from the §4.6 sound demo) | 6A (loosely) |
 | Release engineering (unscoped, can run in parallel) | Docs site ([docs-site-plan.md](../notes/docs-site-plan.md)), versioned firmware releases | none |
 
@@ -308,9 +313,11 @@ into the running firmware** — the 6A framework itself, and every app
 SD-discovered tier (§4.5) is not an exception to that: those are
 MicroPython *source* files interpreted by an interpreter that is itself
 compiled in, which is why they carry none of §9.1's relocator/ABI
-problems. §3.4's stretch `.uf2` apps are the one case that runs
-genuinely foreign machine code, and they do it by rebooting into it,
-never alongside the calculator.
+problems. [Phase 6.3](phase6.3-spec.md)'s `.uf2` apps are the one case
+that runs separately compiled machine code, and they do it by rebooting
+into it, never alongside the calculator. (Not *foreign* code: an app is
+linked at the app slot's base from this project's own template, because
+0x10000000 is where the calculator lives — see §3.4.)
 
 ---
 
@@ -359,8 +366,9 @@ work.
 **Two tiers, one list (decided 2026-08-15).** Compiled-in apps
 (Notepad, the Python program editor, anything else built into this
 firmware image) are **statically registered at boot**. SD-discovered
-apps — MicroPython scripts (§4.5) and, if §3.4 is ever built, compiled
-`.uf2` apps — are **populated dynamically** from the boot-time SD scan.
+apps — MicroPython scripts (§4.5) and, from
+[Phase 6.3](phase6.3-spec.md), compiled `.uf2` apps — are **populated
+dynamically** from the boot-time SD scan.
 Both tiers land in the same table and the launcher walks it with one
 `count()`/`get()` loop; only `kind` and where the entry's strings live
 differ.
@@ -371,7 +379,7 @@ namespace platform {
 enum class AppKind {
     kBuiltIn,  // compiled into this firmware image; launch pushes a screen
     kScript,   // SD-discovered MicroPython app (§4.5), path = entry .py
-    kNative,   // SD-discovered compiled .uf2 (§3.4, stretch), path = .uf2
+    kNative,   // SD-discovered compiled .uf2 (Phase 6.3), path = .uf2
 };
 
 // One entry per launchable app, static or SD-discovered.
@@ -440,6 +448,12 @@ is also where P6-6's version-stamp check (and, on mismatch, the
 firmware self-snapshot to `/picocalc/firmware.uf2`) hooks in — no new
 lifecycle needed, just an addition to a hook 6A.2 already has.
 
+*Open, 2026-08-16*: the proposed D88 would remove that check entirely
+(returning from an app would write no flash, so nothing to snapshot),
+and [Phase 6.3](phase6.3-spec.md) would use `on_activate` for something
+cheaper instead — the per-app block-0 sniff that decides whether a
+native tile is launchable on *this* board.
+
 ### 3.3 Screen-ownership handoff
 
 Apps take over the full screen the same way any existing full-screen
@@ -456,187 +470,81 @@ keys, two distinct destinations: `ESC` is the "step back" convention,
 `HOME` is the global "start over" convention, and apps don't get a
 special case on the latter.
 
-### 3.4 Compiled app launcher entries (self-sufficient reboot-based, **stretch — not core 6A scope**)
+### 3.4 Compiled app launcher entries (**stretch — not core 6A scope**; a promotion to Phase 6.3 is *proposed*, 2026-08-16)
 
-Promoted here from a deferred-future-phase candidate on 2026-07-21 (D34
-follow-up) once it became clear this can plausibly appear as **a third
-`AppEntry` kind, selected from the same launcher as everything else** —
-not a separate reboot-into-a-different-menu experience. Explicitly
-**stretch**: not part of 6A's committed 31 hrs (§5), attempted only if there's
-appetite after the core sub-phase ships, same status as the old
-`program_screen`'s "syntax highlighting is a stretch goal."
+**This section is a pointer, and its status has not changed.** §3.4 has been a
+stretch goal since 2026-07-21 (promoted here from a deferred-future candidate,
+D34 follow-up) and **still is**. On 2026-08-16 it was worked up as a candidate
+committed sub-phase with its own draft contract —
+**[Phase 6.3](phase6.3-spec.md)** — where the design, task breakdown and risks
+now live. **That draft is not accepted**: D88-D91 are all open and the developer
+is researching further before deciding. Until then, nothing below overrides
+anything in this spec.
 
-**Mechanism**: each compiled app is a complete, independently built
-`.uf2` — same fixed-address pico-sdk toolchain, no relocation, no PIC,
-no shared-ABI table with the running calculator firmware (it never runs
-concurrently with it, see §9.1 for why that matters). A manifest entry
-(§4.5's format, extended with `type=native`) points at the `.uf2` file
-on SD instead of a `.py` entry script — registered into §3.1's tier-2
-list as `AppKind::kNative`, `path` pointing at the `.uf2`, so the
-launcher lists and selects it identically to a Python app. Selecting it
-in the launcher:
+**Why a promotion was proposed**: issue [#38](https://github.com/moodoki/graphite_picocalc_gc/issues/38),
+the Python-free build. D78 deferred #38 until Phase 6's final SRAM numbers were
+known, and as framed it is a straight loss — give up scripting entirely to
+recover D70 lever C's ~6.3% render cost. Native apps dissolve that trade
+(**D90**): a Python-free calculator plus a `Python` tile that chain-loads a
+MicroPython-enabled build of this same repo. It works because no user state
+lives in flash — everything persists to SD, so the hop between two images is
+invisible to the data.
 
-1. Parses the `.uf2` directly off the SD card — UF2 is a simple,
-   well-specified block format (512-byte self-describing blocks: magic
-   numbers, target address, payload, block count), designed from the
-   ground up to be robust against partial reads/writes. This is real
-   work, but it's implementing a well-specified format, not inventing a
-   write-safety protocol from scratch — a materially smaller lift than
-   the "homegrown write-verify-activate protocol for an arbitrary
-   relocatable blob" that in-process loading would need (§9.1).
-2. Writes the parsed payload into a **reserved app-boot flash region**,
-   using the Pico SDK's flash write primitives (code executing this step
-   must run from RAM, not flash, while flash is being written, with
-   interrupts and the second core quiesced). **This project has no
-   existing flash-write code to model that on** — confirmed 2026-08-15:
-   zero hits for `flash_range_program`/`flash_range_erase`/
-   `hardware/flash` anywhere in `src/`, `drivers/` or `docs/`, because
-   all persistence to date is SD-card I/O through `platform::Storage`.
-   So this is a from-scratch HAL addition on a dual-core board, not an
-   extension of an established pattern — part of why §3.4's estimate is
-   flagged as understated below, and why the feasibility spike puts the
-   flash-write step first.
-3. Triggers a reset. On boot, a small, standalone bootstrap component —
-   this project's own, **resolved 2026-08-14 (D66): self-sufficient,
-   not `uf2loader`-dependent** — auto-boots whatever's in that region:
-   the freshly written app, with no interactive menu step, because the
-   *selection* already happened in our own launcher. `uf2loader` is not
-   part of this path at all; see the safety-net paragraph below for
-   where it fits instead.
-4. **Returning to the calculator** is the same operation run in reverse:
-   re-flash the calculator's own image into that region and reset. Apps
-   built from this project's own template know how to do this (a `calc`
-   module binding, analogous to 6B's other bindings); a completely
-   foreign `.uf2` would not, and would rely on the hold-a-key-at-boot
-   fallback below instead. **Resolved 2026-08-13 (D59, P6-6): fetched
-   fresh from a known SD path** (`/picocalc/firmware.uf2`, matching the
-   top-level-singleton-file convention `graphstate.dat` already uses),
-   not bundled per-app — see P6-6 for the full mechanism (self-snapshot,
-   checked lazily on launcher entry).
+**Dotted, so it does not gate Phase 6's completion.** §3.4 was explicitly
+outside this phase's committed goals, and Phase 6 closes without it.
 
-**What this does and doesn't remove, versus §9.1's in-process approach**:
-removes the relocator/PIC problem (#2) and the ABI/symbol-table
-versioning tax (#4) and the concurrent-execution memory-protection
-problem (#3) entirely — nothing runs concurrently, so there's nothing to
-protect or version against. It does **not** remove the need for a real,
-carefully tested flash-write step — that's still genuine risk, just a
-substantially smaller and better-specified version of it (a known block
-format, not an arbitrary blob).
+**Two things in this spec the draft would correct — open challenges, not
+corrections, until D88-D91 are decided:**
 
-**Safety net, not a nice-to-have**: the reserved app-boot region must be
-strictly separate from wherever this project's own bootstrap (D66)
-lives. If the self-flash routine has a bug, the worst case must be "the
-app slot is corrupted, hold the boot key and reflash from SD via the
-untouched bootloader" — never "the device won't boot at all." This
-constraint should be treated as non-negotiable in any implementation,
-not an optimization. **`uf2loader` lives here now, not in the automatic
-path (D66)**: purely optional, user-installed, reached only by
-deliberately holding a boot key — an extra personal safety net a user
-may add, never something the calculator's own logic checks for or
-depends on.
+1. **The separate permanent bootstrap component would be retired** (**D88**,
+   which proposes amending **D66**). D66 required a standalone binary at the reset vector because the
+   calculator cannot make the boot decision when an app has overwritten it —
+   true, but only for the one-payload-region layout this section assumed. Phase
+   6.3 gives the app **its own non-overlapping flash slot** (Pico 1:
+   0x10100000–0x101FFFFF; Pico 2: 0x10200000–0x103FFFFF), so the calculator is
+   always what the boot ROM starts and makes the decision itself, in ~15 lines
+   of `main()`. Returning from an app would write no flash at all, which
+   **would dissolve D59/P6-6 entirely** — `/picocalc/firmware.uf2`, the lazy
+   self-snapshot, the build-size symbol and the `pico_set_program_version` gate.
+   **D59 and D66 stand as written until this is decided.** D66's *marker*
+   correction is untouched either way and is
+   load-bearing: bare `watchdog_caused_reboot()` is ambiguous, so a dedicated
+   `scratch[2]` marker is what the boot path checks.
 
-**A power cycle recovers to the calculator automatically — even from a
-hung third-party app (2026-08-13 schematic read, confirmed on hardware
-2026-08-14 — D65)**: the mainboard's POWER section
-(`clockwork_Mainboard_V2.0_Schematic.pdf`) shows `U101`, an **AXP2101**
-PMIC, with the physical power button wired into its `PWRON` pin — a
-*soft* power sequence, not a raw battery-voltage cutoff — and a
-dedicated `PICO_EN` line gating a regulator (`U102`) whose output is
-named `PICO_VSYS`, the Pico module's own supply rail. That topology
-predicted that a real power-off fully removes the Pico's VDD, making
-the next power-on a genuine hardware power-on reset (POR) —
-indistinguishable from unplugging a standalone Pico.
+2. **Third-party `.uf2`s split by board** (**D91**). They are linked at
+   0x10000000, where the calculator lives, so they cannot run from a flash slot
+   on the **Pico 1** — the RP2040 has no address translation. The **Pico 2**
+   can run them straight out of the slot, untouched, via the RP2350's
+   `QMI_ATRANS` apertures, which exist for exactly this ("execute in place at
+   multiple physical flash addresses … without the overhead of
+   position-independent code"). Phase 6.3 commits to the Pico 2 path and
+   delegates the Pico 1 to `uf2loader`, which already does this on that board.
+   **This is not a cost of the new layout**: a bootstrap at flash start
+   collides with a stock image's link address exactly as the calculator does,
+   so the old layout would not have delivered it either. The "works for every
+   app, including completely foreign ones" claim below was only ever true of
+   the **recovery** path — a power cycle recovers from any app, cooperative or
+   not, and still does.
 
-**Confirmed on the Pico 1, 2026-08-14 (P6-14, D65)**: `watchdog_caused_reboot()`
-read `false` after a genuine physical power-cycle (button off, wait,
-button on — USB observably dropped and reappeared ~13 s later) and
-`true` after a non-power reboot. The actual off-sequencing lives in the
-STM32 keyboard MCU's firmware, so this couldn't be settled from the
-schematic alone — it needed exactly this hardware measurement, and now
-has one. This gives a clean mechanism with **no app cooperation required**: use
-`watchdog_reboot()` (not a generic reset) for the deliberate
-launch-into-app handoff in step 3 above, and have the bootstrap check
-reset reason on every boot — **app slot marker present → boot the app
-slot; anything else (a real power cycle, including a POR from a hung
-app forcing the user to physically power-cycle; or a watchdog reboot
-for an unrelated reason) → always boot the calculator, regardless of
-what's sitting in the app slot.** Because this is a bootstrap decision
-keyed on hardware reset reason, not something the app itself has to
-implement or call back into, it works uniformly for **every app,
-including completely foreign third-party ones that know nothing about
-this project's `calc` return binding.**
+**What still stands from the original section**, and is carried into
+[phase6.3-spec.md](phase6.3-spec.md) rather than repeated here: the third
+`AppEntry` kind (`AppKind::kNative`, §3.1) selected from the same launcher as
+everything else; the manifest extension (`type=native`, §4.5 — already parsed
+and refused with a diagnostic since 6B.15, which is the hook); the safety
+requirement that a bad app write must never cost the device its ability to boot
+(now **structural** rather than a property of correct re-flash code); the
+power-cycle recovery mechanism confirmed on hardware in **D65**; and the
+insistence on a **feasibility spike before anything is built on top of the
+flash-write step** — Phase 6.3 task 6.3.0, which gates every other task in that
+phase.
 
-**Correction, 2026-08-14 (D66): bare `watchdog_caused_reboot()` is not
-enough on its own** — it's already shared by D47's hard-fault recovery
-reboot, the bulk-PSRAM self-test's watchdog guard, and (measured via
-D65) even an ordinary `picotool load -f -x` flash-and-relaunch. As
-first written above, a hard fault inside the calculator itself would
-misread as "boot the app slot." The fix matches this codebase's own
-existing pattern (`fault.cpp`'s `g_crash.magic`, `main.cpp`'s
-`kBulkTestMarker`): write a dedicated marker to a free watchdog scratch
-register (`scratch[2]`/`[3]` — `[0]`/`[1]` are the bulk test's,
-`[4]-[7]` are boot-ROM-reserved) immediately before the deliberate
-`watchdog_reboot()` call, and have the bootstrap check that marker, not
-the bare flag.
-
-**Also D66: the bootstrap must be a genuinely separate, permanent
-component, not logic embedded in the calculator's own `main()`.** The
-"always recovers to the calculator" guarantee above can't be satisfied
-from inside the calculator's own image when an app is what's currently
-resident in the boot region — the calculator's code isn't running to
-make that check in that case. Something has to run first, on every
-reset, regardless of what's currently flashed — a small, standalone
-bootstrap binary at the true reset vector, distinct from both the
-calculator and any app. This is more new engineering than "a few lines
-in `main()`" (its own linker script, its own flash placement, a
-one-time install step on a fresh device) — §3.4's ~25-35 hr estimate
-predates this and should be revisited when §3.4 is actually scoped for
-implementation.
-
-This also meaningfully improves the safety-net paragraph above: a
-hung/misbehaving app's *common-case* recovery becomes "just power-cycle
-it," not "remember to hold the boot key" — hold-a-key stays as the
-fallback only for the rarer case of a corrupted app-slot write itself.
-
-**This is what settled P6-5**: the reset-reason check has to run as
-custom decision logic very early in boot, and a generic third-party
-bootloader wasn't designed with this project's specific "app slot vs.
-calculator" concept — it may expose no hook for it at all. That
-argument is what carried P6-5 to *self-sufficient* (D66, above); it is
-no longer an open consideration.
-
-**Open questions before implementation**:
-
-- ~~Does this depend on `uf2loader` being separately installed... or
-  does the calculator firmware become fully self-sufficient~~ —
-  **resolved 2026-08-14 (D66): self-sufficient.** No dependency on
-  `uf2loader`'s behavior anywhere in the automatic path — it's demoted
-  to a purely optional, user-installed, manually-invoked recovery tool.
-  Working through what "self-sufficient" requires surfaced two
-  corrections, both folded into the mechanism/safety-net text above:
-  bare `watchdog_caused_reboot()` is ambiguous with other reboot causes
-  already in this codebase and needs a dedicated marker; and the
-  bootstrap must be a genuinely separate, permanent component (not
-  logic inside the calculator's own `main()`), which the ~25-35 hr
-  estimate below predates.
-- ~~Where does the calculator's own `.uf2` come from at "return"
-  time~~ — **resolved, see P6-6**: fetched fresh from
-  `/picocalc/firmware.uf2`, kept in sync by the running firmware
-  self-snapshotting there. Two prerequisites this codebase doesn't have
-  yet: an exposed build-size symbol, and a version/build identifier to
-  gate the write (`pico_set_program_version` or similar — not currently
-  set anywhere in `CMakeLists.txt`).
-
-**Rough estimate**: **~25–35 hrs — likely understated as of D66**
-(2026-08-14): this predates working through what "self-sufficient"
-requires (a genuinely separate, permanent bootstrap component, not a
-few lines in `main()`). Revisit when §3.4 is actually scoped. Gated by
-a feasibility spike first
-(parse one real `.uf2`, write it to a scratch flash region, reboot into
-it successfully, confirm the untouched-bootloader recovery path actually
-recovers) — flash-write code should prove itself in isolation before the
-rest is built on top of it, the same "spike before committing" principle
-§9.1 recommends for anything touching a homegrown flash/loader path.
+**One requirement Phase 6.3 adds that this section never had**: the loader must
+distinguish Pico 1 from Pico 2 binaries, because one SD card is moved between
+both boards during testing, so a wrong-board image on the card is the normal
+case. Three independent gates decide it, none of which guess — see
+[phase6.3-spec.md](phase6.3-spec.md) §3 and **D89**. The third gate
+*classifies* rather than refuses, which is what leaves room for point 2's
+third-party path.
 
 ### 3.5 Shared text-editing widget
 
@@ -1855,7 +1763,7 @@ their own (est. 3 hrs) before §4.6's entry 1 can be built, and
 | 6B: MicroPython | ~69 | Interpreter, `calc` module, editor (thin wrapper on 6A's widget), SD scripts, SD-discovered app manifests — first app on 6A |
 | 6C: Notepad | ~3 | Second thin wrapper on 6A's widget — plain-text notes, no MicroPython dependency (D54) |
 | **Total (committed)** | **~103 hrs** | |
-| *Compiled app launcher entries (§3.4, stretch)* | *~25–35 (likely understated, D66), gated on a feasibility spike* | *Self-sufficient reboot into a full app `.uf2` via this project's own bootstrap (D66 — not `uf2loader`-dependent), selected the same way as a Python app* |
+| *Compiled app launcher entries — moved to **[Phase 6.3](phase6.3-spec.md)** 2026-08-16* | *~46, gated on a feasibility spike (6.3.0). Dotted, so it does **not** gate Phase 6's completion* | *The calculator chain-loads a **separate, non-overlapping** app slot (D88) — no standalone bootstrap, and returning writes no flash. Three gates keep a wrong-board `.uf2` off the flash (D89). Enables issue #38's Python-free build (D90)* |
 | *Native dynamically-loaded (in-process) apps* | *deferred* | *own future phase, not Phase 6 — see §9.1* |
 | *6C+ other future apps, release engineering* | *unscoped* | *see §9.2 — no estimate until something is actually picked up* |
 
@@ -1960,8 +1868,8 @@ P4-4/P4-5, renumbered into this document.)*
 | P6-2 | `calc.plot()` from Python: immediate graph switch or buffered? | **Resolved 2026-08-15 (D68): buffered** — `calc.plot()` is a state write into the Y-slots and does not switch screens; `calc.show_graph()` stays the explicit "display it now" call. Follows from P6-15's clearing decision (same row below) rather than being separately specified | 6B.6 implementation |
 | P6-3 | Launcher entry point: dedicated Home softkey, or typed-command-only like `lists`/`stats`? | **Resolved 2026-08-13 (D58): both** — a softkey and the `apps`/`app` command ship together | 6A implementation |
 | P6-4 | Does leaving an app via `HOME` (not `ESC`) skip the launcher entirely, or route through it? | **Resolved 2026-08-13 (D58): skips it** — `HOME` keeps its existing system-wide short-circuit-to-Home behavior unchanged; only `ESC` routes through the launcher | 6A implementation |
-| P6-5 | §3.4 compiled apps: depend on `uf2loader` being installed, or make the calculator self-sufficient for the flash-write/reboot step? | **Resolved 2026-08-14 (D66): self-sufficient.** `uf2loader` demoted to a purely optional, user-installed, manually-invoked recovery tool — never depended upon by the automatic boot path. Surfaced two corrections in the process: bare `watchdog_caused_reboot()` is ambiguous (needs a dedicated scratch-register marker, matching this codebase's existing `g_crash.magic`/`kBulkTestMarker` pattern); the bootstrap must be a genuinely separate, permanent component, not logic inside the calculator's own `main()` — §3.4's ~25-35 hr estimate predates this and is likely understated | Resolved; bootstrap design itself still owed at §3.4 implementation |
-| P6-6 | §3.4 "return to calculator": bundle the calculator's own `.uf2` as a resource apps carry, or fetch it fresh from a known SD path at return time? | **Resolved 2026-08-13 (D59): fetched fresh**, from `/picocalc/firmware.uf2`. Kept in sync by the firmware self-snapshotting its own running image there (safe: on-device flash is memory-mapped/XIP, so this is an ordinary read, not the write-into-flash risk the restore step has) — **checked and, only on mismatch, written lazily on every launcher entry** (§3.2's `on_activate`), not at boot. Needs two prerequisites this codebase doesn't have yet: an exposed build-size symbol, and a version/build identifier to gate the write (`pico_set_program_version` or similar — zero hits in `CMakeLists.txt` today) | 3.4 implementation |
+| P6-5 | §3.4 compiled apps: depend on `uf2loader` being installed, or make the calculator self-sufficient for the flash-write/reboot step? | **Resolved 2026-08-14 (D66): self-sufficient.** `uf2loader` demoted to a purely optional, user-installed, manually-invoked recovery tool — never depended upon by the automatic boot path. Surfaced two corrections in the process: bare `watchdog_caused_reboot()` is ambiguous (needs a dedicated scratch-register marker, matching this codebase's existing `g_crash.magic`/`kBulkTestMarker` pattern); the bootstrap must be a genuinely separate, permanent component, not logic inside the calculator's own `main()` — §3.4's ~25-35 hr estimate predates this and is likely understated | Resolved; bootstrap design itself still owed at §3.4 implementation. **Challenged 2026-08-16 by the proposed D88** (open, not accepted): the *separate permanent bootstrap component* may be unnecessary, because Phase 6.3's app slot would never overlap the calculator — self-sufficiency and the dedicated marker are unaffected either way |
+| P6-6 | §3.4 "return to calculator": bundle the calculator's own `.uf2` as a resource apps carry, or fetch it fresh from a known SD path at return time? | **Resolved 2026-08-13 (D59): fetched fresh**, from `/picocalc/firmware.uf2`. Kept in sync by the firmware self-snapshotting its own running image there (safe: on-device flash is memory-mapped/XIP, so this is an ordinary read, not the write-into-flash risk the restore step has) — **checked and, only on mismatch, written lazily on every launcher entry** (§3.2's `on_activate`), not at boot. Needs two prerequisites this codebase doesn't have yet: an exposed build-size symbol, and a version/build identifier to gate the write (`pico_set_program_version` or similar — zero hits in `CMakeLists.txt` today) | Resolved (D59), **still standing**. **Challenged 2026-08-16 by the proposed D88** (open, not accepted): if the app slot never overlaps the calculator, returning clears a marker and reboots without writing flash — nothing to fetch, nothing to keep in sync, neither prerequisite needed. Until that is decided, D59 and both prerequisites stand, owed at 3.4 implementation |
 | P6-7 | §3.7 file browser: how much is in scope for Phase 6 — navigate+pick only, or also delete/rename/new-folder management? | **Resolved 2026-08-13 (D55): management is in scope** — delete (confirm-gated), rename, new folder, plus `Storage::rename_file`/`delete_dir` (non-recursive) | 6A.7 implementation |
 | P6-8 | §3.7: does the existing diagnostic `Files` entry point (`FilesScreen`, `/picocalc`-only, read-only) change to support navigation, or does a separate picker-mode component get added alongside it unchanged? | **Resolved 2026-08-13 (D55): generalized in place** — one `FileBrowserScreen` with `kBrowse`/`kPick` modes; the diagnostic keeps its current `start_dir`/behavior as `kBrowse`'s default and gains navigation/management for free | 6A.6/6A.7 implementation |
 | P6-9 | §9.3 home-screen scripts: does a line that errors abort the rest of the script, or continue and report at the end? | **Resolved 2026-08-13 (D56): abort** on the first error | 9.3 implementation, if promoted |
@@ -2000,8 +1908,9 @@ out to be viable as **a launcher menu item indistinguishable in shape
 from a Python app entry** (self-flash the selected `.uf2` into a
 reserved region, then reboot — no interactive bootloader menu needed),
 which is enough of a UX and complexity win that it has since been
-promoted out of this section entirely — **see §3.4** for the accepted
-stretch-goal version. What remains deferred to a genuinely separate
+promoted out of this section entirely — **see §3.4**, and since
+2026-08-16 its own committed spec, [Phase 6.3](phase6.3-spec.md). What
+remains deferred to a genuinely separate
 future phase, covered below, is the harder problem: **loading code that
 runs concurrently with the calculator firmware**, in the same process,
 without a reboot.

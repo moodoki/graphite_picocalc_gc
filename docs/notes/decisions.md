@@ -18,6 +18,320 @@ Format:
 
 ---
 
+## D91: third-party `.uf2`s run on the Pico 2 by address translation, and are delegated on the Pico 1
+
+**Date**: 2026-08-16
+**Status**: **PROPOSED — open, not accepted.** Written 2026-08-16; the developer
+is researching further before deciding. Narrows D88 and revises D89's gate 3
+*if all four are taken together* — D88-D91 stand or fall as one design. Nothing
+here has been built, and no earlier decision is actually overridden until this
+is accepted
+**Context**: D88 was written on the assumption that a stock third-party `.uf2`
+— one built by anyone else for the PicoCalc, linked at 0x10000000 — simply
+cannot run once the calculator occupies flash start, and that this was a cost
+of D88's layout. **Both halves were wrong**, and the investigation that found
+so is worth keeping, because two of the three findings are hardware facts that
+were sitting in this repo unread.
+
+**Finding 1 — the RP2350 can do this in hardware, by design.** `QMI_ATRANS0..7`
+(`pico-sdk/src/rp2350/hardware_regs/include/hardware/regs/qmi.h`) are eight
+address-translation apertures over the XIP window, and the register
+documentation states the intent outright: *"Address translation allows a
+program image to be executed in place at multiple physical flash addresses (for
+example, a double-buffered flash image for over-the-air updates), without the
+overhead of position-independent code."* Set `ATRANS0.BASE` to the slot's 4 KiB
+index, flush the XIP cache, jump — and a stock image runs from the app slot
+believing it is at flash start, **with the calculator untouched**. `ATRANS0.SIZE`
+bounds the aperture in hardware: *"offsets greater than SIZE return a bus error,
+and do not cause a QSPI access"*, so an over-reading app faults instead of
+silently reading the calculator's flash.
+
+**Finding 2 — the RP2040 has no equivalent.** No address translation anywhere
+in its XIP block. A stock image must physically occupy 0x10000000.
+
+**Finding 3 — a resident chooser *can* coexist with stock images on RP2040, and
+`uf2loader` already does it.** Its architecture: the loader lives in the **top
+16 KB** of flash rather than at the start, stock pico-sdk UF2s are written to
+flash start unmodified, and the user returns by **holding a key at power-on**.
+It carries a documented caveat — it works *"if the app does not itself write to
+flash"* — with a magic number in the app's vector table declaring the safe
+region. So the honest RP2040 statement is not "impossible", it is **"only by
+giving the stock image flash start, which costs the calculator its residency"**.
+
+**The finding that settles D88 either way**: §3.4's original layout would not
+have delivered third-party support either, because **a bootstrap at flash start
+collides with a stock image's link address exactly as the calculator does**.
+The layout choice and third-party support are *independent*. This looks like a
+trade and is not one.
+
+**Decision**: commit Phase 6.3 to template-built apps on both boards, and add
+**task 6.3.10** for stock images on the **Pico 2 only**, via ATRANS. On the
+Pico 1, a stock image is refused with an accurate reason that names
+`uf2loader`. D89's gate 3 becomes a **classifier** rather than a refusal, so a
+header-less image of our own family is `kForeign` and the per-board policy
+decides what happens next.
+
+**Rationale**: the Pico 2 path is cheap (~6–8 hrs), keeps every property D88
+bought — no overwrite, calculator always resident, power-cycle recovery — and
+*adds* a hardware-enforced bound the template path does not have. Refusing to
+build it because the other board cannot would be giving up a real capability to
+preserve symmetry, which is not a good trade on a two-board project where the
+boards already differ in FPU, SRAM, framebuffer strategy and stack depth.
+
+On the Pico 1, the alternative was rebuilding `uf2loader`'s architecture inside
+the calculator — a boot-start shim, a top-of-flash chooser, the app overwriting
+the calculator while it runs. That duplicates a GPLv3 project that already
+works on this exact hardware, reintroduces a bootstrap component, and gives up
+D88's structural safety net **on the board that can least afford flash**.
+Delegating is the better boundary: **we launch apps; `uf2loader` switches
+firmwares.** This is also, finally, a real job for the place D66 put
+`uf2loader` — optional, user-installed, never depended on by our automatic
+path.
+
+**Tradeoffs**: a board-asymmetric feature, which this project has otherwise
+avoided in user-visible behaviour. And ATRANS translates *reads*, not flash
+programming — a stock app that writes flash uses physical offsets and can
+therefore corrupt the calculator, which is the same hazard `uf2loader`
+documents. Recovery is a USB reflash. This is a warning to surface at launch
+time, not something the design can prevent.
+
+**The largest technical unknown, and 6.3.10 is gated on it**: whether ATRANS
+survives the app's own early boot. An SDK image configures QMI timings on
+startup, and if anything in that path resets the aperture to identity, the app
+would suddenly be executing from the calculator's flash. The switch routine
+must also be RAM-resident and must never return to flash — the moment ATRANS
+changes, the code that changed it is no longer mapped. Prove both in the spike
+before building anything on top.
+
+**Revisit when**: the RP2350's partition-table support is understood well
+enough to be a cleaner route than raw ATRANS registers; or if a stock image
+worth running turns out to need flash writes, which would change the warning
+into a refusal.
+
+---
+
+## D90: native apps are the route out of issue #38's trade — D78 amended
+
+**Date**: 2026-08-16
+**Status**: **PROPOSED — open, not accepted.** Written 2026-08-16, under further
+research. Would amend D78 and depends on D88; **D78 stands as written until this
+is accepted**, so issue #38 remains an open question on its original terms
+**Context**: D78 opened [issue #38](https://github.com/moodoki/graphite_picocalc_gc/issues/38)
+— a Python-free release build, the only way to recover D70 lever C's ~6.3%
+render cost on the Pico 1 — and deferred it *by its own terms* until Phase 6's
+final SRAM numbers were known. They now are: 15 KB free (Pico 1), 24 KB
+(Pico 2). But the decision #38 framed is a straight loss: **give up scripting
+entirely to get the render time back.** Nobody wants to make that trade, which
+is why it has sat open rather than being decided.
+
+**Decision**: **#38 stops being a trade once D88's app slot exists.** Ship a
+Python-free calculator in flash and a `Python` tile that chain-loads a
+MicroPython-enabled build of *this same repo* from the app slot. The render
+time is recovered on the default path; scripting costs one reboot to reach.
+
+**Rationale**: the reason this works at all is that **no user state lives in
+flash**. Variables, lists, matrices and graph state all persist to SD through
+`platform::Storage`, so the hop between two firmware images is invisible to
+the data — a script can store a variable and the calculator sees it after the
+return reboot. That property was never designed for this; it falls out of
+every persistence decision this project has made, and it is what makes two
+resident images behave like one calculator.
+
+It also changes what 6.3's app template is *for*. §3.4 always described the
+template as the thing third parties build against. It has a first-party job
+now: **building this project as an app**, linked at the slot base. That is one
+extra CMake target, not new machinery, but it has to be true from 6.3.7
+onward rather than retrofitted.
+
+**Tradeoffs**: two firmware images on the card instead of one, and they can
+drift — a user who updates the calculator and not the Python app gets two
+different `calc` versions in one session. The app header (D89's gate 3) carries
+a build stamp so the launcher can say so, but nothing forces them into step.
+And the Pico 1's flash budget now genuinely matters: a MicroPython app image is
+~640 KB against a 1 MB slot, which is comfortable but no longer academic.
+
+**Revisit when**: 6.3.0's spike settles whether the chain-load is clean on both
+boards. If it is not, #38 goes back to being the trade it was, and should be
+decided on its original terms.
+
+---
+
+## D89: three independent gates decide whether a `.uf2` may be written, and none of them guess
+
+**Date**: 2026-08-16
+**Status**: **PROPOSED — open, not accepted.** Written 2026-08-16, under further
+research. Implements the upfront board-discrimination requirement on D88. The
+requirement itself is not in doubt (one card, two boards); the design below is
+what is still open
+**Context**: One SD card moves between the Pico 1 and the Pico 2 during
+testing, so **a wrong-board binary will routinely be sitting on the card** —
+this is the normal case, not an edge case. Writing one into the app slot must
+fail safely and legibly, and it must fail *before* anything is erased.
+
+**Decision**: three gates, checked in order, all of which must pass before a
+single flash sector is erased. Each catches something the others do not.
+
+**Gate 1 — the UF2 family ID.** A block's `file_size` field is the family ID
+iff `UF2_FLAG_FAMILY_ID_PRESENT` is set in `flags` (`boot/uf2.h`). Ours is
+`RP2040_FAMILY_ID` on the Pico 1 and `RP2350_ARM_S_FAMILY_ID` on the Pico 2,
+as a new `config::kUf2FamilyId` — `config.hpp` is the one place board `#ifdef`s
+are tolerated, and the loader must not branch on board identity itself. The
+rules that matter:
+
+- **no family ID present → refuse.** Never guess a board from anything else.
+- **a block of another family is skipped but counted**, so a multi-family
+  ("universal") `.uf2` programs only our blocks and one file serves both
+  boards from the shared card — which is exactly the testing setup.
+- **zero blocks for us and at least one for another known family → refuse,
+  naming it** ("needs Pico 2"). Distinguishing that from "this is not a UF2"
+  is the whole point; both are refusals, but only one of them is the user's
+  card working as intended.
+- RISC-V, ARM-NS, `ABSOLUTE`, `DATA` and the CYW43 family are named and
+  refused rather than lumped into a generic error.
+
+**Gate 2 — every target address inside our slot, 256-byte aligned.**
+Independent of gate 1 *by construction*, because the slot base differs per
+board (0x10100000 vs 0x10200000): a Pico 2 app's addresses fall outside the
+Pico 1's slot even if gate 1 were somehow bypassed. Two mechanisms, one
+answer.
+
+**Gate 3 — our own 16-byte app header at the slot base.** It answers the
+entry-point question the loader needs regardless (the SDK's image layout
+differs between RP2040 and RP2350), and it separates "a valid RP2040 `.uf2`"
+from "one of our apps".
+
+**Gate 3 classifies; it does not refuse** (revised the same day, **D91**). An
+image of our own family that lacks the header is **`kForeign`**, not
+`kNotUf2` — a real and common case, because the PicoCalc has an ecosystem of
+stock firmware images (Coyote OS, PicoMite, ports). What happens to a
+`kForeign` image is D91's question, and the answer differs per board. Making
+gate 3 a refusal would have baked in the assumption that the answer is always
+"no", which it is not.
+
+**Rationale**: every rule above is a *refusal by default*. The failure mode
+this design exists to prevent is a half-erased slot, and the only way to be
+sure is to complete validation before touching flash — a cheap block-0 sniff
+at boot for the launcher's verdict, then an authoritative pass over every
+block at launch time.
+
+**The parser is pure and host-tested**, in the shape 6B.15 established:
+`parse_app_manifest` proved its 29 rules on the host rather than one bad
+`app.txt` at a time, and a wrong-board rejection is exactly the same kind of
+rule. Blocks can be synthesised in a buffer, so **the requirement this decision
+exists to satisfy is provable with no hardware at all** — including checking a
+genuine RP2350 header against a Pico 1 build.
+
+**The launcher lists a wrong-board app greyed, with the reason**, rather than
+hiding it. On a card deliberately shared between two boards, a silently missing
+tile is indistinguishable from a broken card, a bad manifest, or a failed scan.
+
+**Tradeoffs**: gate 3 means a genuinely foreign `.uf2` is refused even when it
+is the right family. That is not a real loss — see D88: a foreign image is
+linked at 0x10000000, where the calculator lives, so it could never have run.
+
+**Revisit when**: an app wants to ship one file containing both boards' images
+*and* our header — the header is per-image, so a universal `.uf2` carries two.
+The block-0 sniff gives a definite verdict only for single-family files; that
+is every file our template produces, and the full pass covers the rest.
+
+---
+
+## D88: the calculator chain-loads a separate app slot — D66's bootstrap component retired, D59 dissolved
+
+**Date**: 2026-08-16
+**Status**: **PROPOSED — open, not accepted.** Written 2026-08-16; the developer
+is researching further before deciding. **Would** supersede D59/P6-6 and amend
+D66 — but only on acceptance. **Until then D59 and D66 stand as written**, and
+the notes added to them are provisional
+**Context**: §3.4 (compiled `.uf2` launcher entries) is being promoted from a
+stretch goal to committed sub-phase **6.3**, because D90 makes it the enabling
+work for issue #38. Scoping it for real meant re-reading D66, which requires a
+**standalone permanent bootstrap binary at the reset vector** — its own linker
+script, its own flash placement, and a one-time install step on a fresh device.
+D66 itself flagged §3.4's ~25–35 hr estimate as understated because of it.
+
+D66's argument was: the "always recovers to the calculator" guarantee "can't be
+satisfied from inside the calculator's own image when an app is what's
+currently resident in the boot region — the calculator's code isn't running to
+make that check in that case."
+
+**That is true, and it is true only of the layout §3.4 assumed** — one payload
+region, the app written *over* the calculator. It is not a property of
+reboot-based app loading.
+
+**Decision**: the calculator stays at 0x10000000, built exactly as it is today,
+and chain-loads a **separate, non-overlapping app slot**: 0x10100000–0x101FFFFF
+on the Pico 1 (1 MB of 2 MB), 0x10200000–0x103FFFFF on the Pico 2 (2 MB of 4).
+
+- **launch** — validate (D89), erase + program the slot, write the marker to
+  `watchdog_hw->scratch[2]`, `watchdog_reboot()`
+- **boot** — the calculator's `main()` reads the marker before any init and
+  chain-jumps to the slot
+- **return** — clear the marker, `watchdog_reboot()`. **Nothing is written.**
+- **hung app** — power cycle; POR clears the scratch registers, so the
+  calculator boots
+- **corrupt slot write** — the calculator was never touched; it still boots
+
+**Rationale**: the safety net §3.4 calls non-negotiable becomes **structural**.
+Under D66's layout, "the worst case must be a corrupted app slot, never a
+device that won't boot" is a property of the re-flash code being correct.
+Here it is a property of the address map: the only image the boot ROM can
+start is the one the loader never writes to. That is a strictly stronger
+guarantee than the one it replaces, obtained by giving up flash address space
+— which the Pico 2 has in abundance and the Pico 1 can afford at 640 KB used
+of 2 MB.
+
+It also retires a large amount of committed machinery:
+
+- **D66's separate bootstrap** — no second binary, no second linker script, no
+  provisioning step on a fresh device. The chain-load is ~15 lines early in
+  `main()`, and D66's objection to putting it there does not apply, because the
+  calculator is always resident. **D66's marker correction survives unchanged**
+  and is load-bearing: bare `watchdog_caused_reboot()` is ambiguous with D47's
+  fault recovery, the bulk-PSRAM self-test and an ordinary `picotool load -f -x`,
+  so the dedicated `scratch[2]` marker is still exactly what is checked.
+- **D59 / P6-6 dissolves entirely** — `/picocalc/firmware.uf2`, the lazy
+  self-snapshot on launcher entry, the exposed build-size symbol and the
+  `pico_set_program_version` gate. Returning from an app writes no flash at
+  all, so there is nothing to fetch and nothing to keep in sync. D59 is
+  marked superseded rather than amended: its question no longer exists.
+
+**Tradeoffs**: apps must be **linked at the slot base**, from this project's
+template. A stock `.uf2` from anywhere else is linked at 0x10000000, where the
+calculator lives.
+
+> **Narrowed same day by D91 — read that before quoting this.** The first draft
+> of this entry said a stock image "cannot run" and that §3.4's foreign-app
+> claim was simply wrong. Both statements are too strong. **The Pico 2 can run
+> a stock image straight out of the app slot** via the RP2350's QMI address
+> translation, with no overwrite at all; only the Pico 1 cannot, because the
+> RP2040 has no equivalent. And what makes the Pico 1 unable to do it is **the
+> chip, not this layout** — a bootstrap at flash start collides with a stock
+> image's link address exactly as the calculator does, so §3.4's original
+> layout would not have delivered it either. **The layout choice and
+> third-party support are independent**, which is the opposite of what it looks
+> like, and it is why this decision stands regardless of how D91 goes.
+
+The calculator also
+acquires a hard ceiling: its image may never grow into the slot base, which
+6.3.8 makes a build-time assertion rather than something a flash write
+discovers.
+
+**What this does not remove**: the flash-write step itself. There is still no
+`flash_range_program`/`flash_range_erase` anywhere in this tree — it is a
+from-scratch RAM-resident HAL addition on a dual-core board with core 1 driving
+the panel and a PIO driving PSRAM. **6.3.0's spike gates everything else** and
+must pass on both boards; the RP2350 differs on bootrom scratch use, IMAGE_DEF
+and the M33's VTOR/security state, and D65's hardware result covers the
+reset-reason half of the marker but not whether POR actually zeroes
+`scratch[2]`. Assume nothing there that a board has not shown.
+
+**Revisit when**: the calculator image approaches the slot base on the Pico 1
+(640 KB of the 1 MB reserved today), or a use case appears that genuinely needs
+an app larger than its slot.
+
+---
+
 ## D87: a key event carries its name, because `code` and `ch` cannot answer "which arrow"
 
 **Date**: 2026-08-16
@@ -1476,7 +1790,17 @@ the context-carrying `launch` are still required by §4.5 alone.
 ## D66: P6-5 resolved — self-sufficient bootstrap, no `uf2loader` dependency; two corrections this surfaced
 
 **Date**: 2026-08-14
-**Status**: Accepted
+**Status**: Accepted and **still standing**. **D88 (2026-08-16) proposes
+amending it, but D88 is not accepted** — treat the following as the open
+challenge to correction 2, not as its withdrawal. Self-sufficiency and
+correction 1 (the dedicated scratch marker) are untouched either way. The
+challenge: the bootstrap may not need to be a separate permanent component,
+because its argument — that the calculator cannot make the boot
+decision when an app is resident in the boot region — holds only for the
+one-payload-region layout §3.4 assumed. D88 gives the app its own
+non-overlapping slot, so the calculator is always what the boot ROM starts and
+makes the decision itself, in ~15 lines of `main()`. The standalone binary, its
+linker script and the fresh-device install step are all retired
 **Context**: P6-5 asked whether §3.4 depends on `uf2loader` being
 installed, or the calculator becomes self-sufficient for the
 flash-write/reboot step. D65 (same day) hardware-confirmed the reset-
@@ -1841,7 +2165,15 @@ than silently patching around a surprise.
 ## D59: §3.4 "return to calculator" fetches fresh from a known SD path, self-snapshotted lazily on launcher entry
 
 **Date**: 2026-08-13
-**Status**: Accepted
+**Status**: Accepted and **still standing**. **D88 (2026-08-16) proposes
+superseding it, but D88 is not accepted.** If it is, this question stops
+existing: D88's app slot never overlaps the calculator, so returning from an app
+clears the marker and reboots without writing any flash — no image to fetch,
+nothing to keep in sync, and neither the build-size symbol nor the
+`pico_set_program_version` stamp this decision needed. Worth keeping either way
+for the
+reasoning about self-snapshotting a running XIP image, which may be useful if a
+firmware-update-from-SD feature is ever wanted for its own sake
 **Context**: `phase6-spec.md` §8 P6-6 asked whether §3.4's compiled-app
 "return to calculator" step bundles the calculator's own image as a
 resource every app carries, or fetches it fresh from a known SD path at

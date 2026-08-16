@@ -1,6 +1,104 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 (last) — **the periodic table app**
+**Last session:** 2026-08-16 (last) — **a design worked up for §3.4's stretch
+goal (native compiled `.uf2` apps), and deliberately left OPEN.** Docs only, no
+firmware changed. Draft spec
+[phase6.3-spec.md](../phases/phase6.3-spec.md), decisions **D88-D91**.
+
+> ## Read this first: nothing here is decided
+>
+> **D88, D89, D90 and D91 are all PROPOSED, not accepted** — the developer is
+> researching further before deciding, and they stand or fall as one design.
+> **§3.4 is still a stretch goal**, `phase6.3-spec.md` is a draft contract, and
+> **D59 and D66 stand exactly as written** (each carries a note naming the open
+> challenge, not a withdrawal). Nothing in this session overrides anything.
+>
+> Read `phase6.3-spec.md` as the strongest case that could be made for this
+> shape, with its weak points marked — not as work to pick up.
+
+> ## The case that was made (all of it open)
+>
+> **Issue #38 is the reason.** D78 deferred the Python-free build until Phase
+> 6's SRAM numbers were final. They are, and #38 as framed is a straight loss —
+> give up scripting entirely for ~6.3% of render time. **Native apps dissolve
+> the trade** (D90): a Python-free calculator plus a `Python` tile that
+> chain-loads a MicroPython build of this same repo. It works only because **no
+> user state lives in flash** — everything persists to SD, so the hop between
+> two images is invisible to the data. Nothing designed that; it falls out of
+> every persistence decision already made.
+>
+> **D88 argues D66's separate bootstrap component is unnecessary.** D66 required a
+> standalone binary at the reset vector — its own linker script, a fresh-device
+> install step — because the calculator cannot make the boot decision when an
+> app has overwritten it. **True only of the one-payload-region layout §3.4
+> assumed.** Give the app its own non-overlapping slot (Pico 1: 1 MB..2 MB;
+> Pico 2: 2 MB..4 MB) and the calculator is always what the boot ROM starts.
+> Returning would write **no flash at all**, which would dissolve D59/P6-6
+> entirely. **Neither is decided; both stand.**
+>
+> The claim to test: the safety net §3.4 calls non-negotiable would stop being a
+> property of correct re-flash code and become a property of the address map: **the only image the
+> boot ROM can start is the one the loader never writes to.** D66's marker
+> correction survives unchanged and is still load-bearing.
+
+**The upfront requirement, from how the hardware is actually used**: one SD card
+moves between both boards, so **a wrong-board `.uf2` on the card is the normal
+case**. The proposed answer is three independent gates, none of which guess (D89): the **UF2 family
+ID** (absent → refuse; a foreign-family block is skipped *but counted*, so a
+universal `.uf2` serves both boards and `kWrongBoard` stays distinguishable from
+`kNotUf2`), the **target address range** (independent by construction — the slot
+base differs per board), and **our own header** at the slot base. Nothing is
+erased until all three pass. The parser is pure and host-tested, 6B.15's shape:
+**the requirement is provable with no hardware at all.**
+
+> ## Third-party `.uf2`s: investigated, and two of the three answers were
+> already sitting in this repo unread (D91)
+>
+> **The RP2350 can run a stock image from the app slot in hardware.**
+> `QMI_ATRANS0..7` are eight XIP address-translation apertures, documented for
+> exactly this — *"execute in place at multiple physical flash addresses …
+> without the overhead of position-independent code."* Set `BASE`, flush the
+> cache, jump: the image believes it is at flash start, **the calculator is
+> never overwritten**, and reset restores identity so a power cycle comes back.
+> `ATRANS0.SIZE` bounds it in hardware — an over-read is a bus error, not a
+> quiet read of the calculator.
+>
+> **The RP2040 has no equivalent**, so a stock image must physically take
+> 0x10000000. But "impossible with a resident chooser" was wrong:
+> **`uf2loader` already does it** — loader in the **top 16 KB**, stock UF2s at
+> flash start, key-at-power-on to return, with the caveat that the app must not
+> write flash. So the draft takes the Pico 2 path and **delegates the Pico 1**:
+> we launch apps, `uf2loader` switches firmwares. Task **6.3.10**, separable.
+>
+> **The part that holds whichever way D88 goes**: §3.4's original bootstrap-at-flash-
+> start layout would not have delivered third-party support either, because it
+> collides with a stock image's link address exactly as the calculator does.
+> **The layout choice and third-party support are independent** — it looks like
+> a trade and is not one. Worth checking for that shape before paying for a
+> constraint.
+>
+> One design change fell out of it: **D89's third gate classifies rather than
+> refuses**, or "third-party images never run" would have been baked in.
+
+> ## Next — unchanged by any of the above
+>
+> **Close Phase 6**: the Pico 1 pass, the merge, issue #38. The three items in
+> the section below are exactly as they were, because none of D88-D91 has been
+> accepted and §3.4 is still a stretch goal.
+>
+> **On the open design**: the developer is researching before deciding. When
+> picking it back up, the two things most worth attacking are (a) whether the
+> RP2350 chain-jump and ATRANS actually survive an SDK image's own boot — no
+> board has shown either, and there is no `flash_range_program` anywhere in
+> this tree yet; and (b) whether delegating the Pico 1 to `uf2loader` is the
+> right boundary or a capability gap that will be resented later. If the design
+> is accepted, flip D88-D91 to Accepted and `phase6.3-spec.md`'s status line
+> with it; if it is not, this whole set can be dropped without touching
+> anything else — that was the point of leaving D59/D66 standing.
+
+---
+
+**Previous session:** 2026-08-16 — **the periodic table app**
 (`examples/apps/periodic/`), §4.6 entry 1, built as the pressure test
 for the `calc` module. It found the gap it existed to find, and the
 measurement §4.4 has wanted since before 6B.1.
