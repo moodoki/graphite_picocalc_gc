@@ -50,6 +50,27 @@ constexpr bool kHasHardwareFpu = false;
 // both the slowest and barely roomier, so 8px keeps D10s pipeline
 // overlap and pays ~6.3% instead of ~8.6%. One run each; the ordering
 // is consistent across avg and max.
+//
+// STAYS AT 8, re-measured 2026-08-23 (issue #38). 6B closed leaving
+// 15.2 KB free on the Pico 1, above the ~12 KB the issue set as the
+// point where a Python-free build would be the only way to offer the
+// faster render — so restoring 16 was affordable, was built, was
+// flashed, and was then reverted on the numbers:
+//
+//   8px  (this)  render+overhead 140.9 / 140.5 ms   15.2 KB free
+//   16px         render+overhead 135.9 / 135.9 ms    5.4 KB free
+//
+// Two runs each, same 32-expression workload, host round trip minus the
+// reported evaluation time (main.cpp's `us=` field, D70's own A/B
+// method). The gain is 4.8 ms — 3.4%, not the ~6.3% recorded above,
+// which was measured before 6B existed and no longer holds. Paying
+// 10,008 bytes, two thirds of the board's remaining headroom, for a
+// 3.4% frame time nobody can see is the wrong trade.
+//
+// If this is ever raised again it must be Pico-1-only: strip_buf is
+// allocated on both boards, but only the Pico 1 renders in strips — the
+// Pico 2 pushes a whole framebuffer and keeps it solely as the script
+// canvas's scratch, where a bigger strip costs 10 KB and buys nothing.
 constexpr int kStripHeight = 8;
 constexpr size_t kStripBytes =
     static_cast<size_t>(kScreenWidth) * kStripHeight * 2;  // RGB565 = 2 bytes/px
