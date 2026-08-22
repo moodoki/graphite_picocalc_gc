@@ -43,3 +43,7 @@ Raw feedback from a soak session, not yet investigated or fixed.
 
 11. **File browser**: "file browser should be able to open scripts and notes
     in the appropriate app."
+
+12. **App launcher, design consideration**: "might be usefull to differentiate
+    between python apps and native compiled apps (and eventually uf2 apps if
+    shipped) in the apps menu, keep this as a design consideration." [sic]
