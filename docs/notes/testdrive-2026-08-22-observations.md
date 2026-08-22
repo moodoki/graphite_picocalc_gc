@@ -38,12 +38,12 @@ Raw feedback from a soak session, not yet investigated or fixed.
    as a todo, since it involves some design to ensure clean migration and
    backwards compatibility should we swap to an older firmware."
 
-10. **File browser**: "file browser vant move files." [sic — clarified: the
-    file browser can't move files to another folder; not supported today]
+10. **File browser**: "file browser can't move files." (clarified: can't move
+    files to another folder; not supported today)
 
 11. **File browser**: "file browser should be able to open scripts and notes
     in the appropriate app."
 
-12. **App launcher, design consideration**: "might be usefull to differentiate
+12. **App launcher, design consideration**: "might be useful to differentiate
     between python apps and native compiled apps (and eventually uf2 apps if
-    shipped) in the apps menu, keep this as a design consideration." [sic]
+    shipped) in the apps menu, keep this as a design consideration."
