@@ -21,3 +21,6 @@ Raw feedback from a soak session, not yet investigated or fixed.
 5. **File browser**: "File list count draws over top status bar, file sizes
    difficult to read, human readable formatting will help. We can use diff
    colors for folders, scripts, text, and calc data files."
+
+6. **Python editor** (`ProgramScreen` / `TextEditorWidget`): "keywords base
+   syntax highlighting will be helpful in python editor."
