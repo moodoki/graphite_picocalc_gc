@@ -4,6 +4,7 @@
 # Runs:
 #   1. clang-format --dry-run --Werror (catches unformatted files)
 #   2. clang-tidy on changed files
+#   3. check-text-fits.py (literal text drawn past the panel edge)
 #
 # Exits non-zero if any check fails.
 
@@ -103,6 +104,18 @@ else
       EXIT=1
     fi
   fi
+fi
+
+# 3. Panel-width check for literal text. Needs no toolchain and no board —
+# it reads the strings and the panel width straight out of the source,
+# which is the only place a hint row's length is ever decided. It does NOT
+# see softkey labels: draw_softkeys truncates by design rather than
+# overflowing, so nothing lands out of bounds (issue #52).
+echo
+echo "=== text-fits check ==="
+if ! python3 scripts/check-text-fits.py; then
+  echo "ERROR: text is drawn past the edge of the panel." >&2
+  EXIT=1
 fi
 
 if [[ "$EXIT" -ne 0 ]]; then
