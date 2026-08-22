@@ -42,4 +42,32 @@ void sort_entries(platform::Storage::DirEntry* entries, int count);
 // reads larger than the file is.
 void format_size(std::uint32_t bytes, char* out, std::size_t out_len);
 
+// ---- Move (issue #47) ----
+//
+// Cut-and-paste rather than a typed destination: the browser already
+// navigates, so the target folder is wherever the user has walked to,
+// and nobody should have to type "/picocalc/apps/periodic" on this
+// keyboard.
+
+enum class MoveCheck : std::uint8_t {
+    kOk,
+    kSameFolder,  // destination is the folder it is already in
+    kIntoItself,  // a directory cannot be moved inside its own subtree
+    kTooLong,     // the joined destination would not fit kMaxPath
+    kBadSource,   // empty, or has no '/' to take a basename from
+};
+
+// Everything about a move that can be decided WITHOUT touching the
+// card, which is all of it except whether the destination exists. On
+// kOk, out_dest holds the full destination path.
+//
+// kIntoItself is the one that matters: f_rename would happily move a
+// directory into its own descendant and orphan the whole subtree, and
+// the card would not say no.
+MoveCheck check_move(const char* src_path, bool src_is_dir, const char* dest_dir, char* out_dest,
+                     std::size_t out_len);
+
+// Last path component. Returns the whole string when there is no '/'.
+const char* basename_of(const char* path);
+
 }  // namespace apps

@@ -7,7 +7,11 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "ui/text_buffer.hpp"
+#include "ui/text_editor_widget.hpp"
 #include "apps/file_list.hpp"
+#include "apps/notepad_screen.hpp"
+#include "apps/program_screen.hpp"
 
 namespace apps {
 
@@ -58,6 +62,8 @@ void FileBrowserScreen::configure(FileBrowserMode mode, const char* start_dir,
     prompt_.close();
     prompt_kind_ = Prompt::kNone;
     status_[0] = 0;
+    pending_move_[0] = 0;
+    pending_move_is_dir_ = false;
 }
 
 int FileBrowserScreen::depth() const {
@@ -159,6 +165,125 @@ const platform::Storage::DirEntry* FileBrowserScreen::current() const {
         return nullptr;
     }
     return &entries_[selected_];
+}
+
+void FileBrowserScreen::begin_move() {
+    const auto* e = current();
+    if (e == nullptr) {
+        return;
+    }
+    if (!join(e->name, pending_move_, sizeof(pending_move_))) {
+        pending_move_[0] = 0;
+        set_status("Path too long");
+        return;
+    }
+    pending_move_is_dir_ = e->is_dir;
+    set_status("Cut");
+}
+
+void FileBrowserScreen::complete_move() {
+    if (pending_move_[0] == 0) {
+        return;
+    }
+    char dest[platform::kMaxPath];
+    switch (check_move(pending_move_, pending_move_is_dir_, cur_dir_, dest, sizeof(dest))) {
+        case MoveCheck::kSameFolder:
+            set_status("Already here");
+            return;
+        case MoveCheck::kIntoItself:
+            set_status("Into itself");
+            return;
+        case MoveCheck::kTooLong:
+            set_status("Path too long");
+            return;
+        case MoveCheck::kBadSource:
+            pending_move_[0] = 0;
+            set_status("Bad source");
+            return;
+        case MoveCheck::kOk:
+            break;
+    }
+
+    // Distinguish the two ways rename_file returns false, because they
+    // need different things from the user: a name already taken here,
+    // versus a source that has gone since it was cut.
+    if (!platform::storage().file_exists(pending_move_)) {
+        pending_move_[0] = 0;
+        set_status("Source gone");
+        return;
+    }
+    if (platform::storage().file_exists(dest)) {
+        set_status("Name taken here");
+        return;
+    }
+    if (!platform::storage().rename_file(pending_move_, dest)) {
+        set_status("Move failed");
+        return;
+    }
+
+    // Land the cursor on what was just moved rather than at the top —
+    // the same reflex as do_delete() staying where the user was.
+    char moved_name[64];
+    std::snprintf(moved_name, sizeof(moved_name), "%s", basename_of(dest));
+    pending_move_[0] = 0;
+    relist();
+    for (int i = 0; i < count_; ++i) {
+        if (std::strcmp(entries_[i].name, moved_name) == 0) {
+            selected_ = i;
+            scroll_ = std::max(0, selected_ - visible_rows() + 1);
+            break;
+        }
+    }
+    set_status("Moved");
+}
+
+void FileBrowserScreen::open_selected() {
+    const auto* e = current();
+    if (e == nullptr || e->is_dir) {
+        return;
+    }
+    const FileKind kind = classify(*e);
+    if (kind == FileKind::kCalcData) {
+        // .dat is the calculator's own state, written and read by the
+        // firmware. Opening it in a text editor would show bytes and
+        // saving would corrupt it, so this refuses rather than obliges.
+        set_status("Calculator data");
+        return;
+    }
+    if (kind != FileKind::kScript && kind != FileKind::kText) {
+        set_status("No app for this");
+        return;
+    }
+
+    char path[platform::kMaxPath];
+    if (!join(e->name, path, sizeof(path))) {
+        set_status("Path too long");
+        return;
+    }
+
+    // The editor truncates silently at kCapacity and reports success,
+    // so a file bigger than the buffer would open short and SAVE short,
+    // losing the tail. The editor's own F3:LOAD lives with that inside
+    // its own directory; opening anything on the card widens it far
+    // enough to be worth refusing (elements.csv is already 5 KB).
+    const long size = platform::storage().file_size(path);
+    if (size > ui::TextBuffer::kCapacity) {
+        set_status("Too big to edit");
+        return;
+    }
+
+    // Push the app, THEN load: on_activate reconfigures the shared
+    // widget and reloads that screen's own last path, which would undo
+    // a load done first. The browser stays underneath, so ESC comes
+    // back to the folder rather than to wherever the browser was
+    // opened from.
+    if (kind == FileKind::kScript) {
+        program_screen().open_editor();  // never inherit a stale app mode
+        ui::screen_manager().push(&program_screen());
+    } else {
+        ui::screen_manager().push(&notepad_screen());
+    }
+    ui::text_editor().load(path);
 }
 
 void FileBrowserScreen::begin_rename() {
@@ -306,6 +431,12 @@ bool FileBrowserScreen::on_key(const platform::KeyEvent& ev) {
     }
 
     switch (ev.key) {
+        case Key::kF2:
+            begin_move();
+            return true;
+        case Key::kF3:
+            complete_move();
+            return true;
         case Key::kF4:
             begin_rename();
             return true;
@@ -348,8 +479,13 @@ bool FileBrowserScreen::on_key(const platform::KeyEvent& ev) {
                         ui::screen_manager().pop();
                         fn(path);
                     }
+                } else {
+                    // kBrowse: hand the file to whatever edits it
+                    // (issue #48). This was a deliberate no-op under
+                    // D55; kPick is untouched, so the editor's own
+                    // F3:LOAD still returns a path to its caller.
+                    open_selected();
                 }
-                // kBrowse on a file: view only, no action (D55).
             }
             return true;
         case Key::kEscape:
@@ -379,6 +515,24 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
                          kGrayLine);
     }
 
+    // Which visible name, if any, is the one armed for a move. Resolved
+    // once here rather than joining a path per row: render() runs on
+    // every frame this screen is up.
+    const char* armed_name = nullptr;
+    if (pending_move_[0] != 0) {
+        const char* base = basename_of(pending_move_);
+        // base == pending_move_ means there was no '/' to split on.
+        // join() always writes one, but the subtraction below would
+        // underflow to a huge size_t if that ever stopped being true.
+        if (base != pending_move_) {
+            const auto dir_len = static_cast<std::size_t>(base - pending_move_ - 1);
+            if (std::strlen(cur_dir_) == dir_len &&
+                std::strncmp(pending_move_, cur_dir_, dir_len) == 0) {
+                armed_name = base;
+            }
+        }
+    }
+
     char line[24];
     const int first = scroll_ > 0 ? scroll_ : 0;
     for (int i = first; i < count_ && i - first < visible_rows(); ++i) {
@@ -386,7 +540,14 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
         if (i == selected_) {
             fb.fill_rect(0, y - 1, platform::kScreenW, kRowH, platform::Color::from_rgb(0, 0, 60));
         }
-        font.draw_string(fb, 8, y, entries_[i].name, color_for(classify(entries_[i])));
+        const bool armed = armed_name != nullptr && std::strcmp(entries_[i].name, armed_name) == 0;
+        if (armed) {
+            // Marked for a move: dimmed, with a marker in the 8px gutter
+            // the names are already indented past.
+            font.draw_string(fb, 0, y, ">", kGrayLine);
+        }
+        font.draw_string(fb, 8, y, entries_[i].name,
+                         armed ? kGrayLine : color_for(classify(entries_[i])));
         if (entries_[i].is_dir) {
             std::snprintf(line, sizeof(line), "[DIR]");
         } else {
@@ -403,7 +564,11 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
         return;
     }
 
-    const char* const keys[6] = {"", "", "", "REN", "MKDIR", ""};
+    // MOVE appears only while something is armed, which is what tells
+    // the user a cut is still pending after walking to another folder.
+    // Both labels are within draw_softkeys' 6-character cell (#52).
+    const char* const keys[6] = {"",    "CUT",   pending_move_[0] != 0 ? "MOVE" : "",
+                                 "REN", "MKDIR", ""};
     ui::draw_softkeys(fb, keys);
 
     // Position counter in the (unbound) F6 cell. It used to be drawn at

@@ -56,6 +56,26 @@ private:
     char start_dir_[platform::kMaxPath] = {};  // floor for ascending
     char cur_dir_[platform::kMaxPath] = {};
 
+    // ---- Move, as cut-and-paste (issue #47) ----
+    //
+    // The full source path, empty when nothing is armed. Armed state
+    // survives navigating and opening a file, because walking to the
+    // destination folder IS the gesture — it does not survive
+    // configure(), so a new caller never inherits someone else's
+    // pending move.
+    char pending_move_[platform::kMaxPath] = {};
+    bool pending_move_is_dir_ = false;
+
+    void begin_move();     // F2: arm the selection
+    void complete_move();  // F3: move it into the current folder
+
+    // ---- Open in the associated app (issue #48) ----
+    //
+    // ENTER on a file in kBrowse mode used to be a deliberate no-op
+    // (D55, "view only"). It now hands .py to the Python editor and
+    // text to Notepad, and says why for the kinds it will not open.
+    void open_selected();
+
     // ---- Management (6A.7, D55), available in both modes ----
     ui::PromptLine prompt_;
     enum class Prompt : std::uint8_t { kNone, kRename, kNewFolder, kConfirmDelete };

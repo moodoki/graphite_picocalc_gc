@@ -161,6 +161,99 @@ void test_format_size() {
     check_size(8191, "7.9K");  // 7.999K, truncated rather than shown as 8.0K
 }
 
+void check_move_case(const char* src, bool is_dir, const char* dest_dir,
+                     apps::MoveCheck want, const char* want_path, const char* what) {
+    char got[platform::kMaxPath];
+    got[0] = 0;
+    const apps::MoveCheck res = apps::check_move(src, is_dir, dest_dir, got, sizeof(got));
+    ++g_checks;
+    if (res != want) {
+        ++g_failures;
+        std::printf("FAIL: %s (verdict %d, want %d)\n", what, static_cast<int>(res),
+                    static_cast<int>(want));
+        return;
+    }
+    if (want_path != nullptr && std::strcmp(got, want_path) != 0) {
+        ++g_failures;
+        std::printf("FAIL: %s (path \"%s\", want \"%s\")\n", what, got, want_path);
+    }
+}
+
+void test_basename() {
+    check(std::strcmp(apps::basename_of("/picocalc/notes/a.txt"), "a.txt") == 0, "basename");
+    check(std::strcmp(apps::basename_of("/a.txt"), "a.txt") == 0, "basename at root");
+    check(std::strcmp(apps::basename_of("bare"), "bare") == 0, "basename with no slash");
+    check(std::strcmp(apps::basename_of(""), "") == 0, "basename of empty");
+    check(std::strcmp(apps::basename_of(nullptr), "") == 0, "basename of null");
+}
+
+void test_move_ok() {
+    check_move_case("/picocalc/a.txt", false, "/picocalc/notes", apps::MoveCheck::kOk,
+                    "/picocalc/notes/a.txt", "file moves into a subfolder");
+    check_move_case("/picocalc/notes/a.txt", false, "/picocalc", apps::MoveCheck::kOk,
+                    "/picocalc/a.txt", "file moves up to the parent");
+    check_move_case("/picocalc/apps/old", true, "/picocalc/notes", apps::MoveCheck::kOk,
+                    "/picocalc/notes/old", "a directory moves to an unrelated folder");
+}
+
+void test_move_same_folder() {
+    check_move_case("/picocalc/a.txt", false, "/picocalc", apps::MoveCheck::kSameFolder, nullptr,
+                    "moving into the folder it is already in");
+    // Reported as kSameFolder rather than falling through to "exists":
+    // both refuse, but only one of them says what actually happened.
+    check_move_case("/picocalc/notes/a.txt", false, "/picocalc/notes",
+                    apps::MoveCheck::kSameFolder, nullptr, "same folder, one level down");
+}
+
+void test_move_into_itself() {
+    // f_rename would do this and orphan the subtree; the card does not
+    // object, so this check is the only thing standing in the way.
+    check_move_case("/picocalc/apps", true, "/picocalc/apps", apps::MoveCheck::kIntoItself,
+                    nullptr, "a directory into itself");
+    check_move_case("/picocalc/apps", true, "/picocalc/apps/periodic",
+                    apps::MoveCheck::kIntoItself, nullptr, "a directory into its own child");
+    check_move_case("/picocalc/apps", true, "/picocalc/apps/a/b/c", apps::MoveCheck::kIntoItself,
+                    nullptr, "a directory deep into its own subtree");
+
+    // The separator is what makes this safe: a sibling whose name
+    // merely starts with the source's name is NOT inside it.
+    check_move_case("/picocalc/apps", true, "/picocalc/appsdata", apps::MoveCheck::kOk,
+                    "/picocalc/appsdata/apps", "a sibling with a prefix name is not inside it");
+    // A FILE named like a directory carries no subtree rule.
+    check_move_case("/picocalc/apps", false, "/picocalc/apps/periodic", apps::MoveCheck::kOk,
+                    "/picocalc/apps/periodic/apps", "the subtree rule applies to dirs only");
+}
+
+void test_move_rejects_bad_input() {
+    check_move_case("", false, "/picocalc", apps::MoveCheck::kBadSource, nullptr, "empty source");
+    check_move_case(nullptr, false, "/picocalc", apps::MoveCheck::kBadSource, nullptr,
+                    "null source");
+    check_move_case("/picocalc/a.txt", false, "", apps::MoveCheck::kBadSource, nullptr,
+                    "empty destination");
+    check_move_case("noslash", false, "/picocalc", apps::MoveCheck::kBadSource, nullptr,
+                    "source with no directory part");
+    check_move_case("/picocalc/", false, "/picocalc/notes", apps::MoveCheck::kBadSource, nullptr,
+                    "source ending in a slash has no basename");
+}
+
+void test_move_length_bound() {
+    // kMaxPath is 128 and descent is capped at 4 levels, so this is not
+    // reachable through the UI — which is exactly why it should be
+    // checked here rather than trusted.
+    char out[24];  // deliberately too small for the joined path
+    const apps::MoveCheck res = apps::check_move("/picocalc/notes/a-fairly-long-name.txt", false,
+                                                 "/picocalc/some/other/folder", out, sizeof(out));
+    check(res == apps::MoveCheck::kTooLong, "a destination that would not fit is refused");
+
+    // One byte of headroom either side of the bound, so the check is
+    // the length and not an off-by-one near it.
+    char exact[20];  // "/a/bcd.txt" + NUL is 11
+    check(apps::check_move("/x/bcd.txt", false, "/a", exact, 11) == apps::MoveCheck::kOk,
+          "a destination that fits exactly is allowed");
+    check(apps::check_move("/x/bcd.txt", false, "/a", exact, 10) == apps::MoveCheck::kTooLong,
+          "one byte short is refused");
+}
+
 }  // namespace
 
 int main() {
@@ -171,6 +264,12 @@ int main() {
     test_sort_edges();
     test_sort_is_total_over_a_full_listing();
     test_format_size();
+    test_basename();
+    test_move_ok();
+    test_move_same_folder();
+    test_move_into_itself();
+    test_move_rejects_bad_input();
+    test_move_length_bound();
 
     std::printf("test_file_list: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

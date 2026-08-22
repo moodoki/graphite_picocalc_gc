@@ -109,4 +109,52 @@ void format_size(std::uint32_t bytes, char* out, std::size_t out_len) {
     std::snprintf(out, out_len, "%lu%s", static_cast<unsigned long>(whole), unit);
 }
 
+const char* basename_of(const char* path) {
+    if (path == nullptr) {
+        return "";
+    }
+    const char* slash = std::strrchr(path, '/');
+    return slash != nullptr ? slash + 1 : path;
+}
+
+MoveCheck check_move(const char* src_path, bool src_is_dir, const char* dest_dir, char* out_dest,
+                     std::size_t out_len) {
+    if (src_path == nullptr || dest_dir == nullptr || src_path[0] == 0 || dest_dir[0] == 0) {
+        return MoveCheck::kBadSource;
+    }
+    const char* slash = std::strrchr(src_path, '/');
+    if (slash == nullptr || slash[1] == 0) {
+        return MoveCheck::kBadSource;
+    }
+
+    // Already here? Compare the source's own directory with the target,
+    // rather than comparing paths after the join — a no-op move would
+    // otherwise fail later as "destination exists", which is true but
+    // says the wrong thing.
+    const auto src_dir_len = static_cast<std::size_t>(slash - src_path);
+    if (std::strlen(dest_dir) == src_dir_len &&
+        std::strncmp(src_path, dest_dir, src_dir_len) == 0) {
+        return MoveCheck::kSameFolder;
+    }
+
+    // A directory may not be moved into itself or into anything below
+    // it. Both are checked against the SOURCE path with a separator, so
+    // "/picocalc/apps" does not swallow "/picocalc/appsdata".
+    if (src_is_dir) {
+        const std::size_t src_len = std::strlen(src_path);
+        if (std::strncmp(dest_dir, src_path, src_len) == 0 &&
+            (dest_dir[src_len] == 0 || dest_dir[src_len] == '/')) {
+            return MoveCheck::kIntoItself;
+        }
+    }
+
+    const char* name = slash + 1;
+    // dest_dir + '/' + name + NUL
+    if (std::strlen(dest_dir) + 1 + std::strlen(name) + 1 > out_len) {
+        return MoveCheck::kTooLong;
+    }
+    std::snprintf(out_dest, out_len, "%s/%s", dest_dir, name);
+    return MoveCheck::kOk;
+}
+
 }  // namespace apps
