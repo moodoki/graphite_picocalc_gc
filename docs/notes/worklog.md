@@ -305,6 +305,82 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-23 — Phase 6 CLOSES: the Pico 1 pass, ten issues, and two measurements that overturned their own premises
+
+**Phase 6 is merged and tagged `v0.5.0`** (PR #56, 58 commits). 22 host suites /
+**3,386 checks**, clang-tidy clean, both targets building. Free SRAM **15.2 KB**
+(Pico 1) / **32.6 KB** (Pico 2); core-0 stack high-water 2,432 of 4,096.
+
+Thirteen commits, ten issues closed, four filed. The two things worth reading
+first are the measurements, because both contradicted the estimate they were
+meant to confirm — in opposite directions.
+
+**§4.4's heap estimate held; its headroom claim did not, and then did.** The
+periodic dataset was "computed, not measured" on the Pico 1's 40 KB heap. The
+app's own instrumentation, through the real `exec_file` path: **11,536 B** for
+118 elements against an estimate of 11,504, and the app's bytecode **8,624 B**
+against ~8,500. Both essentially exact. The first run said otherwise — 11,376 B
+and only 17,104 free, which I wrote up as the estimate being optimistic — and
+that was **my own REPL globals still holding ~2.7 KB**. Runs 2 and 3 were
+byte-identical on a clean interpreter. *An absolute `mem_free` reading is only
+meaningful on a clean interpreter; the delta across load is the robust number.*
+
+**#38 closed by measurement, and the premise was stale.** 6B left 15.2 KB free,
+above the ~12 KB the issue set as the point where a Python-free build would be
+the only way to get D70 lever C back. So restoring the 16 px strip was
+affordable — it was built, flashed, and measured at **3.4%, not the ~6.3%** the
+issue was built on (that figure predates 6B). Reverted: 10,008 bytes, two
+thirds of the board's remaining headroom, for 4.8 ms on a 140 ms frame. The
+issue closes as it predicted but for a better reason — not "we can afford to
+give lever C back" but "lever C costs less than we thought". The record lives in
+`kStripHeight`'s own comment so it is not run a third time.
+
+**The Pico 1 pass earned its keep by finding my own regression.** Bisecting the
+stack by workload after a clean reboot: arithmetic 2,116, CAS 2,432, matrix and
+999-element list work no new high — then **`calc.list_files` at 3,004**, the
+deepest frame in the firmware and one morning old. The window is paid for
+*twice* on the way down (the glue's `CalcDirEntry win[8]` and the adapter's
+`Storage::DirEntry buf[8]`, both live at the leaf), so 576 bytes was really
+1,152. Halved both: it no longer sets a high-water mark at all.
+
+**D53's fix re-verified, 30/30.** Reproduced #24's exact shape —
+`seq(x,x,1,999,1)/249750`, a 999-element evaluator temporary from the pool —
+thirty times. Element 1 correct every run; it was ~8/30 corrupt before the
+block-read fix. Root cause still unknown, #24 stays open.
+
+**Two new bindings.** `calc.list_files` (#53) closed a gap that had blocked its
+own diagnosis: two scratch scripts were throwing tracebacks and there was no way
+to enumerate `/picocalc/programs` to find out which. With it: `loop.py`, a
+`while True:` labelled "ESC to stop" with no handler — **stopping it the way it
+says to is what printed the traceback**. D74 decided the implementation, ruling
+out the obvious callback iterator: it would build Python objects with an open
+`FF_DIR` on a C++ frame below, and allocation there is a non-local exit.
+
+`calc.capture_esc` (#55) fixed a capability gap, not an app bug: `poll_interrupt`
+latched on ESC and **never delivered it to a script at all**, so no app could
+implement "ESC goes back one level". The backstop needs no timer and no
+heuristic — count the presses the script has not read; one that reads keys
+resets it, one that has stopped never does. Measured on hardware with a
+self-narrating runaway script: metronomic beats to 0.09 s before the interrupt,
+**two presses required**.
+
+**Testdrive friction, both sessions.** 2026-08-22's Pico 2 soak gave #43-#51;
+2026-08-23's Pico 1 pass gave the ESC theme (#55). Closed this session: #40,
+#43, #44, #45, #46, #47, #48, #53, #55, #38. Filed: #52 (softkey labels
+truncate, `MKDIR` renders `MKDI`), #54 (ESC out of an app reports the run as
+`raised`, extended to cover the force-quit unwind), #55 (closed same day).
+
+**A new lint gate.** `scripts/check-text-fits.py` measures every literal string
+drawn at a literal x against `kScreenW`, after the Y= hint row was found running
+2 px off a 320 px panel. It reads the panel width and glyph width from source
+rather than hardcoding either, and reports its own reach (38 checked, 107
+skipped as runtime text). Verified by reverting the string and watching it fail.
+
+**HW-PENDING**: none new. The Pico 1 board-swap pass is done, which was the last
+thing gating the close besides the merge.
+
+---
+
 ## 2026-08-16 (last) — a design for §3.4's native `.uf2` apps, left open on purpose (D88-D91)
 
 Docs only; no firmware changed, nothing built. §3.4 (compiled `.uf2` launcher

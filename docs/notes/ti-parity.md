@@ -1,7 +1,7 @@
 # Feature parity stocktake — TI-83/84+ (and TI-Nspire CAS for CAS)
 
-**Last updated**: 2026-08-02 (originally written 2026-07-21; kept current
-going forward — see "Maintenance" below)
+**Last updated**: 2026-08-23, at the Phase 6 close (originally written
+2026-07-21; kept current going forward — see "Maintenance" below)
 **Purpose**: a living assessment of how PicoCalc GraphCalc compares to its two
 reference machines — the TI-83/84+ family for the general calculator, and the
 TI-Nspire CX II CAS for the not-yet-built CAS phase. Used to inform phase
@@ -20,6 +20,33 @@ Legend: ✅ shipped/on par · 🟡 partial or different shape · ❌ not present
 🚫 out of scope (deliberately not pursuing)
 
 ---
+
+## 0. Where Phase 6 leaves this comparison (added 2026-08-23)
+
+Phase 6 shipped an app platform: a launcher, a shared text editor, Notepad,
+a file browser, and embedded MicroPython with a `calc` module that reaches
+the evaluator, the CAS, graphs, lists, matrices, the keyboard, the screen
+and the SD card.
+
+**That is a TI-83/84+ parity item and a departure at the same time.** The
+TI-83/84+ has TI-BASIC and Flash applications, so "programmable, with apps"
+is on-par in kind. But the shape is different enough that scoring it in the
+tables below would mislead:
+
+| | TI-83/84+ | here |
+|---|---|---|
+| on-device language | TI-BASIC (+ASM/C via SDK) | MicroPython |
+| app distribution | signed Flash apps | a folder with an `app.txt` on the SD card |
+| editing apps | on-device BASIC editor | on-device editor, or edit the `.py` on the card |
+
+The practical read: **scripting is ahead of TI-BASIC in language power and
+behind it in integration** — no on-calculator app store, no signed
+distribution, and a script cannot yet draw over the calculator's own screens
+(it takes the panel). Native compiled `.uf2` apps are drafted but not
+committed (Phase 6.3, D88-D91 all open).
+
+Nothing in the tables below changed at the Phase 6 close; Phase 6 added a
+new axis rather than moving existing rows.
 
 ## 1. Core arithmetic & calculator basics
 
