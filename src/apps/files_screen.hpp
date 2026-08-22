@@ -81,6 +81,7 @@ private:
     enum class Prompt : std::uint8_t { kNone, kRename, kNewFolder, kConfirmDelete };
     Prompt prompt_kind_ = Prompt::kNone;
     char status_[40] = {};  // transient result/error text
+    bool status_is_error_ = false;
 
     void relist();
     void descend(const char* name);
@@ -89,7 +90,12 @@ private:
     // Joins cur_dir_ + "/" + name into out. False if it wouldn't fit.
     bool join(const char* name, char* out, std::size_t out_len) const;
 
+    // Transient feedback on the softkey bar. Green says it happened,
+    // red says it did not — the same split PromptLine already draws,
+    // and the reason a refusal like "Too big to edit" should not look
+    // like a report of success. Either is cleared by the next keypress.
     void set_status(const char* msg);
+    void set_error(const char* msg);
     const platform::Storage::DirEntry* current() const;
     void begin_rename();
     void begin_new_folder();

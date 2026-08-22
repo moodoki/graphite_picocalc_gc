@@ -158,6 +158,12 @@ bool FileBrowserScreen::ascend() {
 
 void FileBrowserScreen::set_status(const char* msg) {
     std::snprintf(status_, sizeof(status_), "%s", msg != nullptr ? msg : "");
+    status_is_error_ = false;
+}
+
+void FileBrowserScreen::set_error(const char* msg) {
+    std::snprintf(status_, sizeof(status_), "%s", msg != nullptr ? msg : "");
+    status_is_error_ = true;
 }
 
 const platform::Storage::DirEntry* FileBrowserScreen::current() const {
@@ -174,7 +180,7 @@ void FileBrowserScreen::begin_move() {
     }
     if (!join(e->name, pending_move_, sizeof(pending_move_))) {
         pending_move_[0] = 0;
-        set_status("Path too long");
+        set_error("Path too long");
         return;
     }
     pending_move_is_dir_ = e->is_dir;
@@ -188,17 +194,17 @@ void FileBrowserScreen::complete_move() {
     char dest[platform::kMaxPath];
     switch (check_move(pending_move_, pending_move_is_dir_, cur_dir_, dest, sizeof(dest))) {
         case MoveCheck::kSameFolder:
-            set_status("Already here");
+            set_error("Already here");
             return;
         case MoveCheck::kIntoItself:
-            set_status("Into itself");
+            set_error("Into itself");
             return;
         case MoveCheck::kTooLong:
-            set_status("Path too long");
+            set_error("Path too long");
             return;
         case MoveCheck::kBadSource:
             pending_move_[0] = 0;
-            set_status("Bad source");
+            set_error("Bad source");
             return;
         case MoveCheck::kOk:
             break;
@@ -209,15 +215,15 @@ void FileBrowserScreen::complete_move() {
     // versus a source that has gone since it was cut.
     if (!platform::storage().file_exists(pending_move_)) {
         pending_move_[0] = 0;
-        set_status("Source gone");
+        set_error("Source gone");
         return;
     }
     if (platform::storage().file_exists(dest)) {
-        set_status("Name taken here");
+        set_error("Name taken here");
         return;
     }
     if (!platform::storage().rename_file(pending_move_, dest)) {
-        set_status("Move failed");
+        set_error("Move failed");
         return;
     }
 
@@ -247,17 +253,17 @@ void FileBrowserScreen::open_selected() {
         // .dat is the calculator's own state, written and read by the
         // firmware. Opening it in a text editor would show bytes and
         // saving would corrupt it, so this refuses rather than obliges.
-        set_status("Calculator data");
+        set_error("Calculator data");
         return;
     }
     if (kind != FileKind::kScript && kind != FileKind::kText) {
-        set_status("No app for this");
+        set_error("No app for this");
         return;
     }
 
     char path[platform::kMaxPath];
     if (!join(e->name, path, sizeof(path))) {
-        set_status("Path too long");
+        set_error("Path too long");
         return;
     }
 
@@ -268,7 +274,7 @@ void FileBrowserScreen::open_selected() {
     // enough to be worth refusing (elements.csv is already 5 KB).
     const long size = platform::storage().file_size(path);
     if (size > ui::TextBuffer::kCapacity) {
-        set_status("Too big to edit");
+        set_error("Too big to edit");
         return;
     }
 
@@ -319,7 +325,7 @@ void FileBrowserScreen::do_delete() {
     }
     char path[platform::kMaxPath];
     if (!join(e->name, path, sizeof(path))) {
-        set_status("Path too long");
+        set_error("Path too long");
         return;
     }
     const bool is_dir = e->is_dir;
@@ -332,7 +338,7 @@ void FileBrowserScreen::do_delete() {
         selected_ = keep < count_ ? keep : (count_ > 0 ? count_ - 1 : 0);
         set_status("Deleted");
     } else {
-        set_status(is_dir ? "Dir not empty" : "Delete failed");
+        set_error(is_dir ? "Dir not empty" : "Delete failed");
     }
 }
 
@@ -429,6 +435,10 @@ bool FileBrowserScreen::on_key(const platform::KeyEvent& ev) {
         }
         return true;
     }
+
+    // Any key retires the previous result: it described the action
+    // before this one. PromptLine does the same with a stale error.
+    status_[0] = 0;
 
     switch (ev.key) {
         case Key::kF2:
@@ -589,7 +599,7 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
         const int sx = status_right - font.text_width(status_);
         fb.fill_rect(sx - 2, bar_y, status_right - sx + 4, ui::kSoftkeyBarH,
                      platform::Color::from_rgb(30, 30, 30));
-        font.draw_string(fb, sx, bar_y + 4, status_, kGreen);
+        font.draw_string(fb, sx, bar_y + 4, status_, status_is_error_ ? kRed : kGreen);
     }
 }
 
