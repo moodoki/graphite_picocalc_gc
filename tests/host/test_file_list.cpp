@@ -45,13 +45,13 @@ platform::Storage::DirEntry entry(const char* name, bool is_dir, std::uint32_t s
 }
 
 void test_has_ext() {
-    check(apps::has_ext("main.py", ".py"), "has_ext exact");
-    check(apps::has_ext("MAIN.PY", ".py"), "has_ext is case-insensitive on the name");
-    check(apps::has_ext("notes.TxT", ".txt"), "has_ext mixed case");
-    check(!apps::has_ext("python", ".py"), "has_ext matches the suffix, not the stem");
-    check(!apps::has_ext("py", ".py"), "has_ext needs more than the extension itself");
-    check(!apps::has_ext("", ".py"), "has_ext on an empty name");
-    check(!apps::has_ext("main.py", ""), "has_ext with an empty extension never matches");
+    check(platform::has_ext("main.py", ".py"), "has_ext exact");
+    check(platform::has_ext("MAIN.PY", ".py"), "has_ext is case-insensitive on the name");
+    check(platform::has_ext("notes.TxT", ".txt"), "has_ext mixed case");
+    check(!platform::has_ext("python", ".py"), "has_ext matches the suffix, not the stem");
+    check(!platform::has_ext("py", ".py"), "has_ext needs more than the extension itself");
+    check(!platform::has_ext("", ".py"), "has_ext on an empty name");
+    check(!platform::has_ext("main.py", ""), "has_ext with an empty extension never matches");
 }
 
 void test_classify() {

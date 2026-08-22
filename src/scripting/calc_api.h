@@ -38,6 +38,15 @@ enum { kCalcTextMax = 256 };
 // Most solutions math::cas::solve can return (cas_eval.hpp's HomeResult).
 enum { kCalcMaxSolutions = 8 };
 
+// One directory entry, mirroring platform::Storage::DirEntry, which this
+// header cannot include (it must stay C and free of C++ headers).
+enum { kCalcDirNameMax = 64 };
+typedef struct CalcDirEntry {
+    char name[kCalcDirNameMax];
+    int is_dir;
+    unsigned long size;
+} CalcDirEntry;
+
 typedef enum CalcStatus {
     kCalcOk = 0,
     kCalcFailed,  // *err holds a static message
@@ -312,6 +321,9 @@ typedef struct CalcFileOps {
     int (*write)(const char* path, const char* buf, int len);        // 1 ok
     int (*append)(const char* path, const char* buf, int len);       // 1 ok
     int (*exists)(const char* path);
+    // At most `max` entries starting at `skip`; count, or -1 on error.
+    // A short return means the directory ended (issue #53).
+    int (*list)(const char* path, CalcDirEntry* out, int max, int skip);
 } CalcFileOps;
 void calc_api_set_file_ops(const CalcFileOps* ops);
 
@@ -321,6 +333,15 @@ CalcStatus calc_api_file_read(const char* path, long offset, char* buf, int len,
 CalcStatus calc_api_file_write(const char* path, const char* buf, int len, int append,
                                const char** err);
 int calc_api_file_exists(const char* path);
+
+// One window of a directory listing (issue #53). The glue walks a whole
+// directory by calling this with a rising `skip` and building Python
+// objects BETWEEN calls, never during one — the same shape as
+// calc_api_list_read, and the reason is D74: an allocation can trigger a
+// GC pass, a finalizer, or a MemoryError longjmp, none of which may
+// happen while a C++ frame holding an open directory is on the stack.
+CalcStatus calc_api_list_dir(const char* path, int skip, int max, CalcDirEntry* out, int* out_count,
+                             const char** err);
 
 // ---- 6B.8: the script canvas ----
 

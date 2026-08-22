@@ -110,7 +110,7 @@ void FileBrowserScreen::relist() {
     if (count_ > 0 && ext_filter_ != nullptr) {
         int kept = 0;
         for (int i = 0; i < count_; ++i) {
-            if (entries_[i].is_dir || has_ext(entries_[i].name, ext_filter_)) {
+            if (entries_[i].is_dir || platform::has_ext(entries_[i].name, ext_filter_)) {
                 if (kept != i) {
                     entries_[kept] = entries_[i];
                 }

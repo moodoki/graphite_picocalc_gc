@@ -1199,6 +1199,30 @@ CalcStatus calc_api_file_read(const char* path, long offset, char* buf, int len,
     return kCalcOk;
 }
 
+CalcStatus calc_api_list_dir(const char* path, int skip, int max, CalcDirEntry* out, int* out_count,
+                             const char** err) {
+    *out_count = 0;
+    if (g_files == nullptr || g_files->list == nullptr || path == nullptr || out == nullptr) {
+        *err = "No filesystem";
+        return kCalcFailed;
+    }
+    if (max <= 0 || skip < 0) {
+        *err = "Bad range";
+        return kCalcFailed;
+    }
+    const int n = g_files->list(path, out, max, skip);
+    if (n < 0) {
+        // Only the FIRST window can distinguish "no such directory" from
+        // "the card went away"; a later one failing is reported the same
+        // way, which is honest — by then the walk cannot be completed
+        // either way.
+        *err = "No such folder";
+        return kCalcFailed;
+    }
+    *out_count = n;
+    return kCalcOk;
+}
+
 CalcStatus calc_api_file_write(const char* path, const char* buf, int len, int append,
                                const char** err) {
     if (g_files == nullptr || path == nullptr) {

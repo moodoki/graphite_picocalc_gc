@@ -276,7 +276,29 @@ int file_exists(const char* path) {
     return platform::storage().file_exists(path) ? 1 : 0;
 }
 
-constexpr CalcFileOps kFileOps = {file_size, file_read, file_write, file_append, file_exists};
+int file_list(const char* path, CalcDirEntry* out, int max, int skip) {
+    // DirEntry and CalcDirEntry are the same shape but not the same type:
+    // the C boundary may not include a C++ header (calc_api.h's own note),
+    // so the copy is the price of that rule. It is bounded by `max`, which
+    // the glue keeps small enough to sit on the 4 KB core-0 stack.
+    platform::Storage::DirEntry buf[8];
+    const int want = max < static_cast<int>(sizeof(buf) / sizeof(buf[0]))
+                         ? max
+                         : static_cast<int>(sizeof(buf) / sizeof(buf[0]));
+    const int n = platform::storage().list_dir(path, buf, want, skip);
+    if (n < 0) {
+        return -1;
+    }
+    for (int i = 0; i < n; ++i) {
+        std::snprintf(out[i].name, sizeof(out[i].name), "%s", buf[i].name);
+        out[i].is_dir = buf[i].is_dir ? 1 : 0;
+        out[i].size = static_cast<unsigned long>(buf[i].size);
+    }
+    return n;
+}
+
+constexpr CalcFileOps kFileOps = {file_size,   file_read,   file_write,
+                                  file_append, file_exists, file_list};
 
 // Is there room below us for a path that needs `need` bytes? A local's
 // address is the current stack pointer to within a few bytes, and the floor

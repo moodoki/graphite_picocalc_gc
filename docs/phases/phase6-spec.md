@@ -949,6 +949,18 @@ down = calc.key_held("left")        # True/False, wraps Keyboard::is_held
 # File I/O (SD card)
 calc.write_file("/picocalc/data.txt", "hello")
 content = calc.read_file("/picocalc/data.txt")
+
+# Directory listing (added after the fact — issue #53). Without it a
+# script could only reach paths it already hardcoded, which rules out
+# "plot every .csv in this folder" and everything shaped like it.
+# Unsorted (FatFs creation order) and unfiltered, because both would
+# need the whole listing in memory and the binding reads it in windows
+# of 8 to stay off the 4 KB core-0 stack. The caller holds the finished
+# list and can do either in one line.
+for name, is_dir, size in calc.list_files("/picocalc/notes"):
+    ...
+sorted(calc.list_files("/picocalc/notes"))
+[e for e in calc.list_files(p) if e[0].endswith(".csv")]
 ```
 
 Each `calc.*` function is a thin C++ wrapper that calls into the existing

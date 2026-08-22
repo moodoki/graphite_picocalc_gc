@@ -14,6 +14,40 @@ namespace platform {
 // nesting nothing on this SD layout needs.
 constexpr size_t kMaxPath = 128;
 
+// Case-insensitive extension match: FAT is case-preserving but not
+// case-sensitive, so a ".TXT" on the card must still match ".txt".
+//
+// Header-only and dependency-free on purpose. It began in the file
+// browser, and the `calc` binding needs the same rule — but scripting/
+// sits below apps/ and must not reach up into it, so the shared rule
+// lives here, next to the filesystem whose case behaviour is the reason
+// it exists.
+inline bool has_ext(const char* name, const char* ext) {
+    if (name == nullptr || ext == nullptr) {
+        return false;
+    }
+    const size_t n = __builtin_strlen(name);
+    const size_t e = __builtin_strlen(ext);
+    if (e == 0 || n < e) {
+        return false;
+    }
+    const char* tail = name + (n - e);
+    for (size_t i = 0; i < e; ++i) {
+        char a = tail[i];
+        char b = ext[i];
+        if (a >= 'A' && a <= 'Z') {
+            a = static_cast<char>(a - 'A' + 'a');
+        }
+        if (b >= 'A' && b <= 'Z') {
+            b = static_cast<char>(b - 'A' + 'a');
+        }
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // SD card file access via FatFs. All paths are absolute ("/picocalc/...").
 class Storage {
 public:
@@ -62,7 +96,15 @@ public:
         uint32_t size;
     };
     // Returns number of entries, or -1 on error.
-    int list_dir(const char* path, DirEntry* entries, int max_entries) const;
+    //
+    // `skip` resumes: it discards that many entries before filling, so a
+    // caller holding a small buffer can walk a directory it could never
+    // hold at once (issue #53). A short return means the end was
+    // reached. Resuming re-opens and re-scans, so walking a directory of
+    // n entries in windows of w costs about n^2/2w readdirs — chosen over
+    // holding an open FF_DIR across calls, which would leak the handle if
+    // the caller abandoned the walk, and over a permanent 2.3 KB buffer.
+    int list_dir(const char* path, DirEntry* entries, int max_entries, int skip = 0) const;
 
     // Convenience: NUL-terminated string I/O.
     bool read_string(const char* path, char* buf, size_t max_len) const;

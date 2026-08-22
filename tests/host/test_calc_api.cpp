@@ -1034,8 +1034,138 @@ int fake_exists(const char* path) {
     return g_fake_present ? 1 : 0;
 }
 
+// A directory of g_fake_dir_n entries named f0, f1, ... Every third one
+// is a directory, so is_dir is not constant across the walk.
+int g_fake_dir_n = 0;
+bool g_fake_dir_present = true;
+
+int fake_list(const char* path, CalcDirEntry* out, int max, int skip) {
+    (void)path;
+    if (!g_fake_dir_present) {
+        return -1;
+    }
+    int n = 0;
+    for (int i = skip; i < g_fake_dir_n && n < max; ++i, ++n) {
+        std::snprintf(out[n].name, sizeof(out[n].name), "f%d", i);
+        out[n].is_dir = (i % 3 == 0) ? 1 : 0;
+        out[n].size = static_cast<unsigned long>(i * 10);
+    }
+    return n;
+}
+
+// The walk the Python glue performs, replayed against the same contract.
+// mp_calc_module.c cannot be built on the host, but its loop is where the
+// off-by-one lives: a SHORT window means the directory ended, a FULL one
+// means call again — and a directory that is an exact multiple of the
+// window ends with a call that returns zero.
+int walk_directory(const char* path, int window, int* out_calls) {
+    CalcDirEntry buf[16];
+    const char* err = nullptr;
+    int n = 0;
+    int calls = 1;
+    if (calc_api_list_dir(path, 0, window, buf, &n, &err) != kCalcOk) {
+        *out_calls = calls;
+        return -1;
+    }
+    int seen = 0;
+    for (;;) {
+        for (int i = 0; i < n; ++i) {
+            char want[16];
+            std::snprintf(want, sizeof(want), "f%d", seen);
+            if (std::strcmp(buf[i].name, want) != 0) {
+                return -2;  // out of order or repeated
+            }
+            ++seen;
+        }
+        if (n < window) {
+            break;
+        }
+        ++calls;
+        if (calc_api_list_dir(path, seen, window, buf, &n, &err) != kCalcOk) {
+            return -1;
+        }
+        if (n == 0) {
+            break;
+        }
+    }
+    *out_calls = calls;
+    return seen;
+}
+
+void test_list_dir() {
+    static const CalcFileOps kOps = {fake_size,   fake_read,   fake_write,
+                                     fake_append, fake_exists, fake_list};
+    calc_api_set_file_ops(&kOps);
+    g_fake_dir_present = true;
+
+    CalcDirEntry buf[16];
+    const char* err = nullptr;
+    int n = 0;
+
+    // One window, and the fields arrive intact.
+    g_fake_dir_n = 5;
+    check(calc_api_list_dir("/d", 0, 8, buf, &n, &err) == kCalcOk && n == 5,
+          "a short directory comes back in one window");
+    check(std::strcmp(buf[0].name, "f0") == 0 && buf[0].is_dir == 1 && buf[0].size == 0,
+          "first entry's name, is_dir and size");
+    check(std::strcmp(buf[4].name, "f4") == 0 && buf[4].is_dir == 0 && buf[4].size == 40,
+          "last entry's fields");
+
+    // skip resumes where the previous window stopped.
+    check(calc_api_list_dir("/d", 3, 8, buf, &n, &err) == kCalcOk && n == 2 &&
+              std::strcmp(buf[0].name, "f3") == 0,
+          "skip resumes mid-directory");
+    check(calc_api_list_dir("/d", 5, 8, buf, &n, &err) == kCalcOk && n == 0,
+          "skipping to the end yields nothing, not an error");
+    check(calc_api_list_dir("/d", 99, 8, buf, &n, &err) == kCalcOk && n == 0,
+          "skipping past the end is empty, not an error");
+
+    // The walk terminates and sees every entry exactly once. The sizes
+    // either side of a window boundary are the cases that matter, and
+    // the exact multiples most of all — those end on a zero-length call.
+    const int sizes[] = {0, 1, 7, 8, 9, 15, 16, 17, 40};
+    for (int i = 0; i < static_cast<int>(sizeof(sizes) / sizeof(sizes[0])); ++i) {
+        g_fake_dir_n = sizes[i];
+        int calls = 0;
+        const int seen = walk_directory("/d", 8, &calls);
+        char what[64];
+        std::snprintf(what, sizeof(what), "walk of %d entries sees them all, in order", sizes[i]);
+        check(seen == sizes[i], what);
+    }
+
+    // An exact multiple costs one extra call, which is the price of a
+    // short window being the only end-of-directory signal.
+    g_fake_dir_n = 16;
+    int calls = 0;
+    check(walk_directory("/d", 8, &calls) == 16 && calls == 3,
+          "a directory of exactly two windows takes three calls");
+    g_fake_dir_n = 15;
+    check(walk_directory("/d", 8, &calls) == 15 && calls == 2,
+          "one entry fewer takes two");
+
+    // Failures.
+    g_fake_dir_present = false;
+    check(calc_api_list_dir("/nope", 0, 8, buf, &n, &err) == kCalcFailed && n == 0,
+          "a missing directory fails");
+    check(err != nullptr && std::strcmp(err, "No such folder") == 0, "and says so");
+    g_fake_dir_present = true;
+
+    check(calc_api_list_dir("/d", 0, 0, buf, &n, &err) == kCalcFailed, "a zero window is refused");
+    check(calc_api_list_dir("/d", -1, 8, buf, &n, &err) == kCalcFailed,
+          "a negative skip is refused");
+
+    // No list op at all — an older ops table, zero-filled.
+    static const CalcFileOps kNoList = {fake_size, fake_read, fake_write, fake_append, fake_exists,
+                                        nullptr};
+    calc_api_set_file_ops(&kNoList);
+    check(calc_api_list_dir("/d", 0, 8, buf, &n, &err) == kCalcFailed,
+          "a filesystem without a list op fails rather than crashing");
+    calc_api_set_file_ops(&kOps);
+}
+
 void test_file_bindings() {
-    static const CalcFileOps kOps = {fake_size, fake_read, fake_write, fake_append, fake_exists};
+    static const CalcFileOps kOps = {fake_size,   fake_read,   fake_write,
+                                     fake_append, fake_exists, fake_list};
     calc_api_set_file_ops(&kOps);
 
     long size = 0;
@@ -1121,6 +1251,7 @@ int main() {
     test_canvas_geometry();
     test_key_bindings();
     test_file_bindings();
+    test_list_dir();
 
     test_list_round_trip();
     test_list_append_grows();

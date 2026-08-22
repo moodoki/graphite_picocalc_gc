@@ -12,10 +12,6 @@ namespace apps {
 // test — the same split that made ui::TextBuffer testable off-device.
 // Everything here is a pure function over DirEntry.
 
-// Case-insensitive suffix match. FAT is case-preserving but not
-// case-sensitive, so a ".TXT" on the card must still match ".txt".
-bool has_ext(const char* name, const char* ext);
-
 // What a listing row IS, which is what the browser colours by. The
 // extensions are this SD layout's, not a general guess: the calculator
 // persists its own state as .dat (list%d.dat, matrix%d.dat,

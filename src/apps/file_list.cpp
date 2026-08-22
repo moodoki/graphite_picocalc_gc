@@ -34,22 +34,8 @@ int name_cmp(const char* a, const char* b) {
 
 }  // namespace
 
-bool has_ext(const char* name, const char* ext) {
-    const std::size_t n = std::strlen(name);
-    const std::size_t e = std::strlen(ext);
-    if (e == 0 || n < e) {
-        return false;
-    }
-    const char* tail = name + (n - e);
-    for (std::size_t i = 0; i < e; ++i) {
-        if (lower(tail[i]) != lower(ext[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
 FileKind classify(const platform::Storage::DirEntry& e) {
+    using platform::has_ext;
     if (e.is_dir) {
         return FileKind::kDir;
     }

@@ -840,6 +840,61 @@ static mp_obj_t calc_append_file(mp_obj_t p, mp_obj_t d) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(calc_append_file_obj, calc_append_file);
 
+// calc.list_files(path) -> [(name, is_dir, size), ...]
+//
+// Windowed, and the window size is the whole design (issue #53). A
+// DirEntry is 72 bytes and core 0 has a 4 KB stack, so the obvious
+// "read all 32 at once" local would be 2.3 KB of it — D47/D48 territory.
+// Eight at a time is 576 bytes, and the Python objects are built BETWEEN
+// calls rather than during one, because an allocation can GC, run a
+// finalizer, or longjmp out of a MemoryError, and none of that may
+// happen with an open directory on a C++ frame below (D74). Exactly the
+// shape calc_get_list already uses for a long list.
+//
+// Deliberately unsorted and unfiltered: FatFs hands back creation order,
+// and sorting or filtering here would need the whole listing in memory,
+// which is what the windowing exists to avoid. The caller already holds
+// the finished list and can do both in one line:
+//
+//     sorted(calc.list_files("/picocalc/notes"))
+//     [e for e in calc.list_files(p) if e[0].endswith(".csv")]
+#define CALC_DIR_WINDOW 8
+static mp_obj_t calc_list_files(mp_obj_t path_obj) {
+    const char* path = mp_obj_str_get_str(path_obj);
+    const char* err = NULL;
+    CalcDirEntry win[CALC_DIR_WINDOW];
+    int n = 0;
+
+    // Probe the first window before allocating, so a missing directory
+    // raises without having built a list to throw away.
+    if (calc_api_list_dir(path, 0, CALC_DIR_WINDOW, win, &n, &err) != kCalcOk) {
+        calc_raise(kCalcFailed, err);
+    }
+
+    mp_obj_t out = mp_obj_new_list(0, NULL);
+    int skip = 0;
+    for (;;) {
+        for (int i = 0; i < n; ++i) {
+            mp_obj_t row[3] = {mp_obj_new_str(win[i].name, strlen(win[i].name)),
+                               mp_obj_new_bool(win[i].is_dir),
+                               mp_obj_new_int_from_uint(win[i].size)};
+            mp_obj_list_append(out, mp_obj_new_tuple(3, row));
+        }
+        if (n < CALC_DIR_WINDOW) {
+            break;  // short window: the directory ended
+        }
+        skip += n;
+        if (calc_api_list_dir(path, skip, CALC_DIR_WINDOW, win, &n, &err) != kCalcOk) {
+            calc_raise(kCalcFailed, err);
+        }
+        if (n == 0) {
+            break;
+        }
+    }
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_list_files_obj, calc_list_files);
+
 static mp_obj_t calc_file_exists(mp_obj_t p) {
     return mp_obj_new_bool(calc_api_file_exists(mp_obj_str_get_str(p)));
 }
@@ -923,6 +978,7 @@ static const mp_rom_map_elem_t calc_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_clear_screen), MP_ROM_PTR(&calc_clear_screen_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_pixel), MP_ROM_PTR(&calc_draw_pixel_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_line), MP_ROM_PTR(&calc_draw_line_obj)},
+    {MP_ROM_QSTR(MP_QSTR_list_files), MP_ROM_PTR(&calc_list_files_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_rect), MP_ROM_PTR(&calc_draw_rect_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_text), MP_ROM_PTR(&calc_draw_text_obj)},
     {MP_ROM_QSTR(MP_QSTR_text_size), MP_ROM_PTR(&calc_text_size_obj)},

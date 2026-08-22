@@ -167,7 +167,7 @@ bool Storage::delete_dir(const char* path) const {
     return f_unlink(path) == FR_OK;
 }
 
-int Storage::list_dir(const char* path, DirEntry* entries, int max_entries) const {
+int Storage::list_dir(const char* path, DirEntry* entries, int max_entries, int skip) const {
     if (!mounted_) {
         return -1;
     }
@@ -177,6 +177,15 @@ int Storage::list_dir(const char* path, DirEntry* entries, int max_entries) cons
     }
     int n = 0;
     FILINFO info;
+    // Discard the window the caller has already seen. f_readdir is the
+    // only way forward — FatFs has no seek on a directory — so this is
+    // the re-scan the header's cost note describes.
+    for (int i = 0; i < skip; ++i) {
+        if (f_readdir(&dir, &info) != FR_OK || info.fname[0] == 0) {
+            f_closedir(&dir);
+            return 0;  // skipped past the end: no entries, not an error
+        }
+    }
     while (n < max_entries && f_readdir(&dir, &info) == FR_OK && info.fname[0] != 0) {
         std::strncpy(entries[n].name, info.fname, sizeof(entries[n].name) - 1);
         entries[n].name[sizeof(entries[n].name) - 1] = 0;
