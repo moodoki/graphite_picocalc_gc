@@ -29,11 +29,28 @@ def heap(stage):
 # ---- Layout ----------------------------------------------------------
 #
 # The panel is 320x320 and the font is 8x16, so a 16px cell holds exactly
-# a two-character symbol and 18 columns come to 288 — 16px of margin each
-# side. Nothing here is a magic number; they all fall out of those three.
+# a two-character symbol. Nothing here is a magic number; they all fall
+# out of those three.
+#
+# PITCH is one pixel wider than CELL, and that pixel is the whole of
+# issue #43. The canvas has no transparent text — a glyph is drawn as a
+# filled cell, because there is no framebuffer to read back into
+# (calc_canvas.hpp) — so a symbol paints its 16x16 edge to edge, and at
+# a 16px pitch two neighbours in the same series fused into one slab you
+# could not read. Drawing the outline OVER the glyph afterwards was the
+# obvious fix and is wrong: across the five 8x16 fonts the firmware can
+# be built with, every edge of the glyph box is lit by some letter
+# (Terminus lights the left column for M/T/W/Y, Spleen for almost every
+# capital, Iosevka the bottom row for descenders), so an outline drawn
+# on top shaves real pixels off real symbols. A 17px pitch instead
+# leaves a gutter column and row that no glyph can ever reach, and the
+# outline is drawn in it.
+#
+# 18 columns at 17 come to 305, so the margins are 8 and 7.
 
-CELL = 16
-GRID_X = 16
+CELL = 16   # painted cell, and exactly two characters of the 8x16 font
+PITCH = 17  # cell + the 1px gutter the outline lives in
+GRID_X = 8
 GRID_Y = 22
 FGAP = 8  # blank strip between the main block and the lanthanides
 DETAIL_Y = 184
@@ -42,6 +59,7 @@ HINT_Y = 300
 BG = (0, 0, 0)
 WHITE = (255, 255, 255)
 DIM = (150, 150, 150)
+GRID_INK = (70, 70, 70)  # cell outline, drawn in the gutter
 
 SERIES_NAME = (
     "Alkali metal",
@@ -133,13 +151,13 @@ def load():
 
 
 def cell_xy(z):
-    x = GRID_X + (COL[z] - 1) * CELL
+    x = GRID_X + (COL[z] - 1) * PITCH
     row = ROW[z]
     if row <= 7:
-        return x, GRID_Y + (row - 1) * CELL
+        return x, GRID_Y + (row - 1) * PITCH
     # Rows 9 and 10 are the f-block strips, drawn below the main table
     # with a gap. Row 8 does not exist and is what the gap is made of.
-    return x, GRID_Y + 7 * CELL + FGAP + (row - 9) * CELL
+    return x, GRID_Y + 7 * PITCH + FGAP + (row - 9) * PITCH
 
 
 def draw_cell(z, selected):
@@ -152,6 +170,11 @@ def draw_cell(z, selected):
         calc.draw_text(x, y, sym, SERIES_COLOR[s], WHITE)
     else:
         calc.draw_text(x, y, sym, SERIES_INK[s], SERIES_COLOR[s])
+    # The ring sits entirely in the gutter around the painted cell, so
+    # it never touches a glyph pixel (see PITCH above). Adjacent cells
+    # share the gutter between them and so draw the same line twice,
+    # which costs a redraw and keeps the arithmetic honest.
+    calc.draw_rect(x - 1, y - 1, CELL + 2, CELL + 2, WHITE if selected else GRID_INK)
 
 
 def draw_detail(z):
