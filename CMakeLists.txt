@@ -245,6 +245,7 @@ add_executable(picocalc_graphcalc
     src/apps/home_screen.cpp
     src/apps/const_screen.cpp
     src/apps/settings_screen.cpp
+    src/apps/file_list.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/calc_menu.cpp

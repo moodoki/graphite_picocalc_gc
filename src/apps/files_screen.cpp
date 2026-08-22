@@ -7,6 +7,7 @@
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
+#include "apps/file_list.hpp"
 
 namespace apps {
 
@@ -19,29 +20,24 @@ int visible_rows() {
     return (platform::kScreenH - kTopY - ui::kSoftkeyBarH - 4) / kRowH;
 }
 
-// Case-insensitive suffix match — FAT is case-preserving but not
-// case-sensitive, so a ".TXT" on the card must still match ".txt".
-bool has_ext(const char* name, const char* ext) {
-    const std::size_t n = std::strlen(name);
-    const std::size_t e = std::strlen(ext);
-    if (e == 0 || n < e) {
-        return false;
+// Listing colours by entry kind (issue #45). A folder and a script are
+// the two things you look for by eye; .dat is the calculator's own
+// state, coloured to say "not yours to hand-edit".
+platform::Color color_for(FileKind kind) {
+    using namespace platform::colors;
+    switch (kind) {
+        case FileKind::kDir:
+            return platform::Color::from_rgb(90, 170, 255);
+        case FileKind::kScript:
+            return kGreen;
+        case FileKind::kText:
+            return kWhite;
+        case FileKind::kCalcData:
+            return platform::Color::from_rgb(255, 190, 40);
+        case FileKind::kOther:
+            break;
     }
-    const char* tail = name + (n - e);
-    for (std::size_t i = 0; i < e; ++i) {
-        char a = tail[i];
-        char b = ext[i];
-        if (a >= 'A' && a <= 'Z') {
-            a = static_cast<char>(a - 'A' + 'a');
-        }
-        if (b >= 'A' && b <= 'Z') {
-            b = static_cast<char>(b - 'A' + 'a');
-        }
-        if (a != b) {
-            return false;
-        }
-    }
-    return true;
+    return kGrayLine;
 }
 
 void copy_path(char* dst, const char* src) {
@@ -116,6 +112,13 @@ void FileBrowserScreen::relist() {
             }
         }
         count_ = kept;
+    }
+
+    // Directories first, then by name (issue #46). FatFs hands back
+    // whatever order the directory table happens to be in, which is
+    // creation order — fine for four files, unusable for thirty.
+    if (count_ > 1) {
+        sort_entries(entries_, count_);
     }
 
     scroll_ = 0;
@@ -383,19 +386,13 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
         if (i == selected_) {
             fb.fill_rect(0, y - 1, platform::kScreenW, kRowH, platform::Color::from_rgb(0, 0, 60));
         }
-        font.draw_string(fb, 8, y, entries_[i].name, kWhite);
+        font.draw_string(fb, 8, y, entries_[i].name, color_for(classify(entries_[i])));
         if (entries_[i].is_dir) {
             std::snprintf(line, sizeof(line), "[DIR]");
         } else {
-            std::snprintf(line, sizeof(line), "%lu B",
-                          static_cast<unsigned long>(entries_[i].size));
+            format_size(entries_[i].size, line, sizeof(line));
         }
         font.draw_string(fb, platform::kScreenW - font.text_width(line) - 8, y, line, kGrayLine);
-    }
-
-    if (count_ > visible_rows()) {
-        std::snprintf(line, sizeof(line), "%d/%d", selected_ + 1, count_);
-        font.draw_string(fb, platform::kScreenW - font.text_width(line) - 8, 2, line, kGrayLine);
     }
 
     const int bar_y = platform::kScreenH - ui::kSoftkeyBarH;
@@ -408,9 +405,26 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
 
     const char* const keys[6] = {"", "", "", "REN", "MKDIR", ""};
     ui::draw_softkeys(fb, keys);
+
+    // Position counter in the (unbound) F6 cell. It used to be drawn at
+    // y=2, which is inside the 16px status bar the chrome right-aligns
+    // the battery and RAD/FLT into — a straight overlap that only shows
+    // up in a directory of more than visible_rows() entries (issue #44).
+    int status_right = platform::kScreenW - 2;
+    if (count_ > visible_rows()) {
+        std::snprintf(line, sizeof(line), "%d/%d", selected_ + 1, count_);
+        const int cx = platform::kScreenW - font.text_width(line) - 6;
+        font.draw_string(fb, cx, bar_y + 4, line, kGrayLine);
+        status_right = cx - 4;
+    }
     if (status_[0] != 0) {
-        font.draw_string(fb, platform::kScreenW - font.text_width(status_) - 2, bar_y + 2, status_,
-                         kGreen);
+        // Transient text sits to the left of the counter, on a repainted
+        // strip: it is wider than one softkey cell and would otherwise
+        // print over the REN/MKDIR labels it overlaps.
+        const int sx = status_right - font.text_width(status_);
+        fb.fill_rect(sx - 2, bar_y, status_right - sx + 4, ui::kSoftkeyBarH,
+                     platform::Color::from_rgb(30, 30, 30));
+        font.draw_string(fb, sx, bar_y + 4, status_, kGreen);
     }
 }
 

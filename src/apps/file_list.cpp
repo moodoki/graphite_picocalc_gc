@@ -1,0 +1,112 @@
+#include "apps/file_list.hpp"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+
+namespace apps {
+
+namespace {
+
+char lower(char c) {
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+// Case-insensitive strcmp, with a case-sensitive tie-break so the order
+// is total: "README" and "readme" can coexist in one FAT directory only
+// as different names, and a comparator that called them equal would
+// leave their relative order down to the listing order.
+int name_cmp(const char* a, const char* b) {
+    const char* pa = a;
+    const char* pb = b;
+    for (; *pa != 0 && *pb != 0; ++pa, ++pb) {
+        const char la = lower(*pa);
+        const char lb = lower(*pb);
+        if (la != lb) {
+            return la < lb ? -1 : 1;
+        }
+    }
+    if (*pa != *pb) {
+        return *pa == 0 ? -1 : 1;
+    }
+    return std::strcmp(a, b);  // equal ignoring case: order by exact bytes
+}
+
+}  // namespace
+
+bool has_ext(const char* name, const char* ext) {
+    const std::size_t n = std::strlen(name);
+    const std::size_t e = std::strlen(ext);
+    if (e == 0 || n < e) {
+        return false;
+    }
+    const char* tail = name + (n - e);
+    for (std::size_t i = 0; i < e; ++i) {
+        if (lower(tail[i]) != lower(ext[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+FileKind classify(const platform::Storage::DirEntry& e) {
+    if (e.is_dir) {
+        return FileKind::kDir;
+    }
+    if (has_ext(e.name, ".py")) {
+        return FileKind::kScript;
+    }
+    if (has_ext(e.name, ".txt") || has_ext(e.name, ".md") || has_ext(e.name, ".csv")) {
+        return FileKind::kText;
+    }
+    if (has_ext(e.name, ".dat")) {
+        return FileKind::kCalcData;
+    }
+    return FileKind::kOther;
+}
+
+void sort_entries(platform::Storage::DirEntry* entries, int count) {
+    for (int i = 1; i < count; ++i) {
+        const platform::Storage::DirEntry key = entries[i];
+        int j = i - 1;
+        while (j >= 0) {
+            const bool after = entries[j].is_dir != key.is_dir
+                                   ? !entries[j].is_dir  // a file sorts after any directory
+                                   : name_cmp(entries[j].name, key.name) > 0;
+            if (!after) {
+                break;
+            }
+            entries[j + 1] = entries[j];
+            --j;
+        }
+        entries[j + 1] = key;
+    }
+}
+
+void format_size(std::uint32_t bytes, char* out, std::size_t out_len) {
+    if (bytes < 1024) {
+        std::snprintf(out, out_len, "%lu B", static_cast<unsigned long>(bytes));
+        return;
+    }
+    const char* unit = "K";
+    std::uint32_t whole = bytes / 1024;
+    std::uint32_t rem = bytes % 1024;
+    if (whole >= 1024) {
+        rem = whole % 1024;
+        whole /= 1024;
+        unit = "M";
+    }
+    if (whole < 10) {
+        // A tenth below 10 units: "1.2K" carries information "1K" loses,
+        // and most files on this card are in that range. Clamped, so a
+        // rounded tenth never carries into the next unit — 10239 B is
+        // 9.9990K, and a tenth of 10 would print as "9.10K".
+        const std::uint32_t tenths = std::min<std::uint32_t>((rem * 10 + 512) / 1024, 9);
+        std::snprintf(out, out_len, "%lu.%lu%s", static_cast<unsigned long>(whole),
+                      static_cast<unsigned long>(tenths), unit);
+        return;
+    }
+    std::snprintf(out, out_len, "%lu%s", static_cast<unsigned long>(whole), unit);
+}
+
+}  // namespace apps

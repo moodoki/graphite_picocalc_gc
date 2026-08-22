@@ -183,6 +183,15 @@ echo "== Compiling + linking test_apps =="
     src/platform/app_registry.cpp src/platform/sd_apps.cpp \
     -o "$OUT/test_apps"
 
+# The file browser's listing logic (issues #44-#46), split out of
+# FileBrowserScreen so ordering and size formatting need no panel.
+echo "== Compiling + linking test_file_list =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_file_list.cpp \
+    src/apps/file_list.cpp \
+    -o "$OUT/test_file_list"
+
 # The editor's multi-line buffer, split out from TextEditorWidget so it
 # needs no framebuffer.
 echo "== Compiling + linking test_text_buffer =="
@@ -307,6 +316,9 @@ echo "== Running test_units =="
 
 echo "== Running test_apps =="
 "$OUT/test_apps"
+
+echo "== Running test_file_list =="
+"$OUT/test_file_list"
 
 echo "== Running test_text_buffer =="
 "$OUT/test_text_buffer"
