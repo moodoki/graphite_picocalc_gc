@@ -40,3 +40,6 @@ Raw feedback from a soak session, not yet investigated or fixed.
 
 10. **File browser**: "file browser vant move files." [sic — clarified: the
     file browser can't move files to another folder; not supported today]
+
+11. **File browser**: "file browser should be able to open scripts and notes
+    in the appropriate app."
