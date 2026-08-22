@@ -27,3 +27,6 @@ Raw feedback from a soak session, not yet investigated or fixed.
 
 7. **File browser**: "file browser should sort files by names and with
    directories listed at the top."
+
+8. **SD card layout**: "we might also want to keep calc data files in a sub
+   folder now that we have other files in the picocalc dir."
