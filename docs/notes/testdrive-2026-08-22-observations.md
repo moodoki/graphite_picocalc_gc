@@ -30,3 +30,10 @@ Raw feedback from a soak session, not yet investigated or fixed.
 
 8. **SD card layout**: "we might also want to keep calc data files in a sub
    folder now that we have other files in the picocalc dir."
+
+9. **SD card layout, TODO**: "since we name the calculator project graphite,
+   let's also change the directory for the files to graphite. migration to
+   new dir structure should be done manually with a script. we can provide
+   this as a micro python script if file operations are supported. keep this
+   as a todo, since it involves some design to ensure clean migration and
+   backwards compatibility should we swap to an older firmware."
