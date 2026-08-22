@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.20)
 include(pico_sdk_import.cmake)
 
 project(picocalc_graphcalc
-    VERSION   0.4.1
+    VERSION   0.5.0
     LANGUAGES C CXX ASM
 )
 
@@ -61,6 +61,75 @@ add_library(tinyexpr STATIC drivers/tinyexpr/tinyexpr.c)
 target_include_directories(tinyexpr PUBLIC drivers/tinyexpr)
 target_compile_definitions(tinyexpr PUBLIC TE_POW_FROM_RIGHT)
 
+# ---- MicroPython (Phase 6B) ----
+# MicroPython is a git submodule (drivers/micropython), not a vendored copy:
+# it is far too large and too actively maintained to hand-port, and it is the
+# first dependency of that kind here — see drivers/README.md.
+#
+# It has no build system we can call directly. Upstream's embed port instead
+# GENERATES a self-contained tree of .c/.h, which we then compile ourselves.
+# That has to happen at CONFIGURE time, because CMake needs the source list
+# before it can define a target. The generator needs `make` and a HOST
+# compiler (it preprocesses to collect qstrs); the arm toolchain is not
+# involved until the add_library below.
+set(MPY_PORT_DIR    ${CMAKE_SOURCE_DIR}/drivers/micropython_port)
+set(MPY_EMBED_DIR   ${CMAKE_BINARY_DIR}/micropython_embed)
+
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/drivers/micropython/py/mkenv.mk)
+    message(FATAL_ERROR
+        "drivers/micropython is empty — run: git submodule update --init --recursive")
+endif()
+
+message(STATUS "Generating MicroPython embed package -> ${MPY_EMBED_DIR}")
+# From scratch, every time. The generator's incremental path leaves stale
+# per-module fragments in genhdr/module/, so turning a feature OFF in
+# mpconfigport.h still emitted its MP_REGISTER_MODULE entry and the link
+# failed on a symbol nothing compiled any more. Configure is rare; a
+# silently wrong qstr/module table is not worth the seconds saved.
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/micropython_embed_build ${MPY_EMBED_DIR})
+execute_process(
+    COMMAND make -f micropython_embed.mk
+            BUILD=${CMAKE_BINARY_DIR}/micropython_embed_build
+            PACKAGE_DIR=${MPY_EMBED_DIR}
+    WORKING_DIRECTORY ${MPY_PORT_DIR}   # embed.mk puts -I. on CFLAGS: this is
+    RESULT_VARIABLE MPY_GEN_RESULT      # how it finds our mpconfigport.h
+    OUTPUT_VARIABLE MPY_GEN_LOG
+    ERROR_VARIABLE  MPY_GEN_LOG
+)
+if(NOT MPY_GEN_RESULT EQUAL 0)
+    message(FATAL_ERROR "MicroPython embed generation failed:\n${MPY_GEN_LOG}")
+endif()
+
+# Editing the port config must regenerate the tree — the qstr pool and the
+# module table are baked in at generation time, so a stale package would
+# silently disagree with the config it was built from.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${MPY_PORT_DIR}/mpconfigport.h
+    ${MPY_PORT_DIR}/micropython_embed.mk
+    # Our own module (6B.3): the generator scans it for MP_QSTR_* and
+    # MP_REGISTER_MODULE, so adding a binding means regenerating the qstr pool
+    # even though CMake compiles the file itself as ordinary firmware source.
+    ${CMAKE_SOURCE_DIR}/src/scripting/mp_calc_module.c
+)
+
+# Globbing is normally a smell; here the sources are generated, so there is no
+# hand-maintained list for it to drift from.
+file(GLOB_RECURSE MPY_SOURCES ${MPY_EMBED_DIR}/*.c)
+# Upstream's mphalport.c sends stdout straight to printf. We need it to reach
+# the on-device output pane as well, so ours replaces it (src/scripting/).
+list(REMOVE_ITEM MPY_SOURCES ${MPY_EMBED_DIR}/port/mphalport.c)
+
+add_library(micropython STATIC ${MPY_SOURCES})
+# SYSTEM: our own src/scripting/*.c include py/*.h, and those headers do not
+# survive this project's -Wall -Wextra -Wpedantic (zero-size arrays, unused
+# parameters, ISO C complaints). -isystem silences third-party headers without
+# lowering the bar for the file including them, which is the whole point.
+target_include_directories(micropython SYSTEM PUBLIC ${MPY_EMBED_DIR} ${MPY_PORT_DIR})
+set_target_properties(micropython PROPERTIES C_STANDARD 99)
+# Third-party C against this project's -Wall -Wextra -Wshadow -Wpedantic:
+# same treatment as the cephes target below, for the same reason.
+target_compile_options(micropython PRIVATE -w)
+
 # Cephes special functions (Phase 3C distributions — drivers/cephes/README.md).
 # Symbols that exist in libm are renamed at compile time so the two can
 # never collide; math::dist declares the cephes_* names extern "C".
@@ -84,8 +153,12 @@ target_compile_options(cephes PRIVATE -w)
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
     src/main.cpp
+    src/platform/app_registry.cpp
+    src/platform/sd_apps.cpp
+    src/platform/sd_app_scan.cpp
     src/platform/display.cpp
     src/platform/fault.cpp
+    src/platform/io_scratch.cpp
     src/platform/keyboard.cpp
     src/platform/platform.cpp
     src/platform/psram.cpp
@@ -98,6 +171,10 @@ add_executable(picocalc_graphcalc
     src/gfx/framebuffer.cpp
     src/ui/screen_manager.cpp
     src/ui/input_line.cpp
+    src/ui/prompt_line.cpp
+    src/ui/output_log.cpp
+    src/ui/text_buffer.cpp
+    src/ui/text_editor_widget.cpp
     src/ui/chrome.cpp
     src/math/engine.cpp
     src/math/functions.cpp
@@ -139,6 +216,12 @@ add_executable(picocalc_graphcalc
     src/math/cas/integrate.cpp
     src/math/cas/cas_eval.cpp
     src/math/cas/exact.cpp
+    src/math/var_store.cpp
+    src/scripting/mp_port.c
+    src/scripting/micropython_embed.cpp
+    src/scripting/calc_api.cpp
+    src/scripting/calc_canvas.cpp
+    src/scripting/mp_calc_module.c
     src/render/pool.cpp
     src/render/layout_builder.cpp
     src/render/layout_render.cpp
@@ -156,9 +239,13 @@ add_executable(picocalc_graphcalc
     src/graph/analysis.cpp
     src/graph/analysis_cursor.cpp
     src/apps/nav.cpp
+    src/apps/launcher_screen.cpp
+    src/apps/notepad_screen.cpp
+    src/apps/program_screen.cpp
     src/apps/home_screen.cpp
     src/apps/const_screen.cpp
     src/apps/settings_screen.cpp
+    src/apps/file_list.cpp
     src/apps/files_screen.cpp
     src/apps/list_editor.cpp
     src/apps/calc_menu.cpp
@@ -223,7 +310,7 @@ message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 # screen. Not derivable from git — bump it here when a phase/sub-phase
 # reaches code-complete (the session-wrapup agent's README status pass
 # covers this).
-set(PICOCALC_PHASE "5.2")
+set(PICOCALC_PHASE "6B")
 
 # Serial line injection for on-device test automation (Phase 5.1). Lets a
 # host script submit whole lines to the home screen over USB serial and read
@@ -243,6 +330,13 @@ option(PICOCALC_SERIAL_INJECT "Accept expression lines over USB serial (dev tool
 # this option.
 option(PICOCALC_EVAL_PROBE "Time evaluation and report it on the inject echo (measurement only)" OFF)
 
+# Reports free stack at every `calc` binding entry, on serial (6B.3). The
+# constants those checks compare against have to come off hardware — the
+# firmware's deepest frames are on this path and `stack: peak` is a high-water
+# mark since boot, so it cannot answer "how much was free at THIS call".
+# **Default OFF**: a printf on the binding path is a measurement tool.
+option(PICOCALC_STACK_PROBE "Report free stack at each calc binding (measurement only)" OFF)
+
 # rp2040-psram is an INTERFACE library: its sources compile as part of
 # this target, so its pin configuration is set here (PicoCalc mainboard).
 target_compile_definitions(picocalc_graphcalc PRIVATE
@@ -250,6 +344,7 @@ target_compile_definitions(picocalc_graphcalc PRIVATE
     PICOCALC_PHASE="${PICOCALC_PHASE}"
     $<$<BOOL:${PICOCALC_SERIAL_INJECT}>:PICOCALC_SERIAL_INJECT=1>
     $<$<BOOL:${PICOCALC_EVAL_PROBE}>:PICOCALC_EVAL_PROBE=1>
+    $<$<BOOL:${PICOCALC_STACK_PROBE}>:PICOCALC_STACK_PROBE=1>
     # Stack overrun protection (D47). Core 0's stack lives in the 4 KB
     # SCRATCH_Y bank, immediately above core 1's stack in SCRATCH_X. The
     # SDK default declares only 2 KB of it, so __StackBottom sat in the
@@ -308,6 +403,7 @@ target_link_libraries(picocalc_graphcalc
     fatfs
     tinyexpr
     cephes
+    micropython
 )
 
 # Generate .uf2, .elf, .bin, .hex, .map alongside the binary.

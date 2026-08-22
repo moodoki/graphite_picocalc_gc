@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/io_scratch.hpp"
 #include "platform/storage.hpp"
 #include "math/matrix.hpp"
 
@@ -33,7 +34,11 @@ struct Header {
 };
 
 constexpr int kChunkElements = 256;
-calc_t g_chunk[kChunkElements];
+// D70 lever A: view over the shared one-shot I/O region. Safe
+// because only one store is ever saving or loading at a time.
+static_assert(kChunkElements * sizeof(calc_t) <= platform::kIoScratchBytes,
+              "matrix persistence chunk must fit the shared I/O scratch region");
+calc_t* g_chunk = reinterpret_cast<calc_t*>(platform::io_scratch());
 // Complex chunk (4D.25) aliases the same buffer budget: 128 complex
 // elements per pass through the 2 KB chunk.
 constexpr int kChunkComplex = kChunkElements / 2;

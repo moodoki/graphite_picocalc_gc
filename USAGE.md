@@ -37,6 +37,10 @@ The same five keys mean the same thing on every screen:
 | `HOME` | Back to the home screen |
 | `ESC` | Back, or cancel an edit |
 
+On the **home screen only**, `F6` opens the app launcher. Inside an app, `ESC`
+returns to the launcher rather than to the home screen — `HOME` still goes
+straight home from anywhere, as it always has.
+
 ## Typed commands
 
 Several screens have no key of their own and are opened by typing their name on
@@ -52,12 +56,15 @@ the home screen:
 | `plot`, `plots` | Stat plot setup |
 | `calc`, `analyze` | Graph analysis menu |
 | `mat`, `matrix` | Matrix editor |
-| `cas` | CAS menu (also `F6`) |
+| `cas` | CAS menu |
+| `apps`, `app` | App launcher (also `F6`) |
 | `solve`, `solver` | Numeric equation solver |
 | `const`, `constants` | Scientific constants |
 | `settings`, `setup` | Power and brightness settings |
 | `diag` | Hardware diagnostics |
-| `files` | SD file list |
+| `files` | SD file browser |
+| `py <statement>` | Runs one line of Python and shows what it printed. State persists between calls, so `py a=6*7` then `py print(a)` works |
+| `mode`, `mode <setting>` | Mode settings — bare opens the screen, with an argument sets it directly |
 | `cls` | Clear the screen, keeping input history |
 | `clrhist` | Erase all history |
 
@@ -222,3 +229,238 @@ than `NaN`; `a+bi` and `r∠θ` display the complex value in that form.
 
 `simplify`, `expand`, `factor`, `diff`, `integ` and `solve` are also ordinary
 functions you can call inline — `diff(x^2, x)` works without opening a menu.
+
+## Apps (`F6`, or `apps`)
+
+`F6` on the home screen opens the launcher. `ESC` from an app returns to the
+launcher; `HOME` goes straight back to the calculator from anywhere.
+
+| App | What it does |
+|-----|--------------|
+| **Notepad** | Plain-text notes under `/picocalc/notes/`. `F2` saves, `F3` loads, `F4` starts a new file |
+| **Python** | Write and run MicroPython. Same editor keys as Notepad, plus `F1` RUN. Files live under `/picocalc/programs/` |
+| **Files** | Browse the SD card. `ENTER` opens a directory, `F4` renames, `F5` makes a folder, `DEL` deletes |
+
+Anything you put under `/picocalc/apps/` shows up here too — see
+[your own apps on the SD card](#your-own-apps-on-the-sd-card).
+
+### Python
+
+`F1` saves the script and runs it, then shows what it printed. `ESC` returns to
+the editor, `ESC` again leaves for the launcher; `UP`/`DOWN` scroll the output.
+An error shows its traceback with the failing line number, and the view scrolls
+to it.
+
+`ENTER` after a line ending in `:` indents the next line, as you would expect.
+
+**`ESC` stops a running script** — it raises `KeyboardInterrupt`, so a loop that
+never ends is not a reason to power-cycle the machine.
+
+If a script prints more than the output pane holds, the **oldest** lines are
+dropped and the header says `(trimmed)`. That keeps the end of the output, which
+is where a traceback is.
+
+There is no `import` of your own modules yet, and `open()` raises — SD files
+are reached through `calc.read_file`/`write_file` instead (below). `json` is
+available.
+
+For one-off expressions, `py <statement>` on the home screen runs a single line
+without leaving the calculator.
+
+### The `calc` module
+
+`import calc` gives a script the calculator itself.
+
+```python
+import calc
+
+calc.eval("2 + 3 * sin(pi/4)")   # 4.121320343559642
+calc.eval("2+3i")                 # (2+3j), in a+bi mode
+calc.eval("{1,2,3}+1")            # "{2,3,4}" — a list comes back as text
+
+calc.store("a", 42)               # same A-Z variables the calculator uses,
+calc.recall("a")                  #   and they survive a power cycle
+
+calc.diff("x^3-2*x", "x")         # "3*x^2 - 2"
+calc.integ("sin(x)", "x")         # "-1*cos(x)"
+calc.integ("sin(x)", "x", 0, "pi")# 2.0 — bounds make it a number
+calc.factor("x^2-4")              # "(x - 2)*(x + 2)"
+calc.solve("x^2-4=0", "x")        # ['2', '-2']
+
+calc.c_abs(complex(3, 4))         # 5.0
+calc.c_arg(complex(0, 1))         # 1.5707... — always radians
+
+calc.plot("x^2-4")                # writes Y1, returns 1
+calc.window(-10, 10, -10, 10)
+calc.show_graph()                 # shown when the script finishes
+
+calc.graph_zero("Y1", 0, 5)       # (2.0, 0.0)
+calc.graph_max("Y1", -5, 5)       # (x, y) of the maximum
+calc.graph_integral("Y1", 0, 3)   # -3.0
+calc.graph_deriv("Y1", 2)         # 4.0
+calc.graph_value("Y1", 3)         # (3.0, 5.0)
+```
+
+### Lists and matrices
+
+```python
+calc.set_list(1, [2, 4, 4, 4, 5, 5, 7, 9])
+calc.get_list(1)                  # [2.0, 4.0, ...]
+calc.stat_mean(1)                 # 5.0 — also stat_sum/min/max/stddev
+calc.list_append(1, 12.5)         # grows l1 by one
+
+calc.det([[1, 2], [3, 4]])        # -2.0
+calc.inverse([[1, 2], [3, 4]])    # [[-2.0, 1.0], [1.5, -0.5]]
+calc.transpose(m); calc.rref(m)
+calc.eigenvalues([[2, 1], [1, 2]])# [3.0, 1.0] — a flat list
+calc.set_matrix("A", [[1, 2], [3, 4]])
+calc.get_matrix("A")
+```
+
+Lists are the six real `l1`–`l6`, so anything a script writes shows up in the
+list editor and in `stats`. Matrices are ordinary nested Python lists, except
+for `set_matrix`/`get_matrix`, which read and write the calculator's own
+`[A]`–`[J]`.
+
+**Use `calc.list_append` for logging, not a Python list.** A loop that
+collects a few hundred readings in a Python list will run the interpreter out
+of memory; the same loop through `list_append` costs essentially nothing,
+because the data lives where the calculator's lists live rather than in the
+script's own memory.
+
+**Lists and matrices are saved when the script finishes**, not on every call —
+that is what keeps a logging loop fast. The trade is that a script you stop
+with `ESC`, or one that fails, loses whatever it had not saved yet.
+
+`calc.eigenvalues` on a large matrix needs more stack than most things, so
+call it from the top level of your script rather than from inside a function.
+
+**`calc.plot()` replaces your Y= functions.** The first `plot()` a script runs
+clears all seven slots, and later calls fill Y2, Y3 and so on; an eighth is an
+error. This is deliberate — it means a script draws what it asks for and not
+whatever was left over — but it is **permanent**: graph state is saved, so
+your own functions do not come back after a power cycle. Keep anything you
+care about in a note before running someone else's plotting script.
+
+Each `py` line at the home screen counts as its own script, so two separate
+`py calc.plot(...)` lines leave one curve, not two. Put them on one line, or
+in a real script, to get both.
+
+A plot's colour is its slot's colour — Y1 blue, Y2 red, and so on, the same as
+the Y= editor shows. `plot()` returns the slot it used.
+
+`calc.eval` takes anything you could type on the home screen, and gives back a
+number when the answer is one, a string when it is a list, a matrix or an
+algebraic expression.
+
+Three things to know:
+
+- **Variable names are strict.** One lowercase letter, or `"theta"` or
+  `"ans"`. `calc.store("A", 1)` is an error rather than quietly writing
+  somewhere else.
+- **Some answers depend on the mode.** `calc.solve("x^2+1=0","x")` finds no
+  solution in REAL mode and returns `['i', '-1*i']` in a+bi. Angle mode
+  applies to `calc.eval` the same way it applies to typing.
+- **Call `calc` from the top of your script, not from deep inside it.** The
+  calculator's evaluator needs more stack than Python does. A `calc.eval`
+  works at the top level and inside one function; **inside two nested
+  functions it raises `ValueError: Not enough stack`**, and `calc.eval` of a
+  `solve(...)` is top-level only. Do the calculating up front and pass the
+  answers down.
+- **A loop that builds thousands of small strings can exhaust memory.**
+  `calc.eval("sin(" + str(i) + ")")` makes three throwaway strings every
+  time round; a few hundred iterations will fill the 40 KB Python heap. If
+  that happens the interpreter resets itself and says so — your script's
+  variables are lost, but the calculator keeps working and no power cycle is
+  needed. Building the expression once outside the loop avoids it.
+
+### Drawing, keys and files
+
+```python
+calc.clear_screen("blue")            # the script now owns the screen
+calc.draw_rect(30, 50, 260, 140, "white", True)
+calc.draw_rect(30, 50, 260, 140, "red")        # outline
+calc.draw_line(30, 190, 290, 50, "green")
+calc.draw_pixel(160, 160, (255, 140, 0))       # names or (r, g, b)
+calc.draw_text(45, 70, "Hello", "black", "white")
+calc.text_size("Hello")              # (40, 16)
+
+k = calc.wait_key()                  # blocks; k["name"], k["ch"], k["shift"]…
+calc.key_pressed()                   # None if nothing is waiting
+calc.key_held("left")                # True while the key is down
+name = calc.input("Your name? ")
+
+calc.write_file("/picocalc/data.txt", "hello")
+calc.append_file("/picocalc/data.txt", " again")
+calc.read_file("/picocalc/data.txt")
+calc.file_exists("/picocalc/data.txt")
+```
+
+**A script that draws owns the screen.** `clear_screen()` hands it over: your
+drawing stays up when the script finishes, instead of the output pane
+appearing. **`ESC` gives the screen back** to the editor — and `ESC` also stops
+a running script, so a drawing loop that never ends is not a reason to
+power-cycle.
+
+**`draw_text` needs a background colour** (it defaults to black). The screen
+cannot be read back, so text is drawn as filled character cells rather than
+letters floating over whatever was there.
+
+**`k["name"]` is how you read a key that is not a character.** The arrows
+are `"up"`, `"down"`, `"left"`, `"right"`; then `"enter"`, `"space"`, `"tab"`,
+`"back"`, `"del"`, `"home"`, and `"f1"`–`"f6"`. It is `""` for anything else,
+never `None`, so you can compare it without checking first — and it is the
+same set of names `calc.key_held()` takes.
+
+**`k["ch"]` covers the control keys too**: `ENTER` is `"\r"`, `BACKSPACE` is
+`"\b"`, `TAB` is `"\t"` and `DEL` is `chr(127)`. Everything else printable is
+itself, and `None` for keys with no character.
+
+Colours are either a name — `black`, `white`, `blue`, `red`, `green`,
+`yellow`, `cyan`, `magenta`, `orange`, `gray` — or an `(r, g, b)` triple.
+
+`calc.read_file` reads the whole file into memory, so it is limited by the
+Python heap; a few kilobytes is comfortable, a very large data file is not.
+
+### Your own apps on the SD card
+
+A directory under `/picocalc/apps/` with an `app.txt` in it becomes its own
+tile in the launcher, next to Notepad and Python:
+
+```
+/picocalc/apps/hello/app.txt
+/picocalc/apps/hello/main.py
+```
+
+`app.txt` is one `key=value` per line — `#` starts a comment, and spacing and
+capitalisation of the key do not matter:
+
+```
+name=Hello
+icon=H
+entry=main.py
+```
+
+All three have defaults, so **an empty `app.txt` next to a `main.py` is a
+working app**: `name` falls back to the directory's name, `entry` to
+`main.py`. An `entry` may also be an absolute path, to share one script
+between tiles.
+
+Copy [`examples/apps/`](examples/apps/) onto a card to see both shapes: `hello`
+draws and keeps the screen, `quadratic` asks for numbers, prints its answers
+and plots the curve.
+
+An app is the same interpreter the `RUN` key uses, on the same calculator —
+variables it stores are still there on the home screen afterwards. Two things
+differ:
+
+- **`ESC` returns to the launcher**, not to the program editor. An app never
+  touches the editor's buffer, so whatever you were writing there is safe.
+- **The card is scanned at boot** and whenever it is re-mounted. Adding an app
+  to a card that is already in the slot needs a reboot, or an eject and
+  re-insert.
+
+An app that will not start is skipped rather than breaking the launcher, and
+says why over USB serial — usually an `entry` naming a file that is not there.
+The `Files` app (`F5` makes a folder) can create the directories on-device if
+you would rather not take the card out.

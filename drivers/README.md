@@ -16,7 +16,44 @@ Vendored 2026-07-08 from Coyote OS commit `e86cf36d26e90e4891615991c1689b76fb2f9
 | `fatfs/` | [elm-chan.org](http://elm-chan.org/fsw/ff/) | R0.15a | BSD-style (`fatfs/LICENSE.txt`) | SD card FAT32 filesystem; `diskio.c` is the stub template — SD SPI glue implemented in `src/platform/` (task 1.5). Local edit: `ffconf.h` LFN=1, CP437 (D8) |
 | `tinyexpr/` | [codeplea/tinyexpr](https://github.com/codeplea/tinyexpr) | `4a7456e` (2025-12-12) | Zlib | C expression parser (task 2.1). Built `-DTE_POW_FROM_RIGHT` |
 
+## Submodules
+
+Not everything here is a vendored copy. **MicroPython is a git submodule**, and the rule that decision established is:
+
+| Kind of dependency | How it enters the repo |
+|---|---|
+| Small, single-purpose, rarely-updated C driver | **Vendored** — copied in, table above, local fixes recorded below |
+| Large, actively-maintained upstream project | **Submodule** — pinned to a release tag, never edited |
+
+| Submodule | Path | Pinned to | License | Notes |
+|-----------|------|-----------|---------|-------|
+| [micropython/micropython](https://github.com/micropython/micropython) | `micropython/` | **v1.28.0** (`e0e9fbb1`, 2026-04-06) | MIT | Phase 6B. Read-only. Our whole configuration is `micropython_port/` — see below |
+
+MicroPython is ~60 MB and releases every few months; hand-porting it and then hand-porting each upstream fix is not a maintenance model that survives contact with reality, which is what the vendoring rationale below implicitly assumed of everything in this directory. Pinning to a tag keeps the stability argument intact.
+
+After cloning, or after a pull that moves the pin:
+
+```bash
+git submodule update --init --recursive
+```
+
+### `micropython_port/` — our side of the submodule
+
+MicroPython has no build system this project can call directly. Its **embed port** instead *generates* a self-contained tree of `.c`/`.h`, which our CMake compiles as the `micropython` static library. That generation runs at configure time (see `CMakeLists.txt`) and needs `make` plus a **host** compiler — the arm toolchain is not involved until the generated sources are compiled.
+
+`micropython_port/` is the entire local configuration, so the submodule itself is never touched:
+
+| File | What it is |
+|------|------------|
+| `mpconfigport.h` | The one file that decides what the on-device Python *is*. Read twice — once by the host compiler during qstr generation, once by `arm-none-eabi` when the tree is compiled — so it lives here rather than in CMake defines |
+| `micropython_embed.mk` | Runs upstream's `ports/embed/embed.mk`, and adds two things it does not ship: the `extmod/` modules we want (currently `json`), and our own `calc` module. The two are added differently — an extmod source is both scanned *and* copied into the package, while `src/scripting/mp_calc_module.c` is only **scanned** (`SRC_QSTR`), because CMake compiles it as ordinary firmware source. Scanning is what produces its `MP_QSTR_*` names and its `MP_REGISTER_MODULE` entry; the resulting reference resolves against our object at link |
+| `picocalc_mphal.h` | The embed port's own `mphalport.h` is one line and declares none of the HAL functions the core calls above the minimum ROM level. `mpconfigport.h` repoints `MICROPY_MPHALPORT_H` here |
+
+The functions those headers declare are implemented in `src/scripting/mp_port.c`, which is also where the reasoning about MicroPython's longjmp-based exceptions lives. The same reasoning shapes the `calc` module's three-file split (`src/scripting/calc_api.{h,cpp}` + `mp_calc_module.c`, D74): argument conversion and object construction on one side, `math::` on the other, so a longjmp can never unwind a C++ frame.
+
 ## Why vendor instead of submodule
+
+For the vendored drivers in the table above:
 
 - **Stability**: drivers don't get accidentally updated to a breaking version.
 - **Self-contained build**: cloning the repo doesn't require `--recurse-submodules` discipline.

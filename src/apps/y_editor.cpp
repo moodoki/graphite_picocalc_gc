@@ -71,7 +71,11 @@ char YEditorScreen::field_marker(int i) const {
 }
 
 const char* YEditorScreen::softkey_text() const {
-    return "ENTER:EDIT SPC:SEL DEL:CLR S:SHD F5:GRPH";
+    // ENT, not ENTER: the base row plus S:SHD came to 40 characters, and
+    // the 8x16 font puts the 40th at x=322 on a 320-wide panel, so the
+    // last hint ran off the edge (testdrive 2026-08-22). A hint row
+    // drawn at x=2 has 39 characters to spend; this one now spends 38.
+    return "ENT:EDIT SPC:SEL DEL:CLR S:SHD F5:GRPH";
 }
 
 YEditorScreen& y_editor_screen() {

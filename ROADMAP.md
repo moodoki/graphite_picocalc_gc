@@ -22,7 +22,8 @@ significant work that turned up outside them. See
 | 5: CAS (symbolic math) | **Complete** | Engine, UI integration, exact-form display, Stage 5 stack hardening. Tagged **v0.2.0** |
 | 5.1: Serial line injection | **Complete** | Host-driven on-device test automation. Tagged **v0.3.0** |
 | 5.2: Unified evaluator | **Complete** | One tagged-value evaluator replacing three. Tagged **v0.4.0** |
-| 6: Non-calculator functions | **Specced, not started** | App-launcher framework (6A) + MicroPython (6B). [Spec](docs/phases/phase6-spec.md) |
+| 6: Non-calculator functions | **6A, 6B and 6C.1 code-complete** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS, complex numbers, graphing, lists, matrices, drawing, key input and files — plus SD app manifests, so a directory under `/picocalc/apps/` is its own launcher tile. [Spec](docs/phases/phase6-spec.md) |
+| 6.3: Native compiled apps | **Proposed — under review, not committed** | A `.uf2` on the SD card becomes a launcher tile. The calculator chain-loads a separate flash slot it never overwrites, and refuses a wrong-board image before erasing anything. On the Pico 2, stock third-party firmware images run from that slot too, by address translation. Enables a Python-free build that keeps scripting. [Spec](docs/phases/phase6.3-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H.
@@ -41,6 +42,7 @@ the record of what was agreed:
 - [phase5.1-spec.md](docs/phases/phase5.1-spec.md) — serial line injection
 - [phase5.2-spec.md](docs/phases/phase5.2-spec.md) — unified evaluator
 - [phase6-spec.md](docs/phases/phase6-spec.md) — app framework and MicroPython
+- [phase6.3-spec.md](docs/phases/phase6.3-spec.md) — native compiled `.uf2` apps
 
 ## What Phase 5.2 changed, and why it mattered
 
@@ -63,24 +65,83 @@ behaviour that changed is recorded in
 the before/after measurements — including the regressions — in
 [docs/notes/measurements/phase5.2/](docs/notes/measurements/phase5.2/).
 
-## Next: Phase 6
+## Phase 6: non-calculator functions
 
-Non-calculator functions, in two sub-phases:
+**6A (app framework), 6C.1 (Notepad) and most of 6B (MicroPython) are done and
+hardware-verified.** The calculator has an app launcher reached from the home
+screen by an `F6` softkey or an `apps` command, a shared line-numbered text
+editor, a file browser with directory navigation and file management, Notepad,
+and **a working MicroPython interpreter that can reach the calculator**: write
+a script on the device, press RUN, read its output, save it, power-cycle,
+reload it. `ESC` stops a runaway loop.
 
-- **6A — app-launcher framework**: a way to run things that are not the
-  calculator, with a lifecycle and a screen contract.
-- **6B — MicroPython** as the first app on that framework, exposing a `calc`
-  module so scripts can reach the math engine.
+- **6B.1, 6B.2, 6B.11-6B.14 are done.** MicroPython enters as a git submodule
+  pinned to v1.28.0 (D71) — the first dependency here that is not a vendored
+  copy, and the rule for large upstream projects from now on. `json` is
+  compiled in. `py <statement>` on the home screen runs a single line.
+- **6B.3-6B.5 are done.** `import calc` gives a script `eval`, `store`,
+  `recall`, the six CAS operations and the complex helpers. `calc.eval` runs
+  the same four-stage pipeline the home screen does, so anything you can type
+  a script can evaluate, and it returns a float, a Python complex or a string
+  by result kind (D75).
+- **6B.6 is done.** A script can `plot()` into the Y= slots, set the
+  `window()` and `show_graph()`, and run the numeric CALC operations —
+  `graph_zero`, `graph_min`/`max`, `graph_integral`, `graph_deriv`,
+  `graph_value`. Plotting **destroys the user's own Y= functions** and the
+  loss is persisted, which is D68's deliberate cost and is documented
+  user-facing.
+- **6B.7 and 6B.17 are done.** A script reaches the six lists and the ten
+  matrices. The number that justified them: 400 `calc.list_append` calls cost
+  **16 bytes** of Python heap, where the same loop into a Python list
+  exhausted all 40 KB (D77/D84).
+- **6B.8-6B.10 are done, and the `calc` module is complete.** A script can
+  draw on its own canvas, read keys, and read and write SD files. Drawing
+  takes the panel until the script ends (D80/D85), and `ESC` both stops the
+  script and gives the screen back.
+- **Both boards are verified.** The Pico 2 ran Phase 6B for the first time on
+  2026-08-16 and found a two-core SPI race the Pico 1 could not show: its
+  async full-frame push returns while core 1 is still transferring, so a
+  script drawing from a key handler shared the bus and the conversion buffer
+  with core 1 (issue #39, fixed). Nothing outside the render loop may touch
+  the panel without `gfx::display_wait_idle()`.
+- **6B.15-6B.16 are done, and 6B is code-complete.** A directory under
+  `/picocalc/apps/` with an `app.txt` in it is its own launcher tile, on the
+  tier-2 registry hook that had existed unused since 6A.1. The number worth
+  keeping: `exec_file` streams its source through MicroPython's lexer reader,
+  so it costs **128 bytes**, not the 4 KB staging buffer §4.1 had assumed when
+  it deferred the work (D86). Examples in `examples/apps/`.
 
-Two things worth knowing before scoping it:
+What the 6A and 6B work established that matters for scoping the rest:
 
-- 5.2's RAM win roughly **doubled the spare margin** for 6B's 48 KB
-  MicroPython heap on the Pico 1 (~5 KB → ~10 KB). Still not comfortable;
-  [pre-phase5-review.md](docs/notes/pre-phase5-review.md) lists further levers
-  if 6A's framework growth eats it.
-- 6B's `calc` module bindings were specced against the evaluator that 5.2
-  replaced, so that surface needs re-verifying against the unified evaluator
-  before the sub-phase is scoped.
+- **The SRAM tooling was wrong, and fixing it changed the picture.**
+  `size-report.sh` computed headroom from Berkeley `size`'s `bss + data`
+  columns, which bin this target's `.data` under *text* and report `data 0` —
+  omitting ~44 KB of live SRAM from every reading it had ever produced. Real
+  free SRAM was **14.3 KB**, not the ~58 KB reported, so the MicroPython heap
+  never fit on either board (D69).
+- **54 KB was then recovered** (D70): one-shot persistence buffers folded into
+  a shared region, the ArrayStore slab pool cut behind a new PSRAM fallback,
+  and the render strip height halved. Pico 1 free SRAM is now **61 KB** and
+  Pico 2 **126 KB**, against the 48 KB and 104 KB the two heap budgets need.
+- **6B's `calc` bindings were re-verified** against the unified evaluator
+  (D60, closing issue #27) — no dead entry points, and a concrete
+  `calc.eval()` shape recorded for 6B.3 to build against.
+- **Embedding MicroPython then spent 44 KB of that**, leaving **17 KB** free
+  on the Pico 1 and 26 KB on the Pico 2. Its static cost beyond the 40 KB heap
+  turned out to be under 1 KB — the figure the spec had never estimated. 17 KB
+  is the budget the `calc` module has to fit inside.
+- **The stack risk closed without new machinery** (D73). MicroPython runs
+  inside core 0's existing 4 KB stack; deep recursion raises a catchable
+  `RuntimeError` at 3,224 of 4,096 bytes instead of walking into core 1's
+  stack. The planned stack-switching fallback was measured out of existence.
+- **...and then reopened from the other side** (D76). The bindings showed that
+  MicroPython was never the deep part: the calculator's own evaluator frames
+  are, and `MICROPY_STACK_CHECK` cannot see them. `calc.eval` of an inline
+  `solve()` hung the board on the first flash. Fixed by moving 1 KB of
+  `solveexpr::substitute`'s frame to bss and adding a measured headroom check
+  to every binding, so a call that will not fit raises instead. **Every
+  binding added in 6B.6-6B.10 has to be measured the same way** —
+  `-DPICOCALC_STACK_PROBE=ON` exists for it.
 
 ## Beyond the plan
 

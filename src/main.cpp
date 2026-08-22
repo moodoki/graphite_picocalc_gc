@@ -16,21 +16,27 @@
 #include "pico/stdlib.h"
 
 #include "config.hpp"
+#include "platform/app_registry.hpp"
 #include "platform/fault.hpp"
 #include "platform/platform.hpp"
 #include "platform/power.hpp"
+#include "platform/sd_apps.hpp"
 #include "platform/sd_card.hpp"
 #include "gfx/font.hpp"
 #include "gfx/framebuffer.hpp"
 #include "ui/chrome.hpp"
 #include "ui/input_line.hpp"  // kCapacity bounds the serial-injection buffer
 #include "ui/screen_manager.hpp"
+#include "math/array.hpp"
 #include "math/functions.hpp"
 #include "math/lists.hpp"
 #include "math/matrix.hpp"
 #include "math/named_lists.hpp"
+#include "apps/files_screen.hpp"
 #include "apps/graph_model.hpp"
 #include "apps/home_screen.hpp"
+#include "apps/notepad_screen.hpp"
+#include "apps/program_screen.hpp"
 
 // Build id from CMake (git short hash, "-dev" when the tree is dirty).
 #ifndef PICOCALC_BUILD_ID
@@ -71,6 +77,13 @@ constexpr uint32_t kBulkTestMarker = 0xB07DFACEu;
 // consume the watchdog reboot cause and reported once USB is up.
 bool g_prior_fault = false;
 platform::FaultInfo g_fault;
+
+// P6-14 hardware spike (2026-08-14, phase6-spec.md §0.3): does
+// watchdog_caused_reboot() actually read false after a genuine physical
+// power-cycle? Captured at the same point as g_prior_fault, before
+// anything else (run_self_tests()'s PSRAM bulk test) can re-arm the
+// watchdog and overwrite the reason bits.
+bool g_watchdog_caused_reboot = false;
 
 void run_psram_bulk_test() {
     if (watchdog_caused_reboot() && watchdog_hw->scratch[0] == kBulkTestMarker) {
@@ -319,6 +332,54 @@ private:
 
 DiagScreen g_diag_screen;
 
+// ---- Built-in app registry entries (Phase 6A.1, D67 tier 1) ----
+//
+// Each launch fn is captureless, so it converts to AppLaunchFn. A
+// kBuiltIn entry ignores the AppEntry argument — only the SD tiers
+// need it, to read their own `path`.
+void register_builtin_apps() {
+    platform::AppEntry notepad = {};
+    notepad.name = "Notepad";
+    notepad.kind = platform::AppKind::kBuiltIn;
+    notepad.launch = [](const platform::AppEntry&) {
+        ui::screen_manager().push(&apps::notepad_screen());
+    };
+    platform::AppRegistry::register_app(notepad);
+
+    platform::AppEntry python = {};
+    python.name = "Python";
+    python.kind = platform::AppKind::kBuiltIn;
+    python.launch = [](const platform::AppEntry&) {
+        // Paired with launch_sd_app()'s queue_app() below: one singleton
+        // screen, two modes, and the mode is always chosen here rather
+        // than left over from the last visit.
+        apps::program_screen().open_editor();
+        ui::screen_manager().push(&apps::program_screen());
+    };
+    platform::AppRegistry::register_app(python);
+
+    platform::AppEntry files = {};
+    files.name = "Files";
+    files.kind = platform::AppKind::kBuiltIn;
+    files.launch = [](const platform::AppEntry&) {
+        ui::screen_manager().push(&apps::files_screen());
+    };
+    platform::AppRegistry::register_app(files);
+}
+
+// The one thunk every SD-discovered app shares (§4.5, 6B.16). They
+// differ only by path, and none of them exists until the scan runs —
+// which is exactly why AppLaunchFn takes the entry rather than being a
+// bare void(*)() (D67).
+//
+// Queue then push, in that order: ProgramScreen runs the script from
+// on_activate, so it is already the top screen by the time the script
+// draws or asks for a graph.
+void launch_sd_app(const platform::AppEntry& self) {
+    apps::program_screen().queue_app(self.path, self.name);
+    ui::screen_manager().push(&apps::program_screen());
+}
+
 }  // namespace
 
 int main() {
@@ -327,6 +388,7 @@ int main() {
     // Before anything else can consume the watchdog reboot cause — a
     // fault-triggered reboot looks like any other to run_self_tests().
     g_prior_fault = platform::take_prior_fault(&g_fault);
+    g_watchdog_caused_reboot = watchdog_caused_reboot();
     // Paint the unused stack now, while it is shallow, so the heartbeat
     // below can report how deep anything has actually gone (D47).
     platform::paint_stack();
@@ -363,6 +425,17 @@ int main() {
     // The typed `diag` command pushes the diagnostics overlay (the old
     // global F6 toggle is gone — 2026-07-18 remap).
     apps::home_screen().set_diag_screen(&g_diag_screen);
+
+    // Built-in apps for the 6A launcher (D67 tier 1). An explicit list
+    // here rather than per-translation-unit self-registration, so the
+    // launcher's row order is visible in one place and doesn't depend
+    // on static-init order. The SD tier (tier 2) is appended later by
+    // 6B.16's scan, and always sorts after these.
+    register_builtin_apps();
+    // Tier 2 (§4.5, 6B.16). A no-op when the card has not mounted yet —
+    // the late-init loop below rescans once it does, which is the
+    // ordinary case on an RP2350 cold boot (D14).
+    platform::scan_sd_apps(&launch_sd_app);
 
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());
@@ -450,6 +523,16 @@ int main() {
                         printf("late-init: storage remounted at %lu ms\n",
                                static_cast<unsigned long>(now));
                     }
+                    // Both branches: the card that just mounted may be a
+                    // different card. scan_sd_apps() clears tier 2 first,
+                    // so this replaces the launcher's SD rows rather
+                    // than duplicating them (§4.5). After the state
+                    // loads above, never during — they share
+                    // io_scratch's staging region.
+                    const int n_apps = platform::scan_sd_apps(&launch_sd_app);
+                    if (n_apps > 0) {
+                        printf("late-init: %d sd app(s) registered\n", n_apps);
+                    }
                 }
                 run_self_tests();
                 if (!lists_loaded) {
@@ -513,10 +596,12 @@ int main() {
                 last_sd_ok = sd_ok;
                 last_psram_ok = ps_ok;
                 ui::set_health_flags(sd_ok, ps_ok);
-                if (ui::Screen* s = mgr.current()) {
+                // Not while a script owns the panel (6B.8/D80) — repainting
+                // the status bar there would put chrome over its canvas.
+                if (ui::Screen* s = mgr.current(); s != nullptr && !s->owns_display()) {
                     s->invalidate_band(0, ui::kStatusBarH);
+                    dirty = true;
                 }
-                dirty = true;
             }
         }
 
@@ -547,6 +632,16 @@ int main() {
                 last_peak = peak;
                 printf("stack: peak %lu of %lu\n", static_cast<unsigned long>(peak),
                        static_cast<unsigned long>(platform::stack_total()));
+                // ArrayStore slab high-water, on the same event (D70
+                // lever B): kSlabCount must be sized from what real use
+                // actually peaks at, not from a guess. `miss` counts
+                // allocations that fell back to PSRAM because the pool
+                // was empty — nonzero is not an error, it is the
+                // fallback working, but it is what costs speed.
+                auto& store = math::array_store();
+                printf("slabs: peak %d of %d, live %d, miss %lu\n", store.slabs_peak(),
+                       math::ArrayStore::kSlabCount, store.slabs_live(),
+                       static_cast<unsigned long>(store.slab_misses()));
             }
         }
 
@@ -568,6 +663,19 @@ int main() {
                     static_cast<unsigned long>(g_fault.sp),
                     static_cast<unsigned long>(g_fault.depth),
                     static_cast<unsigned long>(platform::stack_total()));
+            }
+        }
+
+        // P6-14 hardware spike (2026-08-14): does watchdog_caused_reboot()
+        // read false after a genuine power-cycle? Same heartbeat reasoning
+        // as the blocks above — a one-shot before USB enumerates would be
+        // missed on exactly the boot this is meant to catch.
+        {
+            static uint32_t last_wd_report_ms = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            if (now_ms > 3'000 && now_ms - last_wd_report_ms >= 30'000) {
+                last_wd_report_ms = now_ms;
+                printf("boot: watchdog_caused_reboot=%d\n", g_watchdog_caused_reboot ? 1 : 0);
             }
         }
 
@@ -620,10 +728,12 @@ int main() {
                 if (batt.percent != last_batt_percent || batt.charging != last_batt_charging) {
                     last_batt_percent = batt.percent;
                     last_batt_charging = batt.charging;
-                    if (ui::Screen* s = mgr.current()) {
+                    // See the health-flag branch above: a script's canvas is
+                    // not ours to draw on.
+                    if (ui::Screen* s = mgr.current(); s != nullptr && !s->owns_display()) {
                         s->invalidate_band(0, ui::kStatusBarH);
+                        dirty = true;
                     }
-                    dirty = true;
                 }
             }
         }

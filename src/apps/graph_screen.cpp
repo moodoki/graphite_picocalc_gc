@@ -95,6 +95,7 @@ void GraphScreen::start_trace() {
         }
     }
     trace_.clamp(trace_max_index());
+    refresh_trace_readout();
 }
 
 void GraphScreen::begin_analysis(graph::AnalysisOp op) {
@@ -329,6 +330,7 @@ void GraphScreen::sync_trace_to_value(double v) {
             break;
     }
     trace_.clamp(trace_max_index());
+    refresh_trace_readout();
 }
 
 void GraphScreen::recompute() {
@@ -357,6 +359,7 @@ void GraphScreen::recompute() {
     last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
     printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
     trace_.clamp(trace_max_index());
+    refresh_trace_readout();  // the window moved under the cursor
     dirty_ = false;
 }
 
@@ -1092,9 +1095,12 @@ void GraphScreen::draw_trace(gfx::Framebuffer& fb) const {
         char xb[24];
         char yb[24];
         math::format_number(x, xb, sizeof(xb));
-        math::format_number(
-            py == kOffscreen ? std::numeric_limits<double>::quiet_NaN() : vp.data_y(py), yb,
-            sizeof(yb));
+        // trace_y_, not data_y(py): the cached row is a pixel, and one
+        // pixel is a whole readout's worth of y once you zoom (#40).
+        // x stays the column's own data_x — in function mode the cursor
+        // walks columns, so that value is exact by construction.
+        math::format_number(trace_y_ok_ ? trace_y_ : std::numeric_limits<double>::quiet_NaN(), yb,
+                            sizeof(yb));
         std::snprintf(line, sizeof(line), "Y%d  x=%s  y=%s", trace_.slot + 1, xb, yb);
     }
 
@@ -1249,6 +1255,36 @@ void GraphScreen::draw_analysis(gfx::Framebuffer& fb) const {
 }
 
 bool GraphScreen::on_key(const platform::KeyEvent& ev) {
+    const bool consumed = handle_key(ev);
+    // One choke point rather than a call beside each of the eight
+    // trace_.step/slot/clamp sites below (issue #40). A new trace
+    // binding added later gets the refresh whether or not its author
+    // knows the readout is cached.
+    refresh_trace_readout();
+    return consumed;
+}
+
+// Exact y under the cursor, from the evaluator. Function mode only:
+// parametric and polar read their point out of the curve cache, and seq
+// already reads its own values straight from math::seqexpr (draw_trace).
+void GraphScreen::refresh_trace_readout() {
+    trace_y_ok_ = false;
+    if (!trace_.active || param_style()) {
+        return;
+    }
+    const int s = trace_.slot;
+    if (s < 0 || s >= graph::kFunctionSlots || !active_[s]) {
+        return;
+    }
+    const math::EvalResult r =
+        math::engine().evaluate_at(y_functions().expr[s], viewport().data_x(trace_.index));
+    if (r.ok && std::isfinite(r.value)) {
+        trace_y_ = r.value;
+        trace_y_ok_ = true;
+    }
+}
+
+bool GraphScreen::handle_key(const platform::KeyEvent& ev) {
     using platform::Key;
     if (!ev.pressed) {
         return false;

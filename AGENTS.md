@@ -101,6 +101,20 @@ Dual-core: core 0 runs the application, core 1 handles display DMA. Multicore FI
 
 Read `docs/architecture.md` before structural changes.
 
+**Python bindings (`src/scripting/`, Phase 6B)** carry two rules that are not
+style preferences — see D74 and D76:
+
+- **A binding is a C glue function plus a C++ leaf, in separate files.**
+  `mp_calc_module.c` converts arguments and builds Python objects;
+  `calc_api.cpp` calls `math::` and never calls back into MicroPython. Not
+  only `mp_raise_*` longjmps — `mp_obj_new_*` can trigger a GC, a `__del__`
+  finalizer can run arbitrary Python during it, and a `MemoryError` leaves
+  from there. Allocation happens after the C++ leaf has returned.
+- **A binding starts ~1.8 KB into a 4 KB stack, and nothing below it is
+  checked.** `MICROPY_STACK_CHECK` guards MicroPython's own recursion only.
+  Measure every new binding with `-DPICOCALC_STACK_PROBE=ON` and give it a
+  headroom requirement; do not reason about frame sizes.
+
 ## Hardware
 
 - **Display**: $320\times320$ RGB565 IPS via SPI, ST7365P controller (~ILI9488-compatible).

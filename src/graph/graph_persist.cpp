@@ -2,6 +2,7 @@
 #include <cstring>
 #include <type_traits>
 
+#include "platform/io_scratch.hpp"
 #include "platform/storage.hpp"
 #include "graph/graph_state.hpp"
 
@@ -28,7 +29,12 @@ struct Image {
 static_assert(std::is_trivially_copyable_v<GraphState>, "raw image dump requires POD state");
 
 // ~6.5 KB — far too big for the stack; reused by save and load.
-Image g_image;
+// D70 lever A: a view over the shared one-shot I/O region rather than
+// its own static. Note this also moves it out of .data (GraphState has
+// non-zero default member initialisers), so it costs no flash either.
+static_assert(sizeof(Image) <= platform::kIoScratchBytes,
+              "graph state image must fit the shared I/O scratch region");
+Image& g_image = *reinterpret_cast<Image*>(platform::io_scratch());
 
 }  // namespace
 

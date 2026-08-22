@@ -23,8 +23,14 @@ on the Raspberry Pi Pico SDK. Runs on both the Pico 1 H (RP2040) and Pico 2 H
 
 > **Status**: feature-complete as a graphing calculator, plus a symbolic CAS.
 > Phases 0 through 5.2 are done and hardware-verified on both boards. Phase 6
-> (an app framework and MicroPython) is specced and not started. Full
-> breakdown in [ROADMAP.md](ROADMAP.md).
+> is under way: an app launcher, a shared text editor, a file browser, Notepad,
+> and — as of 2026-08-15 — **MicroPython, embedded and running on the device**.
+> You can write a Python script on the calculator, run it, and `import calc` to
+> evaluate expressions, read and write the calculator's variables, call the
+> CAS, plot and analyse graphs, reach the calculator's lists and matrices, and
+> draw on the screen, read keys and read and write files. A script folder
+> dropped under `/picocalc/apps/` becomes its own launcher tile, which
+> completes 6B. Full breakdown in [ROADMAP.md](ROADMAP.md).
 
 ## What it does
 

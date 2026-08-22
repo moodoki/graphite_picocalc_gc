@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/io_scratch.hpp"
 #include "platform/storage.hpp"
 #include "math/named_lists.hpp"
 
@@ -34,7 +35,11 @@ struct Header {
 };
 
 constexpr int kChunkElements = 256;
-calc_t g_chunk[kChunkElements];
+// D70 lever A: view over the shared one-shot I/O region. Safe
+// because only one store is ever saving or loading at a time.
+static_assert(kChunkElements * sizeof(calc_t) <= platform::kIoScratchBytes,
+              "named-list persistence chunk must fit the shared I/O scratch region");
+calc_t* g_chunk = reinterpret_cast<calc_t*>(platform::io_scratch());
 constexpr int kChunkComplex = kChunkElements / 2;
 
 void path_for(int idx, char* buf, size_t cap) {

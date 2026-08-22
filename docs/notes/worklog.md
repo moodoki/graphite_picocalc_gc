@@ -305,6 +305,872 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-16 (last) — a design for §3.4's native `.uf2` apps, left open on purpose (D88-D91)
+
+Docs only; no firmware changed, nothing built. §3.4 (compiled `.uf2` launcher
+entries) has been a stretch goal since 2026-07-21. This session worked it up
+into a full draft contract — `docs/phases/phase6.3-spec.md`, a candidate dotted
+sub-phase **6.3** — and then **left every decision in it open at the developer's
+call**. D88, D89, D90 and D91 are all marked **PROPOSED, not accepted**; §3.4 is
+still a stretch goal; D59 and D66 still stand as written, each carrying a note
+naming the open challenge rather than a withdrawal. The set can be dropped
+whole without touching anything else, which is why the amendments were written
+that way.
+
+**Why it was worth working up at all**: issue #38. D78 deferred the
+Python-free build until Phase 6's SRAM numbers were final — they now are — and
+as framed it is a straight loss: give up scripting entirely for D70 lever C's
+~6.3% render cost. The draft's route out (D90) is a Python-free calculator plus
+a `Python` tile that chain-loads a MicroPython build of this same repo. That
+only works because **no user state lives in flash** — everything persists to SD
+through `platform::Storage`, so the hop between two firmware images is
+invisible to the data. Nothing designed that; it falls out of every persistence
+decision already made.
+
+**The structural argument (D88)**: D66 required a standalone permanent
+bootstrap at the reset vector, because the calculator cannot make the boot
+decision when an app has overwritten it. True — but only for the
+one-payload-region layout §3.4 assumed. Give the app its own non-overlapping
+slot and the calculator is always what the boot ROM starts, so the chain-load
+is ~15 lines in `main()`, returning writes no flash at all, and D59/P6-6's
+`/picocalc/firmware.uf2` self-snapshot stops being needed. The safety property
+§3.4 calls non-negotiable would become structural rather than a property of
+correct re-flash code: the only image the boot ROM can start is the one the
+loader never writes to.
+
+**The developer's upfront requirement (D89)**: one SD card moves between both
+boards, so a wrong-board `.uf2` on the card is the normal case, not an edge
+case. Three independent gates, none of which guess — UF2 family ID (absent →
+refuse; foreign-family blocks skipped *but counted*, so a universal `.uf2`
+serves both boards and "wrong board" stays distinguishable from "not a UF2"),
+target-address range (independent by construction, since the slot base differs
+per board), and our own header. Nothing erased until all three pass, and the
+parser is pure in 6B.15's shape, so the requirement is provable on the host
+with no hardware at all.
+
+**Then the third-party question was investigated (D91), and two of its three
+answers were already in this repo unread.** The RP2350 has eight XIP
+address-translation apertures (`QMI_ATRANS0..7`) documented for exactly this
+use — a stock image runs from the app slot with the calculator untouched, and
+`ATRANS0.SIZE` bounds it in hardware. The RP2040 has no equivalent. And
+"impossible with a resident chooser" was wrong: `uf2loader` already does it on
+RP2040, with the loader in the top 16 KB and stock UF2s at flash start. So the
+draft takes the Pico 2 path and delegates the Pico 1.
+
+**The finding worth carrying regardless of how this is decided**: §3.4's
+original bootstrap-at-flash-start layout would not have delivered third-party
+support either, because it collides with a stock image's link address exactly
+as the calculator does. **The layout choice and third-party support are
+independent.** It looks like a trade and is not one — worth checking for that
+shape before paying for a constraint.
+
+Two claims written earlier in the session had to be narrowed the same day, and
+both are marked in place rather than quietly edited: "a stock `.uf2` cannot
+run" (false on the Pico 2) and "gate 3 refuses" (it classifies, or
+"third-party images never run" would have been baked into the design).
+
+Issue #38 carries a comment recording the native-app route as a possibility
+under review. Phase 6's close is untouched: the Pico 1 pass, the merge, and #38
+are exactly as they were.
+
+---
+
+## 2026-08-16 (earlier) — the periodic table app, and the key field it was missing (D87)
+
+`examples/apps/periodic/` — a TI-83-shaped periodic table: an 18-column grid
+walked with the arrow keys, coloured by element series, with a detail panel
+and an `F1` legend. Data lives in an editable CSV beside it. This is §4.6
+entry 1, the app that list has been holding open since 2026-08-13 as the
+pressure test for the `calc` module.
+
+**It found the gap it existed to find.** A key event reported `code` — a
+`platform::Key` enumerator a script has no names for — and `ch`, which is
+`None` for every arrow. `key_held("up")` resolves a name but asks a different
+question, and by the time a blocking `wait_key()` has returned the key may be
+up again. **So a script could not tell which arrow had been pressed**: the
+most basic thing a navigable app does, missing from an API whose keyboard
+half had already passed its own hardware check. Events now carry `name`, from
+the same table `key_held` reads, so the two cannot drift (D87). The function
+keys are in the table too — nothing needed them yet, but they have the
+identical problem and would have been a second decision about the same thing.
+
+**Three predictions in §4.6 entry 1 were wrong, all in the cheap direction:**
+
+- **The small font was not needed.** The entry assumed ~17 px cells with the
+  5x8 font; a 16 px cell holds a two-character symbol exactly in the ordinary
+  8x16 font, and 18 columns come to 288 of 320. A `calc` binding avoided
+  rather than deferred.
+- **JSON was the wrong data format.** The entry specified it for
+  user-editability. CSV parsed with `split` is *more* hand-editable, and
+  avoids holding the source string and an object tree live at the same
+  moment — which on the Pico 1's 40 KB heap is the difference between working
+  and not.
+- **No layout helper was needed**, because the grid is drawn once and an
+  arrow press repaints only the two cells that changed plus the panel.
+  Redrawing 118 cells per keypress would have been the slow version the entry
+  worried about; not doing it makes the question moot.
+
+**The measurement §4.4 has wanted since before 6B.1 exists now**, and it is
+the reason to build reference-data apps this way:
+
+```
+periodic: start, heap 87760 free
+periodic: 118 elements loaded, heap 76256 free
+```
+
+**11,504 bytes for a 118-element dataset** — ~97 bytes an element for a
+symbol, name, mass, series and grid position, held as parallel lists indexed
+by atomic number. About 3x §4.4's "low single-digit KB" estimate, and still
+leaves ~21 KB of the Pico 1's 40 KB free (the interpreter's own overhead
+measures at ~8.5 KB, with the app already compiled).
+
+**Layout and navigation were verified on the host before the board saw them** —
+a stubbed `calc` module checking that all 118 cells land in unique in-range
+positions, that no arrow leaves the table, and that every element is reachable
+from hydrogen. That last one caught the real trap while it was still cheap:
+straight up from a lanthanide is **column 3, which is empty in every row of
+the main block** — it is the column the f-block was pulled out of — so a naive
+column scan strands the cursor in the strip. Vertical movement falls back to
+the nearest occupied cell in the target row.
+
+**Verified on the Pico 2**: tile appears, table draws, `Ba` -> RIGHT jumps the
+f-block notch to `Hf`, UP escapes the lanthanide strip, `F1` shows the legend
+and returns, `ESC` exits. Stack peak **1,988 of 4,096** (1,396 before) — an
+app that touches gfx and Storage rather than the evaluator, as expected.
+
+**Verified**: 21 host suites / **3,277 checks**, lint clean, 52 markdown
+files. Free SRAM unchanged at **15 KB** (Pico 1) / **24 KB** (Pico 2) — the
+firmware change is one pointer per queued event.
+
+## 2026-08-16 (6B close) — 6B.15 + 6B.16: SD app manifests, and 6B closes (D86)
+
+A directory under `/picocalc/apps/` with an `app.txt` in it is now its own
+launcher tile. That is the last committed Phase 6B work, on the tier-2
+`AppRegistry` hook that had existed unused since 6A.1, and it needed
+`exec_file`, which 6B.1 deferred to exactly here.
+
+**The deferral's premise was wrong by a factor of 28.** §4.1 put `exec_file`
+off on the grounds that reading a script would cost "a second 4 KB staging
+buffer". MicroPython's lexer pulls source through an `mp_reader_t` a byte at a
+time, so it is a **128-byte window** over the file: an SD app's length is
+bounded by the card, not by SRAM. What is still heap-bound is the parse tree
+and the bytecode, which is what the RUN key already costs.
+
+**An SD app is `ProgramScreen` in a second mode, not a new screen.** It
+already had the output pane, canvas mode, the `show_graph` hand-off and ESC.
+App mode removes the editor: no `configure()`, so **an app never touches the
+buffer the user was editing**, and ESC pops to the launcher (§3.3). The script
+runs from `on_activate` rather than the launch thunk, so the screen is already
+on top when it draws or pushes a graph — verified end to end, including
+`calc.show_graph()` pushing the graph screen from inside the outer `push()`.
+
+One singleton in two modes needs both doors explicit: `queue_app()` enters,
+`open_editor()` leaves, both called three lines apart in `main.cpp`. Without
+the second, `HOME` — which pops to the root from anywhere, bypassing the ESC
+path — would leave the screen stuck in app mode and the next visit to the
+editor would come up as a stale app's output pane.
+
+**The parser is a pure function, split into its own translation unit** and
+linked into `test_apps`. 29 host checks cover defaults, CRLF, comments,
+trimming, case, repeated keys, absolute entries, `type=native` refusal,
+truncation and the over-long path — none of which is worth learning one bad
+`app.txt` at a time, on a board, with a card that has to come out to be
+edited.
+
+**Two defects the board found, both in code 6B.8-6B.10 had already shipped:**
+
+- **A file is a module, not a REPL.** `is_repl` was `true`, copied from
+  `exec_str`, so top-level expression statements printed their own values — an
+  app calling `calc.draw_text` five times emitted `176 192 168 168 216` into
+  its output pane. `exec_str` keeps REPL semantics on purpose; that is what
+  makes `py 1+1` show `2`.
+- **`KeyEvent::ch` is printable ASCII only**, so ENTER, BACKSPACE, TAB and DEL
+  reached a script as `0`. **`calc.input()` had been waiting since 6B.9 for a
+  `'\r'` the driver never produces — ENTER did nothing.** The queue now
+  normalises the four, where `platform::Key` is visible.
+
+The second is the one to remember: 6B.9's hardware pass exercised `wait_key`,
+`key_pressed` and `key_held`, all of which report `code`, and never typed a
+line into `calc.input`. **A binding can be verified and still be unusable
+through the one entry point nobody drove.**
+
+**Verified on the Pico 2**: both example apps scanned and registered at boot
+(`sd-apps: Hello -> /picocalc/apps/hello/main.py`), both tiles in the
+launcher, `Hello` drew and its canvas survived with ESC returning to the
+launcher, `Quadratic` took three `calc.input` values, printed both roots,
+plotted, showed the graph, and ESC walked back graph → output pane (green
+`done`) → launcher. Stack peaked at **2,004 of 4,096**. 21 host suites /
+**3,275 checks**, lint clean, 51 markdown files.
+
+**Sizes**: flash 651,532 → 654,852 (+3,320). Free SRAM **15 KB** (Pico 1, down
+1) and **24 KB** (Pico 2, down 2). The cost is the manifest table's 1,536
+permanent bytes — `AppEntry` stores pointers into it, so it cannot be scratch.
+Everything transient (the directory listing, the manifest text) comes out of
+`io_scratch`, costing nothing.
+
+**Still open**: the Pico 1 has not run 6B.15/16 — deferred to the Phase 6 close
+pass under the board-swap policy, and the sizes above are already recorded for
+it. Then the close: merge `phase-6`, and issue #38 (the Python-free build,
+D78) unblocks now that both SRAM numbers are final.
+
+## 2026-08-16 (Pico 2 bring-up) — first 6B run on the RP2350, and a two-core SPI race (issue #39)
+
+**The Pico 2 has now run Phase 6B**, for the first time. Everything passed —
+after a real bug that only this board could show.
+
+**The bug.** One `calc.draw_rect` left the panel with visibly fewer shades
+(greys collapsing to black) **globally and until reboot**, on every screen.
+The drawing itself came out correct, which is what made it hard to see.
+
+**The cause**: the core-1 display service runs on **both** boards (D10 leg A),
+and strip mode ends `render_frame` with `drain_acks()` — but the Pico 2's
+async full-frame push *deliberately returns while core 1 is still
+transferring*, draining at the start of the next frame instead. So a 6B.8
+binding, running from `on_key`, drove the same SPI peripheral and the same
+`staging` conversion buffer as core 1, concurrently.
+
+**D85 asserted the opposite** — "render_frame drains its pushes before
+returning" — which is true on the Pico 1 and false on the Pico 2. Corrected in
+place. Fixed with `gfx::display_wait_idle()` at the top of every canvas entry
+point, and the rule now stated at the function: nothing outside the render
+loop may touch the panel or the scratch buffers without waiting for core 1.
+
+**Three hypotheses were built, flashed and disproved first** — a `staging`
+overrun, the Pico 2 composing in the live `frame_buf`, and a stale address
+window. Each cost a hardware check. What broke the deadlock was a *negative*
+result: a full-width push degraded the panel identically to a narrow one, so
+geometry was irrelevant and the difference had to be context, not shape. Worth
+remembering — the misleading part was that width looked relevant.
+
+Two corrections came from the user rather than from me: the degradation
+appeared **after the draw**, not after flashing (my first issue write-up blamed
+the reset path and was wrong), and the Pico 1 had **never been checked** for
+it, so "Pico 2 only" was an assumption. It does turn out to be Pico 2 only,
+for the drain reason above — but that was luck, not evidence, at the time.
+
+**Also fixed**: drawing from the home screen's `py` left the softkey bar
+showing script pixels forever, because the home screen tracks dirty bands and
+`submit_input` invalidates rows 0..kSoftkeyY only. The `py` path now
+`invalidate_all()`s when a script took the panel — unlike ProgramScreen there
+is no canvas mode at the home screen, since a REPL drawing is transient by
+definition.
+
+**Verified on the Pico 2**: boot, PSRAM, `sqrt(8)` symbolic; the whole calc
+module — eval/CAS/solve/complex, graph analysis, 10x10 Hilbert
+det/inverse/eigenvalues, 400 `list_append` calls costing **32 bytes** of a
+96 KB heap, 5,000-byte chunked file read, canvas, keys, and both demo scripts
+including ESC stopping an infinite drawing loop.
+
+**Two board differences worth recording**, both benign:
+
+- The **stack guard adapts correctly**. The M33's hardware FPU removes
+  softfloat frames, so the same requirements in bytes permit deeper nesting
+  here: `calc.eval("solve(...)")` peaks at 3,228 vs 3,544 on the Pico 1, and a
+  10x10 eigen call four Python frames deep peaks at 3,440 of 4,096 and is
+  *allowed*, where the Pico 1 refuses it two frames down. That is the point of
+  checking free bytes at runtime rather than hardcoding a depth.
+- The **96 KB heap changes D77's behaviour**: the 400-iteration string-churn
+  loop that exhausted the Pico 1's 40 KB heap and triggered the fragmentation
+  reset simply completes here, with 80 KB still free.
+
+---
+
+## 2026-08-16 (later still) — 6B.8-6B.10: the calc module is complete (D85)
+
+**Done: 6B.8, 6B.9, 6B.10.** A script can draw on its own canvas, read keys
+and read and write SD files. Verified on the panel, which this chunk needed —
+it is the first that could not be checked over serial alone.
+
+**Three things D80 could not have known, found by building it:**
+
+**The canvas is span-exact, and `read_buffer_spi` is the recorded upgrade
+path.** No framebuffer to read back into on the Pico 1, so each primitive
+pushes only its own pixels: `draw_text` takes a **background colour** and a
+diagonal line goes out as horizontal runs. The vendored driver *does* expose
+`read_buffer_spi()`, so real compositing is available and additive if a script
+ever needs it — deliberately not built.
+
+**Nothing new was allocated**, but that needed a board split. Composition
+borrows the render loop's own buffers, idle whenever a key handler is on the
+stack. The Pico 1 lends `strip_buf`; the **Pico 2 lends the full
+framebuffer** — because in full-framebuffer mode nothing else references
+`strip_buf`, so `--gc-sections` drops it, and referencing it from the scratch
+accessor **resurrected 10 KB on a board with 26 KB free**. Measured, reverted,
+`#if`-split.
+
+**The bug only hardware could show.** A script's pixels survive because
+`render_frame` skips a frame whose dirty band is empty. But while tracking was
+*off*, `take_dirty()` reset the band to the **full screen** every frame — so a
+screen that switched tracking on and then marked nothing still inherited one
+last full repaint. On the device the canvas appeared and was instantly painted
+over by the editor, and because canvas mode was correctly on underneath, keys
+stayed dead until `ESC`. Two symptoms, one cause. `set_dirty_tracking(true)`
+now clears the band.
+
+That took **two attempts**. The first fix — `ProgramScreen::on_key` skipping
+`invalidate_all()` when the run took the panel — was necessary and not
+sufficient; the RUN key is consumed by the editor, so it did repaint, but the
+stale band repainted too. Worth remembering: a symptom with two causes looks
+like a fix that did not work.
+
+**D81 needed a refinement too.** It said "one poller"; a blocking
+`calc.wait_key()` sits inside a binding where the VM hook never runs, so the
+rule is **one drain routine and one queue**. `ESC` is recognised inside the
+drain, so it works on both paths — verified by stopping an infinite drawing
+loop. Key *names* resolve where `platform::Key` is visible; a table of
+enumerator values in `calc_api.cpp` would have gone quietly wrong the first
+time the enum gained a member.
+
+**Stack**: nothing here needed a guard. The canvas, key and file bindings
+peaked at 1,748-2,156 of 4,096, against 2,848 for a plain `calc.eval` — they
+are shallow by nature, reaching gfx and Storage rather than the evaluator.
+
+**Verified**: 21 host suites / 3,241 checks (`test_calc_api` 306 → 344, with a
+recording canvas stub so geometry is testable without a panel), both boards,
+lint clean, 52 markdown files. On hardware: the canvas draws and survives;
+`ESC` stops an infinite drawing loop and the canvas stays up; `wait_key`
+returns the pressed character; file round-trip including a **5,000-byte
+chunked read**; a missing file raises `ValueError('No such file')`.
+
+**Sizes**: flash 644,876 → 651,532 (+6,656). Free SRAM **16 KB** on the Pico 1
+(down 1 KB) and 26 KB on the Pico 2 (unchanged, after the gc-sections fix).
+
+**Still not done**: the Pico 2 has never run any 6B code, and 6B.15/16 (SD app
+manifests) are the last committed Phase 6 work.
+
+---
+
+## 2026-08-16 (later) — 6B.7 + 6B.17: lists and matrices, and the number that justifies them (D84)
+
+**Done: 6B.7 and 6B.17.** A script can read and write the six lists and the
+ten matrices. Verified on the Pico 1.
+
+**The measurement this task existed for.** D77 had shown a 400-iteration loop
+accumulating samples in a Python list exhausting the 40 KB heap and
+fragmenting it badly enough that the interpreter had to be rebuilt. The same
+400 iterations through `calc.list_append`:
+
+| | free heap |
+|---|---|
+| before | 32,432 |
+| after 400 appends | 32,416 |
+
+**16 bytes.** `math::Array` moves to PSRAM above ~256 elements, so the samples
+never enter the heap. §4.6 entry 1's data-logging app is now possible, and the
+claim is demonstrated rather than argued.
+
+**Persistence is deferred and it works.** D82 said a run's lists save once at
+the end rather than per append — otherwise a logging loop is one SD write per
+sample, the exact pattern the 2026-07-22 fix split `lists.dat` into six files
+to avoid. The persist hook grew an index, `calc_api_flush_run()` walks a dirty
+mask, and the 400 elements plus `[A]` both survived a reflash.
+
+**Matrices cross as nested Python lists, not handles** (D84). `math::Array` is
+non-copyable and PSRAM-backed with ten named slots, so a value-returning
+`calc.matrix()` would exhaust them. One file-static scratch Array, `clear()`ed
+per call so its slab returns immediately. `calc.eigenvalues` returns a **flat**
+list, because `matops::eigenvalues` produces a 1-D Array on purpose so results
+can flow into l1-l6 — the host test caught that assumption before hardware did.
+
+**The eigen guard is set by margin, not by what survives.** Measured against a
+$10\times10$ Hilbert matrix (`kMaxEigen` is the cap; ill-conditioning makes the
+shifted QR work hardest):
+
+| call site | peak of 4,096 | spare at peak |
+|---|---|---|
+| top level | 3,192 | 904 |
+| two Python functions deep | 3,864 | **232** |
+
+The two-deep call **worked** — and is still refused. `fault.cpp`'s
+`kLiveMargin` assumes a TinyUSB IRQ frame can exceed 256 bytes, and the
+paint-and-scan instrument only records an ISR that actually fired, so 232
+bytes is a run that looks fine while being one interrupt from D48's overrun.
+`kEigenStackNeed = 1900` keeps ~400 spare whenever the call proceeds, which
+makes eigenvalues top-level-only like the `solve()` path.
+
+Unlike D79's integrator this genuinely is the worst case: the QR iteration is
+iterative rather than recursive and `eigen_core`'s frame is already sized for
+`kMaxEigen`, so depth does not grow with the input.
+
+**Verified**: 21 host suites / 3,203 checks (test_calc_api 177 → 306), both
+boards, lint clean, 52 markdown files. On hardware: list round-trip, the 400
+append heap check, stats against a known dataset, reboot persistence,
+det/inverse/rref/eigenvalues on a 10x10 Hilbert matrix, the `[A]` round-trip,
+and the guard refusing two frames deep rather than hanging.
+
+**Sizes**: flash 639,452 → 644,876 (+5,424). Free SRAM 17 KB (Pico 1) and
+26 KB (Pico 2) — the Pico 2 lost 1 KB to the scratch Array's slab accounting.
+
+**Lint note worth keeping**: a `CALC_GUARDED` macro wrapping the eleven
+reentrancy guards was rejected by `cppcoreguidelines-macro-usage`, and
+expanding it was right anyway — the file's own comment argues the guard should
+be "checkable by looking at one line", which a macro undoes.
+
+---
+
+## 2026-08-16 — 6B.6: a script can plot and analyse graphs (D79)
+
+**Done: 6B.6.** `calc.plot`, `window`, `show_graph`, and the six numeric
+analysis bindings (`graph_zero`, `graph_min`, `graph_max`, `graph_integral`,
+`graph_deriv`, `graph_value`). All verified on the Pico 1.
+
+**D76's discipline earned itself back immediately.** `analyze_integral`
+recurses through `integrate_panel` — 136 bytes a frame, depth cap 12, so
+1,632 bytes of recursion before the expression evaluator underneath it, against
+the 2,239 a binding has. The first measurement was reassuring and **wrong to
+trust**: integrating `x^2-4` peaked at 2,488 of 4,096, because a smooth
+integrand never subdivides. Integrating `sin(1/x)` over 0.01..1 — which does —
+peaked at **3,532, leaving 564 bytes**. `kAnalysisStackNeed = 2000` comes from
+that, not from the first number. **Measure new bindings against a hostile
+input, not a convenient one.**
+
+**Three things D68 did not cover, now D79:**
+
+- **`show_graph()` is deferred.** A binding runs inside the VM inside the
+  screen's `on_key`; pushing a screen there nests screen management inside
+  itself and renders nothing until the script returns anyway. It sets a
+  request and the screen switches once `exec()` ends — the same shape as
+  6B.12 buffering output. Only on a clean run, so a traceback is never hidden
+  behind a graph.
+- **No per-plot colour.** §4.2 shows `color="blue"`; `GraphState` has no field
+  for one, and adding it means a persistence bump and a one-time graph reset
+  for every user, to make a script's curve differ from what the same slot
+  shows when typed. `plot()` returns the slot number instead — which *is* the
+  colour.
+- **Plotting forces FUNC mode**, or a script's graph comes up blank in POLAR.
+
+**A behaviour worth knowing about**: D68's latch resets at each top-level
+`exec()`, and each `py` line is one. Two `py calc.plot(...)` lines leave one
+curve; `py calc.plot("sin(x)"); calc.plot("cos(x)")` gives slots 1 and 2, and
+a script run from the editor is a single exec throughout. Verified both ways
+(`1 2 3` from one line). Spec-conformant, not guessable, so it is documented
+user-facing.
+
+**Verified on hardware**: `plot` returns its slot; `graph_zero("Y1",0,5)` on
+`x^2-4` gives `(2.0, 0.0)`; `graph_deriv` at 2 gives 3.9999999999995;
+`graph_integral` 0..3 gives `-3.0`; and `show_graph()` switched screens,
+confirmed by the next injection reporting `popped to home`. Host suite gained
+53 checks (124 → 177) covering D68's clear/append/eighth-fails, the latch
+reset, window validation, the show-graph latch and every analysis op.
+
+One test of my own was wrong and worth noting: I held the minimum of `x^2-4`
+to 1e-9 and Brent returned 1.35e-8. That is correct — a minimiser locates the
+*argument* of a smooth minimum to about sqrt(eps), because the function is
+flat there. The tolerance was the bug.
+
+**Sizes**: flash 637,260 → 639,452 (+2,192). **Free SRAM unchanged at 17 KB**
+— the graph bindings write into state that already exists.
+
+**Not verified**: the graph itself has not been looked at on the screen, only
+proven to switch to it; and the Pico 2 still has never run any 6B code.
+
+---
+
+## 2026-08-15 — measuring the Python heap found a wedge, not a sizing answer (D77, D78)
+
+Follow-on from the session below. The question was whether the 40 KB Python
+heap could be cut to fund D70 lever C's ~6.3% render cost — the one price
+MicroPython makes every user pay. The measurement said no, and turned up a
+worse bug on the way.
+
+**The heap cannot be shrunk.** MicroPython's own baseline after init is
+**544 bytes**; a realistic mixed workload (500 samples, string building, json
+dumps/loads, 40 CAS results) has a live working set of **~8 KB** and peaks at
+**22 KB** with garbage. But the live set is not what the 40 KB buys — it buys
+churn headroom, and a 400-iteration loop building expression strings already
+exhausts it. 400 `calc.eval` calls cost 9.4 KB and returned every byte, so
+**the binding does not leak**; the churn is three throwaway strings per
+iteration. Cutting to 30 KB would make ordinary loops fail sooner. **D78**,
+and [issue #38](https://github.com/moodoki/graphite_picocalc_gc/issues/38) for
+the Python-free build that follows from it.
+
+Also settled, because it removes a tempting option: **D70 lever B costs
+nothing in normal use** — instrumented peak was 12 live slabs of 14, `miss 0`.
+Lever C is the only one of the three levers with a general price.
+
+**The bug (D77): one heap exhaustion wedged the `py` path until a power
+cycle.** Every statement afterwards failed with `MemoryError` — including
+`gc.collect()` and `import gc`. Two things were wrong with the obvious
+diagnosis:
+
+- **It was not exhaustion.** Instrumenting showed **31.5 KB free** when a
+  **512-byte** allocation failed. The GC is mark-and-sweep with no
+  compaction; 400 surviving floats scattered among 1,200 freed strings left
+  no run long enough to compile another statement.
+- **`gc.collect()` cannot be the escape hatch** — every statement is compiled
+  before it runs, and compiling allocates, so the call dies while being
+  parsed.
+
+Fixed by collecting from C after every exec (no compiler, no allocation, so
+it works exactly when Python cannot — measured recovering 6.3 KB), and by
+checking the largest *contiguous* free run and rebuilding the runtime when it
+falls below 1 KB, announced through the script's own output rather than done
+silently. The loop that used to wedge the board now prints the message and the
+next statement runs, no reboot.
+
+The first attempt — collect only — was **flashed and did not work**, which is
+what produced the 31.5 KB number and the correct diagnosis. Worth recording:
+the fix that looks obviously sufficient was not.
+
+**Also corrected: D76 overstated the usable call depth.** Measured directly —
+`calc.eval` works at top level (peak 2,828) and inside one function (peak
+3,412, 684 B spare), and is refused inside two. The rule is one level of
+nesting, not "a couple of frames"; the `solve()` path is effectively
+top-level only. D76, §4.2, USAGE.md and the binding comment all corrected.
+
+**Verified**: 21 host suites / 3,021 checks, both boards build, lint clean,
+52 markdown files validated, and the wedge repro plus recovery on the Pico 1.
+Flash +664 B, free SRAM unchanged at 17 KB.
+
+**Also this session**: CI ran against `phase-6` for the first time
+(`workflow_dispatch`, run 31891363753) — all four jobs green, so the Linux
+side of the MicroPython generation works. Worth knowing that `build.yml`
+triggers only on `main`, tags and PRs into `main`, and that **CI runs neither
+the host tests nor clang-tidy** — both are local-only gates.
+
+---
+
+## 2026-08-15 — the `calc` module: Python reaches the calculator (D74-D76)
+
+Third session of the day, continuing directly from the one below.
+
+**Done: 6B.3, 6B.4, 6B.5.** `import calc` now gives a script `eval`,
+`store`, `recall`, `simplify`, `expand`, `factor`, `diff`, `integ`,
+`solve`, `complex`, `c_abs`, `c_arg`, `c_conj`. All of it verified on
+the Pico 1 over serial. What is left of 6B is 6B.6-6B.10 (graphing,
+matrices, display, keyboard, file I/O) and the SD app manifests
+(6B.15-6B.16).
+
+**The module reaches MicroPython's build without being part of it.** Our
+`.c` has to be seen by the generator (for `MP_QSTR_*` and
+`MP_REGISTER_MODULE`) while being compiled by CMake as ordinary firmware
+source. Two lines in `micropython_embed.mk` do it — `CFLAGS += -I../../src`
+and `SRC_QSTR +=` the file. `makeqstrdefs.py` sanitizes `..` and `/` out
+of its fragment names, so an out-of-tree source is fine, and
+`builtinimport.c`'s reduced `__import__` still finds builtin modules with
+external import off. It worked first try.
+
+**Three files, and the split is the safety property (D74).** The glue
+converts arguments and builds objects; the C++ leaves call `math::` and
+never call back. It is not only `mp_raise_*` that longjmps — `mp_obj_new_*`
+can trigger a GC, a `__del__` finalizer can run arbitrary Python during
+it, and a `MemoryError` leaves from there. The split also made
+`calc_api.cpp` depend on `math/` alone, which is why **124 of this
+session's checks run on the host** rather than needing a board.
+
+**Then hardware found what static analysis had not (D76).**
+`calc.eval("solve(x^2-4,x,0,10)")` hung the board on the first flash:
+`sp=0x20040ff0`, sixteen bytes below `__StackBottom` — D48's failure
+mode, reached from a direction D48 never considered. D73 had measured
+MicroPython's stack use and been right about it; the deep frames turned
+out to belong to the **calculator**, which `MICROPY_STACK_CHECK` cannot
+see. `solveexpr::substitute` alone was 1,672 bytes — the largest frame in
+the binary — called from a VM already 1,857 bytes deep.
+
+Fixed twice over: 1 KB of `substitute`'s frame moved to bss (1,672 → 696,
+which helps the home screen too), and every binding now checks headroom
+first and raises rather than running. The thresholds came off hardware
+via a new `-DPICOCALC_STACK_PROBE=ON`, because `stack: peak` is a
+high-water mark since boot and cannot answer "how much was free at *this*
+call":
+
+| path | free at binding | peak of 4,096 | consumed below |
+|---|---|---|---|
+| `calc.eval("1+1")` | 2,239 | 2,848 | 991 |
+| `calc.diff` / `factor` / `solve` | 2,135 | 3,240 | 1,279 |
+| `calc.eval("solve(f,x,lo,hi)")` | 2,239 | 3,544 | **1,687** |
+
+Verified both ways on the board: at a script's top level the solve path
+returns `2.0` with 552 bytes to spare; six Python frames down it returns
+`ValueError('Not enough stack for eval')` and the machine stays up.
+**Every binding added in 6B.6-6B.10 must be measured this way.**
+
+**Sizes**, exact bytes rather than the mixed-unit KB the entry below used:
+
+| | before | after |
+|---|---|---|
+| Flash text, Pico 1 | 632,828 | 636,596 (+3,768) |
+| Flash text, Pico 2 | 615,300 | 619,164 (+3,864) |
+| Free SRAM, Pico 1 | 17 KB | 17 KB |
+| Free SRAM, Pico 2 | 27 KB | 27 KB |
+
+The module's own SRAM cost is **zero** — its tables are const, in flash.
+bss moved twice and cancelled: −452 bytes from extracting
+`HomeScreen::save_variables` into `math::save_variables` (two 456-byte
+statics became one), +1,024 from `substitute`'s buffers.
+
+**Verified**: 21 host suites / 3,021 checks, both boards build, lint
+clean, 51 markdown files validated. On hardware: eval through all four
+pipeline stages, a real vs complex scalar, list results as text, every
+rejected variable name, store/recall surviving a reboot, all six CAS
+ops, mode-dependent `solve`, the complex helpers, and 50 `calc.eval` +
+20 `calc.diff` calls in loops.
+
+**Not done**: the Pico 2 still has not been run — it builds and fits but
+only the Pico 1 is on the desk. The `calc` module is **not** exercised
+through the ProgramScreen's RUN key yet, only through `py` over serial;
+the binding path is identical, but the screen path is unverified.
+
+**Spec gap recorded, not fixed**: §4.2 specifies `calc.set_list`,
+`calc.stat_mean` and `calc.list_append` — the last load-bearing for
+§4.6's data-logging walkthrough — but §5's task table has no list-bindings
+task at all. Noted in the spec; needs a task before §4.6 entry 1 can be
+built.
+
+---
+
+## 2026-08-15 — 6B first half: MicroPython embedded and running on hardware (D71-D73)
+
+Second session of the day. The first one shipped 6A + 6C.1 and rebuilt
+the SRAM accounting (D69/D70) — its narrative is in
+[next-session.md](next-session.md); it never got a worklog entry of its
+own.
+
+**Done: 6B.1, 6B.2, 6B.11, 6B.12, 6B.13, 6B.14.** A Python script can be
+written on the device, run, saved, power-cycled and reloaded. Three
+commits on `phase-6`. What is left of 6B is the `calc` module
+(6B.3-6B.10) and the SD app manifests (6B.15-6B.16) — a script today can
+print, loop and compute in pure Python but cannot reach the calculator.
+
+**MicroPython is a git submodule** at `drivers/micropython`, pinned to
+**v1.28.0** (**D71**, direct user instruction). That is a departure from
+every other dependency here, and it generalizes into a rule
+`drivers/README.md` now states: small single-purpose C drivers stay
+vendored, large actively-maintained upstream projects come in as
+submodules pinned to a tag. The submodule is never edited;
+`drivers/micropython_port/` is the whole local configuration.
+
+Three consequences worth knowing before touching the build:
+
+- **A fresh clone needs `git submodule update --init --recursive`**, and
+  CMake stops with a pointed error rather than failing later on a
+  missing header. CI already checked out with `submodules: recursive`,
+  so nothing there changed.
+- **The build needs `make` and a HOST compiler.** MicroPython has no
+  build system we can call; its embed port *generates* the C tree we
+  compile, at CMake configure time, because CMake needs the source list
+  before it can define a target.
+- **Generation is a clean rebuild every time.** The generator's
+  incremental path leaves stale per-module fragments in
+  `genhdr/module/`, so turning `MICROPY_PY_IO` off still emitted its
+  `MP_REGISTER_MODULE` entry and the link failed on a symbol nothing
+  compiled any more. Configure is rare; a silently wrong qstr/module
+  table is not worth the seconds.
+
+**Every line that touches a MicroPython header is in C**
+(`src/scripting/mp_port.c`), not C++. MicroPython raises by `longjmp`,
+straight past every intervening frame, with no compiler diagnostic when
+that frame was C++ holding something with a destructor. Keeping the seam
+in C makes that structural rather than something to remember — which is
+what will matter in 6B.3, when `calc` bindings start calling back the
+other way. **Every binding must be an `extern "C"` leaf.**
+
+**The measurements — this is the part that changes future planning:**
+
+| | before | after |
+|---|---|---|
+| Free SRAM, Pico 1 | 61 KB | **17 KB** |
+| Free SRAM, Pico 2 | 126 KB | **26 KB** |
+| Flash text, Pico 1 | 473 KB | 633 KB (of 2 MB) |
+
+41,916 bytes of SRAM went to a 40,960-byte heap, so **MicroPython's own
+static footprint beyond the heap is under 1 KB** — the single figure
+§4.4 had no estimate for at any point. `json` and the `io` module it
+drags in cost 4 KB of flash and **zero** SRAM. **17 KB is the real
+budget for the whole `calc` module**, not the 61 KB D70's recovery
+banked; re-measure at every step.
+
+**The stack risk closed cheaply, and the contingency was not built**
+(**D73**). §4.4 had budgeted "8 KB C stack for Python calls" and there
+is no 8 KB to give — core 0 has 4 KB, hard-capped by SCRATCH_Y, and
+`PICO_STACK_SIZE=4096` is already the maximum the bank allows (D47).
+Rather than reason about it, it was measured with the paint-and-scan
+instrument D47 left behind:
+
+| Workload | `stack: peak` of 4,096 | Outcome |
+|---|---|---|
+| one-liners | 1,832 | fine |
+| 15-line script (two functions, nested loop, conditional, comprehension) | no new mark | fine |
+| Python recursion to depth 40 | **3,224** | `RuntimeError` |
+| recursion to depth 60, caught in Python | **3,288** | caught |
+| 400,000-iteration busy loop | 2,208 | fine |
+
+`RuntimeError: maximum recursion depth exceeded`, catchable, **808 bytes
+still unused**. D48's failure mode — SP crosses `__StackBottom` into
+core 1's stack and the machine hangs with a garbage PC — is now a Python
+exception. The planned fallback (a dedicated bss stack entered by
+switching to PSP, real assembly on two different cores) is not needed
+and was not written. Repeating D47/D48's lesson a third time: measure.
+
+**The heap is a static bss array, not an allocation** (**D72**, amending
+D57). D57 said "lazily allocated ... not reserved at boot"; there is no
+allocator, so that sentence could not be implemented as written. What is
+lazy is `mp_embed_init`/`deinit` on entering and leaving the program
+screen. D70 had already reached the same conclusion from the other side.
+
+**`py <statement>` at the home screen** is both a one-liner REPL and the
+harness that makes the interpreter drivable from
+`scripts/serial-console.py` — every measurement above was taken that way
+without touching the keyboard. It immediately exposed
+`submit_input()`'s `char cmd[16]`, ample while `mode <keyword>` was the
+only command with an argument, which silently dropped
+`py print(2**0.5)` into the math evaluator as "Syntax error". Widened to
+a whole input line.
+
+**`ui::OutputLog`** (6B.12) is pure and host-tested like `TextBuffer`.
+It keeps the **tail** — when a run outruns the 2 KB buffer the *oldest*
+whole lines go, because the failing case (a traceback) is the one where
+the user cannot get the information any other way. Byte buffer and
+128-entry line index overflow independently (2048 bytes of
+one-character lines is 1024 of them), so both are capped and
+`truncated()` says so on screen. 164 host checks; suite 2,733 → 2,897.
+
+**Hardware, Pico 1, all six developer checks passed**: launcher with
+three apps; write-and-run with auto-indent after `:`; a red `raised`
+header with the traceback scrolled into view; **`ESC` breaking a
+`while True:` via `KeyboardInterrupt`**; save → power-cycle → reload →
+run; and ten enter/leave cycles with no heap drift. **More extensive
+testing deferred to a soak session** (developer's call).
+
+**HW-PENDING**: the Pico 2 builds and fits (26 KB free) but has not been
+run — only the Pico 1 is connected and board swaps happen at stage
+closures.
+
+---
+
+## 2026-08-14 — Phase 6 spec-completion continued: §0 pre-flight checklist fully cleared (D61-D66), one hardware-verified firmware diagnostic
+
+Continuation of 2026-08-13's brainstorm. Docs-only except one small,
+verified firmware diagnostic (`src/main.cpp`, ~21 lines). Six new
+decisions, **D61 through D66**, all dated 2026-08-14, all Accepted, all
+in `docs/notes/decisions.md` and cross-referenced in
+`docs/phases/phase6-spec.md`.
+
+**D61 — Pico 1 MicroPython heap pre-committed to 40 KB (was 48 KB).**
+§0.1's pre-flight checklist called for a fresh `size-report.sh`
+measurement before sizing 6B's heap, since the two existing numbers
+(`pre-phase5-review.md`'s ~12 KB, the `picocalc-phase5.2-state`
+memory's ~5-10 KB) were stale and from different points in the
+codebase's history. Measured on current `main` (`564406f`, pre-6A):
+bss+data = 210,764 B → **58.2 KB nominal headroom** on the Pico 1 —
+only **2.2 KB** above the 56 KB threshold (48 KB heap + 8 KB C-stack)
+§0.1 named, with zero 6A code written yet. Rather than gamble that 6A's
+own static footprint (`AppRegistry`, launcher, `TextEditorWidget`'s
+line buffer, the generalized `FileBrowserScreen`'s directory-entry
+state — all the class of fixed-size static array that costs
+low-single-digit KB apiece elsewhere in this codebase) fits in 2.2 KB,
+took the heap-size lever proactively rather than discover a shortfall
+mid-6B. §4.4's memory table and Risk 6 (§7) updated to state 40 KB as
+the shipped number, not a conditional. A post-6A `size-report.sh`
+re-run is still owed once 6A actually lands.
+
+**D62 — P6-13 resolved: editing vendored `pwm_sound.h`/`.c` is
+acceptable.** The sound-demo tone extension needs one new public entry
+point in the vendored driver (the tone state is file-private to
+`pwm_sound.c`, so D7's usual "reimplement in the wrapper" answer isn't
+available). `drivers/README.md`'s own policy already covers this
+exact shape as its documented exception process — matches the existing
+D51/tinyexpr precedent. §4.6 entry 4 updated.
+
+**D63 — P6-12 resolved: the sensor catalog splits into two tiers,**
+against the user's actual sensor box (DHT11, DS18B20, assorted
+LM393-comparator breakout boards). LM393 boards need only the existing
+generic `calc.gpio_*` primitives plus one new addition,
+`calc.adc_read(pin)` — confirms the "generic primitives, Python glue"
+model holds for that whole class. DHT11 and DS18B20 get **dedicated
+C++ bindings** (`calc.dht11_read`/`calc.ds18b20_read`), a narrow,
+reasoned exception to "no per-sensor drivers": both are timing-critical
+single-wire protocols a MicroPython bytecode loop can't reliably time,
+and this project's GC can pause mid-bit-bang at an arbitrary point — a
+sharper risk than "Python is slow" generically. DS18B20 v1 is scoped
+single-device-per-bus (skip-ROM); multi-device ROM search is a stretch.
+§4.2 and §4.6 entry 2 updated.
+
+**D64 — build order: Notepad (6C) ships before MicroPython (6B),** per
+direct user instruction — build the text editor as the first real app,
+with MicroPython's editor wrapping it rather than being a second
+untested consumer of the shared widget. New recommended sequence:
+6A.1-6A.4 → 6A.6 (file browser, moved ahead of the widget so
+`F3:LOAD` is wired for real instead of stubbed) → 6A.5 (shared
+`TextEditorWidget`) → 6C.1 (Notepad — proves the widget end-to-end) →
+6A.7 (file management, can trail) → 6B (Python; 6B.11's editor now
+explicitly wraps the already-proven widget). No task hours moved
+between sub-phases, only build order — supersedes the previous
+session's "stub `F3:LOAD` then wire it" note. §1 and §5 updated.
+
+**D65 — P6-14 hardware-confirmed on the connected Pico 1.** Added a
+small permanent diagnostic to `src/main.cpp`: captures
+`watchdog_caused_reboot()` at boot, at the same point/ordering as the
+existing `g_prior_fault` capture (before anything else can re-arm the
+watchdog), and reports it on the existing 30 s heartbeat cadence
+(`"boot: watchdog_caused_reboot=%d\n"`, matching the existing
+`fault:`/`stack:` pattern). Flashed via `picotool load -f -x
+build/pico/picocalc_graphcalc.uf2` and measured two cases over serial
+(`scripts/serial-capture.py`): a non-power reboot (picotool's own
+flash-and-relaunch) read `=1`; a genuine physical power-cycle via the
+case's power button (USB device observably dropped and reappeared
+~13 s later) read `=0`. Confirms the AXP2101/`PICO_EN` schematic
+prediction from 2026-08-13 directly — §3.4's planned mechanism
+(distinguish "deliberate app-launch handoff" from "user power-cycled")
+is sound. Both boards rebuilt after this change and build clean;
+`lint.sh`/`format.sh` pass.
+
+**D66 — P6-5 resolved: self-sufficient bootstrap, not
+`uf2loader`-dependent,** per direct user instruction. `uf2loader`
+demoted from "either/or" to a purely optional, user-installed,
+manually-invoked recovery tool — never part of the automatic boot
+path. Working through what "self-sufficient" requires surfaced two
+real corrections to §3.4: **(1)** bare `watchdog_caused_reboot()` is
+ambiguous — already shared by D47's hard-fault recovery reboot, the
+bulk-PSRAM self-test's watchdog guard, and (per D65's own measurement)
+an ordinary `picotool` flash-and-relaunch — so the app-launch handoff
+needs a **dedicated scratch-register marker**, matching this
+codebase's existing pattern (`fault.cpp`'s `g_crash.magic`,
+`main.cpp`'s `kBulkTestMarker`), not the bare flag. **(2)** the
+bootstrap must be a genuinely **separate, permanent firmware
+component** (own linker script, own flash placement, its own one-time
+install step) — not a few lines inside the calculator's own `main()`
+— because the "power-cycle always recovers to the calculator, even
+from a hung foreign app" guarantee can't be checked from code that
+isn't currently resident when a foreign app is what's booted. §3.4's
+existing ~25-35 hr estimate is flagged as likely understated as a
+result, to revisit when §3.4 is actually scoped for implementation
+(§3.4 remains a stretch item, not core 6A/6B scope).
+
+**Net effect: §0's pre-flight checklist is now fully clear.** Every
+item that was open at the start of this session (§0.1 SRAM headroom,
+§0.5 open policy calls P6-12/P6-13, §0.3 hardware spike P6-5/P6-14) is
+resolved. Nothing blocks starting 6A implementation. Phase 6 itself is
+still **specced, not started** — no app-framework/MicroPython/Notepad
+code was written this session. The one piece of firmware code
+(`main.cpp`'s reset-reason diagnostic) is small, generically useful,
+unrelated to 6A/6B/6C's own implementation, and already verified on
+both boards plus real hardware.
+
+Also this session, folded into §4.6 without new decision numbers: two
+more candidate apps walked through against §4.2's speculative
+bindings — a **real-time game** (entry 5), which found a real gap
+(every existing input primitive blocks; added non-blocking
+`calc.key_pressed()`/`calc.key_held()`, direct wrappers over existing
+HAL surface, no estimate change), and a **graph-analysis combo app**
+(entry 6), which surfaced a new open question, **P6-15** (§8): does
+`calc.plot()` clear Y1-Y7 first, take an explicit slot argument, or
+append-with-error-on-full? Unresolved, needed before 6B.6.
+
+**Verification**: `./scripts/lint.sh` (101 files) and
+`./scripts/format.sh` both passed, no changes needed to `main.cpp`;
+`cmake --build build/pico` and `cmake --build build/pico2` both link
+clean; `python3 scripts/validate_md.py docs/phases/phase6-spec.md
+docs/notes/decisions.md` both OK. Host test suite not re-run —
+`main.cpp` isn't part of the host-testable logic surface and nothing
+under `src/math`, `src/apps`, etc. changed.
+
+Landed on a new `phase-6` branch (not `main`), per explicit user
+request this session — a deliberate departure from how the two
+previous Phase 6 docs sessions were committed straight to `main`.
+
+---
+
 ## 2026-08-13 — Phase 6 spec-completion brainstorm: editor/notepad generalized (D54), file management scoped in (D55), launcher + return-to-calculator UX resolved (D58/D59), hardware pin map researched, two new candidate sub-phases opened
 
 Docs/brainstorm-only session, no firmware changed. Everything landed in

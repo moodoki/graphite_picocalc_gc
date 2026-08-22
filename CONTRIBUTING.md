@@ -33,14 +33,28 @@ as an issue versus what stays in the repo is settled in
   the change.
 - **The stack is 4 KB and shared.** Core 0 runs the app; core 1 runs the
   display service. Recursion without a stated, measured depth cap has crashed
-  this firmware more than once — see D45, D47 and D48 in
-  [decisions.md](docs/notes/decisions.md) before adding any.
+  this firmware more than once — see D45, D47, D48 and D76 in
+  [decisions.md](docs/notes/decisions.md) before adding any. Anything called
+  from a Python binding starts ~1.8 KB down and must be measured, not
+  reasoned about: `-DPICOCALC_STACK_PROBE=ON` reports free stack at each
+  binding.
 - **Decisions get written down.** Anything non-obvious — a rejected
   alternative, a constraint discovered on hardware, a number that came from a
   measurement — goes in the decision log with its reasoning, not just its
   conclusion.
 
 ## Building
+
+**First clone only:** this repo has one git submodule (MicroPython, Phase 6B).
+The build fails with a pointed error if it is missing.
+
+```bash
+git submodule update --init --recursive
+```
+
+The MicroPython embed package is *generated* at CMake configure time, so the
+build also needs `make` and a host C compiler. Both are already present in any
+working toolchain setup.
 
 ```bash
 ./scripts/build-all.sh          # both boards (--clean to reconfigure)
@@ -57,7 +71,7 @@ hardware and no cross-toolchain needed. **This is the primary correctness check
 between hardware sessions.**
 
 ```bash
-./scripts/host-tests.sh   # 16 suites, 2,599 checks
+./scripts/host-tests.sh   # 21 suites, 3,277 checks
 ./scripts/lint.sh         # clang-format check + clang-tidy (warnings are errors)
 ./scripts/format.sh       # apply formatting
 ```
@@ -68,7 +82,9 @@ formatting, variables and store, viewport transforms, the
 function/parametric/polar/sequence point sources, trace stepping, the
 mode-aware table model, lists and statistics and regression, distributions and
 inference, matrices and the numeric solver, graph analysis, complex arithmetic
-and display, and the CAS passes.
+and display, and the CAS passes, plus the `calc` Python module's C++ side — which is
+host-testable precisely because `src/scripting/calc_api.cpp` depends on
+`math/` and nothing else (D74).
 
 ### On-device testing
 
@@ -84,8 +100,12 @@ python3 scripts/ab-measure.py         # the A/B timing harness
 Note that the serial port needs DTR asserted — `cat /dev/tty.*` will not work;
 use the scripts.
 
-An **evaluation-timing probe** is compiled out of shipped builds and enabled
-with `-DPICOCALC_EVAL_PROBE=ON` when you need per-expression timings.
+Two probes are compiled out of shipped builds and enabled per-configure:
+`-DPICOCALC_EVAL_PROBE=ON` for per-expression timings, and
+`-DPICOCALC_STACK_PROBE=ON` for free stack at each `calc` binding entry. The
+second exists because `stack: peak` is a high-water mark since boot and so
+cannot answer "how much was free at *this* call" — the question D76 turned
+on.
 
 ## Repository layout
 

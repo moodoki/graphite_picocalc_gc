@@ -1,5 +1,6 @@
 #include "math/array.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -194,22 +195,36 @@ bool Array::set_shape(int nd, int d0, int d1) {
         }
         psram_addr_ = region;
     } else if (!want_psram && in_psram()) {
-        // Shrink back into a slab, releasing the 80 KB region.
+        // Shrink back into a slab, releasing the 80 KB region. If the
+        // pool is exhausted, STAY in PSRAM rather than failing the
+        // resize (D70 lever B) — the array is merely slower there, and
+        // this used to be a hard error on a path the user cannot see
+        // or avoid.
         uint8_t* slab = array_store().slab_alloc();
-        if (slab == nullptr) {
-            return false;  // Pool exhausted; keep the PSRAM tier as-is
+        if (slab != nullptr) {
+            const int keep = old_size < new_size ? old_size : new_size;
+            if (keep > 0) {
+                psram_backend::read(psram_addr_, slab,
+                                    static_cast<size_t>(keep) * dtype_size(dtype_));
+            }
+            array_store().region_free(psram_addr_);
+            psram_addr_ = kNoPsram;
+            sram_ = slab;
         }
-        const int keep = old_size < new_size ? old_size : new_size;
-        if (keep > 0) {
-            psram_backend::read(psram_addr_, slab, static_cast<size_t>(keep) * dtype_size(dtype_));
-        }
-        array_store().region_free(psram_addr_);
-        psram_addr_ = kNoPsram;
-        sram_ = slab;
     } else if (!want_psram && sram_ == nullptr) {
         sram_ = array_store().slab_alloc();
         if (sram_ == nullptr) {
-            return false;
+            // Slab pool exhausted. Fall back to PSRAM instead of
+            // failing (D70 lever B): this is what lets kSlabCount be
+            // sized to the common case rather than to the worst one.
+            if (!psram_backend::available()) {
+                return false;
+            }
+            const uint32_t region = array_store().region_alloc();
+            if (region == psram_backend::kInvalid) {
+                return false;
+            }
+            psram_addr_ = region;
         }
     }
 
@@ -264,9 +279,15 @@ uint8_t* ArrayStore::slab_alloc() {
     for (int i = 0; i < kSlabCount; ++i) {
         if (!slab_used_[i]) {
             slab_used_[i] = true;
+            ++slabs_live_;
+            slabs_peak_ = std::max(slabs_live_, slabs_peak_);
             return slabs_[i];
         }
     }
+    // Exhausted. The caller falls back to PSRAM (D70 lever B); count
+    // it so sizing kSlabCount rests on a measurement rather than on a
+    // guess about what "enough" means.
+    ++slab_misses_;
     return nullptr;
 }
 
@@ -274,6 +295,7 @@ void ArrayStore::slab_free(const uint8_t* p) {
     for (int i = 0; i < kSlabCount; ++i) {
         if (slabs_[i] == p) {
             slab_used_[i] = false;
+            --slabs_live_;
             return;
         }
     }

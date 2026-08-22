@@ -1,0 +1,5 @@
+# Anything this file does not name gets a default: no entry= would mean
+# main.py, and no name= would mean "quadratic", the directory's own name.
+name=Quadratic
+icon=Q
+entry=main.py

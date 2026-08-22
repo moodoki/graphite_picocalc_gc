@@ -52,18 +52,63 @@ echo "== Static footprint: $ELF =="
 "$SIZE" "$ELF"
 echo
 
-# RP2040 has 264 KB SRAM; RP2350 has 520 KB. bss+data must fit alongside the
-# stacks and any runtime heap. Report headroom against the board's SRAM.
-BSS="$("$SIZE" "$ELF" | awk 'NR==2{print $3}')"
-DATA="$("$SIZE" "$ELF" | awk 'NR==2{print $2}')"
+# SRAM accounting.
+#
+# DO NOT use Berkeley `size`'s text/data/bss columns here. This is how
+# this script was wrong until 2026-08-15: `.data` on the Pico has a
+# flash LMA and an SRAM VMA, and the SDK marks it READONLY+CODE (it
+# carries RAM-resident functions as well as initialised variables), so
+# Berkeley `size` bins the whole section under *text* and reports
+# `data 0`. The script then summed bss+data and silently omitted ~44 KB
+# of real SRAM, overstating headroom by that much. It also counted
+# .stack_dummy, which lives in a dedicated scratch bank, not main SRAM.
+#
+# Measure from the section table instead: sum every ALLOC section whose
+# VMA lands in the main SRAM bank. That is what actually competes for
+# space with the heap.
 case "$BUILD" in
-    *pico2*) SRAM=$((520 * 1024)); BOARD="RP2350 (520 KB SRAM)" ;;
-    *)       SRAM=$((264 * 1024)); BOARD="RP2040 (264 KB SRAM)" ;;
+    *pico2*)
+        BOARD="RP2350 (520 KB SRAM)"
+        SRAM_BASE=$((0x20000000)); SRAM_TOP=$((0x20080000))  # 512 KB striped
+        ;;
+    *)
+        BOARD="RP2040 (264 KB SRAM)"
+        # Main bank is 256 KB; SRAM4/5 (0x20040000+) are the 4 KB
+        # scratch banks that hold the two core stacks.
+        SRAM_BASE=$((0x20000000)); SRAM_TOP=$((0x20040000))
+        ;;
 esac
-USED=$((BSS + DATA))
+
+# Parsed in python3 rather than awk: BSD awk (macOS) has no strtonum,
+# and objdump prints sizes and addresses in hex.
+SRAM_SUMMARY="$("$OBJDUMP" -h "$ELF" | python3 -c '
+import re, sys
+base, top = int(sys.argv[1]), int(sys.argv[2])
+rows, total, pending = [], 0, None
+for line in sys.stdin:
+    m = re.match(r"\s+\d+\s+(\S+)\s+([0-9a-f]{8})\s+([0-9a-f]{8})", line)
+    if m:
+        pending = (m.group(1), int(m.group(2), 16), int(m.group(3), 16))
+        continue
+    if pending and "ALLOC" in line:
+        name, size, vma = pending
+        if base <= vma < top:
+            rows.append((name, size, vma))
+            total += size
+        pending = None
+print(total)
+for name, size, vma in rows:
+    print("  %-22s %8d  @ 0x%08x" % (name, size, vma))
+' "$SRAM_BASE" "$SRAM_TOP")"
+
+USED="$(head -1 <<<"$SRAM_SUMMARY")"
 echo "board: $BOARD"
-printf "static RAM (bss+data): %d bytes (%.1f KB) — ~%d KB nominal headroom\n" \
-    "$USED" "$(echo "scale=1; $USED/1024" | bc)" "$(((SRAM - USED) / 1024))"
+printf "static SRAM (all ALLOC sections in the main bank): %d bytes (%.1f KB) — %d KB free\n" \
+    "$USED" "$(echo "scale=1; $USED/1024" | bc)" "$(((SRAM_TOP - SRAM_BASE - USED) / 1024))"
+echo "  (core stacks live in the separate scratch banks and are not counted here)"
+echo
+echo "== SRAM sections (main bank) =="
+tail -n +2 <<<"$SRAM_SUMMARY"
 echo
 
 echo "== Top $TOPN bss symbols (bytes, demangled) =="

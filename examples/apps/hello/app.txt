@@ -1,0 +1,3 @@
+name=Hello
+icon=H
+entry=main.py

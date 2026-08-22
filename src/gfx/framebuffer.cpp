@@ -229,6 +229,32 @@ void Framebuffer::draw_line(int x0, int y0, int x1, int y1, Color c) {
     }
 }
 
+void display_wait_idle() {
+    drain_acks();
+}
+
+uint16_t* scratch_pixels() {
+#if PICOCALC_PICO2
+    // The full framebuffer. Idle outside render_frame like the strips are,
+    // and render_frame redraws the whole of it every pass, so scribbling in
+    // it between frames costs nothing.
+    //
+    // Not strip_buf: in full-framebuffer mode nothing else references it, so
+    // --gc-sections drops it entirely, and referencing it here costs 10 KB on
+    // a board with 26 KB free (measured 2026-08-16).
+    //
+    // Swapping this to strip_buf was TRIED as a fix for issue #39 (the Pico 2
+    // panel losing colour depth after one canvas draw) and made no
+    // difference, so the aliasing is not the cause and the 10 KB is not worth
+    // spending on it.
+    return frame_buf;
+#else
+    // Both strips, which are one contiguous array — idle outside
+    // render_frame, see the header for the terms.
+    return &strip_buf[0][0];
+#endif
+}
+
 Framebuffer& framebuffer() {
     static Framebuffer instance;
     return instance;

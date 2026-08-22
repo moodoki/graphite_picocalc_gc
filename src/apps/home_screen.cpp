@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "platform/io_scratch.hpp"
 #include "platform/storage.hpp"
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
@@ -23,6 +24,7 @@
 #include "math/solve_expr.hpp"
 #include "math/unified_home.hpp"
 #include "math/units.hpp"
+#include "math/var_store.hpp"
 #include "render/layout_builder.hpp"
 #include "render/layout_render.hpp"
 #include "apps/calc_menu.hpp"
@@ -34,6 +36,7 @@
 #include "apps/graph_screen.hpp"
 #include "apps/help_screen.hpp"
 #include "apps/infer_screen.hpp"
+#include "apps/launcher_screen.hpp"
 #include "apps/list_editor.hpp"
 #include "apps/matrix_editor.hpp"
 #include "apps/mode_screen.hpp"
@@ -44,12 +47,29 @@
 #include "apps/stats_screen.hpp"
 #include "apps/window_screen.hpp"
 #include "graph/graph_state.hpp"
+#include "scripting/calc_api.h"
+#include "scripting/micropython_embed.hpp"
 
 namespace apps {
 
 namespace {
+
+// One line of captured Python output, for the `py` command below. Sized
+// to a home-screen result line, not to a script's full output — that is
+// the program screen's output pane, which has its own ring buffer.
+// Overflow is dropped rather than wrapped: this is a one-liner REPL.
+char g_py_line[128];
+std::size_t g_py_line_len = 0;
+
+void capture_py_line(const char* text, std::size_t len) {
+    const std::size_t room = sizeof(g_py_line) - 1 - g_py_line_len;
+    const std::size_t n = len < room ? len : room;
+    std::memcpy(g_py_line + g_py_line_len, text, n);
+    g_py_line_len += n;
+    g_py_line[g_py_line_len] = 0;
+}
+
 constexpr const char* kHistoryPath = "/picocalc/history.txt";
-constexpr const char* kVarsPath = "/picocalc/variables.dat";
 // Shown as the "expression" on the history line the `mode` command pushes.
 constexpr const char* kModeCommandName = "mode";
 
@@ -60,9 +80,15 @@ constexpr const char* kModeCommandName = "mode";
 // bound and, once past the read window, reboots would restore stale old
 // lines instead of the newest. g_hist_io backs both paths (single-threaded
 // UI, never reentrant) so neither carries its own multi-KB static.
+// D70 lever A: this is now a view over the shared one-shot I/O staging
+// region rather than its own 8 KB static. See platform/io_scratch.hpp
+// for the invariant — nothing may hold this across a call that reaches
+// another owner of the region.
 constexpr size_t kHistoryTailBytes = 8192;
 constexpr long kHistoryMaxBytes = 24576;  // 3x tail: compaction stays rare
-char g_hist_io[kHistoryTailBytes];
+static_assert(kHistoryTailBytes <= platform::kIoScratchBytes,
+              "history tail must fit the shared I/O scratch region");
+char* g_hist_io = reinterpret_cast<char*>(platform::io_scratch());
 
 // evaluate_input's per-branch string scratch, in bss rather than on its
 // stack frame (D47). Each result branch declared its own buffers and
@@ -252,7 +278,7 @@ void HomeScreen::compact_history() {
     // (line-aligned: drop the partial leading fragment). Appends are
     // human-paced so this rare O(file) rewrite is cheap; kMaxBytes = 3x the
     // tail keeps it to roughly one rewrite per two tail-buffers of writes.
-    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t cap = kHistoryTailBytes - 1;
     const size_t offset = static_cast<size_t>(fsize) - cap;
     const int n =
         fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
@@ -265,45 +291,17 @@ void HomeScreen::compact_history() {
     fs.write_file(kHistoryPath, reinterpret_cast<const uint8_t*>(start), std::strlen(start));
 }
 
-namespace {
-
-// variables.dat image (4D.15): versioned since complex storage widened
-// Variables — the pre-PCV1 file was a raw 224-byte vars[] dump with no
-// header, so it simply fails the magic check and is ignored (one-time
-// variable reset on first boot, same precedent as PCL/PCM/PCG bumps).
-struct VarsImage {
-    char magic[4];
-    math::calc_t vars[math::Variables::kCount];
-    math::calc_t imag[math::Variables::kCount];
-};
-constexpr char kVarsMagic[4] = {'P', 'C', 'V', '1'};
-
-}  // namespace
-
+// The image format and both halves of it moved to math/var_store.cpp in 6B.3,
+// when calc.store() became a second writer — a value a script stores has to
+// survive a power cycle the same way a typed one does, and scripting/ cannot
+// reach into apps/. These stay as methods because a dozen call sites read
+// better for it, and because load_state() below is where the ordering lives.
 void HomeScreen::save_variables() {
-    auto& fs = platform::storage();
-    if (!fs.mounted()) {
-        return;
-    }
-    const auto& v = math::engine().vars();
-    static VarsImage img;
-    std::memcpy(img.magic, kVarsMagic, sizeof(img.magic));
-    std::memcpy(img.vars, v.vars, sizeof(img.vars));
-    std::memcpy(img.imag, v.imag, sizeof(img.imag));
-    fs.write_file(kVarsPath, reinterpret_cast<const uint8_t*>(&img), sizeof(img));
+    math::save_variables(platform::storage());
 }
 
 void HomeScreen::load_variables() {
-    auto& fs = platform::storage();
-    auto& v = math::engine().vars();
-    static VarsImage img;
-    const int n = fs.read_file(kVarsPath, reinterpret_cast<uint8_t*>(&img), sizeof(img));
-    if (n != static_cast<int>(sizeof(img)) ||
-        std::memcmp(img.magic, kVarsMagic, sizeof(img.magic)) != 0) {
-        return;  // Missing, old-format, or truncated: keep defaults
-    }
-    std::memcpy(v.vars, img.vars, sizeof(v.vars));
-    std::memcpy(v.imag, img.imag, sizeof(v.imag));
+    math::load_variables(platform::storage());
 }
 
 void HomeScreen::load_state() {
@@ -322,7 +320,7 @@ void HomeScreen::load_state() {
     if (fsize <= 0) {
         return;
     }
-    const size_t cap = sizeof(g_hist_io) - 1;
+    const size_t cap = kHistoryTailBytes - 1;
     const size_t offset = static_cast<size_t>(fsize) > cap ? static_cast<size_t>(fsize) - cap : 0;
     const int n =
         fs.read_file_range(kHistoryPath, offset, reinterpret_cast<uint8_t*>(g_hist_io), cap);
@@ -553,7 +551,15 @@ void HomeScreen::evaluate_input(bool force_decimal) {
 // typed one; two copies would drift.
 void HomeScreen::submit_input() {
     // Trimmed command match first (cls, help, ...).
-    char cmd[16];
+    //
+    // Sized to a whole input line, not to a command word. This was
+    // char[16], which was ample while `mode <keyword>` was the only
+    // command taking an argument — but `py <statement>` (6B) means the
+    // argument is arbitrary Python, and a 16-byte cap silently dropped
+    // anything longer into the math evaluator, where `py print(2**0.5)`
+    // came back as "Syntax error". No command word is anywhere near this
+    // long, so widening it changes nothing else.
+    char cmd[ui::InputLine::kCapacity];
     const char* t = input_.text();
     while (*t == ' ') {
         ++t;
@@ -824,9 +830,75 @@ bool HomeScreen::handle_command(const char* cmd) {
         ui::screen_manager().push(&const_screen());
         return true;
     }
-    // CAS operations menu (Phase 5); also on the F6 softkey.
+    // CAS operations menu (Phase 5). Typed-command only since Phase 6A
+    // took F6 for the app launcher (D58's dedicated softkey — there was
+    // no free slot, and `cas` was already a typed command).
     if (std::strcmp(cmd, "cas") == 0) {
         ui::screen_manager().push(&cas_menu());
+        return true;
+    }
+    // App launcher (Phase 6A.4, D58): both entry points ship — this
+    // command and the F6 softkey. Shadows a user list named app/apps
+    // the same way list/stat/mat already do.
+    if (std::strcmp(cmd, "apps") == 0 || std::strcmp(cmd, "app") == 0) {
+        ui::screen_manager().push(&launcher_screen());
+        return true;
+    }
+    // `py <line>` — one line of Python at the home screen (Phase 6B).
+    // Two jobs: a genuine one-liner REPL, and the harness that makes the
+    // interpreter drivable from scripts/serial-console.py, so "does
+    // MicroPython still work on both boards" is a scripted check rather
+    // than a manual one.
+    //
+    // The runtime is brought up on first use and left up, so `py a=1`
+    // followed by `py a` sees the same globals. ProgramScreen's own
+    // teardown (6B.14) may pull it down underneath; the next `py` just
+    // brings it back.
+    if (std::strncmp(cmd, "py", 2) == 0 && (cmd[2] == 0 || cmd[2] == ' ')) {
+        const char* src = cmd[2] == 0 ? cmd + 2 : cmd + 3;
+        while (*src == ' ') {
+            ++src;
+        }
+        if (*src == 0) {
+            push_entry("py", "usage: py <statement>", ResultKind::kError);
+            return true;
+        }
+        if (!scripting::python().init()) {
+            push_entry("py", "interpreter unavailable", ResultKind::kError);
+            return true;
+        }
+        g_py_line_len = 0;
+        g_py_line[0] = 0;
+        scripting::python().set_output_callback(&capture_py_line);
+        const bool ok = scripting::python().exec(src);
+        scripting::python().set_output_callback(nullptr);
+        // Trailing newline from print() is noise in a one-line result.
+        while (g_py_line_len > 0 &&
+               (g_py_line[g_py_line_len - 1] == '\n' || g_py_line[g_py_line_len - 1] == '\r')) {
+            g_py_line[--g_py_line_len] = 0;
+        }
+        push_entry(cmd, g_py_line_len > 0 ? g_py_line : (ok ? "ok" : "error"),
+                   ok ? ResultKind::kPlain : ResultKind::kError);
+        // A script that drew (6B.8) has scribbled straight onto the panel,
+        // and this screen tracks dirty bands — submit_input's own
+        // invalidate() covers rows 0..kSoftkeyY, so the softkey bar below it
+        // would keep the script's pixels until something else repainted the
+        // whole screen. Found on the Pico 2, 2026-08-16.
+        //
+        // Unlike ProgramScreen there is no canvas MODE here: `py` is a
+        // one-liner REPL at the calculator, so a drawing is transient by
+        // definition and the home screen takes its display straight back.
+        if (calc_api_canvas_owns_display() != 0) {
+            invalidate_all();
+        }
+
+        // calc.show_graph() is deferred out of the binding to here (6B.6),
+        // for the same reason ProgramScreen defers it: the binding ran inside
+        // the VM inside this on_key, and pushing a screen from there would
+        // nest screen management inside itself.
+        if (ok && calc_api_take_show_graph() != 0) {
+            ui::screen_manager().push(&graph_screen());
+        }
         return true;
     }
     // Device settings: brightness/backlight/auto-power-down (4D.19-20).
@@ -971,8 +1043,8 @@ bool HomeScreen::on_key(const platform::KeyEvent& ev) {
         case Key::kF5:
             ui::screen_manager().push(&graph_screen());
             return true;
-        case Key::kF6:  // CAS menu (Phase 5; F6 = Shift+F1 on the unit)
-            ui::screen_manager().push(&cas_menu());
+        case Key::kF6:  // App launcher (Phase 6A.4; F6 = Shift+F1 on the unit)
+            ui::screen_manager().push(&launcher_screen());
             return true;
         default:
             if (input_.on_key(ev)) {
@@ -1088,7 +1160,7 @@ void HomeScreen::render(gfx::Framebuffer& fb) {
         default:
             break;
     }
-    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", "CAS"};
+    const char* const keys[6] = {f1, "WIN", "MODE", "TRC", "GRPH", "APPS"};
     ui::draw_softkeys(fb, keys);
 }
 

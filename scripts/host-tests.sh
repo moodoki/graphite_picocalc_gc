@@ -172,7 +172,73 @@ echo "== Compiling + linking test_units =="
     "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
     -o "$OUT/test_units"
 
+# Phase 6A app framework plus 6B.15's manifest parser. No math, no
+# tinyexpr, no cephes — the registry is deliberately free of platform
+# and Screen dependencies, and the parser takes a buffer rather than a
+# path so it never reaches Storage (the I/O half is sd_app_scan.cpp).
+echo "== Compiling + linking test_apps =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_apps.cpp \
+    src/platform/app_registry.cpp src/platform/sd_apps.cpp \
+    -o "$OUT/test_apps"
+
+# The file browser's listing logic (issues #44-#46), split out of
+# FileBrowserScreen so ordering and size formatting need no panel.
+echo "== Compiling + linking test_file_list =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_file_list.cpp \
+    src/apps/file_list.cpp \
+    -o "$OUT/test_file_list"
+
+# The editor's multi-line buffer, split out from TextEditorWidget so it
+# needs no framebuffer.
+echo "== Compiling + linking test_text_buffer =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_text_buffer.cpp \
+    src/ui/text_buffer.cpp \
+    -o "$OUT/test_text_buffer"
+
+# Script output pane buffer (6B.12). Pure logic — no interpreter, and
+# the drop-oldest/index-overflow edges are exactly what a device check
+# cannot show.
+echo "== Compiling + linking test_output_log =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra \
+    -Isrc \
+    tests/host/test_output_log.cpp \
+    src/ui/output_log.cpp \
+    -o "$OUT/test_output_log"
+
 # Entry-time paren auto-close (issue #35). Pure string logic — no math
+# The `calc` Python module's C++ side (6B.3-6B.5). No interpreter: calc_api.cpp
+# depends on math/ and nothing else, which is exactly what makes the pipeline,
+# the variable name rules and the reentrancy guard testable here rather than
+# only on a board. Links the union of the unified evaluator, the CAS, the
+# numeric solver and the unit converter, because calc.eval() calls all four.
+echo "== Compiling + linking test_calc_api =="
+"$CXX" -std=c++17 -O1 -Wall -Wextra -DTE_POW_FROM_RIGHT \
+    -Isrc -Idrivers/tinyexpr -Itests/host \
+    tests/host/test_calc_api.cpp tests/host/host_psram_backend.cpp \
+    tests/host/host_canvas_stub.cpp \
+    src/scripting/calc_api.cpp \
+    src/graph/analysis.cpp src/graph/graph_state.cpp src/graph/viewport.cpp \
+    src/graph/graph_mode.cpp src/math/numeric_solve.cpp \
+    src/math/unified_compile.cpp src/math/unified_vm.cpp src/math/unified_home.cpp \
+    src/math/solve_expr.cpp src/math/units.cpp \
+    src/math/cas/expr.cpp src/math/cas/parser.cpp src/math/cas/serialize.cpp \
+    src/math/cas/simplify.cpp src/math/cas/derivative.cpp src/math/cas/expand.cpp \
+    src/math/cas/poly.cpp src/math/cas/solve.cpp src/math/cas/factor.cpp \
+    src/math/cas/integrate.cpp src/math/cas/cas_eval.cpp \
+    src/math/array.cpp src/math/scratch.cpp src/math/lists.cpp src/math/list_ops.cpp \
+    src/math/named_lists.cpp src/math/stats.cpp src/math/matrix.cpp \
+    src/math/array_format.cpp src/math/frac.cpp src/math/complex.cpp \
+    src/math/engine.cpp src/math/functions.cpp src/math/format.cpp \
+    src/math/catalog.cpp src/math/dist.cpp \
+    "$OUT/tinyexpr.o" "${CEPHES_OBJS[@]}" \
+    -o "$OUT/test_calc_api"
+
 # engine, no tinyexpr, no cephes.
 echo "== Compiling + linking test_autoclose =="
 "$CXX" -std=c++17 -O1 -Wall -Wextra \
@@ -247,6 +313,21 @@ echo "== Running test_analysis =="
 
 echo "== Running test_units =="
 "$OUT/test_units"
+
+echo "== Running test_apps =="
+"$OUT/test_apps"
+
+echo "== Running test_file_list =="
+"$OUT/test_file_list"
+
+echo "== Running test_text_buffer =="
+"$OUT/test_text_buffer"
+
+echo "== Running test_output_log =="
+"$OUT/test_output_log"
+
+echo "== Running test_calc_api =="
+"$OUT/test_calc_api"
 
 echo "== Running test_autoclose =="
 "$OUT/test_autoclose"
