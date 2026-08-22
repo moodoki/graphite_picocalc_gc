@@ -83,6 +83,17 @@ private:
     bool dirty_ = true;
     graph::TraceCursor trace_;
 
+    // Exact y under the trace cursor in function mode (issue #40). The
+    // readout used to come from data_y(plot_y_[slot][px]), a round trip
+    // through a pixel row: at a zoom where one row spans a hundredth of
+    // a unit, every column near the peak of a sine reported "1". Worse,
+    // plot_y_ is clamped (clamp_px), so a defined point outside the
+    // window read back as the clamp boundary rather than its value.
+    // Refreshed outside render() by refresh_trace_readout(); false means
+    // "undefined here", which is what prints blank.
+    double trace_y_ = 0.0;
+    bool trace_y_ok_ = false;
+
     // ZBox (4D.9): free 2-D pixel cursor, two ENTER-committed corners
     // become the new window. Pure state — render only draws it.
     struct ZBoxSession {
@@ -122,6 +133,18 @@ private:
     int slot_count() const;
     bool slot_active(int s) const;
     int trace_max_index() const;
+
+    // Every key this screen handles, wrapped by on_key so the trace
+    // readout is refreshed exactly once per event however the cursor
+    // moved — there are eight paths that move it and a ninth would
+    // otherwise silently report a stale y (issue #40).
+    bool handle_key(const platform::KeyEvent& ev);
+
+    // Recompute trace_y_ from the EVALUATOR, not from the pixel cache.
+    // Must never be called from render(): it parses an expression, and
+    // compiling under render is what D47 forbids. Cheap and a no-op
+    // unless a function-mode trace is active.
+    void refresh_trace_readout();
 
     void draw_axes(gfx::Framebuffer& fb) const;
     void draw_axis_labels(gfx::Framebuffer& fb) const;

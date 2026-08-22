@@ -408,6 +408,78 @@ int main() {
                "bad expression yields NaN column");
     }
 
+    // Trace readout: the evaluator, not the pixel round trip (issue
+    // #40). GraphScreen itself needs a panel and is not in this build,
+    // so what is pinned here is the arithmetic the fix turns on — that
+    // data_y(px_y(y)) is lossy by enough to matter, and that
+    // evaluate_at at the column's own x is not.
+    {
+        // A single period of sin(x) across the panel, which is the
+        // report's own case: zoomed in, every column near the peak read
+        // back as exactly 1.
+        graph::Viewport vp = phase1_viewport();
+        vp.x_min = 0.0;
+        vp.x_max = 6.2831853071795865;
+        vp.y_min = -1.2;
+        vp.y_max = 1.2;
+
+        math::Engine eng;
+        int quantized_columns = 0;
+        int exact_columns = 0;
+        double worst_pixel_err = 0.0;
+        double worst_exact_err = 0.0;
+        for (int px = 0; px < vp.width; ++px) {
+            const double x = vp.data_x(px);
+            const double want = std::sin(x);
+            // What trace used to print: data -> pixel row -> back.
+            const double via_pixel = vp.data_y(vp.px_y(want));
+            // What it prints now.
+            const math::EvalResult r = eng.evaluate_at("sin(x)", x);
+            if (!r.ok) {
+                continue;
+            }
+            const double pixel_err = std::fabs(via_pixel - want);
+            const double exact_err = std::fabs(static_cast<double>(r.value) - want);
+            if (pixel_err > worst_pixel_err) {
+                worst_pixel_err = pixel_err;
+            }
+            if (exact_err > worst_exact_err) {
+                worst_exact_err = exact_err;
+            }
+            // A y readout is shown to a handful of significant figures;
+            // an error above 1e-3 is one a user can see.
+            if (pixel_err > 1e-3) {
+                ++quantized_columns;
+            }
+            if (exact_err < 1e-12) {
+                ++exact_columns;
+            }
+        }
+        expect(exact_columns == vp.width, "evaluator gives the exact y at every column");
+        expect(worst_exact_err < 1e-12, "evaluator y carries no pixel error");
+        expect(quantized_columns > vp.width / 2,
+               "the pixel round trip is visibly wrong on most columns");
+        expect(worst_pixel_err > 1e-3, "the pixel round trip loses more than display precision");
+
+        // The peak specifically: several adjacent columns share the top
+        // row, so all of them used to report the same y.
+        const int peak_px = vp.px_x(1.5707963267948966);
+        const int left_py = vp.px_y(std::sin(vp.data_x(peak_px - 1)));
+        const int peak_py = vp.px_y(std::sin(vp.data_x(peak_px)));
+        expect(left_py == peak_py, "two columns either side of the peak land on one pixel row");
+        expect(vp.data_y(left_py) == vp.data_y(peak_py),
+               "so the old readout could not tell them apart");
+        const math::EvalResult a = eng.evaluate_at("sin(x)", vp.data_x(peak_px - 1));
+        const math::EvalResult b = eng.evaluate_at("sin(x)", vp.data_x(peak_px));
+        expect(a.ok && b.ok && a.value != b.value, "the evaluator still can");
+
+        // An undefined point stays undefined: that is what prints blank,
+        // and it is the one case the pixel cache got right.
+        const math::EvalResult bad = eng.evaluate_at("1/x", 0.0);
+        expect(!bad.ok || !std::isfinite(static_cast<double>(bad.value)),
+               "1/0 is not a finite readout");
+    }
+
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
