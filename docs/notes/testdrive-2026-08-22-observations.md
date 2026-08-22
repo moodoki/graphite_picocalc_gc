@@ -24,3 +24,6 @@ Raw feedback from a soak session, not yet investigated or fixed.
 
 6. **Python editor** (`ProgramScreen` / `TextEditorWidget`): "keywords base
    syntax highlighting will be helpful in python editor."
+
+7. **File browser**: "file browser should sort files by names and with
+   directories listed at the top."
