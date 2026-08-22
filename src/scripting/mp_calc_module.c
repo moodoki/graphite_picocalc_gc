@@ -845,7 +845,18 @@ static MP_DEFINE_CONST_FUN_OBJ_2(calc_append_file_obj, calc_append_file);
 // Windowed, and the window size is the whole design (issue #53). A
 // DirEntry is 72 bytes and core 0 has a 4 KB stack, so the obvious
 // "read all 32 at once" local would be 2.3 KB of it — D47/D48 territory.
-// Eight at a time is 576 bytes, and the Python objects are built BETWEEN
+//
+// FOUR at a time, not more, and the number was measured rather than
+// picked. At eight this was the deepest thing in the firmware on a
+// Pico 1: it took the stack high-water from 2,432 to 3,004 of 4,096
+// (hardware, 2026-08-23), because the window is allocated TWICE on the
+// way down — once here and once in micropython_embed.cpp's adapter,
+// which has to convert between CalcDirEntry and Storage::DirEntry — and
+// both frames are live at the leaf. Four halves that to 576 bytes total
+// for a walk. The re-scan cost it buys back is invisible: a 30-entry
+// directory goes from ~60 readdirs to ~112, on a cached FAT.
+//
+// The Python objects are built BETWEEN
 // calls rather than during one, because an allocation can GC, run a
 // finalizer, or longjmp out of a MemoryError, and none of that may
 // happen with an open directory on a C++ frame below (D74). Exactly the
@@ -858,7 +869,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(calc_append_file_obj, calc_append_file);
 //
 //     sorted(calc.list_files("/picocalc/notes"))
 //     [e for e in calc.list_files(p) if e[0].endswith(".csv")]
-#define CALC_DIR_WINDOW 8
+#define CALC_DIR_WINDOW 4
 static mp_obj_t calc_list_files(mp_obj_t path_obj) {
     const char* path = mp_obj_str_get_str(path_obj);
     const char* err = NULL;

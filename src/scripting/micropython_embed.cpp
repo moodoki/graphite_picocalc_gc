@@ -281,7 +281,9 @@ int file_list(const char* path, CalcDirEntry* out, int max, int skip) {
     // the C boundary may not include a C++ header (calc_api.h's own note),
     // so the copy is the price of that rule. It is bounded by `max`, which
     // the glue keeps small enough to sit on the 4 KB core-0 stack.
-    platform::Storage::DirEntry buf[8];
+    // Four, matching CALC_DIR_WINDOW: this frame and the glue's are both
+    // live at the leaf, so the window is paid for twice on a 4 KB stack.
+    platform::Storage::DirEntry buf[4];
     const int want = max < static_cast<int>(sizeof(buf) / sizeof(buf[0]))
                          ? max
                          : static_cast<int>(sizeof(buf) / sizeof(buf[0]));
