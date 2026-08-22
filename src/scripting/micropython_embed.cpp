@@ -97,6 +97,27 @@ int g_key_head = 0;  // next to read
 int g_key_count = 0;
 bool g_esc_seen = false;
 
+// ---- Opt-in ESC delivery (issue #55) ----
+//
+// By default ESC never reaches a script: drain_keys() turns it into an
+// interrupt, which is what makes a runaway loop always escapable. That
+// also means a script CANNOT implement "ESC goes back one level" inside
+// itself, which is what the periodic table's legend screen wanted.
+//
+// With capture on, ESC is queued as an ordinary key event instead. The
+// guarantee is kept by a backstop that needs no timer and no heuristic:
+// count the ESC presses the script has not picked up. A script that is
+// reading keys consumes each one and the count returns to zero, so it
+// never fires. A script that has stopped reading — the only dangerous
+// case — never consumes any, so the second press interrupts it.
+//
+// The consequence is deliberate and worth stating: a rapid double-tap
+// force-quits even a well-behaved script. That is the escape hatch, and
+// it is the same gesture users already expect from one.
+constexpr int kEscForceQuit = 2;
+bool g_capture_esc = false;
+int g_esc_unconsumed = 0;
+
 // Names resolved HERE, where platform::Key is visible. A table of hardcoded
 // enumerator values in calc_api.cpp would go quietly wrong the first time the
 // enum gained a member.
@@ -197,9 +218,12 @@ void drain_keys() {
     for (int guard = 0; guard < 64; ++guard) {
         const platform::KeyEvent ev = platform::keyboard().poll();
         if (ev.pressed) {
-            if (ev.key == platform::Key::kEscape) {
+            if (ev.key == platform::Key::kEscape && !g_capture_esc) {
                 g_esc_seen = true;
             } else {
+                if (ev.key == platform::Key::kEscape) {
+                    ++g_esc_unconsumed;
+                }
                 queue_push(ev);
             }
         }
@@ -217,6 +241,11 @@ int script_key_poll(CalcKeyEvent* out) {
     *out = g_key_queue[g_key_head];
     g_key_head = (g_key_head + 1) % kKeyQueueSize;
     --g_key_count;
+    // Handing an ESC to the script is what "consumed" means: the script
+    // is reading, so the backstop below stands down.
+    if (out->code == static_cast<int>(platform::Key::kEscape)) {
+        g_esc_unconsumed = 0;
+    }
     return 1;
 }
 
@@ -274,6 +303,19 @@ int file_append(const char* path, const char* buf, int len) {
 
 int file_exists(const char* path) {
     return platform::storage().file_exists(path) ? 1 : 0;
+}
+
+// Registered with calc_api so the binding can reach the flag without
+// calc_api.cpp knowing anything about the interpreter (D74's split).
+int set_capture_esc(int on) {
+    const int prev = g_capture_esc ? 1 : 0;
+    g_capture_esc = on != 0;
+    if (!g_capture_esc) {
+        // Leaving capture mode drops the backstop's tally: presses that
+        // were waiting for the script are no longer its responsibility.
+        g_esc_unconsumed = 0;
+    }
+    return prev;
 }
 
 int file_list(const char* path, CalcDirEntry* out, int max, int skip) {
@@ -347,6 +389,7 @@ bool PythonInterpreter::init(std::size_t heap_bytes) {
     calc_api_set_stack_hook(&stack_room);
     calc_api_set_key_hooks(&script_key_poll, &script_key_held);
     calc_api_set_file_ops(&kFileOps);
+    calc_api_set_capture_esc_hook(&set_capture_esc);
     initialized_ = true;
     interrupt_pending_ = false;
     return true;
@@ -372,7 +415,11 @@ void PythonInterpreter::begin_run() {
     // Resets D68's "has this run plotted yet" latch, so a script's graph is
     // a function of the script and not of what the last one left in Y1-Y7.
     calc_api_begin_run();
-    // A run starts with no stale ESC and no stale keystrokes.
+    // A run starts with no stale ESC and no stale keystrokes — and with
+    // capture OFF, so a script that raised on its last run cannot leave
+    // ESC swallowed for the next one.
+    g_capture_esc = false;
+    g_esc_unconsumed = 0;
     g_esc_seen = false;
     g_key_head = 0;
     g_key_count = 0;
@@ -478,6 +525,13 @@ bool PythonInterpreter::poll_interrupt() {
     // read them and type-ahead is no longer silently lost.
     drain_keys();
     if (g_esc_seen) {
+        interrupt_pending_ = true;
+    }
+    // Backstop for capture mode: presses the script never picked up.
+    // Queue overflow drops the oldest event, so an ESC can be lost
+    // before delivery — which only makes this fire sooner, and a script
+    // overflowing its key queue is exactly the one to interrupt.
+    if (g_esc_unconsumed >= kEscForceQuit) {
         interrupt_pending_ = true;
     }
     return interrupt_pending_;

@@ -343,6 +343,21 @@ int calc_api_file_exists(const char* path);
 CalcStatus calc_api_list_dir(const char* path, int skip, int max, CalcDirEntry* out, int* out_count,
                              const char** err);
 
+// ---- Opt-in ESC delivery (issue #55) ----
+//
+// Off by default and reset at the start of every run. While on, ESC
+// arrives through the key bindings as an ordinary event ("esc") instead
+// of raising KeyboardInterrupt, so a script can use it for "back one
+// level" the way every screen in the firmware does.
+//
+// ESC still always gets the user out: the runtime counts presses the
+// script has not read, and interrupts on the second. So this weakens
+// nothing for a script that stops responding — it only gives a script
+// that IS responding the chance to handle the key first.
+typedef int (*CalcCaptureEscFn)(int on);  // returns the previous state
+void calc_api_set_capture_esc_hook(CalcCaptureEscFn fn);
+CalcStatus calc_api_capture_esc(int on, int* prev, const char** err);
+
 // ---- 6B.8: the script canvas ----
 
 // A colour, as RGB565. Resolved in the glue from either a name or an (r,g,b)

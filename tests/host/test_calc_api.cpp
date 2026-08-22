@@ -1220,6 +1220,54 @@ void test_complex_helpers() {
     check_near(im, -2, "and negates the imaginary one");
 }
 
+// ---- Opt-in ESC delivery (issue #55) ----
+//
+// The backstop that keeps ESC able to kill a runaway script lives in
+// micropython_embed.cpp, which needs the interpreter and is not in this
+// build; what is checkable here is the boundary — that the flag round
+// trips, reports the previous value so a modal sub-screen can restore
+// its caller's setting, and fails rather than silently doing nothing
+// when no interpreter is wired up.
+int g_fake_capture = 0;
+int fake_capture_esc(int on) {
+    const int prev = g_fake_capture;
+    g_fake_capture = on;
+    return prev;
+}
+
+void test_capture_esc() {
+    const char* err = nullptr;
+    int prev = -1;
+
+    // No interpreter: refuse, and say so, rather than pretending it worked.
+    calc_api_set_capture_esc_hook(nullptr);
+    check(calc_api_capture_esc(1, &prev, &err) == kCalcFailed,
+          "capture_esc fails with no interpreter");
+    check(err != nullptr && std::strcmp(err, "No interpreter") == 0, "and names the reason");
+
+    calc_api_set_capture_esc_hook(fake_capture_esc);
+    g_fake_capture = 0;
+
+    check(calc_api_capture_esc(1, &prev, &err) == kCalcOk && prev == 0,
+          "turning capture on reports it was off");
+    check(g_fake_capture == 1, "and it is now on");
+    check(calc_api_capture_esc(1, &prev, &err) == kCalcOk && prev == 1,
+          "turning it on again reports it was already on");
+    check(calc_api_capture_esc(0, &prev, &err) == kCalcOk && prev == 1,
+          "turning it off reports it was on");
+    check(g_fake_capture == 0, "and it is now off");
+
+    // The save/restore a modal sub-screen would do.
+    calc_api_capture_esc(1, &prev, &err);
+    int saved = 0;
+    calc_api_capture_esc(0, &saved, &err);
+    check(saved == 1, "a sub-screen can read what to restore");
+    calc_api_capture_esc(saved, &prev, &err);
+    check(g_fake_capture == 1, "and restore it");
+
+    calc_api_set_capture_esc_hook(nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -1252,6 +1300,7 @@ int main() {
     test_key_bindings();
     test_file_bindings();
     test_list_dir();
+    test_capture_esc();
 
     test_list_round_trip();
     test_list_append_grows();

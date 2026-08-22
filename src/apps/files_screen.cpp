@@ -470,9 +470,6 @@ bool FileBrowserScreen::on_key(const platform::KeyEvent& ev) {
             return true;
         case Key::kLeft:
         case Key::kBackspace:
-            // Up one level. ESC deliberately does NOT do this — it pops
-            // the screen, so the §3.3 exit convention stays uniform
-            // however deep the user has navigated.
             ascend();
             return true;
         case Key::kEnter:
@@ -499,7 +496,20 @@ bool FileBrowserScreen::on_key(const platform::KeyEvent& ev) {
             }
             return true;
         case Key::kEscape:
-            ui::screen_manager().pop();
+            // ESC steps back: up one folder while below start_dir, out
+            // of the browser at the top (issue #55). It used to pop
+            // from any depth, for uniformity — but §3.3 calls ESC "the
+            // step back convention", and inside a tree that is what
+            // stepping back means. Reported as the reflex it breaks:
+            // "ESC feels like it should go back to the previous
+            // directory, but it exits files instead."
+            //
+            // The cost is that the presses needed to leave now depend
+            // on depth, bounded by kMaxDepth. HOME is the one-press way
+            // out from any depth, which main.cpp gives every screen.
+            if (!ascend()) {
+                ui::screen_manager().pop();
+            }
             return true;
         default:
             return false;

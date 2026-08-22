@@ -21,6 +21,9 @@ namespace apps {
 // Both modes navigate directories. Descent is capped (kMaxDepth) below
 // start_dir so the path buffer has a real bound; /picocalc/apps/<name>
 // is the deepest thing this SD layout defines, at 2 levels.
+//
+// ESC steps back one folder and leaves only from start_dir (#55); HOME
+// leaves from any depth. LEFT/BACKSPACE also ascend, and are unchanged.
 enum class FileBrowserMode : std::uint8_t { kBrowse, kPick };
 
 class FileBrowserScreen : public ui::Screen {

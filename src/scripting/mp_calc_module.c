@@ -743,6 +743,28 @@ static mp_obj_t calc_wait_key(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(calc_wait_key_obj, calc_wait_key);
 
+// calc.capture_esc(on) -> the previous setting (issue #55).
+//
+// While on, ESC arrives from wait_key/key_pressed as an ordinary event
+// with name "esc" rather than raising KeyboardInterrupt, so a script can
+// use it for "back one level" — which is what ESC means everywhere else
+// in the firmware, and what a script previously had no way to honour.
+//
+// It does NOT make a script unkillable. The runtime counts ESC presses
+// the script has not read and interrupts on the second, so a script that
+// stops reading keys dies exactly as before; only one that is actively
+// reading gets to handle the key first. Returning the previous value
+// lets a modal sub-screen restore whatever its caller had.
+static mp_obj_t calc_capture_esc(mp_obj_t on_obj) {
+    int prev = 0;
+    const char* err = NULL;
+    if (calc_api_capture_esc(mp_obj_is_true(on_obj) ? 1 : 0, &prev, &err) != kCalcOk) {
+        calc_raise(kCalcFailed, err);
+    }
+    return mp_obj_new_bool(prev);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(calc_capture_esc_obj, calc_capture_esc);
+
 static mp_obj_t calc_key_held(mp_obj_t name) {
     return mp_obj_new_bool(calc_api_key_held(mp_obj_str_get_str(name)));
 }
@@ -989,6 +1011,7 @@ static const mp_rom_map_elem_t calc_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_clear_screen), MP_ROM_PTR(&calc_clear_screen_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_pixel), MP_ROM_PTR(&calc_draw_pixel_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_line), MP_ROM_PTR(&calc_draw_line_obj)},
+    {MP_ROM_QSTR(MP_QSTR_capture_esc), MP_ROM_PTR(&calc_capture_esc_obj)},
     {MP_ROM_QSTR(MP_QSTR_list_files), MP_ROM_PTR(&calc_list_files_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_rect), MP_ROM_PTR(&calc_draw_rect_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_text), MP_ROM_PTR(&calc_draw_text_obj)},

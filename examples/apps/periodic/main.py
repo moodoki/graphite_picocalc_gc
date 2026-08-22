@@ -222,7 +222,7 @@ def show_legend():
         y = 40 + i * 24
         calc.draw_rect(16, y, 24, CELL, SERIES_COLOR[i], True)
         calc.draw_text(52, y, SERIES_NAME[i], SERIES_COLOR[i], BG)
-    calc.draw_text(8, HINT_Y, "Any key returns", DIM, BG)
+    calc.draw_text(8, HINT_Y, "ESC or any key returns", DIM, BG)
     calc.wait_key()
 
 
@@ -273,6 +273,15 @@ def step_v(z, dr):
 
 
 def main():
+    # ESC arrives as an ordinary key from here on, instead of raising
+    # KeyboardInterrupt (issue #55). Without this a script cannot use ESC
+    # for "back one level", so leaving the legend killed the whole app and
+    # leaving the table took two presses — reported as the reflex it broke.
+    #
+    # It is still always possible to escape: two presses the app does not
+    # read will interrupt it regardless, so a bug in the loop below cannot
+    # trap anyone.
+    calc.capture_esc(True)
     gc.collect()
     heap("start")
     n = load()
@@ -303,6 +312,8 @@ def main():
             show_legend()
             draw_all(z)
             continue
+        elif key == "esc":
+            return  # one press leaves, from the table
         elif ch == "q":
             return
 
@@ -318,6 +329,9 @@ def main():
 try:
     main()
 except KeyboardInterrupt:
-    # ESC. The drawing stays on the panel; a second ESC leaves for the
-    # launcher, which is the app convention everywhere else.
+    # Not the normal exit any more — capture_esc means ESC arrives as a
+    # key and main() returns on it. This is the backstop firing: two
+    # presses this app failed to read, which is the runtime deciding the
+    # script is no longer responding. Swallowing it still leaves the
+    # drawing up, and the next ESC leaves for the launcher.
     pass

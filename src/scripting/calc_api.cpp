@@ -1199,6 +1199,23 @@ CalcStatus calc_api_file_read(const char* path, long offset, char* buf, int len,
     return kCalcOk;
 }
 
+namespace {
+CalcCaptureEscFn g_capture_esc_hook = nullptr;
+}  // namespace
+
+void calc_api_set_capture_esc_hook(CalcCaptureEscFn fn) {
+    g_capture_esc_hook = fn;
+}
+
+CalcStatus calc_api_capture_esc(int on, int* prev, const char** err) {
+    if (g_capture_esc_hook == nullptr) {
+        *err = "No interpreter";
+        return kCalcFailed;
+    }
+    *prev = g_capture_esc_hook(on);
+    return kCalcOk;
+}
+
 CalcStatus calc_api_list_dir(const char* path, int skip, int max, CalcDirEntry* out, int* out_count,
                              const char** err) {
     *out_count = 0;
