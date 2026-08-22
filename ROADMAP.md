@@ -67,13 +67,31 @@ the before/after measurements — including the regressions — in
 
 ## Phase 6: non-calculator functions
 
-**6A (app framework), 6C.1 (Notepad) and most of 6B (MicroPython) are done and
-hardware-verified.** The calculator has an app launcher reached from the home
+**Phase 6 is complete, merged and hardware-verified on both boards** —
+`v0.5.0`, 2026-08-23. The calculator has an app launcher reached from the home
 screen by an `F6` softkey or an `apps` command, a shared line-numbered text
 editor, a file browser with directory navigation and file management, Notepad,
 and **a working MicroPython interpreter that can reach the calculator**: write
 a script on the device, press RUN, read its output, save it, power-cycle,
-reload it. `ESC` stops a runaway loop.
+reload it. `ESC` stops a runaway loop — and, if a script asks for it with
+`calc.capture_esc`, arrives as an ordinary key so the script can use it for
+"back one level" instead. A script that stops responding is still always
+killable: two unread presses interrupt it regardless.
+
+At the close, 22 host suites / **3,386 checks**, free SRAM **15.2 KB**
+(Pico 1) / **32.6 KB** (Pico 2), core-0 stack high-water **2,432 of 4,096**.
+
+Two open questions were settled by measurement rather than argument at the
+close, and both overturned the estimate they were meant to confirm:
+
+- **#38 — no Python-free build is needed.** 6B left more SRAM free than the
+  issue's own threshold, so restoring D70 lever C's 16 px render strip was
+  affordable. Built, flashed, measured at **3.4%, not the ~6.3%** the issue
+  assumed — that figure predated 6B. Reverted: two thirds of the Pico 1's
+  remaining headroom for 4.8 ms on a 140 ms frame is the wrong trade.
+- **§4.4's Python heap estimate was right.** The periodic table's 118-element
+  dataset costs **11,536 bytes** against an estimate of 11,504, measured on
+  the Pico 1's 40 KB heap through the real app-launch path.
 
 - **6B.1, 6B.2, 6B.11-6B.14 are done.** MicroPython enters as a git submodule
   pinned to v1.28.0 (D71) — the first dependency here that is not a vendored

@@ -1,100 +1,113 @@
 # Start here — next session
 
-**Last session:** 2026-08-16 (last) — **a design worked up for §3.4's stretch
-goal (native compiled `.uf2` apps), and deliberately left OPEN.** Docs only, no
-firmware changed. Draft spec
-[phase6.3-spec.md](../phases/phase6.3-spec.md), decisions **D88-D91**.
+**Last session:** 2026-08-23 — **Phase 6 CLOSED, merged, and tagged
+`v0.5.0`** (PR #56, 58 commits). Ten issues closed, four filed, a Pico 1
+board-swap pass, and two measurements that overturned the estimates they
+were meant to confirm.
 
-> ## Read this first: nothing here is decided
+> ## Where the project actually is
 >
-> **D88, D89, D90 and D91 are all PROPOSED, not accepted** — the developer is
-> researching further before deciding, and they stand or fall as one design.
-> **§3.4 is still a stretch goal**, `phase6.3-spec.md` is a draft contract, and
-> **D59 and D66 stand exactly as written** (each carries a note naming the open
-> challenge, not a withdrawal). Nothing in this session overrides anything.
+> **Phase 6 is done and on `main`.** 6A (app framework, launcher, shared
+> text editor, file browser), 6B (MicroPython + the `calc` module + SD app
+> manifests) and 6C (Notepad) all shipped. 22 host suites / **3,386
+> checks**; free SRAM **15.2 KB** (Pico 1) / **32.6 KB** (Pico 2); core-0
+> stack high-water **2,432 of 4,096**.
 >
-> Read `phase6.3-spec.md` as the strongest case that could be made for this
-> shape, with its weak points marked — not as work to pick up.
+> Both boards are hardware-verified. The Pico 1 currently has `v0.5.0`
+> firmware on it.
+>
+> **There is no phase in progress.** The next one is unscoped — see
+> "What's next" below.
 
-> ## The case that was made (all of it open)
+> ## The two measurements, because both changed a standing belief
 >
-> **Issue #38 is the reason.** D78 deferred the Python-free build until Phase
-> 6's SRAM numbers were final. They are, and #38 as framed is a straight loss —
-> give up scripting entirely for ~6.3% of render time. **Native apps dissolve
-> the trade** (D90): a Python-free calculator plus a `Python` tile that
-> chain-loads a MicroPython build of this same repo. It works only because **no
-> user state lives in flash** — everything persists to SD, so the hop between
-> two images is invisible to the data. Nothing designed that; it falls out of
-> every persistence decision already made.
+> **#38 is closed, and no Python-free build is needed.** 6B left 15.2 KB
+> free, above the ~12 KB the issue set as its own threshold — so restoring
+> D70 lever C's 16 px render strip was affordable. It was built, flashed,
+> and measured at **3.4%, not the ~6.3%** the issue was built on; that
+> figure predates 6B and the render mix moved under it. Reverted, because
+> 10,008 bytes — two thirds of the Pico 1's whole remaining headroom — for
+> 4.8 ms on a 140 ms frame is the wrong trade. The record is in
+> `kStripHeight`'s own comment in `config.hpp` so nobody runs it a third
+> time. **If it is ever raised again it must be Pico-1-only**: `strip_buf`
+> is allocated on both boards but only the Pico 1 renders in strips.
 >
-> **D88 argues D66's separate bootstrap component is unnecessary.** D66 required a
-> standalone binary at the reset vector — its own linker script, a fresh-device
-> install step — because the calculator cannot make the boot decision when an
-> app has overwritten it. **True only of the one-payload-region layout §3.4
-> assumed.** Give the app its own non-overlapping slot (Pico 1: 1 MB..2 MB;
-> Pico 2: 2 MB..4 MB) and the calculator is always what the boot ROM starts.
-> Returning would write **no flash at all**, which would dissolve D59/P6-6
-> entirely. **Neither is decided; both stand.**
->
-> The claim to test: the safety net §3.4 calls non-negotiable would stop being a
-> property of correct re-flash code and become a property of the address map: **the only image the
-> boot ROM can start is the one the loader never writes to.** D66's marker
-> correction survives unchanged and is still load-bearing.
+> **§4.4's heap estimate was right, and my first measurement of it was
+> wrong.** The periodic dataset costs **11,536 B** of the Pico 1's 40 KB
+> heap against an estimate of 11,504; the app's bytecode **8,624 B**
+> against ~8,500. My first run read 2.7 KB worse and I wrote it up as the
+> estimate being optimistic — it was **my own REPL globals still live**.
+> Runs 2 and 3 were byte-identical on a clean interpreter. *An absolute
+> `mem_free` reading only means something on a clean interpreter; the
+> delta across load is the robust number.*
 
-**The upfront requirement, from how the hardware is actually used**: one SD card
-moves between both boards, so **a wrong-board `.uf2` on the card is the normal
-case**. The proposed answer is three independent gates, none of which guess (D89): the **UF2 family
-ID** (absent → refuse; a foreign-family block is skipped *but counted*, so a
-universal `.uf2` serves both boards and `kWrongBoard` stays distinguishable from
-`kNotUf2`), the **target address range** (independent by construction — the slot
-base differs per board), and **our own header** at the slot base. Nothing is
-erased until all three pass. The parser is pure and host-tested, 6B.15's shape:
-**the requirement is provable with no hardware at all.**
+> ## What the Pico 1 pass found
+>
+> **A stack regression of mine, one morning old.** Bisecting by workload
+> after a clean reboot: arithmetic 2,116, CAS 2,432, matrix and
+> 999-element list work no new high — then `calc.list_files` at **3,004**,
+> the deepest frame in the firmware. The window is paid for **twice** on
+> the way down (glue + adapter, both live at the leaf), so 576 bytes was
+> really 1,152. Halved both; it no longer sets a high-water mark at all.
+> **The lesson generalises: a buffer that crosses the C/C++ boundary is
+> allocated on both sides of it.**
+>
+> **D53's fix holds, 30/30** — #24's exact shape replayed thirty times,
+> element 1 correct every run against ~8/30 corrupt before the fix. Root
+> cause still unknown; **#24 stays open** and still needs the diagnostic
+> build its own notes describe (~1 hour).
 
-> ## Third-party `.uf2`s: investigated, and two of the three answers were
-> already sitting in this repo unread (D91)
+> ## Open bugs — 3
 >
-> **The RP2350 can run a stock image from the app slot in hardware.**
-> `QMI_ATRANS0..7` are eight XIP address-translation apertures, documented for
-> exactly this — *"execute in place at multiple physical flash addresses …
-> without the overhead of position-independent code."* Set `BASE`, flush the
-> cache, jump: the image believes it is at flash start, **the calculator is
-> never overwritten**, and reset restores identity so a power cycle comes back.
-> `ATRANS0.SIZE` bounds it in hardware — an over-read is a bus error, not a
-> quiet read of the calculator.
->
-> **The RP2040 has no equivalent**, so a stock image must physically take
-> 0x10000000. But "impossible with a resident chooser" was wrong:
-> **`uf2loader` already does it** — loader in the **top 16 KB**, stock UF2s at
-> flash start, key-at-power-on to return, with the caveat that the app must not
-> write flash. So the draft takes the Pico 2 path and **delegates the Pico 1**:
-> we launch apps, `uf2loader` switches firmwares. Task **6.3.10**, separable.
->
-> **The part that holds whichever way D88 goes**: §3.4's original bootstrap-at-flash-
-> start layout would not have delivered third-party support either, because it
-> collides with a stock image's link address exactly as the calculator does.
-> **The layout choice and third-party support are independent** — it looks like
-> a trade and is not one. Worth checking for that shape before paying for a
-> constraint.
->
-> One design change fell out of it: **D89's third gate classifies rather than
-> refuses**, or "third-party images never run" would have been baked in.
+> - **#52** softkey labels truncate: `MKDIR` renders `MKDI`.
+>   `draw_softkeys` truncates to 6 chars a cell by design, so the new
+>   text-fits lint gate deliberately cannot see it.
+> - **#54** ESC out of an app reports the run as `raised` and prints a
+>   traceback — **extended 2026-08-23** to cover the force-quit unwind: a
+>   deliberate kill still needs a third press to dismiss the wreckage.
+>   `interrupt_pending_` already distinguishes the case at the
+>   `micropython_embed` seam; only the return shape has to carry it.
+> - **#24** D53 root cause. `hw-pending`, `board:pico1`.
 
-> ## Next — unchanged by any of the above
+> ## What's next — genuinely open
 >
-> **Close Phase 6**: the Pico 1 pass, the merge, issue #38. The three items in
-> the section below are exactly as they were, because none of D88-D91 has been
-> accepted and §3.4 is still a stretch goal.
+> No phase is scoped. The candidates, in the shape the spec tracks them
+> (letters = planned work, dots = what turned up outside a phase's goals):
 >
-> **On the open design**: the developer is researching before deciding. When
-> picking it back up, the two things most worth attacking are (a) whether the
-> RP2350 chain-jump and ATRANS actually survive an SDK image's own boot — no
-> board has shown either, and there is no `flash_range_program` anywhere in
-> this tree yet; and (b) whether delegating the Pico 1 to `uf2loader` is the
-> right boundary or a capability gap that will be resented later. If the design
-> is accepted, flip D88-D91 to Accepted and `phase6.3-spec.md`'s status line
-> with it; if it is not, this whole set can be dropped without touching
-> anything else — that was the point of leaving D59/D66 standing.
+> - **6.3 — native compiled `.uf2` apps.** Draft spec exists
+>   (`phase6.3-spec.md`), **D88-D91 all still PROPOSED, not accepted**.
+>   Dotted, so it never gated Phase 6 and still doesn't. The two things
+>   most worth attacking are whether the RP2350 chain-jump and ATRANS
+>   survive an SDK image's own boot, and whether delegating the Pico 1 to
+>   `uf2loader` is the right boundary or a gap that will be resented.
+> - **6.1** home-screen convenience scripts (§9.3), **6.2** PCM sampler
+>   audio engine (§9.4). Both candidates, unstarted.
+> - **21 open issues**, mostly features and chores. #19 (screenshot
+>   capture) is worth pulling forward out of proportion to its label: this
+>   session could flash, drive Python, push files to the SD card and read
+>   the whole card over serial, and still could not see a single visual
+>   fix. It is the cheapest multiplier on how we actually work.
+>
+> CI still runs neither host tests nor clang-tidy.
+
+> ## Working notes that paid off, worth reusing
+>
+> - **Serial injection is a full remote.** `PICOCALC_SERIAL_INJECT` is on
+>   by default and submits lines to the home screen, so `py …` runs
+>   MicroPython with `calc` bound and `print()` comes back over USB. This
+>   session used it to push a 10 KB `main.py` to the SD card in chunked
+>   `append_file` calls (byte-verified by length + checksum), enumerate
+>   the whole card, and read scripts off it — **no card removal, no
+>   keypresses**. `scripts/serial-capture.py` needs DTR; plain `cat` reads
+>   nothing.
+> - **A watch tuned only for failure is silent about everything else.**
+>   Three times this session a serial filter dropped the thing that
+>   mattered: the body of a traceback, a script's own instrumentation, and
+>   then a heartbeat that flooded a per-line notifier. Log to a file with
+>   timestamps and report transitions, not lines.
+> - **A stubbed `calc` proves layout arithmetic and nothing about the
+>   API.** The periodic rewrite ran clean against a host stub and was
+>   still checked against `mp_calc_module.c`'s real arities afterwards.
 
 ---
 
