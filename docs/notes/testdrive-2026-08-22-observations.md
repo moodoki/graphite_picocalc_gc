@@ -37,3 +37,6 @@ Raw feedback from a soak session, not yet investigated or fixed.
    this as a micro python script if file operations are supported. keep this
    as a todo, since it involves some design to ensure clean migration and
    backwards compatibility should we swap to an older firmware."
+
+10. **File browser**: "file browser vant move files." [sic — clarified: the
+    file browser can't move files to another folder; not supported today]
