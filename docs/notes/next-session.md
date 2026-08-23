@@ -1,25 +1,27 @@
 # Start here — next session
 
-**Last session:** 2026-08-23 (later) — **no firmware code changed.** Two
-branches are open and neither is merged: **`phase-6.4`** (a desktop-target
-spec, D92-D96) and **PR #58** (the docs brought up to v0.5.0, including a new
-MicroPython guide). Start by deciding what to do with those.
+**Last session:** 2026-08-23 (later) — **no firmware code changed.** The docs
+were brought up to v0.5.0 and **merged (PR #58)**, which unstuck the wiki. One
+branch is still open and unmerged: **`phase-6.4`**, a desktop-target spec
+carrying D92-D96, all PROPOSED. Start there.
 
-> ## Read this first: docs CI is red on `main`, and the wiki is stale
+> ## Docs CI was red for a week, and the wiki with it — now fixed
 >
-> Docs CI has failed on every run since the Phase 6 merge — four in a row, one
-> cause. `help_screen.cpp` gained the file manager's keys and
-> `docs-site/reference/` was never regenerated, so `check-reference` fails.
+> Docs CI failed on every run from the Phase 6 merge onward — four in a row,
+> one cause. `help_screen.cpp` gained the file manager's keys and
+> `docs-site/reference/` was never regenerated, so `check-reference` failed.
 > Because `publish-wiki` needs `[validate-docs, check-reference]`, **the
-> published wiki has not updated since 2026-08-15** and still describes a
-> calculator with no apps.
+> published wiki served a calculator with no apps from 2026-08-15 until
+> today.**
 >
-> **PR #58 fixes it.** Until that merges, the public docs are wrong in the most
-> visible place the project has.
+> **PR #58 merged and the wiki republished** — `Publish wiki` is green on
+> `main` again. Worth keeping: the drift check did its job, nobody read it, and
+> the damage showed up somewhere else entirely. A red badge on a docs workflow
+> is not cosmetic here; it silently stops publishing.
 
-> ## Two open branches
+> ## Where the two branches stand
 >
-> **PR #58 — `docs/v0.5.0-refresh`.** All checks green. Regenerates the
+> **PR #58 — `docs/v0.5.0-refresh`. MERGED.** Regenerates the
 > reference, rewrites guide chapter 15 (which still said Phase 6 was "not yet
 > implemented"), adds **chapter 16, the MicroPython guide**, adds an apps
 > section to `FEATURES.md`, and fixes two factual errors found by reading
@@ -31,9 +33,10 @@ MicroPython guide). Start by deciding what to do with those.
 > opened; that is a deliberate stopping point, since the decisions want a read
 > before they are committed to.
 >
-> **They conflict on one line.** `ROADMAP.md`'s stale header (`v0.4.1`,
-> 17 files / 2,632 checks) is fixed on `phase-6.4` only. Whichever merges
-> second will need that one-line resolution.
+> **`phase-6.4` needs a rebase.** It was branched before #58 merged, and it
+> carries the fix for `ROADMAP.md`'s stale header (`v0.4.1`, 17 files / 2,632
+> checks) that #58 deliberately left alone. Expect that one line to want
+> attention when the branch is brought forward.
 
 > ## Phase 6.4, and why it is worth doing
 >

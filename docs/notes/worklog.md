@@ -307,8 +307,8 @@ Still to verify on hardware:
 
 ## 2026-08-23 (later) — a desktop target scoped from measurement, and the docs caught up with v0.5.0
 
-Two branches, both open as of writing: **`phase-6.4`** (spec + D92-D96) and
-**PR #58** (docs). No firmware code changed this session. The Pico 1 was
+**PR #58 (docs) merged the same day; `phase-6.4` (spec + D92-D96) is still
+open and unmerged.** No firmware code changed this session. The Pico 1 was
 reflashed from HEAD at the start so everything below was checked against the
 firmware it describes.
 
@@ -318,8 +318,9 @@ file manager's keys (ENTER opening a file in its app, LEFT/ESC and HOME for
 leaving, F2 CUT, F3 MOVE) and `docs-site/reference/` was never regenerated.
 `publish-wiki` needs `[validate-docs, check-reference]`, so **the published wiki
 has served a calculator with no apps since 2026-08-15**. One `gen-doc-reference.py`
-run fixes both. Worth noting the shape of the failure: the drift check did its
-job, nobody read it, and the visible symptom was somewhere else entirely.
+run fixed both, and `Publish wiki` went green on `main` once #58 merged. Worth
+noting the shape of the failure: the drift check did its job, nobody read it,
+and the visible symptom was somewhere else entirely.
 
 **#42 answered by measurement before the spec was written.** The question was
 whether the downstream Luckfox fork (`beapig/graphite_picocalc_gc_luckfox_lyra`,
@@ -372,8 +373,8 @@ the failure mode `docs-drift-lesson` warns about:
 
 `FEATURES.md` had no apps or scripting section at all; README's download link
 said v0.4.1 beside a v0.5.0 status blurb; ROADMAP's header said v0.4.1 and
-17 files / 2,632 checks (fixed on `phase-6.4`, so expect a one-line conflict
-with #58 on whichever merges second).
+17 files / 2,632 checks (fixed on `phase-6.4`, which now needs a
+rebase onto the merged #58).
 
 **Probing the board beat reading the config, twice.**
 
