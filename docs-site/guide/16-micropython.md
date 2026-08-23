@@ -19,6 +19,11 @@ The division is deliberate:
 Read the rest of this chapter with that split in mind. Nearly every rule below
 follows from it, and so does nearly every limitation.
 
+The split is about *meaning*, not about routing every arithmetic operation
+through the firmware — crossing into `calc` has a cost, and
+[the section below](#calceval-is-not-a-cheap-function-call) says where that
+stops being worth paying.
+
 ## The two maths, and why you want ours
 
 A `math` module exists. It is not the one you want, and the difference is not
@@ -42,8 +47,69 @@ In RAD mode the two agree, which is exactly what makes this trap quiet: a
 script tested in RAD works, and then someone flips the calculator to DEG and it
 silently answers a different question.
 
-**So: if the calculator can compute it, compute it through `calc`.** Use `math`
-only for things the calculator has no notion of.
+**So: when the calculator's answer is the one you want, ask the calculator.**
+Use `math` for things the calculator has no notion of — and for the case in the
+next section.
+
+### `calc.eval` is not a cheap function call
+
+The two are built very differently, and it shows up in a loop.
+
+`math.sin(x)` is a thin wrapper straight onto the C library: unwrap the float,
+call `sin()`, wrap the result. `calc.eval("sin(90)")` **parses a string every
+time it is called** and runs it through the whole home-screen pipeline —
+symbolic check, `solve()` and `convert()` substitution, then a compile to RPN
+and a run on the calculator's stack machine.
+
+That is exactly what you want when the mode, the variables and `Ans` should all
+apply. It is a poor way to add up ten thousand numbers.
+
+A practical split:
+
+- **Reaching for the calculator's meaning** — mode-aware trig, the CAS,
+  anything involving stored variables or `Ans`, anything a user typed — use
+  `calc.eval`.
+- **Arithmetic inside your own loop**, where the calculator's semantics are not
+  in play — use plain Python operators, or `math`.
+
+```python
+import calc, math
+
+# Fine: one call, and mode matters.
+angle = calc.eval("asin(0.5)")
+
+# Wasteful: parses and compiles the same string 1000 times.
+total = 0
+for i in range(1000):
+    total += calc.eval("sin(" + str(i) + ")")
+
+# Better: settle the units once, then loop in Python.
+# NOTE: this assumes the calculator is in DEG. See the warning below.
+step = calc.eval("pi/180")      # 0.017453292519943296
+total = 0
+for i in range(1000):
+    total += math.sin(i * step)
+```
+
+Note what the rewrite does: it still gets the *conversion* from the calculator,
+then does the repetitive part in Python. That is usually the shape to aim for —
+let `calc` decide what the numbers mean, and let Python grind through them.
+
+> **Hoisting a `calc` call out of a loop means taking responsibility for what
+> it meant.** Those two loops agree in DEG and disagree completely in RAD,
+> because the first asks for `sin` of *i in whatever unit the calculator is
+> set to* and the second hard-codes degrees. Measured on the device with
+> `i = 30`: in DEG both give `0.49999999999999992`; in RAD the `calc.eval`
+> version gives `-0.9880316240928618`.
+>
+> That is the same trap as the opening of this chapter, arriving from the other
+> direction. If you optimise a loop this way, either fix the unit deliberately
+> — as the comment above does — or read the mode first and branch on it.
+
+This is a structural difference, not a measured ratio: no timing figure is
+quoted here because the device has no `time` module to measure one with. Treat
+it as "one is a function call and one is a compiler", which is enough to decide
+where to put a loop.
 
 ## What is actually available
 
