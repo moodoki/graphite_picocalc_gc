@@ -88,6 +88,29 @@ The integrator's limit is differential algebra, not the hardware —
 [docs/references/risch-algorithm.md](docs/references/risch-algorithm.md)
 explains where it stops and why.
 
+## Apps and scripting
+
+- **App launcher** — `F6` on the home screen, or the `apps` command. `ESC`
+  from an app returns to the launcher; `HOME` goes straight back to the
+  calculator from anywhere.
+- **Notepad** — plain-text notes under `/picocalc/notes/`, on a shared
+  line-numbered text editor.
+- **File browser** — directory navigation plus rename, delete, and cut/move
+  between folders.
+- **MicroPython, embedded and running on the device** — pinned to upstream
+  v1.28.0. Write a script on the calculator, press RUN, read its output, save
+  it, power-cycle, and reload it. `ESC` stops a runaway loop; two unread
+  presses kill a script that has stopped responding.
+- **The `calc` module** — 54 functions that give a script the calculator
+  itself: evaluate expressions through the same pipeline the home screen uses,
+  read and write the calculator's variables, call the CAS, plot and analyse
+  graphs, reach the six lists and ten matrices, draw on the screen, read keys,
+  and read and write SD files. See
+  [guide chapter 16](docs-site/guide/16-micropython.md).
+- **Apps on the SD card** — a folder under `/picocalc/apps/` with a manifest
+  becomes its own launcher tile, so an app can be installed by copying a
+  directory.
+
 ## Device and platform
 
 - **Two boards, one source tree** — Pico 1 H (RP2040, Cortex-M0+, softfloat)

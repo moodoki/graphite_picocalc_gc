@@ -58,11 +58,28 @@ Vendored per spec §5.3 ("cherry-pick from cephes" — task 3C.1) into
 not-vendored integer-df wrappers, and the CMake symbol renames
 (`gamma`/`erf`/`erfc` → `cephes_*`) that prevent libm collisions.
 
-## Source dependencies (Phase 4 — planned)
+## Git submodules
 
-| Library | License | Source | Used for |
-|---------|---------|--------|----------|
-| MicroPython embed port | MIT | https://github.com/micropython/micropython | Embedded Python interpreter |
+Unlike everything above, these are **not** vendored copies. The rule from D71:
+vendor by default, but a dependency too large and too actively maintained to
+hand-port comes in as a submodule instead. MicroPython is the first of these
+and set the precedent.
+
+| Path | Pinned to | License | Source | Used for |
+|------|-----------|---------|--------|----------|
+| `drivers/micropython/` | `v1.28.0` (D71) | MIT | https://github.com/micropython/micropython | The embedded Python interpreter (Phase 6B) |
+
+It has no build system we can call directly, so `drivers/micropython_port/`
+holds our port layer — `mpconfigport.h`, `picocalc_mphal.h` and
+`micropython_embed.mk`, which drives upstream's **embed port** to generate a
+self-contained C tree that our CMake then compiles as the `micropython`
+target. A fresh clone needs:
+
+```bash
+git submodule update --init --recursive
+```
+
+The build fails with an explicit message if that has not been run.
 
 ## Reference projects (NOT linked or vendored, used for design only)
 

@@ -24,7 +24,8 @@ tree, in the order it should appear.
   - [12. Distributions and inference](guide/12-distributions-and-inference.md)
   - [13. Matrices](guide/13-matrices.md)
   - [14. Complex numbers](guide/14-complex-numbers.md)
-  - [15. Programming](guide/15-programming.md)
+  - [15. Apps and programming](guide/15-programming.md)
+  - [16. Writing MicroPython scripts](guide/16-micropython.md)
 - How it works
   - [Overview](internals/index.md)
   - [13. What went wrong](internals/13-what-went-wrong.md)

@@ -58,9 +58,11 @@ The three reference pages on this site are generated from that same source.
 
 ## Project status
 
-The calculator is feature-complete as a graphing calculator and has a working
-CAS. Programming — an app framework with MicroPython — is planned and not yet
-started, which is why [chapter 15](guide/15-programming.md) is a placeholder.
+The calculator is feature-complete as a graphing calculator, has a working CAS,
+and is programmable. As of `v0.5.0` an app launcher, a file browser, Notepad
+and an embedded MicroPython interpreter all ship — see
+[chapter 15](guide/15-programming.md) for the apps and
+[chapter 16](guide/16-micropython.md) for writing scripts.
 
 ## Found a bug, or want something?
 
