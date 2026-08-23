@@ -18,6 +18,155 @@ Format:
 
 ---
 
+## D96: MicroPython's host build uses the setjmp GC register scan
+
+**Date**: 2026-08-23
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: 6B's MicroPython embed build had never been compiled for anything
+but `arm-none-eabi`. Generating the embed tree with `CC=clang` and compiling it
+natively on macOS arm64: 135 of 136 files clean. The one failure is
+`shared/runtime/gchelper_generic.c`, whose aarch64 register-scan path declares
+`const register long x19 asm ("x19")` — a GCC extension for arch-specific
+register capture that clang rejects outright.
+**Decision**: Define `MICROPY_GCREGS_SETJMP=1` for the host build only. The
+firmware build is untouched. 136/136 compile with it set.
+**Rationale**: This is MicroPython's own documented escape hatch for exactly
+this situation — `setjmp` spills callee-saved registers to a buffer the GC can
+then scan portably, which is why the option exists. The alternative, requiring
+GCC on host, would make the macOS build depend on a non-default compiler to
+work around a portability flag that already exists. Patching vendored
+MicroPython was never a candidate: `drivers/README.md` treats it as a submodule
+precisely because it is too actively maintained to carry local changes.
+**Tradeoffs**: The setjmp scan is marginally slower and marginally more
+conservative than the register-specific path — irrelevant on a desktop, and it
+never reaches the firmware. It also means host and firmware differ in one more
+place, so a GC-timing-sensitive bug could in principle reproduce on one and not
+the other. Filed under §3.5's general warning rather than treated as special.
+**Revisit when**: MicroPython upstream makes `gchelper_generic.c`'s aarch64
+path clang-compatible, or the host build stops using clang.
+
+---
+
+## D95: desktop sound goes through SDL_audio, not ALSA
+
+**Date**: 2026-08-23
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: The downstream Luckfox fork's host port is portable in every file
+but one. `display_sdl`, `keyboard_sdl`, `storage_posix`, `psram_arena`,
+`power_stub`, `fault_stub` and even the misleadingly-named `system_linux.cpp`
+(which includes only `<ctime>`, `<cstdio>`, `<cstring>`) all build on macOS as
+written. `sound_alsa.cpp` does not: it `dlopen`s `libasound` and drives it from
+a pthread, against the shared `platform::Sound` interface 6.4 inherits.
+**Decision**: Implement `sound_sdl.cpp` against `SDL_audio` instead of porting
+the ALSA backend or writing a CoreAudio sibling. The headless target links a
+silent stub and needs no audio library at all.
+**Rationale**: `SDL_audio` already abstracts ALSA, PulseAudio and CoreAudio
+behind one API, and SDL2 is the desktop target's dependency regardless — so
+this adds nothing new to the dependency set while deleting the `dlopen` and
+pthread machinery rather than duplicating it per platform. A CoreAudio backend
+would mean two non-portable files where the fork has one.
+**Tradeoffs**: Diverges from the fork, so that file cannot be taken as-is and
+the two trees will not converge here. Accepted: it is ~220 lines, and the
+`platform::Sound` seam it implements is shared either way. SDL's audio latency
+is also higher than raw ALSA — immaterial for calculator beeps.
+**Revisit when**: The desktop target needs audio behaviour SDL cannot express,
+or 6.2's PCM sampler engine lands and has its own latency requirements.
+
+---
+
+## D94: host coupling is marked with `#if !PICOCALC_HOST` guards, not hidden behind shim headers
+
+**Date**: 2026-08-23
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: Compiling the tree natively found exactly three files that do not
+build on host, each on a single include: `gfx/framebuffer.cpp`
+(`pico/multicore.h`, the core-1 display service), `apps/mode_screen.cpp`
+(`pico/bootrom.h`, reboot-to-BOOTSEL) and `apps/graph_screen.cpp`
+(`pico/time.h`). 98 of 101 other sources compiled clean with no shims at all.
+Two ways to close the gap: guard the three files, or put a directory of fake
+`pico/*.h` headers on the host include path.
+**Decision**: Guards, in the downstream fork's style — `#if !PICOCALC_HOST`
+with the host branch declaring what it needs from a backend. No shim headers.
+**Rationale**: The shim approach needs zero `src/` edits, which is exactly the
+appeal and exactly the objection: **the guard count is the coupling metric.**
+Three is a number that can be watched in review and defended in a diff. A shim
+directory absorbs new Pico includes silently, so coupling grows without anyone
+deciding to add it, and the day a shim cannot fake the semantics (not just the
+symbol) the debt surfaces all at once. §5.1 already identifies drift as this
+phase's main risk; this keeps one axis of it visible by construction.
+**Tradeoffs**: Every new Pico-coupled file in a shared directory now needs a
+guard written by hand, which is friction on firmware work — a small tax paid by
+people not working on the host target. That is the intended signal, not a side
+effect: it asks whether the coupling belongs in a shared file at all, or behind
+`platform::`.
+**Revisit when**: The guard count passes roughly a dozen, which would mean the
+`platform::` seam has stopped doing its job and the answer is to fix the seam,
+not to switch to shims.
+
+---
+
+## D93: two display backends, and the headless one lands first
+
+**Date**: 2026-08-23
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: #42 asks for a desktop emulator; #33 asks for a host-side renderer
+for docs images. Both bottom out at the same seam —
+`platform::Display::push_rect(x, y, w, h, buf)` — but they want different
+things from it, and #33 was written believing it could only ever cover the
+natural math display because `framebuffer.cpp` was not host-clean. D94 removes
+that constraint, so a host renderer now reaches every screen.
+**Decision**: Two backends over one source list, built as two executables.
+`display_headless.cpp` composites to an RGB565 buffer and writes PPM, with no
+external dependency; `display_sdl.cpp` is the interactive window. `graphite-shot`
+(headless) is built and CI-wired **before** `graphite-desktop` (SDL).
+**Rationale**: Ordering is the whole decision. The headless target closes #33
+outright, needs nothing installed on a CI runner, and is the shortest path to
+looking at #52 — a bug the text-fits lint gate structurally cannot see, since
+`draw_softkeys` truncates to 6 chars a cell by design. Making the render check
+depend on SDL would put an external package between CI and a docs image for no
+gain, and would let a macOS `SDL_main` snag block #33.
+**Tradeoffs**: Two backends to maintain against one interface, and the headless
+one has no way to exercise input, so screens reachable only by navigation need
+§6's key-script question answered before they can be captured. PPM is
+dependency-free but not web-usable; a conversion step is assumed.
+**Revisit when**: The key-script format lands and the two targets' input paths
+start to converge.
+
+---
+
+## D92: the desktop target is a separate CMake project, over a source list shared with the firmware
+
+**Date**: 2026-08-23
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: #42 asks for "a third build target (alongside Pico 1 and Pico 2)".
+The downstream fork instead made `host/` its own `project()` referencing
+`../src`, and that fork is now 29 files stale after one phase — its
+`host/CMakeLists.txt` source list predates every app, scripting and
+text-editor file added in Phase 6.
+**Decision**: Keep the fork's separate-project shape, and fix the thing that
+made it rot. `host/CMakeLists.txt` stays its own project; a new
+`cmake/graphite-sources.cmake` defines `GRAPHITE_PORTABLE_SOURCES` and
+`GRAPHITE_PICO_SOURCES`, and **both** the root project and `host/` `include()`
+it. `config.hpp` folds `PICOCALC_HOST` into the existing Pico 2 branch (full
+framebuffer, synchronous push), as the fork does.
+**Rationale**: The root `CMakeLists.txt` is bound to the Pico SDK from its
+first lines — `pico_sdk_init()`, the SDK toolchain file, `pico_add_extra_outputs`,
+`pico_enable_stdio_usb`, the MicroPython embed cross-build. A third target
+inside it shares no toolchain, no linker script and no output format, so
+literal-#42 would mean guarding nearly every line of that file. Splitting the
+projects but sharing the *list* takes the fork's structural win without its
+maintenance flaw: a new file lands in one place and both targets see it. The
+fork's 29-file drift is the evidence, not a hypothetical.
+**Tradeoffs**: Departs from #42's literal wording, so `cmake --build build/host`
+will not sit alongside `build/pico` and `build/pico2` and one more build
+invocation has to be learned. The shared list also becomes a coupling point:
+reordering or restructuring it now touches three builds at once, and the
+firmware builds must be verified unchanged when 6.4.1 converts them.
+**Revisit when**: CMake's Pico SDK integration stops requiring a toolchain file
+at project scope, which would make a genuine third target cheap.
+
+---
+
 ## D91: third-party `.uf2`s run on the Pico 2 by address translation, and are delegated on the Pico 1
 
 **Date**: 2026-08-16
