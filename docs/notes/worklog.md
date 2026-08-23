@@ -305,6 +305,110 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-23 (later) — a desktop target scoped from measurement, and the docs caught up with v0.5.0
+
+Two branches, both open as of writing: **`phase-6.4`** (spec + D92-D96) and
+**PR #58** (docs). No firmware code changed this session. The Pico 1 was
+reflashed from HEAD at the start so everything below was checked against the
+firmware it describes.
+
+**Docs CI has been red since the Phase 6 merge, and the wiki stopped
+publishing.** Four consecutive failures, one cause: `help_screen.cpp` gained the
+file manager's keys (ENTER opening a file in its app, LEFT/ESC and HOME for
+leaving, F2 CUT, F3 MOVE) and `docs-site/reference/` was never regenerated.
+`publish-wiki` needs `[validate-docs, check-reference]`, so **the published wiki
+has served a calculator with no apps since 2026-08-15**. One `gen-doc-reference.py`
+run fixes both. Worth noting the shape of the failure: the drift check did its
+job, nobody read it, and the visible symptom was somewhere else entirely.
+
+**#42 answered by measurement before the spec was written.** The question was
+whether the downstream Luckfox fork (`beapig/graphite_picocalc_gc_luckfox_lyra`,
+MIT, same copyright holder) is a viable route to a desktop target and to #33's
+host renderer. Compiled the current tree natively on macOS arm64 with
+`-DPICOCALC_HOST=1`, no shims, no source edits:
+
+- **98 of 101 portable sources build clean.** The three failures are one include
+  each — `framebuffer.cpp` (`pico/multicore.h`), `mode_screen.cpp`
+  (`pico/bootrom.h`), `graph_screen.cpp` (`pico/time.h`). The fork already
+  solved the first two.
+- **All 29 files of Phase 6 drift are host-clean at the include level**,
+  `scripting/` included. The `platform::` seam held through 6A/6B/6C without
+  anyone checking that it had — so the port's cost did not grow during Phase 6.
+  This is the number that decided the phase.
+- **MicroPython builds natively**, which the fork could not tell us since it
+  forked at v0.4.1. Generated with `CC=clang`, 135 of 136 files compile; the
+  holdout is `gchelper_generic.c`, whose aarch64 register scan uses a GCC-only
+  extension clang rejects. `MICROPY_GCREGS_SETJMP=1` — MicroPython's own escape
+  hatch — takes it to 136/136 (D96).
+
+Scoped as **Phase 6.4**, dotted. D92 keeps the fork's separate-CMake-project
+shape but adds a shared source list, because that fork is **29 files stale after
+one phase** and a copied source list is why. D93 lands a dependency-free headless
+PPM renderer before SDL, so #33 closes without CI needing a package. D94 uses
+`#if !PICOCALC_HOST` guards rather than shim headers — the guard count is the
+coupling metric, and three is reviewable. D95 replaces the fork's one
+Linux-bound file (`sound_alsa.cpp`) with SDL_audio.
+
+The spec says plainly that this is a development instrument and not a fidelity
+emulator: no SRAM ceiling, no FPU difference, no strip pipeline. Given the Pico
+1's 15.2 KB is the constraint that has bitten hardest here, false confidence is
+a bigger risk than drift.
+
+**The guide said the flagship feature did not exist.** `guide/15-programming.md`
+read *"Not yet implemented ... Neither has started as of this writing"*, and
+`index.md` agreed. Rewrote 15 as the apps chapter and added **chapter 16, a
+MicroPython guide**, leading with the design guideline the developer stated: the
+firmware owns the maths, Python owns the shape around it.
+
+Two factual errors found by reading source rather than prose, which is exactly
+the failure mode `docs-drift-lesson` warns about:
+
+- `architecture.md` put the MicroPython heap in **PSRAM**. It is a static SRAM
+  array (`g_heap`, `config::kPythonHeapSize`), 40 KB Pico 1 / 96 KB Pico 2. It
+  also dated MicroPython to Phase 4.
+- `dependencies.md` listed it under "Source dependencies (Phase 4 - planned)"
+  while the file's own rule said dependencies are vendored, not submodules. D71
+  made it the first submodule, pinned v1.28.0.
+
+`FEATURES.md` had no apps or scripting section at all; README's download link
+said v0.4.1 beside a v0.5.0 status blurb; ROADMAP's header said v0.4.1 and
+17 files / 2,632 checks (fixed on `phase-6.4`, so expect a one-line conflict
+with #58 on whichever merges second).
+
+**Probing the board beat reading the config, twice.**
+
+1. Module availability was probed on hardware rather than derived from
+   `mpconfigport.h` — and the config's ROM level enables `time`, but importing
+   it fails on the device. **There is no `time.sleep()`.** Available: `calc`,
+   `math`, `json`, `gc`, `array`. Absent: `sys`, `os`, `time`, `random`,
+   `cmath`. I had also read the config as disabling `math` and was wrong;
+   CORE_FEATURES enables it.
+2. The chapter's thesis is demonstrated, not asserted: in DEG,
+   `calc.eval("sin(90)")` is **1.0** and `math.sin(90)` is
+   **0.8939966636005579**; in RAD they agree. `calc.eval` runs the same
+   four-stage pipeline the home screen runs (`eval_impl`, `calc_api.cpp:252`)
+   and its trig goes through `fn::sin_am` = `std::sin(to_rad(x))`. Both
+   ultimately call libm — the whole difference is one `to_rad()` consulting a
+   global.
+
+**The worked example in that chapter was wrong, and running it is what caught
+it.** A follow-up asked how `math` differs from `calc`, which surfaced a cost
+asymmetry the guide had not stated — `math.sin` is a libm wrapper,
+`calc.eval` parses a string and runs a compile-plus-VM every call — so the
+"use `calc`" rule needed qualifying for loops. The rewrite I wrote to
+illustrate hoisting (`step = calc.eval("pi/180")`, then `math.sin(i*step)`)
+**only reproduces `calc.eval("sin(i)")` in DEG.** Measured at i=30: DEG gives
+0.49999999999999992 both ways, RAD gives -0.9880316240928618 from `calc.eval`.
+Shipping it unqualified would have walked readers into the exact trap the
+chapter opens with. *A code sample in a chapter about a silent mode-dependent
+trap is a bad place to trust arithmetic done in your head.*
+
+**Device state changed by the verification** — none of it firmware, all of it
+the developer's data: `calc.plot("x^2-4")` **overwrote Y1** (persisted; the
+documented behaviour of D68), and the angle mode was flipped DEG/RAD several
+times and **left in RAD** (the firmware default, `functions.cpp:10`, but not
+necessarily what it was before).
+
 ## 2026-08-23 — Phase 6 CLOSES: the Pico 1 pass, ten issues, and two measurements that overturned their own premises
 
 **Phase 6 is merged and tagged `v0.5.0`** (PR #56, 58 commits). 22 host suites /

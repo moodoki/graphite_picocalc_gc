@@ -1,6 +1,103 @@
 # Start here — next session
 
-**Last session:** 2026-08-23 — **Phase 6 CLOSED, merged, and tagged
+**Last session:** 2026-08-23 (later) — **no firmware code changed.** Two
+branches are open and neither is merged: **`phase-6.4`** (a desktop-target
+spec, D92-D96) and **PR #58** (the docs brought up to v0.5.0, including a new
+MicroPython guide). Start by deciding what to do with those.
+
+> ## Read this first: docs CI is red on `main`, and the wiki is stale
+>
+> Docs CI has failed on every run since the Phase 6 merge — four in a row, one
+> cause. `help_screen.cpp` gained the file manager's keys and
+> `docs-site/reference/` was never regenerated, so `check-reference` fails.
+> Because `publish-wiki` needs `[validate-docs, check-reference]`, **the
+> published wiki has not updated since 2026-08-15** and still describes a
+> calculator with no apps.
+>
+> **PR #58 fixes it.** Until that merges, the public docs are wrong in the most
+> visible place the project has.
+
+> ## Two open branches
+>
+> **PR #58 — `docs/v0.5.0-refresh`.** All checks green. Regenerates the
+> reference, rewrites guide chapter 15 (which still said Phase 6 was "not yet
+> implemented"), adds **chapter 16, the MicroPython guide**, adds an apps
+> section to `FEATURES.md`, and fixes two factual errors found by reading
+> source: `architecture.md` put the MicroPython heap in PSRAM (it is a static
+> SRAM array, 40 KB / 96 KB) and `dependencies.md` had it as "Phase 4 —
+> planned" under a "vendored, not submodules" rule that D71 replaced.
+>
+> **`phase-6.4`** — spec + D92-D96, **all PROPOSED, none accepted**. No PR
+> opened; that is a deliberate stopping point, since the decisions want a read
+> before they are committed to.
+>
+> **They conflict on one line.** `ROADMAP.md`'s stale header (`v0.4.1`,
+> 17 files / 2,632 checks) is fixed on `phase-6.4` only. Whichever merges
+> second will need that one-line resolution.
+
+> ## Phase 6.4, and why it is worth doing
+>
+> #42 asked whether the downstream Luckfox fork is a route to a desktop target
+> and to #33's host renderer. Answered by compiling, not by reading:
+>
+> - **98 of 101 portable sources build natively** on macOS arm64 with
+>   `-DPICOCALC_HOST=1`, no shims. Three failures, one include each.
+> - **All 29 files of Phase 6 drift are host-clean.** The `platform::` seam held
+>   through 6A/6B/6C without anyone checking. *The port's cost did not grow
+>   during Phase 6* — that is the number that decided it.
+> - **MicroPython compiles natively**, 136/136 with `MICROPY_GCREGS_SETJMP=1`.
+>
+> The fork is 29 files stale after one phase because its source list is a copy;
+> D92 keeps its shape but shares the list. D93 lands a dependency-free headless
+> PPM renderer **before** SDL, so #33 closes without CI needing a package —
+> that is also the cheapest way to finally *see* #52.
+>
+> The spec is blunt that this is a development instrument, not a fidelity
+> emulator: no SRAM ceiling, no FPU difference, no strip pipeline. **A green
+> host build is not a hardware verification.**
+
+> ## Two lessons from the docs work, both about not trusting a reading
+>
+> - **Probing the board beat reading the config.** `mpconfigport.h`'s ROM level
+>   enables `time`, but importing it fails on the device — there is no
+>   `time.sleep()`. I also misread the same file as disabling `math` when
+>   CORE_FEATURES enables it. Available: `calc`, `math`, `json`, `gc`, `array`.
+>   Absent: `sys`, `os`, `time`, `random`, `cmath`.
+> - **Running the example is what caught the example being wrong.** Chapter 16
+>   gained a caveat that `calc.eval` is not a cheap call — it parses and
+>   compiles every time, where `math.sin` is a libm wrapper. The hoisting
+>   example I wrote to illustrate it (`step = calc.eval("pi/180")`, then
+>   `math.sin(i*step)`) **only holds in DEG**: at i=30, DEG agrees at
+>   0.49999999999999992 and RAD gives -0.9880316240928618 from `calc.eval`. It
+>   would have walked readers into the trap the chapter opens with. *A code
+>   sample in a chapter about a silent mode-dependent trap is a bad place to
+>   trust mental arithmetic.*
+
+> ## The board's state was changed by verification
+>
+> Not firmware — the developer's own data, on the Pico 1 now carrying HEAD:
+>
+> - **Y1 was overwritten** by `calc.plot("x^2-4")` and the loss is persisted.
+>   That is D68's documented behaviour, not a bug, but it was your slot.
+> - **Angle mode was left in RAD** after several DEG/RAD flips. RAD is the
+>   firmware default (`functions.cpp:10`) but may not be what you had.
+
+> ## What is still open, unchanged from the last session
+>
+> - **#52** softkey labels truncate (`MKDIR` → `MKDI`) — the text-fits lint gate
+>   cannot see it by design. 6.4's headless renderer is the cheapest instrument
+>   that could.
+> - **#54** ESC out of an app reports `raised` and prints a traceback.
+> - **#24** D53 root cause; still needs its ~1 hour diagnostic build.
+> - **CI still runs neither host tests nor clang-tidy.** 6.4.6 would add a third
+>   thing it should run without fixing the first two.
+> - A **developer-facing** app-framework doc still does not exist. Chapter 15
+>   covers installing an app as a user; writing a manifest and the app lifecycle
+>   is unwritten, and is its own piece of work rather than a paragraph.
+
+---
+
+**Previous session:** 2026-08-23 (earlier) — **Phase 6 CLOSED, merged, and tagged
 `v0.5.0`** (PR #56, 58 commits). Ten issues closed, four filed, a Pico 1
 board-swap pass, and two measurements that overturned the estimates they
 were meant to confirm.
