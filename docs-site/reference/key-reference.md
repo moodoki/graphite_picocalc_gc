@@ -106,8 +106,11 @@ rejoined below, everything else is kept as its own line verbatim.
 ## FILES (files cmd)
 
 - `UP/DOWN  select entry`
-- `ENTER    open folder`
-- `LEFT     up one folder`
+- `ENTER    open folder, or open a file in its app`
+- `LEFT/ESC up one folder; ESC at the top leaves`
+- `HOME     leave from any depth`
+- `F2 CUT   mark for moving`
+- `F3 MOVE  move it here`
 - `F4 REN   rename`
 - `F5 MKDIR new folder`
 - `DEL      delete (confirms; folders must be empty)`

@@ -27,7 +27,7 @@
 ├─────────────────────────────────────────┤
 │  drivers/  (vendored C, read-only)      │  Coyote OS drivers (lcdspi,
 │  + Pico SDK + ARM newlib                │  i2ckbd, rp2040-psram, pwm_sound),
-│                                         │  FatFs, MicroPython embed (P4)
+│                                         │  FatFs; MicroPython (submodule)
 └─────────────────────────────────────────┘
 ```
 
@@ -109,13 +109,16 @@ Avoid:
 - ~30 KB math + UI + drivers
 - ~8 KB DMA buffers, system overhead
 - → ~190 KB available for application
-- 8 MB PSRAM holds: large data structures, optional full framebuffer, MicroPython heap (Phase 4), CAS pool (Phase 4).
+- 8 MB PSRAM holds: large data structures, optional full framebuffer, CAS pool.
+- The MicroPython GC heap is **not** in PSRAM: it is a static SRAM array
+  (`g_heap` in `src/scripting/micropython_embed.cpp`), 40 KB here and 96 KB
+  on the Pico 2 — see `config::kPythonHeapSize`.
 
 ### Pico 2 (520 KB SRAM)
 
 - Everything from Pico 1
 - + 200 KB optional full framebuffer in SRAM (faster than PSRAM)
-- + larger CAS pool, MicroPython heap, scratch space
+- + larger CAS pool, larger MicroPython heap (96 KB), scratch space
 - 8 MB PSRAM still used for very large datasets, matrix storage, file buffers.
 
 See `docs/hardware.md` for the canonical hardware spec table.
