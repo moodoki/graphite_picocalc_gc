@@ -305,6 +305,80 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-29 — Phase 6.4: the calculator runs on a desktop, and #52 is not just photographed but explained
+
+**`phase-6.4`, 18 commits, PR #60 open and green — nothing merged.** Two
+sessions' work on one branch; this entry covers both. No firmware behaviour
+changed: the guiding constraint was that the host target must cost the
+device nothing, and the byte-identity gate says it cost exactly nothing.
+
+**D92-D98 accepted (2026-08-28), two of them amended by reading the source
+before writing any code.** Both amendments made the decisions smaller:
+
+- **D94** — the guard count is **two, not three**. `graph_screen.cpp` never
+  needed one; its only Pico use was two `time_us_64()` calls, and
+  `platform::uptime_us()` already existed and was already used this way
+  elsewhere. A guard would have been house-style drift dressed as porting
+  work. `grep -rn PICOCALC_HOST src/ | wc -l` is the coupling metric and it
+  reads 2.
+- **D95** — **the premise was wrong.** D95 said we would "carry anyway" the
+  fork's sound abstraction. There is no `platform::Sound`. `drivers/pwm_sound`
+  is compiled and linked into every release (`CMakeLists.txt:47,401`) with
+  **zero callers in `src/`**. So 6.4.5 does not port a seam, it builds one
+  first — which is why its estimate went 8 -> 10 hrs.
+
+**Done: 6.4.0-6.4.4, 6.4.7, most of 6.4.6 and 6.4.9.** `graphite-shot` renders
+the shared tree headless to a PPM on macOS and Linux, with POSIX storage,
+MicroPython, key scripts, and a committed set of doc images that CI
+regenerates and diffs. **6.4.1's hard gate held**: both `.uf2`s are
+byte-identical across the source-list extraction, on both boards.
+
+**Two ways a byte-identical comparison lies**, both found the hard way. The
+git short hash is baked in at configure time (`PICOCALC_BUILD_ID`), and the
+SDK bakes `__DATE__` via `pico_standard_binary_info` — the latter surfaced as
+a false alarm when the date rolled over at midnight mid-comparison. Both are
+now overridable knobs, which is what makes the gate trustworthy rather than
+lucky.
+
+**The bug haul, and the pattern in it.** Three of four host-side bugs were
+**a stub returning a tidy answer instead of a true one**: `stack_total()`
+returned 0, which made MicroPython raise a recursion-depth error at the first
+call; `stack_top()` was captured lazily from a lambda frame that had already
+returned, so the GC would have scanned upward from an address below the live
+stack; a script's output was doubled because the MicroPython hook already
+printed and the added callback printed again. A stub that fails loudly would
+have cost minutes; each of these cost an hour.
+
+**One real bug, in the firmware's own test suite.** CI ran `host-tests.sh`
+for the first time in this phase — 22 suites, ~3,400 checks that nothing had
+ever executed automatically — and 20 matrix checks failed on GCC only.
+`check_err(matops::add(..., &err), err, ...)` relies on **unspecified
+argument evaluation order**: clang happened to evaluate left-to-right, GCC did
+not, so the tests had been passing by luck. The firmware was never affected.
+Fixed by sequencing (`f6634b4`).
+
+**#52 is now diagnosed, not just photographed.** `draw_softkeys` computes
+`max_chars = (320/6 - 2) / 8 = 6` and then truncates the string it has
+already prefixed with `"%d:"` — so the **label** budget is 4, not 6. `CUT`,
+`MOVE` and `REN` fit; `MKDIR` never could. The comment at
+`files_screen.cpp:589` asserting both labels are "within `draw_softkeys`'
+6-character cell" counts the label and forgets the prefix it does not
+control. **The fix belongs to the sweep, not here** — 6.4.8 files, it does
+not fix.
+
+**Left:** 6.4.8 (the chrome sweep, unblocked, plan already in the spec),
+6.4.5 (SDL, now including the sound seam), and clang-tidy, still not in CI
+and still unable to see `host/` because it replays the arm-none-eabi
+compile database. Three items are held for the developer on purpose:
+commenting the #52 image onto the issue, whether `host-shot` joins the
+release gate, and a go-ahead before 6.4.8 opens several `area:ui` issues on
+a public repo.
+
+**Worth its own issue, unrelated to 6.4:** `drivers/pwm_sound` has shipped in
+every release with no callers.
+
+---
+
 ## 2026-08-23 (later) — a desktop target scoped from measurement, and the docs caught up with v0.5.0
 
 **PR #58 (docs) merged the same day; `phase-6.4` (spec + D92-D96) is still

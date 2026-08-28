@@ -2,7 +2,8 @@
 
 **Last session:** 2026-08-29 — **Phase 6.4 is most of the way done.** The
 calculator now builds and runs as a native application, draws its own
-documentation screenshots, and **issue #52 has been photographed**. Open PR:
+documentation screenshots, and **issue #52 has been photographed and
+root-caused**. Open PR:
 **[#60](https://github.com/moodoki/graphite_picocalc_gc/pull/60)**, 17
 commits on `phase-6.4`, all checks green.
 
@@ -189,7 +190,13 @@ were meant to confirm.
 >
 > - **#52** softkey labels truncate: `MKDIR` renders `MKDI`.
 >   `draw_softkeys` truncates to 6 chars a cell by design, so the new
->   text-fits lint gate deliberately cannot see it.
+>   text-fits lint gate deliberately cannot see it. **Diagnosed 2026-08-29
+>   off the generated image:** `max_chars = (320/6 - 2) / 8 = 6` is applied
+>   to the string *after* `"%d:"` has been prefixed, so the label budget is
+>   **4, not 6**. `CUT`/`MOVE`/`REN` fit, `MKDIR` never could. The comment
+>   at `files_screen.cpp:589` claiming both labels are "within
+>   `draw_softkeys`' 6-character cell" counts the label and forgets the
+>   prefix. Fix belongs to 6.4.8's sweep, which files and does not fix.
 > - **#54** ESC out of an app reports the run as `raised` and prints a
 >   traceback — **extended 2026-08-23** to cover the force-quit unwind: a
 >   deliberate kill still needs a third press to dismiss the wreckage.
