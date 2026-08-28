@@ -63,4 +63,15 @@ void paint_stack();
 uint32_t stack_peak_used();
 uint32_t stack_total();
 
+// High end of core 0's stack -- the address the GC scans down from for
+// roots, and the reference point stack_total() is measured below.
+//
+// This is here rather than read directly where it is needed (Phase 6.4.3)
+// because it is a fact about the board's memory map, and the linker symbol
+// that supplies it exists only in the firmware's link. src/scripting/ was
+// declaring `extern "C" char __StackTop[]` itself, which meant the one
+// file in the tree that has no business knowing the memory map was the
+// second place that knew it.
+char* stack_top();
+
 }  // namespace platform

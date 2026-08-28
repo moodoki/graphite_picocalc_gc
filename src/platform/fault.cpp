@@ -150,6 +150,10 @@ void paint_stack() {
     restore_interrupts(irq);
 }
 
+char* stack_top() {
+    return __StackTop;
+}
+
 uint32_t stack_total() {
     // Compared as integers, not subtracted as pointers: they are the two
     // bounds of one linker-defined region, but they are separate externs and

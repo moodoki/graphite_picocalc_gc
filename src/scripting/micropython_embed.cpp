@@ -18,16 +18,6 @@
 #include "scripting/calc_api.h"
 #include "scripting/mp_port.h"
 
-// Linker-provided top of core 0's stack (SCRATCH_Y). Absolute symbol, so
-// the address *is* the value — hence the array-typed extern, and hence
-// file scope: inside an anonymous namespace it picks up internal linkage
-// and no longer resolves. Same shape as src/platform/fault.cpp, which
-// documents this at length. The reserved double-underscore name is the
-// linker script's, not ours.
-// NOLINTBEGIN(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
-extern "C" char __StackTop[];
-// NOLINTEND(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
-
 namespace scripting {
 
 namespace {
@@ -38,7 +28,8 @@ namespace {
 alignas(8) std::uint8_t g_heap[config::kPythonHeapSize];
 
 // How much of core 0's 4 KB stack is kept BACK from MicroPython, measured
-// down from __StackTop. It has to cover two things the interpreter cannot
+// down from platform::stack_top(). It has to cover two things the
+// interpreter cannot
 // see: the UI frames already below us when a script runs (main loop ->
 // screen manager -> on_key -> run), and an interrupt frame landing on top
 // at any moment. 1 KB is the starting figure; the real one comes off
@@ -346,7 +337,7 @@ constexpr CalcFileOps kFileOps = {file_size,   file_read,   file_write,
 
 // Is there room below us for a path that needs `need` bytes? A local's
 // address is the current stack pointer to within a few bytes, and the floor
-// is __StackTop minus the bank size — the same absolute floor
+// is platform::stack_top() minus the bank size — the same absolute floor
 // picocalc_mp_init hands MicroPython, so the two agree.
 //
 // This exists because the calculator's evaluator has deeper frames than
@@ -358,7 +349,8 @@ constexpr CalcFileOps kFileOps = {file_size,   file_read,   file_write,
 int stack_room(std::size_t need) {
     const char probe = 0;
     const auto sp = reinterpret_cast<std::uintptr_t>(&probe);
-    const auto floor = reinterpret_cast<std::uintptr_t>(__StackTop) - platform::stack_total();
+    const auto floor =
+        reinterpret_cast<std::uintptr_t>(platform::stack_top()) - platform::stack_total();
 #if PICOCALC_STACK_PROBE
     std::printf("py-stack: free %u, need %u\n", static_cast<unsigned>(sp - floor),
                 static_cast<unsigned>(need));
@@ -384,7 +376,7 @@ bool PythonInterpreter::init(std::size_t heap_bytes) {
     if (heap_bytes == 0 || heap_bytes > sizeof(g_heap)) {
         heap_bytes = sizeof(g_heap);
     }
-    picocalc_mp_init(g_heap, heap_bytes, __StackTop, stack_limit());
+    picocalc_mp_init(g_heap, heap_bytes, platform::stack_top(), stack_limit());
     calc_api_set_persist_hook(&persist_state);
     calc_api_set_stack_hook(&stack_room);
     calc_api_set_key_hooks(&script_key_poll, &script_key_held);

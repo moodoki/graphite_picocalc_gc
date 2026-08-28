@@ -73,8 +73,8 @@ public:
     static std::size_t heap_capacity();
 
     // Bytes of core 0's 4 KB stack MicroPython is allowed to reach down
-    // to before it raises, measured from __StackTop. Sizing this is a
-    // measurement, not an argument (D47/D48).
+    // to before it raises, measured from platform::stack_top(). Sizing this
+    // is a measurement, not an argument (D47/D48).
     static std::size_t stack_limit();
 
     // --- Called from mp_port.c's C boundary, not by application code ---

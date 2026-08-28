@@ -32,8 +32,15 @@
 #include "apps/notepad_screen.hpp"
 #include "apps/program_screen.hpp"
 #include "host/display_headless.hpp"
+#include "host/keyboard_host.hpp"
+#include "scripting/calc_canvas.hpp"
+#include "scripting/micropython_embed.hpp"
 
 namespace host {
+
+// Defined in platform_host.cpp -- see the comment there for why main has to
+// be the one to capture this.
+void set_stack_top(char* addr);
 
 namespace {
 bool g_exit_requested = false;
@@ -94,11 +101,15 @@ void launch_sd_app(const platform::AppEntry& self) {
 
 void usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s [--eval <expr>]... --shot <file.ppm>\n"
+                 "usage: %s [--eval <e>]... [--key <k>]... [--run <s.py>] --shot <f.ppm>\n"
                  "\n"
                  "  --eval   submit a line to the home screen before rendering,\n"
                  "           exactly as PICOCALC_SERIAL_INJECT does on the board.\n"
                  "           Repeatable; order is preserved.\n"
+                 "  --run    run a Python file through the same exec_file() the\n"
+                 "           program screen uses for an SD app.\n"
+                 "  --key    queue one key (a name like up/enter/esc/f1, or a\n"
+                 "           single character). Repeatable; order is preserved.\n"
                  "\n"
                  "Storage root: $PICOCALC_HOME, else $HOME/.picocalc\n",
                  argv0);
@@ -107,13 +118,28 @@ void usage(const char* argv0) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // FIRST, before any other frame exists: MicroPython's GC scans for roots
+    // from here down, so this must sit above everything the calculator will
+    // run in. The firmware gets it from the linker (__StackTop); a desktop
+    // has to take it from main's own frame.
+    char stack_anchor = 0;
+    host::set_stack_top(&stack_anchor + 1);
+
     const char* shot_path = nullptr;
     std::vector<const char*> eval_lines;
+    const char* run_script = nullptr;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {
             shot_path = argv[++i];
         } else if (std::strcmp(argv[i], "--eval") == 0 && i + 1 < argc) {
             eval_lines.push_back(argv[++i]);
+        } else if (std::strcmp(argv[i], "--run") == 0 && i + 1 < argc) {
+            run_script = argv[++i];
+        } else if (std::strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
+            if (!host::queue_key(argv[++i])) {
+                std::fprintf(stderr, "unknown key name: %s\n", argv[i]);
+                return 2;
+            }
         } else {
             usage(argv[0]);
             return 2;
@@ -172,7 +198,31 @@ int main(int argc, char** argv) {
         }
     }
 
-    mgr.render_frame();
+    // Same entry point the program screen uses for an SD app (6B.15/16), so
+    // this exercises the streaming file reader rather than a shortcut.
+    if (run_script != nullptr) {
+        auto& py = scripting::python();
+        if (!py.init()) {
+            std::fprintf(stderr, "run: interpreter would not start\n");
+            return 1;
+        }
+        // No output callback. mp_port.c's mp_hal_stdout_tx_strn_cooked
+        // already printfs everything a script prints AND fans it out to the
+        // callback -- the callback exists so the on-device output pane sees
+        // it too. Registering one here just printed every line twice.
+        const bool ok = py.exec_file(run_script);
+        if (!ok) {
+            std::fprintf(stderr, "run: %s raised\n", run_script);
+            return 1;
+        }
+    }
+
+    // A script that took the panel keeps it (D80): repainting the chrome
+    // over its canvas is exactly what the firmware refuses to do, and here
+    // it would silently replace the thing we came to photograph.
+    if (!scripting::canvas::owns_display()) {
+        mgr.render_frame();
+    }
 
     if (!host::write_ppm(shot_path)) {
         std::fprintf(stderr, "graphite-shot: could not write %s\n", shot_path);

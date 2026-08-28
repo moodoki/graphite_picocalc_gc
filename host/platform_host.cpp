@@ -8,6 +8,8 @@
 // files are where that is literally true -- read them before trusting a
 // host result about power, faults or stack depth.
 
+#include <sys/resource.h>
+
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -70,12 +72,43 @@ uint32_t stack_peak_used() {
     return 0;
 }
 
+// Set by host::set_stack_top() from main, before anything else runs.
+char* g_stack_top = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+char* stack_top() {
+    return g_stack_top;
+}
+
+
 uint32_t stack_total() {
-    // 0, not 4096. The host stack is megabytes and nothing here measures
-    // it, so reporting the Pico's number would make a host screenshot of
-    // the diagnostics screen say something false about SRAM -- the exact
-    // false-confidence failure section 5.2 names.
-    return 0;
+    // The host's real main-thread stack, from getrlimit -- not the Pico's
+    // 4 KB, and NOT zero.
+    //
+    // Zero was the first attempt, reasoning that a host screenshot of the
+    // diagnostics screen should not claim SRAM the machine does not have.
+    // That was the wrong answer to the right worry: this function reports a
+    // fact about the platform it is compiled for, and on a desktop zero is
+    // simply false. It also hung the build -- MicroPython derives its
+    // recursion limit from here, so a budget of zero made mp_cstack_check
+    // fail on its first call, and the raise happened while printing the
+    // exception that raise produced.
+    //
+    // Section 3.5 still holds: the Pico 1's 15.2 KB of free SRAM is the
+    // constraint that has bitten this project hardest and the host cannot
+    // feel it. The way to be honest about that is to report the host's own
+    // number, not to report a number that is true nowhere.
+    static const uint32_t total = [] {
+        rlimit rl{};
+        if (::getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY &&
+            rl.rlim_cur > 0) {
+            // Capped: the figure feeds a recursion budget, and a 64 MB
+            // ulimit should not become a 64 MB licence to recurse.
+            constexpr rlim_t kCap = 8u * 1024 * 1024;
+            return static_cast<uint32_t>(rl.rlim_cur < kCap ? rl.rlim_cur : kCap);
+        }
+        return static_cast<uint32_t>(8u * 1024 * 1024);
+    }();
+    return total;
 }
 
 // ---- power ----
@@ -153,6 +186,29 @@ Psram& psram() {
 }
 
 // ---- init ----
+
+}  // namespace platform
+
+namespace host {
+
+// MicroPython's GC scans for roots from the stack top DOWN to the current
+// stack pointer, so this address must be above every frame a script can run
+// in -- otherwise the scan range is empty or inverted and live objects get
+// collected. On the board that is guaranteed by construction: __StackTop is
+// the top of a linker-defined bank.
+//
+// A desktop has no such address, so main() captures one from its own frame
+// before anything else runs. The obvious shortcut -- grabbing it lazily on
+// first call -- is WRONG in a way that compiles and mostly works: the
+// address would come from whatever frame happened to ask first, which is
+// deeper than main, so every later frame would sit above the "top".
+void set_stack_top(char* addr) {
+    platform::g_stack_top = addr;
+}
+
+}  // namespace host
+
+namespace platform {
 
 InitStatus init() {
     // Same order as platform.cpp, so the host's bring-up reads against
