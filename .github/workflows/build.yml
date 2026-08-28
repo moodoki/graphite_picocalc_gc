@@ -97,6 +97,20 @@ jobs:
             echo "No source files yet, skipping format check."
           fi
 
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    # 22 suites, ~3,400 checks, and until Phase 6.4 CI never ran one of
+    # them. That is not a small gap: the spec's central anti-drift argument
+    # is "CI on every PR makes breakage loud immediately", and a suite
+    # nothing runs makes nothing loud. It needs no toolchain and no SDK --
+    # scripts/host-tests.sh compiles a hand-picked subset of src/ with the
+    # system compiler.
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the host suite
+        run: ./scripts/host-tests.sh
+
   host-shot:
     name: Host renderer (Linux)
     runs-on: ubuntu-latest
@@ -164,7 +178,12 @@ jobs:
 
   release:
     name: Publish release artifacts
-    needs: [build, lint, validate-docs]
+    # host-tests joins the gate: it exercises the firmware's own maths and
+    # UI logic, so shipping a release past a failing suite is exactly the
+    # thing a gate is for. host-shot deliberately does NOT -- it is a docs
+    # and tooling job, and blocking a firmware release because a screenshot
+    # drifted would be the wrong trade in the wrong direction.
+    needs: [build, lint, validate-docs, host-tests]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
