@@ -18,6 +18,81 @@ Format:
 
 ---
 
+## D98: generated doc images are committed *and* regenerated in CI, with a drift check
+
+**Date**: 2026-08-28
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: 6.4.4 produces the first machine-generated images this repo has
+had. Two consumers want opposite things.
+[#33](https://github.com/moodoki/graphite_picocalc_gc/issues/33) wants them
+committed, because the README has to render on GitHub and on the wiki with no
+build step and no toolchain. §5.1 wants them regenerable and checked, because
+an image set that silently stops matching the firmware is exactly the drift
+this phase exists to prevent — and a stale screenshot is worse than a
+photograph, since it looks authoritative.
+**Decision**: Both. Committed PNGs under `docs-site/images/`, produced by
+`scripts/gen-doc-images.py` driving `graphite-shot`, with a CI job that
+regenerates the set and fails the build if the working tree differs — the same
+shape `scripts/gen-doc-reference.py` and the Docs workflow's `check-reference`
+job already use for `docs-site/reference/`. Generation must be deterministic:
+a re-run on the same commit is byte-identical, on both host OSes.
+**Rationale**: The constraints only looked opposed. This exact pattern is
+already load-bearing in the repo for generated *text*, so extending it to
+images adds a job, not a mechanism, and the reviewer's mental model does not
+change. The alternative — build-dir images published only to the wiki — breaks
+#33's actual requirement (GitHub's README renderer runs no build) and would
+mean the most-read page in the project is the one page the drift check cannot
+see.
+**Tradeoffs**: Binary files in git history, which grow it monotonically and
+diff as "changed". Kept tolerable by 1-bit-ish 320x320 PNGs and by there being
+tens of them, not hundreds. Determinism is a real constraint on the renderer —
+anything time-, RNG- or uninitialised-memory-dependent in a rendered screen
+becomes a CI flake, and finding those is a cost this decision imports.
+**Revisit when**: the image set outgrows a few hundred KB, or determinism
+turns out to cost more than the drift check is worth — at which point
+build-dir-plus-wiki is the fallback, and #33 would have to be reopened.
+
+---
+
+## D97: scripted input is a key script shared by both host executables, with stdin on the desktop
+
+**Date**: 2026-08-28
+**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Context**: The 6.4 draft left two questions open about host input: whether
+`graphite-desktop` needs the fork's `--uart-inject` equivalent, and whether the
+headless target should grow a key-script format so a doc image can be any
+screen reached by *navigation* rather than only one that can be constructed
+directly. The 2026-08-23 session answered the value question sideways:
+`PICOCALC_SERIAL_INJECT` on the firmware turned out to be a full remote —
+enough to push a 10 KB file to the SD card in chunked calls, enumerate the
+card and read scripts back, with no card removal and no keypresses.
+**Decision**: One mechanism, in `host/keyscript.cpp`, linked into **both**
+executables: a text file of key names — the same names `platform::Key` already
+resolves for `key_held` and for 6B's `KeyEvent::name` (D87) — replayed into the
+key queue, with the screen dumped on demand. `graphite-desktop` additionally
+reads stdin lines and submits them to the home screen, mirroring the
+firmware's serial injection. It lands in **6.4.4, not 6.4.0**.
+**Rationale**: Scripted input is the more valuable of the two paths, so it
+belongs to the headless target that CI runs, not to the window. Reusing the
+existing name table is the same anti-drift argument D87 made: two tables that
+answer "which key is this" will diverge, and here the divergence would be
+silent, because a wrong name in a key script produces a *plausible* screenshot.
+The 6.4.4 timing is forced by 6.4.7 — #52's truncated softkey row is reached by
+navigating into the file manager, so without key scripts the instrument cannot
+photograph the bug it was built to look at. Keeping it out of 6.4.0 preserves
+that spike's job, which is to fail fast on two OSes.
+**Tradeoffs**: A key script is a second input format to keep working, and it
+can only reach screens reachable by keys — a state that needs a specific SD
+card or a specific variable still has to be set up out of band. Neither
+executable gets an interactive host REPL out of this, which was never asked
+for. Stdin on the desktop overlaps with the key script and is kept because it
+is nearly free, not because it is needed.
+**Revisit when**: key scripts start encoding long navigation paths that break
+whenever a menu is reordered — the fix then is named entry points into
+screens, not a richer script format.
+
+---
+
 ## D96: MicroPython's host build uses the setjmp GC register scan
 
 **Date**: 2026-08-23
