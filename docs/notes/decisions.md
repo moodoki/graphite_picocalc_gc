@@ -77,9 +77,11 @@ belongs to the headless target that CI runs, not to the window. Reusing the
 existing name table is the same anti-drift argument D87 made: two tables that
 answer "which key is this" will diverge, and here the divergence would be
 silent, because a wrong name in a key script produces a *plausible* screenshot.
-The 6.4.4 timing is forced by 6.4.7 — #52's truncated softkey row is reached by
-navigating into the file manager, so without key scripts the instrument cannot
-photograph the bug it was built to look at. Keeping it out of 6.4.0 preserves
+The 6.4.4 timing is forced by 6.4.7 and 6.4.8 — #52's truncated softkey row is
+reached by navigating into the file manager, and the chrome sweep needs modal
+and flag states (a cut armed, 2nd held, a subsystem unhealthy) that are
+nothing *but* key sequences. Without key scripts the instrument cannot
+photograph the bug it was built to look at, let alone the rest of the chrome. Keeping it out of 6.4.0 preserves
 that spike's job, which is to fail fast on two OSes.
 **Tradeoffs**: A key script is a second input format to keep working, and it
 can only reach screens reachable by keys — a state that needs a specific SD

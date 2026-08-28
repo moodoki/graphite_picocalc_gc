@@ -18,7 +18,7 @@ already answered by measurement (§2), so the spike is short and the risk is
 concentrated in maintenance rather than in whether it can work at all. The
 2026-08-28 pass added the task estimates (§4), the file list (§3.7) and the
 verification rules (§7), and closed the three questions the draft left open
-(§6, D97-D98). **~43 hrs, or ~35 without the SDL window.**
+(§6, D97-D98). **~48 hrs, or ~40 without the SDL window.**
 
 **Sub-phase numbering**: dotted. A desktop build was never part of Phase 6's
 committed goals; it turned up out of #42's observation that a downstream fork
@@ -290,10 +290,11 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 | 6.4.4 | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
 | 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, `sound_sdl` (D95), the `graphite-desktop` executable, stdin injection (D97). **Closes #42** | 8 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays, and stdin drives it too. **Separable** — everything above closes #33 without it |
 | 6.4.6 | **CI.** Build `graphite-shot` on Linux and macOS runners; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
-| 6.4.7 | **First use of the instrument — look at #52.** Not a fix; a screenshot of the file manager's softkey row | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument and goes in the phase's notes |
-| 6.4.8 | **Docs and close** — README section carrying §3.5's warning verbatim, `ROADMAP.md` row, `dependencies.md` (SDL2 is a developer dependency, never a firmware one), a developer-facing `docs/host-build.md` | 3 | §7's checklist complete |
+| 6.4.7 | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
+| 6.4.8 | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
+| 6.4.9 | **Docs and close** — README section carrying §3.5's warning verbatim, `ROADMAP.md` row, `dependencies.md` (SDL2 is a developer dependency, never a firmware one), a developer-facing `docs/host-build.md` | 3 | §7's checklist complete |
 
-**Total ~43 hrs**, or **~35 without 6.4.5**, which is separable and drops the
+**Total ~48 hrs**, or **~40 without 6.4.5**, which is separable and drops the
 only external package this phase would introduce. The headless path alone
 closes #33, feeds CI and answers #52; the SDL window closes #42 and is the
 part that is *pleasant* rather than necessary — §5.2 is worth re-reading
@@ -301,6 +302,61 @@ before deciding the order.
 
 **Build order is the table order.** 6.4.0 gates everything. The one thing
 worth resisting: 6.4.5 is the fun task and the least load-bearing.
+
+### 4.1 What the sweep already has a list of
+
+A static scan on 2026-08-28, before any of this is built, so 6.4.8 starts from
+suspects rather than from scratch. **None of these are confirmed** — that is
+6.4.8's whole point, and the fact that they had to be derived by hand from
+arithmetic is the argument for building the instrument.
+
+**The softkey bar takes labels of 4 characters, not 6.** `draw_softkeys`
+renders `"%d:%s"`, so the `n:` prefix costs 2 of the 6 characters a cell holds
+at 8 px in a 53 px cell. Every label in `src/` was checked against that:
+
+| screen | labels | verdict |
+|---|---|---|
+| `files_screen.cpp:590` | `CUT` `MOVE` `REN` **`MKDIR`** | **MKDIR is 5 — #52.** The comment above it claims both labels fit; that claim is wrong |
+| `home_screen.cpp:1163` | `Y=`/`PAR`/`R=` `WIN` `MODE` `TRC` `GRPH` `APPS` | fits |
+| `graph_screen.cpp:1570` | `Y=`/`PAR`/`R=`/`u=` `WIN` `MODE` `TRC` `TBL` `CALC` | fits |
+| `table_screen.cpp:349` | `Y=`/`PAR`/`R=` `SETP` `MODE` `TRC` `GRPH` | fits |
+| `text_editor_widget.cpp:389` | `RUN` `SAVE` `LOAD` `NEW` | fits |
+| `program_screen.cpp:305` | `EDIT`/`BACK` | fits |
+| `launcher`, `mode`, `settings` | all empty | n/a |
+
+So **#52 is currently the only truncating softkey label**, which is worth
+knowing: the sweep's value in the softkey bar is not a pile of bugs today, it
+is that the 4-character budget is undocumented and one character from being
+violated again. Committing the images makes the next violation a diff.
+
+**The status bar is the richer target, because it has no collision check at
+all.** `draw_status_bar` draws the title left at `x=4` and the right-aligned
+block (`[2nd] [A]` + angle + display mode, then the battery) at a computed
+`rx`, and **nothing clamps the title against `rx`**. Two consequences:
+
+1. **A long title is silently overdrawn** by the right block, which is painted
+   after it.
+2. **D26's health indicators inherit the problem and amplify it.** `SD` and
+   `PSRAM` are placed at `4 + text_width(title) + 10`, so a long title pushes
+   them rightward into the indicator block — and they only appear when a
+   subsystem is *unhealthy*, i.e. exactly when the user most needs to read
+   them. This state is not reachable in normal use and has almost certainly
+   never been looked at.
+
+The static titles (`STATS`, `SETTINGS`, `CONSTANTS`, `STAT PLOTS` — the
+longest at 10 characters) all appear to clear the right block. **The one
+genuine suspect is `program_screen.cpp:283`**, which passes `app_name_`
+straight through from an SD app manifest. `SdAppManifest::name` is `char[24]`,
+so a 23-character app name draws ~184 px from `x=4` — into the region the
+right-aligned block occupies on a screen showing `2nd A RAD SCI`. **That is
+user-controllable from `app.txt`**, needs no code change to trigger, and is
+the first thing 6.4.8 should point the renderer at.
+
+The sweep must therefore cover, per screen: the **modal** softkey variants
+(the `Y=`/`PAR`/`R=`/`u=` fork, `MOVE` appearing only while a cut is armed,
+`EDIT`/`BACK`), the **flag** states (`2nd`, alpha, each angle mode, each of
+FLT/FIX/SCI/ENG), and the **D26 unhealthy** state — not just one screenshot a
+screen.
 
 ## 5. Risks and mitigations
 
@@ -361,7 +417,8 @@ and that holds: 6.4.0 exists to prove the render path on two OSes and must
 stay small enough to fail fast. But without key scripts the image set is
 limited to screens that can be *constructed*, and #52's softkey row is
 reached by navigating into the file manager — so the instrument would not
-answer the question 6.4.7 exists to ask. Deferring it past 6.4.4 would mean
+answer the question 6.4.7 exists to ask — nor reach most of §4.1's
+chrome bars for 6.4.8. Deferring it past 6.4.4 would mean
 building the manifest twice.
 
 **3. Where do generated images live? — Committed **and** regenerable, with a
@@ -410,6 +467,14 @@ stating rather than assuming:
   it must be *seen* to fail.
 - **A deliberate host-suite test**: break one host check, confirm CI goes red.
   Same reasoning.
+- **The chrome sweep is complete when the image set covers every
+  `draw_softkeys` and `draw_status_bar` call site** (§4.1), in its modal and
+  flag variants, not one image a screen. **Every defect it shows is filed as
+  an issue and none are fixed in this phase** — the fixes are a separate
+  bugfix session, because a tooling phase that starts repairing the UI it is
+  photographing has no natural end. A long list of new issues is a successful
+  outcome here, not a blocked one; the phase closes on the images and the
+  issues existing, not on the bugs being gone.
 
 **Explicitly not verified here**, and named so no one reads a green build as
 more than it is: SRAM headroom, Pico 1 float behaviour, the strip pipeline,
