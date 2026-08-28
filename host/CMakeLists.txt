@@ -90,7 +90,7 @@ add_executable(graphite-shot
     platform_host.cpp
     display_headless.cpp
     keyboard_host.cpp
-    storage_stub.cpp
+    storage_posix.cpp
     psram_arena.cpp
     scripting_stub.cpp
 )
