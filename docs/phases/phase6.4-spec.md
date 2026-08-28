@@ -529,6 +529,17 @@ stating rather than assuming:
 - **6.4.1 carries the one hard regression gate**: both Pico `.uf2`s must be
   byte-identical across the source-list conversion. If they are not, the
   shared list changed the firmware, and that is a stop-and-diagnose.
+- **That gate needs two things pinned, and neither is obvious.** The
+  firmware embeds `PICOCALC_BUILD_ID` (the git short hash, so any comparison
+  *across a commit* fails on the hash alone) and the Pico SDK embeds
+  `__DATE__` through `pico_standard_binary_info` (so any comparison *across
+  midnight* fails on the calendar alone). Both are now overridable —
+  `-DPICOCALC_BUILD_ID=fixed -DPICOCALC_BUILD_DATE="Jan  1 2000"` — and a
+  comparison run without them is not evidence of anything. The second one
+  was found the hard way: a comparison that passed in the evening failed the
+  next morning with the source untouched. **A binary-comparison check is
+  only as good as the number of things it holds fixed, and the way you
+  discover you missed one is a false alarm.**
 
 **The checklist:**
 
