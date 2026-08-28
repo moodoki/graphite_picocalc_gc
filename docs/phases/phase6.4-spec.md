@@ -326,8 +326,8 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 
 | id | task | hrs | done when |
 |---|---|---|---|
-| **6.4.0** | **Spike — one screen to a PPM, on both OSes.** The two guards (D94, §2.2), `display_headless.cpp`, `platform_host.cpp`, `main_host.cpp`, `scripting_stub.cpp`, `psram_arena.cpp`, an ad-hoc source list. No MicroPython, no SDL, no manifest. **Pulls one Linux CI job forward from 6.4.6**, since the two-OS gate is otherwise unmeetable from a macOS-only machine | 6 | `graphite-shot` writes a PPM of the home screen on **macOS and Linux**, and both Pico targets still build. §2 says this should be short; if it is not, **stop and re-plan** — the measurement was wrong |
-| 6.4.1 | **Shared source list** — `cmake/graphite-sources.cmake`, root project converted to consume it, 6.4.0's ad-hoc list replaced | 3 | Both Pico `.uf2`s are **byte-identical before and after** the conversion, and `host/` names no `src/` file directly |
+| **6.4.0** ✅ | **Spike — one screen to a PPM, on both OSes.** The two guards (D94, §2.2), `display_headless.cpp`, `platform_host.cpp`, `main_host.cpp`, `scripting_stub.cpp`, `psram_arena.cpp`, an ad-hoc source list. No MicroPython, no SDL, no manifest. **Pulls one Linux CI job forward from 6.4.6**, since the two-OS gate is otherwise unmeetable from a macOS-only machine | 6 | `graphite-shot` writes a PPM of the home screen on **macOS and Linux**, and both Pico targets still build. §2 says this should be short; if it is not, **stop and re-plan** — the measurement was wrong |
+| 6.4.1 ✅ | **Shared source list** — `cmake/graphite-sources.cmake`, root project converted to consume it, 6.4.0's ad-hoc list replaced | 3 | Both Pico `.uf2`s are **byte-identical before and after** the conversion, and `host/` names no `src/` file directly |
 | 6.4.2 | **Platform backends, non-graphical** — `storage_posix`, `psram_arena`, `system_host`, `power_stub`, `fault_stub`, `commands_file`, ported from the fork against current `main` | 5 | The calculator runs headless end to end: an expression evaluates, a variable persists across a restart via `~/.picocalc`, and an SD app manifest under `~/.picocalc/apps/` appears as a launcher tile (§3.6) |
 | 6.4.3 | **MicroPython on host** — `MICROPY_GCREGS_SETJMP=1` (D96), host heap and stack sizing, the `picocalc_mp_init` call site | 5 | `py` at the home screen runs a script and `print()` reaches stdout; `examples/apps/periodic/` — the largest script we have — loads and draws |
 | 6.4.4 | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
@@ -347,6 +347,43 @@ before deciding the order.
 
 **Build order is the table order.** 6.4.0 gates everything. The one thing
 worth resisting: 6.4.5 is the fun task and the least load-bearing.
+
+### 4.2 Progress
+
+**6.4.0 and 6.4.1 landed 2026-08-28.** What is worth carrying forward:
+
+- **§2's measurement held.** 102 shared sources compiled on the first host
+  build. The only link failures were two symbols from the MicroPython C
+  boundary the spike deliberately excludes. The spike was short, so the
+  instruction to stop and re-plan did not fire.
+- **The guards are provably free.** Both boards built byte-identical with and
+  without them, build id pinned. The one firmware delta in 6.4.0 is
+  `graph_screen.cpp`'s switch to `platform::uptime_us()`, which costs zero
+  bytes — same text, data and bss, different layout.
+- **`PICOCALC_BUILD_ID` had to become overridable** before 6.4.1's gate could
+  be run at all. The id is compiled in, so any before/after comparison across
+  a commit differs on the git hash alone. Worth remembering the next time a
+  "just compare the binaries" check is proposed.
+- **Splitting the source-list change in two was load-bearing.** Regrouping the
+  118 files by target, on its own, left the Pico 1 identical but grew the
+  Pico 2 by 8 bytes of link-order padding. In one commit with the extraction
+  those 8 bytes would have been indistinguishable from the shared list
+  changing the firmware. The extraction itself is byte-identical on both.
+- **The shared file carries four lists, not two.** Sharing only the 118 would
+  have left cephes' 12-file list and tinyexpr duplicated in `host/` — the same
+  failure mode one directory over.
+- **One new host file, `scripting_stub.cpp`**, found on first link:
+  `home_screen.cpp` calls `scripting::python()` for the `py` command. §3.7
+  updated.
+- **Determinism is already met.** A re-run of `graphite-shot` is byte-identical,
+  which D98 needs and which was worth knowing before the drift check that
+  depends on it exists.
+
+**Not yet done from 6.4.0's gate**: nothing. The Linux half is met by the
+`host-shot` CI job, pulled forward from 6.4.6 — it builds `graphite-shot` on
+`ubuntu-latest`, renders, checks the frame is not a flat colour, and requires a
+re-run to be byte-identical. CI still does not run the host test suite or
+clang-tidy; both stay in 6.4.6 and stay named as missing.
 
 ### 4.1 What the sweep already has a list of
 
