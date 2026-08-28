@@ -123,6 +123,7 @@ reaching for the button. Full setup notes:
 | Know what it can do | [FEATURES.md](FEATURES.md) |
 | See what's built and what's next | [ROADMAP.md](ROADMAP.md) |
 | Build, test or contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Run it on your desktop, without hardware | [docs/host-build.md](docs/host-build.md) |
 | Understand *how* it works | [docs/architecture.md](docs/architecture.md) and the decision log, [docs/notes/decisions.md](docs/notes/decisions.md) |
 | Work on it as an AI agent | [AGENTS.md](AGENTS.md) |
 

@@ -12,6 +12,24 @@ All third-party code used in this project, with sources, versions, and licenses.
 | clangd / clang-format / clang-tidy | $\geq$ 18 | Apache 2.0 with LLVM exceptions | https://clangd.llvm.org |
 | Python | $\geq$ 3.10 | PSF | https://python.org |
 
+## Desktop target (Phase 6.4)
+
+The host build (`docs/host-build.md`) adds **no dependency at all** beyond
+what is already in the table above: a C++17 compiler, CMake and Python. That
+is deliberate rather than fortunate — D93 landed the dependency-free headless
+renderer before the SDL window precisely so that nothing would stand between
+CI and a documentation image, and so the docs image set could be regenerated
+on a runner with nothing installed.
+
+It does need `drivers/micropython` checked out, since it builds the same
+embed tree the firmware does (D96, Phase 6.4.3). That is an existing
+submodule, not a new dependency.
+
+**SDL2 arrives with Phase 6.4.5**, for the interactive `graphite-desktop`
+window only. When it does it is a *developer* dependency and never a
+firmware one: `graphite-shot`, the docs images and CI must keep building
+without it.
+
 ## Pico SDK (build dependency)
 
 | Component | Version | License | Source |

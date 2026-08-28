@@ -138,6 +138,9 @@ by the build, so read them before adding a dependency edge.
 - [docs/hardware.md](docs/hardware.md) — PicoCalc hardware reference: pinouts,
   the STM32 keyboard protocol, PSRAM, display
 - [docs/dev-environment.md](docs/dev-environment.md) — toolchain setup
+- [docs/host-build.md](docs/host-build.md) — the desktop build: run the
+  calculator natively, take screenshots, and what it deliberately does not
+  model
 - [docs/dependencies.md](docs/dependencies.md) — what we link and why
 - [AGENTS.md](AGENTS.md) — context file for AI coding agents; also the most
   compact statement of the project's conventions
