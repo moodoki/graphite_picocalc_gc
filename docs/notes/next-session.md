@@ -1,102 +1,130 @@
 # Start here — next session
 
-**Last session:** 2026-08-23 (later) — **no firmware code changed.** The docs
-were brought up to v0.5.0 and **merged (PR #58)**, which unstuck the wiki. One
-branch is still open and unmerged: **`phase-6.4`**, a desktop-target spec
-carrying D92-D96, all PROPOSED. Start there.
+**Last session:** 2026-08-29 — **Phase 6.4 is most of the way done.** The
+calculator now builds and runs as a native application, draws its own
+documentation screenshots, and **issue #52 has been photographed**. Open PR:
+**[#60](https://github.com/moodoki/graphite_picocalc_gc/pull/60)**, 17
+commits on `phase-6.4`, all checks green.
 
-> ## Docs CI was red for a week, and the wiki with it — now fixed
+> ## What is done, and what is left
 >
-> Docs CI failed on every run from the Phase 6 merge onward — four in a row,
-> one cause. `help_screen.cpp` gained the file manager's keys and
-> `docs-site/reference/` was never regenerated, so `check-reference` failed.
-> Because `publish-wiki` needs `[validate-docs, check-reference]`, **the
-> published wiki served a calculator with no apps from 2026-08-15 until
-> today.**
+> Done: **6.4.0** (spike), **6.4.1** (shared source list, both `.uf2`s
+> byte-identical), **6.4.2** (POSIX storage), **6.4.3** (MicroPython),
+> **6.4.4** (images + key scripts, **closes #33**), **6.4.7** (#52
+> verified), most of **6.4.6** (CI) and **6.4.9** (docs).
 >
-> **PR #58 merged and the wiki republished** — `Publish wiki` is green on
-> `main` again. Worth keeping: the drift check did its job, nobody read it, and
-> the damage showed up somewhere else entirely. A red badge on a docs workflow
-> is not cosmetic here; it silently stops publishing.
+> Left: **6.4.8**, the chrome sweep — unblocked and ready, and the plan is
+> already written in the spec. It files every defect as an issue and fixes
+> none; the fixes are a separate session. **6.4.5**, SDL, which now also
+> has to build the sound seam (see below). And clang-tidy, still not in CI
+> and still unable to see `host/`.
+>
+> Three things were left for the developer to decide, deliberately:
+> whether to comment the #52 image onto the issue, whether `host-shot`
+> should join the release gate (it currently does not — blocking a firmware
+> release on a screenshot seemed the wrong trade), and a go-ahead before
+> 6.4.8 opens several `area:ui` issues on a public repo.
 
-> ## Where the two branches stand
+> ## Read this before trusting anything the host build says
 >
-> **PR #58 — `docs/v0.5.0-refresh`. MERGED.** Regenerates the
-> reference, rewrites guide chapter 15 (which still said Phase 6 was "not yet
-> implemented"), adds **chapter 16, the MicroPython guide**, adds an apps
-> section to `FEATURES.md`, and fixes two factual errors found by reading
-> source: `architecture.md` put the MicroPython heap in PSRAM (it is a static
-> SRAM array, 40 KB / 96 KB) and `dependencies.md` had it as "Phase 4 —
-> planned" under a "vendored, not submodules" rule that D71 replaced.
+> `docs/host-build.md` is the guide. The section that matters is the one
+> about what it does **not** model: no SRAM ceiling, no FPU difference, no
+> strip pipeline, no panel, no PSRAM. **A green host build is not a
+> hardware verification**, and 6.4 changes nothing about how any other
+> phase is verified.
 >
-> **`phase-6.4`** — spec + D92-D96, **all PROPOSED, none accepted**. No PR
-> opened; that is a deliberate stopping point, since the decisions want a read
-> before they are committed to.
->
-> **`phase-6.4` needs a rebase.** It was branched before #58 merged, and it
-> carries the fix for `ROADMAP.md`'s stale header (`v0.4.1`, 17 files / 2,632
-> checks) that #58 deliberately left alone. Expect that one line to want
-> attention when the branch is brought forward.
+> The hazard is not that anyone believes a desktop has 15.2 KB of SRAM. It
+> is that the host build is *pleasant* — fast, visual, no flashing — so it
+> gets used first and trusted one step further than it should.
 
-> ## Phase 6.4, and why it is worth doing
+> ## Four bugs, and three of them were the same mistake
 >
-> #42 asked whether the downstream Luckfox fork is a route to a desktop target
-> and to #33's host renderer. Answered by compiling, not by reading:
+> **A stub that returns a tidy answer is still returning a wrong one.**
 >
-> - **98 of 101 portable sources build natively** on macOS arm64 with
->   `-DPICOCALC_HOST=1`, no shims. Three failures, one include each.
-> - **All 29 files of Phase 6 drift are host-clean.** The `platform::` seam held
->   through 6A/6B/6C without anyone checking. *The port's cost did not grow
->   during Phase 6* — that is the number that decided it.
-> - **MicroPython compiles natively**, 136/136 with `MICROPY_GCREGS_SETJMP=1`.
+> - `stack_total()` returned **0** on host, reasoning that a screenshot
+>   should not claim SRAM the machine lacks. MicroPython derives its
+>   recursion limit from it, so the budget of zero made `mp_cstack_check`
+>   fail on its first call — and the raise happened while printing the
+>   exception that raise produced, which hung. It reports the real stack
+>   from `getrlimit` now.
+> - `gen-doc-images.py` wrote its scratch PPM **inside the fixture
+>   directory the file manager photographs**, so the picture contained the
+>   scratch file and `--check` wrote one file more than a plain run. The
+>   image set could never have been stable. Caught by the drift check on
+>   its first run.
+> - The `host-shot` CI job had **no `submodules: recursive`** — correct
+>   when written in 6.4.0, wrong the moment 6.4.3 made MicroPython a
+>   dependency. Impossible to catch locally, where the submodule is
+>   already checked out.
 >
-> The fork is 29 files stale after one phase because its source list is a copy;
-> D92 keeps its shape but shares the list. D93 lands a dependency-free headless
-> PPM renderer **before** SDL, so #33 closes without CI needing a package —
-> that is also the cheapest way to finally *see* #52.
->
-> The spec is blunt that this is a development instrument, not a fidelity
-> emulator: no SRAM ceiling, no FPU difference, no strip pipeline. **A green
-> host build is not a hardware verification.**
+> The fourth was months old: **20 `test_matrix` error checks relied on
+> unspecified argument evaluation order** —
+> `check_err(matops::add(..., &err), err, ...)` writes `err` and reads it
+> in the same argument list. Clang calls first and passes; **GCC reads
+> first and fails all 20**. The firmware was fine; the tests had been
+> passing by luck on one compiler, and the firmware ships built by
+> `arm-none-eabi-gcc`, which is not that compiler. Found within an hour of
+> CI running the suite for the first time.
 
-> ## Two lessons from the docs work, both about not trusting a reading
+> ## Three things the spec asserted that reading the source disproved
 >
-> - **Probing the board beat reading the config.** `mpconfigport.h`'s ROM level
->   enables `time`, but importing it fails on the device — there is no
->   `time.sleep()`. I also misread the same file as disabling `math` when
->   CORE_FEATURES enables it. Available: `calc`, `math`, `json`, `gc`, `array`.
->   Absent: `sys`, `os`, `time`, `random`, `cmath`.
-> - **Running the example is what caught the example being wrong.** Chapter 16
->   gained a caveat that `calc.eval` is not a cheap call — it parses and
->   compiles every time, where `math.sin` is a libm wrapper. The hoisting
->   example I wrote to illustrate it (`step = calc.eval("pi/180")`, then
->   `math.sin(i*step)`) **only holds in DEG**: at i=30, DEG agrees at
->   0.49999999999999992 and RAD gives -0.9880316240928618 from `calc.eval`. It
->   would have walked readers into the trap the chapter opens with. *A code
->   sample in a chapter about a silent mode-dependent trap is a bad place to
->   trust mental arithmetic.*
+> All three were caught before writing code, by reading the files rather
+> than compiling them.
+>
+> - **`graph_screen.cpp` never needed a guard.** Its whole coupling was
+>   two `time_us_64()` calls, and `platform::uptime_us()` had existed all
+>   along. D94's guard count is **2, not 3**.
+> - **`framebuffer.cpp` gates its render body on the raw `PICOCALC_PICO2`
+>   macro**, not on `config::kUseFullFramebuffer`. The `config.hpp` fold
+>   alone would have compiled, linked, run and **drawn nothing**, with no
+>   diagnostic.
+> - **There is no `platform::Sound`.** The spec said we carried the
+>   abstraction the fork added; we do not, and `drivers/pwm_sound` has
+>   **zero callers** — this calculator has never made a sound. 6.4.5 must
+>   build the seam and wire the firmware side first, so it moved 8 → 10 hrs
+>   and got *more* separable, not less.
+>
+> The guard count stayed at 2 through the whole phase. Twice more a third
+> guard was the obvious move and twice the answer was to put it behind
+> `platform::` instead — `stack_top()` and `key_names`. Each cost tens of
+> bytes of flash and **zero SRAM**.
 
-> ## The board's state was changed by verification
+> ## Two traps in comparing binaries, both found the hard way
 >
-> Not firmware — the developer's own data, on the Pico 1 now carrying HEAD:
+> 6.4.1's gate is "both `.uf2`s byte-identical". Two things silently
+> invalidate that, and **both are now pinnable**:
 >
-> - **Y1 was overwritten** by `calc.plot("x^2-4")` and the loss is persisted.
->   That is D68's documented behaviour, not a bug, but it was your slot.
-> - **Angle mode was left in RAD** after several DEG/RAD flips. RAD is the
->   firmware default (`functions.cpp:10`) but may not be what you had.
+>   cmake -DPICOCALC_BUILD_ID=fixed -DPICOCALC_BUILD_DATE="Jan  1 2000" ...
+>
+> `PICOCALC_BUILD_ID` bakes in the git hash, so any comparison **across a
+> commit** fails on the hash. The Pico SDK bakes in `__DATE__` through
+> `pico_standard_binary_info`, so any comparison **across midnight** fails
+> on the calendar — which is exactly how it was found: a comparison that
+> passed in the evening failed the next morning with the source untouched.
+>
+> **A binary-comparison check is only as good as the number of things it
+> holds fixed, and the way you discover you missed one is a false alarm.**
+>
+> Also worth keeping: splitting 6.4.1 into two commits was load-bearing.
+> Regrouping the 118 files by target, changing nothing else, grew the Pico
+> 2 by **8 bytes** of link-order padding. In one commit with the
+> extraction those 8 bytes would have been indistinguishable from the
+> shared list changing the firmware.
 
-> ## What is still open, unchanged from the last session
+> ## How to drive it
 >
-> - **#52** softkey labels truncate (`MKDIR` → `MKDI`) — the text-fits lint gate
->   cannot see it by design. 6.4's headless renderer is the cheapest instrument
->   that could.
-> - **#54** ESC out of an app reports `raised` and prints a traceback.
-> - **#24** D53 root cause; still needs its ~1 hour diagnostic build.
-> - **CI still runs neither host tests nor clang-tidy.** 6.4.6 would add a third
->   thing it should run without fixing the first two.
-> - A **developer-facing** app-framework doc still does not exist. Chapter 15
->   covers installing an app as a user; writing a manifest and the app lifecycle
->   is unwritten, and is its own piece of work rather than a paragraph.
+>     cmake -B build/host -S host && cmake --build build/host
+>     ./build/host/graphite-shot --shot home.ppm
+>     python3 scripts/gen-doc-images.py           # regenerate the doc images
+>     python3 scripts/gen-doc-images.py --check   # what CI runs
+>
+> `--eval` submits a line to the home screen, `--key` and `--keyscript`
+> replay keys, `--run` executes a Python file through the same `exec_file()`
+> an SD app uses. Storage is `$PICOCALC_HOME`, else `~/.picocalc`.
+>
+> **Key names come from `src/platform/key_names.*`**, shared with the
+> MicroPython bindings so a name cannot mean one thing to a key script and
+> another to an app.
 
 ---
 
