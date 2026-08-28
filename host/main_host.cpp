@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "platform/app_registry.hpp"
+#include "platform/keyboard.hpp"
 #include "platform/platform.hpp"
 #include "platform/power.hpp"
 #include "platform/sd_apps.hpp"
@@ -32,7 +33,7 @@
 #include "apps/notepad_screen.hpp"
 #include "apps/program_screen.hpp"
 #include "host/display_headless.hpp"
-#include "host/keyboard_host.hpp"
+#include "host/keyscript.hpp"
 #include "scripting/calc_canvas.hpp"
 #include "scripting/micropython_embed.hpp"
 
@@ -100,19 +101,22 @@ void launch_sd_app(const platform::AppEntry& self) {
 }
 
 void usage(const char* argv0) {
-    std::fprintf(stderr,
-                 "usage: %s [--eval <e>]... [--key <k>]... [--run <s.py>] --shot <f.ppm>\n"
-                 "\n"
-                 "  --eval   submit a line to the home screen before rendering,\n"
-                 "           exactly as PICOCALC_SERIAL_INJECT does on the board.\n"
-                 "           Repeatable; order is preserved.\n"
-                 "  --run    run a Python file through the same exec_file() the\n"
-                 "           program screen uses for an SD app.\n"
-                 "  --key    queue one key (a name like up/enter/esc/f1, or a\n"
-                 "           single character). Repeatable; order is preserved.\n"
-                 "\n"
-                 "Storage root: $PICOCALC_HOME, else $HOME/.picocalc\n",
-                 argv0);
+    std::fprintf(
+        stderr,
+        "usage: %s [--eval <e>] [--key <k>] [--keyscript <f>] [--run <s.py>] --shot <out.ppm>\n"
+        "\n"
+        "  --eval   submit a line to the home screen before rendering,\n"
+        "           exactly as PICOCALC_SERIAL_INJECT does on the board.\n"
+        "           Repeatable; order is preserved.\n"
+        "  --run    run a Python file through the same exec_file() the\n"
+        "           program screen uses for an SD app.\n"
+        "  --key    queue one key (a name like up/enter/esc/f1, or a\n"
+        "           single character). Repeatable; order is preserved.\n"
+        "  --keyscript  replay a file of key names (D97). Same names,\n"
+        "           whitespace-separated, # comments to end of line.\n"
+        "\n"
+        "Storage root: $PICOCALC_HOME, else $HOME/.picocalc\n",
+        argv0);
 }
 
 }  // namespace
@@ -135,6 +139,10 @@ int main(int argc, char** argv) {
             eval_lines.push_back(argv[++i]);
         } else if (std::strcmp(argv[i], "--run") == 0 && i + 1 < argc) {
             run_script = argv[++i];
+        } else if (std::strcmp(argv[i], "--keyscript") == 0 && i + 1 < argc) {
+            if (!host::run_keyscript(argv[++i])) {
+                return 1;
+            }
         } else if (std::strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
             if (!host::queue_key(argv[++i])) {
                 std::fprintf(stderr, "unknown key name: %s\n", argv[i]);
@@ -214,6 +222,22 @@ int main(int argc, char** argv) {
         if (!ok) {
             std::fprintf(stderr, "run: %s raised\n", run_script);
             return 1;
+        }
+    }
+
+    // Drain whatever the key script queued into the UI, exactly as the
+    // firmware's main loop does -- render only when something changed, and
+    // let HOME pop to root. Bounded by the queue, not by a frame budget:
+    // there is no user here to out-type us.
+    while (host::keys_pending()) {
+        const platform::KeyEvent ev = platform::keyboard().poll();
+        if (ev.key == platform::Key::kNone || !ev.pressed) {
+            continue;
+        }
+        if (ev.key == platform::Key::kHome && mgr.current() != &apps::home_screen()) {
+            mgr.pop_to_root();
+        } else {
+            mgr.handle_key(ev);
         }
     }
 

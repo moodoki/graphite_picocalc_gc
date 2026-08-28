@@ -130,6 +130,13 @@ jobs:
         run: |
           ./build/host/graphite-shot --shot home2.ppm
           cmp home.ppm home2.ppm
+      # D98: the committed images must still match the firmware. Same shape
+      # as the Docs workflow's check-reference job, and the same lesson --
+      # that one worked, nobody read the red badge, and the wiki served a
+      # calculator with no apps for eight days. A drift check is only worth
+      # having if its failure is loud.
+      - name: Doc images match the firmware
+        run: python3 scripts/gen-doc-images.py --check
       - uses: actions/upload-artifact@v7
         with:
           name: home-screen-linux

@@ -51,6 +51,15 @@ on the Raspberry Pi Pico SDK. Runs on both the Pico 1 H (RP2040) and Pico 2 H
   variables, lists and matrices.
 - **Persistence** — everything survives a power cycle, on the SD card.
 
+<p align="center">
+  <img src="docs-site/images/natural-math.png" width="320"
+       alt="The home screen showing a square-root sign over 2, a stacked one-third fraction, and 1024, each entered expression echoed on the left and its result right-aligned.">
+  <br>
+  <em>Natural math display. Unlike the photograph above, this one is rendered
+  by the firmware itself and regenerated on every build — see
+  <a href="docs-site/images/">docs-site/images</a>.</em>
+</p>
+
 The full list is in [FEATURES.md](FEATURES.md). The TI-83/84 is the reference
 for behaviour, but the UI is modernized for the PicoCalc's $320\times320$ color
 display rather than reproducing a $96\times64$ monochrome one.

@@ -1,0 +1,5 @@
+# Issue #52: the file manager's softkey row truncates "5:MKDIR" to "5:MKDI".
+#
+# Reached by navigation, not construction -- which is the whole reason key
+# scripts exist (D97). F6 opens APPS, the launcher lists Files third.
+f6 down down enter

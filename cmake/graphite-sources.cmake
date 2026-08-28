@@ -49,6 +49,7 @@ set(GRAPHITE_PORTABLE_SOURCES
     ${GRAPHITE_ROOT}/src/platform/sd_apps.cpp
     ${GRAPHITE_ROOT}/src/platform/sd_app_scan.cpp
     ${GRAPHITE_ROOT}/src/platform/io_scratch.cpp
+    ${GRAPHITE_ROOT}/src/platform/key_names.cpp
     ${GRAPHITE_ROOT}/src/gfx/font.cpp
     ${GRAPHITE_ROOT}/src/gfx/framebuffer.cpp
     ${GRAPHITE_ROOT}/src/ui/screen_manager.cpp

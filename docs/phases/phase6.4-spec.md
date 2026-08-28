@@ -328,12 +328,12 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 |---|---|---|---|
 | **6.4.0** ✅ | **Spike — one screen to a PPM, on both OSes.** The two guards (D94, §2.2), `display_headless.cpp`, `platform_host.cpp`, `main_host.cpp`, `scripting_stub.cpp`, `psram_arena.cpp`, an ad-hoc source list. No MicroPython, no SDL, no manifest. **Pulls one Linux CI job forward from 6.4.6**, since the two-OS gate is otherwise unmeetable from a macOS-only machine | 6 | `graphite-shot` writes a PPM of the home screen on **macOS and Linux**, and both Pico targets still build. §2 says this should be short; if it is not, **stop and re-plan** — the measurement was wrong |
 | 6.4.1 ✅ | **Shared source list** — `cmake/graphite-sources.cmake`, root project converted to consume it, 6.4.0's ad-hoc list replaced | 3 | Both Pico `.uf2`s are **byte-identical before and after** the conversion, and `host/` names no `src/` file directly |
-| 6.4.2 | **Platform backends, non-graphical** — `storage_posix`, `psram_arena`, `system_host`, `power_stub`, `fault_stub`, `commands_file`, ported from the fork against current `main` | 5 | The calculator runs headless end to end: an expression evaluates, a variable persists across a restart via `~/.picocalc`, and an SD app manifest under `~/.picocalc/apps/` appears as a launcher tile (§3.6) |
-| 6.4.3 | **MicroPython on host** — `MICROPY_GCREGS_SETJMP=1` (D96), host heap and stack sizing, the `picocalc_mp_init` call site | 5 | `py` at the home screen runs a script and `print()` reaches stdout; `examples/apps/periodic/` — the largest script we have — loads and draws |
-| 6.4.4 | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
+| 6.4.2 ✅ | **Platform backends, non-graphical** — `storage_posix`, `psram_arena`, `system_host`, `power_stub`, `fault_stub`, `commands_file`, ported from the fork against current `main` | 5 | The calculator runs headless end to end: an expression evaluates, a variable persists across a restart via `~/.picocalc`, and an SD app manifest under `~/.picocalc/apps/` appears as a launcher tile (§3.6) |
+| 6.4.3 ✅ | **MicroPython on host** — `MICROPY_GCREGS_SETJMP=1` (D96), host heap and stack sizing, the `picocalc_mp_init` call site | 5 | `py` at the home screen runs a script and `print()` reaches stdout; `examples/apps/periodic/` — the largest script we have — loads and draws |
+| 6.4.4 ✅ | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
 | 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, the `graphite-desktop` executable, stdin injection (D97). **Plus the sound seam itself**: §2.2 found `platform::Sound` does not exist, so this defines it, wires the firmware side to `drivers/pwm_sound` (which has had no caller ever) and only then writes `sound_sdl` (D95). **Closes #42** | 10 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays **on the board as well as on the desktop**, and stdin drives it too. **Separable** — everything above closes #33 without it |
 | 6.4.6 | **CI.** Build `graphite-shot` on Linux and macOS runners; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
-| 6.4.7 | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
+| 6.4.7 ✅ | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
 | 6.4.8 | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
 | 6.4.9 | **Docs and close** — README section carrying §3.5's warning verbatim, `ROADMAP.md` row, `dependencies.md` (SDL2 is a developer dependency, never a firmware one), a developer-facing `docs/host-build.md` | 3 | §7's checklist complete |
 
@@ -384,6 +384,31 @@ worth resisting: 6.4.5 is the fun task and the least load-bearing.
 `ubuntu-latest`, renders, checks the frame is not a flat colour, and requires a
 re-run to be byte-identical. CI still does not run the host test suite or
 clang-tidy; both stay in 6.4.6 and stay named as missing.
+
+**6.4.2, 6.4.3, 6.4.4 and 6.4.7 landed 2026-08-29.** Additions to the list
+above:
+
+- **The instrument works. #52 is photographed** (`docs-site/images/files-softkeys.png`):
+  the softkey row reads `2:CUT  4:REN  5:MKDI`. §4.1's static reading was
+  right on every detail, which is worth knowing about the *method* as much as
+  the bug — but it took the renderer to turn arithmetic into evidence.
+  **6.4.8 is unblocked.**
+- **Two self-inflicted faults, both from a stub returning a tidy answer
+  rather than a true one.** `stack_total()` returned 0 "so a screenshot would
+  not claim SRAM the host lacks", and MicroPython — which derives its
+  recursion limit from it — hung on the first check. Then the doc generator
+  put its scratch file *inside* the fixture directory the file manager
+  photographs, so the image set could never be stable. The second was caught
+  by the drift check on its first run, which is the argument for D98 in one
+  line.
+- **The drift check has been seen to fail**, on a corrupted image and on the
+  genuine non-determinism above, not merely written. §7 asks for that
+  explicitly.
+- **Guard count still 2.** Two chances to add a third were declined:
+  `__StackTop` became `platform::stack_top()` (16/24 bytes, no bss) and the
+  key-name table became `platform/key_names.*` (96/16 bytes, no bss). Both
+  are the D94 amendment's pattern — the metric prompts the question, and the
+  answer keeps turning out to be "this belongs behind the seam".
 
 ### 4.1 What the sweep already has a list of
 

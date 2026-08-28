@@ -71,7 +71,7 @@ add_executable(graphite-shot
     main_host.cpp
     platform_host.cpp
     display_headless.cpp
-    keyboard_host.cpp
+    keyscript.cpp
     storage_posix.cpp
     psram_arena.cpp
 )
