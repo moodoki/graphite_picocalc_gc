@@ -152,13 +152,11 @@ target_compile_options(cephes PRIVATE -w)
 
 # ---- Main executable ----
 add_executable(picocalc_graphcalc
+    # Firmware-only: the platform:: backends that talk to the board,
+    # plus its entry point. These are what host/ replaces.
     src/main.cpp
-    src/platform/app_registry.cpp
-    src/platform/sd_apps.cpp
-    src/platform/sd_app_scan.cpp
     src/platform/display.cpp
     src/platform/fault.cpp
-    src/platform/io_scratch.cpp
     src/platform/keyboard.cpp
     src/platform/platform.cpp
     src/platform/psram.cpp
@@ -167,6 +165,12 @@ add_executable(picocalc_graphcalc
     src/platform/storage.cpp
     src/platform/system.cpp
     src/platform/power.cpp
+    src/math/array_backend_pico.cpp
+    # Target-agnostic. Every one of these compiles on a desktop too.
+    src/platform/app_registry.cpp
+    src/platform/sd_apps.cpp
+    src/platform/sd_app_scan.cpp
+    src/platform/io_scratch.cpp
     src/gfx/font.cpp
     src/gfx/framebuffer.cpp
     src/ui/screen_manager.cpp
@@ -184,7 +188,6 @@ add_executable(picocalc_graphcalc
     src/math/catalog.cpp
     src/math/scratch.cpp
     src/math/array.cpp
-    src/math/array_backend_pico.cpp
     src/math/lists.cpp
     src/math/lists_persist.cpp
     src/math/named_lists.cpp
