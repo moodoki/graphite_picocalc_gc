@@ -21,7 +21,7 @@ Format:
 ## D98: generated doc images are committed *and* regenerated in CI, with a drift check
 
 **Date**: 2026-08-28
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: 6.4.4 produces the first machine-generated images this repo has
 had. Two consumers want opposite things.
 [#33](https://github.com/moodoki/graphite_picocalc_gc/issues/33) wants them
@@ -57,7 +57,7 @@ build-dir-plus-wiki is the fallback, and #33 would have to be reopened.
 ## D97: scripted input is a key script shared by both host executables, with stdin on the desktop
 
 **Date**: 2026-08-28
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: The 6.4 draft left two questions open about host input: whether
 `graphite-desktop` needs the fork's `--uart-inject` equivalent, and whether the
 headless target should grow a key-script format so a doc image can be any
@@ -98,7 +98,7 @@ screens, not a richer script format.
 ## D96: MicroPython's host build uses the setjmp GC register scan
 
 **Date**: 2026-08-23
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: 6B's MicroPython embed build had never been compiled for anything
 but `arm-none-eabi`. Generating the embed tree with `CC=clang` and compiling it
 natively on macOS arm64: 135 of 136 files clean. The one failure is
@@ -127,7 +127,7 @@ path clang-compatible, or the host build stops using clang.
 ## D95: desktop sound goes through SDL_audio, not ALSA
 
 **Date**: 2026-08-23
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: The downstream Luckfox fork's host port is portable in every file
 but one. `display_sdl`, `keyboard_sdl`, `storage_posix`, `psram_arena`,
 `power_stub`, `fault_stub` and even the misleadingly-named `system_linux.cpp`
@@ -149,12 +149,34 @@ is also higher than raw ALSA — immaterial for calculator beeps.
 **Revisit when**: The desktop target needs audio behaviour SDL cannot express,
 or 6.2's PCM sampler engine lands and has its own latency requirements.
 
+**Amended 2026-08-28: the premise was wrong. There is no `platform::Sound`, so
+6.4.5 has to build the seam before it can back it.**
+
+The Context above says the fork's backend runs "against the shared
+`platform::Sound` interface 6.4 inherits", and §2.1 of the spec says we "since
+carry anyway" the `src/platform/sound.{hpp,cpp}` the fork added. Neither is
+true: no sound abstraction exists in this repo. `drivers/pwm_sound` is built and
+linked (`CMakeLists.txt:47`, `:401`) and has **zero callers in `src/`** — the
+calculator has never made a sound. The claim came from reading the fork's file
+list and assuming a file we would obviously have; nobody grepped for a caller.
+
+The decision itself survives — when a seam exists, SDL_audio is still the right
+thing behind it, and the reasoning about ALSA and CoreAudio is unaffected. What
+changes is the cost: 6.4.5 now has to define `platform::Sound`, wire the
+firmware side to `pwm_sound`, *and* write the host backend, on a task already
+marked separable. It got more separable, not less. Nothing above 6.4.5 depends
+on this, and the headless renderer needs no audio at all.
+
+The same check found `commands_file.cpp` has nothing to implement either: there
+is no commands seam, only an inline `#if PICOCALC_SERIAL_INJECT` block in
+`src/main.cpp:757-846`. It leaves the spec's file list.
+
 ---
 
 ## D94: host coupling is marked with `#if !PICOCALC_HOST` guards, not hidden behind shim headers
 
 **Date**: 2026-08-23
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: Compiling the tree natively found exactly three files that do not
 build on host, each on a single include: `gfx/framebuffer.cpp`
 (`pico/multicore.h`, the core-1 display service), `apps/mode_screen.cpp`
@@ -180,12 +202,40 @@ effect: it asks whether the coupling belongs in a shared file at all, or behind
 `platform::` seam has stopped doing its job and the answer is to fix the seam,
 not to switch to shims.
 
+**Amended 2026-08-28, on reading the three files before writing the guards: the
+count is two, not three, and one of the two is wider than the include table
+said.**
+
+`apps/graph_screen.cpp` never needed a guard. Its whole coupling is two
+`time_us_64()` calls timing `recompute()` (`:338`, `:359`), and
+`platform::uptime_us()` has existed the entire time
+(`src/platform/system.hpp:28`) — `home_screen.cpp:194,391` measures a duration
+with it in exactly the same shape. So that file is a house-style cleanup that
+brings it in line with the rest of the tree, not conditional compilation. The
+original survey read includes and stopped there; reading the *uses* is what
+found it. **That is the guard count doing its job on its first outing** — the
+number is meant to make someone ask whether the coupling belongs, and asking
+deleted a third of it.
+
+`gfx/framebuffer.cpp` is correspondingly worse than recorded. It includes
+`pico/stdlib.h` as well as `pico/multicore.h`, and — the part that matters — it
+gates the frame buffer and the entire full-frame render body on the raw macro
+`#if PICOCALC_PICO2` (`:16`, `:91`, `:237`), not on `config::kUseFullFramebuffer`.
+D92's `config.hpp` fold alone therefore produces a host build that compiles,
+links, runs and **draws nothing**, with no diagnostic anywhere. Those three
+`#if`s are widened to `PICOCALC_PICO2 || PICOCALC_HOST` as part of the same
+change. The general lesson is worth more than the fix: a `constexpr bool` and a
+preprocessor macro that are supposed to mean the same thing, and are read in
+different places, will eventually disagree — and the failure is silent by
+construction, because the preprocessor deletes the code rather than complaining
+about it.
+
 ---
 
 ## D93: two display backends, and the headless one lands first
 
 **Date**: 2026-08-23
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: #42 asks for a desktop emulator; #33 asks for a host-side renderer
 for docs images. Both bottom out at the same seam —
 `platform::Display::push_rect(x, y, w, h, buf)` — but they want different
@@ -214,7 +264,7 @@ start to converge.
 ## D92: the desktop target is a separate CMake project, over a source list shared with the firmware
 
 **Date**: 2026-08-23
-**Status**: **PROPOSED — part of Phase 6.4 (`phase6.4-spec.md`), not yet accepted.**
+**Status**: Accepted (2026-08-28)
 **Context**: #42 asks for "a third build target (alongside Pico 1 and Pico 2)".
 The downstream fork instead made `host/` its own `project()` referencing
 `../src`, and that fork is now 29 files stale after one phase — its

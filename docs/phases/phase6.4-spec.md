@@ -12,13 +12,14 @@ a window. Closes [#33](https://github.com/moodoki/graphite_picocalc_gc/issues/33
 [#42](https://github.com/moodoki/graphite_picocalc_gc/issues/42) (desktop
 emulator build target).
 
-**Status**: **PROPOSED — drafted 2026-08-23, planned out 2026-08-28, not yet
-accepted.** D92-D98 are open. Unlike 6.3, the feasibility question here is
-already answered by measurement (§2), so the spike is short and the risk is
-concentrated in maintenance rather than in whether it can work at all. The
+**Status**: **ACCEPTED 2026-08-28 — in progress.** D92-D98 are accepted; D94
+and D95 carry same-day amendments (§2.2). Unlike 6.3, the feasibility question
+here is already answered by measurement (§2), so the spike is short and the risk
+is concentrated in maintenance rather than in whether it can work at all. The
 2026-08-28 pass added the task estimates (§4), the file list (§3.7) and the
 verification rules (§7), and closed the three questions the draft left open
-(§6, D97-D98). **~48 hrs, or ~40 without the SDL window.**
+(§6, D97-D98). **~50 hrs, or ~40 without the SDL window**, which grew by the
+sound seam §2.2 found missing.
 
 **Sub-phase numbering**: dotted. A desktop build was never part of Phase 6's
 committed goals; it turned up out of #42's observation that a downstream fork
@@ -69,9 +70,9 @@ non-platform sources compiled clean.** Three failed, each on a single include:
 
 | File | Include | Note |
 |------|---------|------|
-| `src/gfx/framebuffer.cpp` | `pico/multicore.h` | The core-1 display service. #33's stated boundary. |
+| `src/gfx/framebuffer.cpp` | `pico/multicore.h`, `pico/stdlib.h` | The core-1 display service. #33's stated boundary. **Two includes, not one** — see §2.2. |
 | `src/apps/mode_screen.cpp` | `pico/bootrom.h` | Reboot-to-BOOTSEL menu entry. |
-| `src/apps/graph_screen.cpp` | `pico/time.h` | Newer than the fork; not covered by it. |
+| `src/apps/graph_screen.cpp` | `pico/time.h` | Newer than the fork; not covered by it. **Needs no guard** — §2.2. |
 
 **All 29 files of Phase 6 drift are host-clean at the include level** —
 `src/scripting/*` (including `mp_calc_module.c` and `mp_port.c`),
@@ -131,6 +132,42 @@ one-time cost.
 Linux-bound**: `sound_alsa.cpp`, which `dlopen`s ALSA and spawns a pthread.
 D95 replaces it.
 
+### 2.2 What re-reading the source before writing code changed
+
+§2 was a compile survey: it ran the compiler and recorded which includes
+failed. Before starting 6.4.0 the same files were read rather than compiled, and
+three things moved. Two of them make the phase smaller and one makes it bigger,
+which is roughly what an honest re-check should look like.
+
+**`graph_screen.cpp` needs no guard, so D94's count is two.** Its entire
+coupling is two `time_us_64()` calls timing `recompute()` (`:338`, `:359`), and
+`platform::uptime_us()` has been there all along (`src/platform/system.hpp:28`)
+— `home_screen.cpp:194,391` measures a duration with it in the identical shape.
+So it is a three-line cleanup that brings the file in line with the rest of the
+tree. **A survey of includes cannot see this; only a reading of uses can.**
+
+**`framebuffer.cpp` has a trap that would have cost a debugging session.** It
+gates the frame buffer *and the whole full-frame render body* on the raw macro
+`#if PICOCALC_PICO2` (`:16`, `:91`, `:237`), not on
+`config::kUseFullFramebuffer`. D92's `config.hpp` fold is therefore necessary
+and **not sufficient**: on its own it yields a host build that compiles, links,
+runs and draws nothing, with no diagnostic. Those three `#if`s widen to
+`PICOCALC_PICO2 || PICOCALC_HOST`. The file also includes `pico/stdlib.h`, which
+the §2 table missed.
+
+**There is no `platform::Sound`, and no commands seam.** §2.1 above claimed we
+"since carry anyway" the sound abstraction the fork added. We do not:
+`drivers/pwm_sound` is linked (`CMakeLists.txt:47`, `:401`) with **zero callers
+in `src/`** — this calculator has never made a sound. So 6.4.5 must define the
+seam and wire the firmware side before a host backend means anything, which is
+why its estimate moves. Likewise `commands_file.cpp` has nothing to implement:
+serial injection is an inline `#if PICOCALC_SERIAL_INJECT` block in
+`src/main.cpp:757-846`, not a `platform::` interface. It leaves §3.7's list.
+
+The pattern in all three is the same one the 2026-08-23 session recorded twice
+over — **probing beat reading, and running the example caught the example being
+wrong.** A file list read off another repository is a reading, not a probe.
+
 ## 3. Design
 
 ### 3.1 A separate CMake project, with a shared source list (D92)
@@ -168,8 +205,9 @@ path to looking at #52.
 
 ### 3.3 Guards, not shim headers (D94)
 
-The three files in §2 get `#if !PICOCALC_HOST` guards in the fork's style, with
-the host branch declaring what it needs from a backend:
+**Two** of the three files in §2 get `#if !PICOCALC_HOST` guards in the fork's
+style, with the host branch declaring what it needs from a backend (§2.2
+retired the third):
 
 ```cpp
 #if !PICOCALC_HOST
@@ -181,9 +219,10 @@ namespace host { void request_exit(); }
 
 The rejected alternative is a `host/shims/pico/*.h` directory of fake headers.
 It would need no `src/` edits at all, which is its whole appeal — and that is
-the objection. The guard count *is* the coupling metric. Three is a number we
+the objection. The guard count *is* the coupling metric. Two is a number we
 can watch; a shim directory makes new coupling invisible and lets the number
-grow silently.
+grow silently. §2.2 is the mechanism working on its first outing: the count made
+someone ask whether the third file's coupling belonged, and it did not.
 
 ### 3.4 Sound through SDL_audio (D95)
 
@@ -247,7 +286,10 @@ host/
 │                           #   is portable as written and misnamed there
 ├── power_stub.cpp          # NEW (6.4.2)
 ├── fault_stub.cpp          # NEW (6.4.2)
-├── commands_file.cpp       # NEW (6.4.2)
+├── scripting_stub.cpp      # NEW (6.4.0): PythonInterpreter with init() ->
+│                           #   false. home_screen.cpp calls scripting::python(),
+│                           #   so the spike cannot link without it; 6.4.3
+│                           #   replaces it with the real runtime
 ├── keyscript.cpp           # NEW (6.4.4): key-script parser and driver,
 │                           #   shared by both executables (D97)
 ├── display_sdl.cpp         # NEW (6.4.5)
@@ -268,12 +310,13 @@ docs-site/images/           # NEW (6.4.4): committed PNGs, regenerable and
 ```
 
 **Existing files modified** — the complete list, and it is short by design
-(§3.3): `src/gfx/framebuffer.cpp`, `src/apps/mode_screen.cpp` and
-`src/apps/graph_screen.cpp` gain one `#if !PICOCALC_HOST` guard each;
-`src/config.hpp` folds `PICOCALC_HOST` into the full-framebuffer branch (7
-lines in the fork); the root `CMakeLists.txt` switches to the shared list.
-**Any growth in this list is §3.3's coupling metric moving, and belongs in a
-review comment.**
+(§3.3): `src/gfx/framebuffer.cpp` and `src/apps/mode_screen.cpp` gain
+`#if !PICOCALC_HOST` guards; `src/apps/graph_screen.cpp` swaps two
+`time_us_64()` calls for the `platform::uptime_us()` that already exists, which
+is a cleanup and **not** a guard (§2.2); `src/config.hpp` folds `PICOCALC_HOST`
+into the full-framebuffer branch (7 lines in the fork); the root
+`CMakeLists.txt` switches to the shared list. **Any growth in this list is
+§3.3's coupling metric moving, and belongs in a review comment.**
 
 ## 4. Task breakdown
 
@@ -283,19 +326,21 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 
 | id | task | hrs | done when |
 |---|---|---|---|
-| **6.4.0** | **Spike — one screen to a PPM, on both OSes.** The three guards (D94), `display_headless.cpp`, `platform_host.cpp`, `main_host.cpp`, `sound_stub.cpp`, an ad-hoc source list. No MicroPython, no SDL, no manifest | 6 | `graphite-shot` writes a PPM of the home screen on **macOS and Linux**, and both Pico targets still build. §2 says this should be short; if it is not, **stop and re-plan** — the measurement was wrong |
+| **6.4.0** | **Spike — one screen to a PPM, on both OSes.** The two guards (D94, §2.2), `display_headless.cpp`, `platform_host.cpp`, `main_host.cpp`, `scripting_stub.cpp`, `psram_arena.cpp`, an ad-hoc source list. No MicroPython, no SDL, no manifest. **Pulls one Linux CI job forward from 6.4.6**, since the two-OS gate is otherwise unmeetable from a macOS-only machine | 6 | `graphite-shot` writes a PPM of the home screen on **macOS and Linux**, and both Pico targets still build. §2 says this should be short; if it is not, **stop and re-plan** — the measurement was wrong |
 | 6.4.1 | **Shared source list** — `cmake/graphite-sources.cmake`, root project converted to consume it, 6.4.0's ad-hoc list replaced | 3 | Both Pico `.uf2`s are **byte-identical before and after** the conversion, and `host/` names no `src/` file directly |
 | 6.4.2 | **Platform backends, non-graphical** — `storage_posix`, `psram_arena`, `system_host`, `power_stub`, `fault_stub`, `commands_file`, ported from the fork against current `main` | 5 | The calculator runs headless end to end: an expression evaluates, a variable persists across a restart via `~/.picocalc`, and an SD app manifest under `~/.picocalc/apps/` appears as a launcher tile (§3.6) |
 | 6.4.3 | **MicroPython on host** — `MICROPY_GCREGS_SETJMP=1` (D96), host heap and stack sizing, the `picocalc_mp_init` call site | 5 | `py` at the home screen runs a script and `print()` reaches stdout; `examples/apps/periodic/` — the largest script we have — loads and draws |
 | 6.4.4 | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
-| 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, `sound_sdl` (D95), the `graphite-desktop` executable, stdin injection (D97). **Closes #42** | 8 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays, and stdin drives it too. **Separable** — everything above closes #33 without it |
+| 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, the `graphite-desktop` executable, stdin injection (D97). **Plus the sound seam itself**: §2.2 found `platform::Sound` does not exist, so this defines it, wires the firmware side to `drivers/pwm_sound` (which has had no caller ever) and only then writes `sound_sdl` (D95). **Closes #42** | 10 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays **on the board as well as on the desktop**, and stdin drives it too. **Separable** — everything above closes #33 without it |
 | 6.4.6 | **CI.** Build `graphite-shot` on Linux and macOS runners; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
 | 6.4.7 | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
 | 6.4.8 | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
 | 6.4.9 | **Docs and close** — README section carrying §3.5's warning verbatim, `ROADMAP.md` row, `dependencies.md` (SDL2 is a developer dependency, never a firmware one), a developer-facing `docs/host-build.md` | 3 | §7's checklist complete |
 
-**Total ~48 hrs**, or **~40 without 6.4.5**, which is separable and drops the
-only external package this phase would introduce. The headless path alone
+**Total ~50 hrs**, or **~40 without 6.4.5**, which is separable and drops the
+only external package this phase would introduce — and which §2.2 made both
+bigger and more clearly optional, since it now carries firmware work the rest of
+the phase does not need. The headless path alone
 closes #33, feeds CI and answers #52; the SDL window closes #42 and is the
 part that is *pleasant* rather than necessary — §5.2 is worth re-reading
 before deciding the order.
