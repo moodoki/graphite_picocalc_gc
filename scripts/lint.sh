@@ -34,7 +34,19 @@ if ! command -v "$CLANG_FORMAT" &>/dev/null; then
   exit 1
 fi
 
-FILES=$(find src -type f \( \
+# host/ is formatted as of Phase 6.4: it is hand-written C++ implementing the
+# same platform:: interfaces as src/, so leaving it unformatted would put a
+# style boundary in the middle of one abstraction. drivers/ stays out --
+# it is vendored (drivers/README.md).
+#
+# It is NOT sent to clang-tidy below, and that is deliberate: clang-tidy
+# replays compile_commands.json, which is the arm-none-eabi database and has
+# no entry for a host file. Analysing host/ against it produces a page of
+# invented errors about missing standard headers -- the exact failure this
+# script's toolchain check further down exists to prevent. Linting host/
+# properly means pointing clang-tidy at build/host's own database, which is
+# 6.4.6's job along with getting clang-tidy into CI at all.
+FILES=$(find src host -type f \( \
   -name '*.cpp' -o -name '*.hpp' -o \
   -name '*.cc'  -o -name '*.h'   -o \
   -name '*.c'                          \
@@ -60,7 +72,8 @@ else
   # Only .cpp/.c go to clang-tidy: headers have no compile_commands.json
   # entry (clang-tidy would guess a bogus command) and are analyzed via
   # HeaderFilterRegex when their including TU is processed.
-  SRC_FILES=$(echo "$FILES" | grep -E '\.(cpp|cc|c)$' || true)
+  # src/ only -- see the note above the find.
+  SRC_FILES=$(echo "$FILES" | grep -E '^src/.*\.(cpp|cc|c)$' || true)
 
   # clang-tidy replays arm-none-eabi-g++ commands but doesn't know that
   # toolchain's built-in include paths (newlib, libstdc++). Ask g++ for

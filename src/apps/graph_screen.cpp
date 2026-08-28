@@ -5,8 +5,7 @@
 #include <cstdio>
 #include <limits>
 
-#include "pico/time.h"
-
+#include "platform/system.hpp"
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
@@ -335,7 +334,7 @@ void GraphScreen::sync_trace_to_value(double v) {
 
 void GraphScreen::recompute() {
     const graph::Viewport vp = viewport();
-    const uint64_t t0 = time_us_64();
+    const uint64_t t0 = platform::uptime_us();
 
     switch (mode()) {
         case graph::Mode::kParametric:
@@ -356,7 +355,7 @@ void GraphScreen::recompute() {
     // compute per strip (§8).
     graph::recompute_stat_plots(vp);
 
-    last_recompute_us_ = static_cast<uint32_t>(time_us_64() - t0);
+    last_recompute_us_ = static_cast<uint32_t>(platform::uptime_us() - t0);
     printf("graph recompute: %lu us\n", static_cast<unsigned long>(last_recompute_us_));
     trace_.clamp(trace_max_index());
     refresh_trace_readout();  // the window moved under the cursor

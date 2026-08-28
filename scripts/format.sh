@@ -22,7 +22,8 @@ if ! command -v "$CLANG_FORMAT" &>/dev/null; then
   exit 1
 fi
 
-FILES=$(find src -type f \( \
+# host/ included as of Phase 6.4 -- keep in step with scripts/lint.sh.
+FILES=$(find src host -type f \( \
   -name '*.cpp' -o -name '*.hpp' -o \
   -name '*.cc'  -o -name '*.h'   -o \
   -name '*.c'                          \

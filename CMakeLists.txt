@@ -299,10 +299,17 @@ execute_process(
 if(NOT GIT_HASH)
     set(GIT_HASH "nogit")
 endif()
-if(GIT_DIRTY)
-    set(PICOCALC_BUILD_ID "${GIT_HASH}-dev")
-else()
-    set(PICOCALC_BUILD_ID "${GIT_HASH}")
+# Overridable with -DPICOCALC_BUILD_ID=..., and that is not a convenience:
+# the id is compiled into the binary, so any before/after comparison of the
+# .uf2 across a commit differs on the git hash alone. Phase 6.4.1's gate is
+# exactly such a comparison (both .uf2s byte-identical across the source-list
+# extraction), and it is unrunnable without a way to hold this fixed.
+if(NOT PICOCALC_BUILD_ID)
+    if(GIT_DIRTY)
+        set(PICOCALC_BUILD_ID "${GIT_HASH}-dev")
+    else()
+        set(PICOCALC_BUILD_ID "${GIT_HASH}")
+    endif()
 endif()
 message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 
