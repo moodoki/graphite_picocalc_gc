@@ -108,7 +108,13 @@ jobs:
     # ordering paying off: the headless renderer was built first precisely
     # so nothing would stand between CI and a docs image.
     steps:
+      # submodules: MicroPython is one, and as of 6.4.3 the host build
+      # generates its embed tree the same way the firmware does. Without
+      # this the job fails at configure -- clearly, because the generator
+      # guard the firmware build already had says exactly what is missing.
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Build graphite-shot
         run: |
           cmake -B build/host -S host
