@@ -8,11 +8,12 @@ cmake_minimum_required(VERSION 3.20)
 # guarding nearly every line of it.
 #
 # What the fork got wrong, and what D92 fixes, is the SOURCE LIST: theirs
-# is a copy, and it is 29 files stale after one of our phases. The list
-# below is deliberately AD HOC and temporary -- 6.4.1 replaces it with
-# cmake/graphite-sources.cmake, included by this file and by the root, so
-# a new file lands in one place and both targets see it. Do not add to it
-# here; if you are reading this after 6.4.1 landed, this comment is a bug.
+# is a copy, and it is 29 files stale after one of our phases. This file
+# lists no sources of its own -- it includes cmake/graphite-sources.cmake,
+# the same lists the firmware builds from, so a new file lands in one place
+# and both targets see it (6.4.1). The only src/ paths it names are the
+# four MicroPython glue files it removes until 6.4.3, and that removal is
+# checked rather than assumed.
 #
 # Build:  cmake -B build/host -S host && cmake --build build/host
 project(graphite_host LANGUAGES C CXX)
@@ -40,140 +41,51 @@ add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
 )
 
-# ---- Vendored C dependencies, same options as the root build ----
-add_library(tinyexpr STATIC ${GRAPHITE_ROOT}/drivers/tinyexpr/tinyexpr.c)
+# ---- Vendored C dependencies ----
+# Sources come from the shared list; the options are repeated because they
+# are options, not a list. The cephes renames are load-bearing rather than
+# style: it exports gamma/erf/erfc, which collide with libm.
+include(${GRAPHITE_ROOT}/cmake/graphite-sources.cmake)
+
+add_library(tinyexpr STATIC ${GRAPHITE_TINYEXPR_SOURCES})
 target_include_directories(tinyexpr PUBLIC ${GRAPHITE_ROOT}/drivers/tinyexpr)
 target_compile_definitions(tinyexpr PUBLIC TE_POW_FROM_RIGHT)
 
-# The renames are load-bearing, not style: cephes exports gamma/erf/erfc,
-# which collide with libm. Same list as the root cephes target.
-add_library(cephes STATIC
-    ${GRAPHITE_ROOT}/drivers/cephes/const.c
-    ${GRAPHITE_ROOT}/drivers/cephes/polevl.c
-    ${GRAPHITE_ROOT}/drivers/cephes/mtherr.c
-    ${GRAPHITE_ROOT}/drivers/cephes/gamma.c
-    ${GRAPHITE_ROOT}/drivers/cephes/ndtr.c
-    ${GRAPHITE_ROOT}/drivers/cephes/expx2.c
-    ${GRAPHITE_ROOT}/drivers/cephes/ndtri.c
-    ${GRAPHITE_ROOT}/drivers/cephes/igam.c
-    ${GRAPHITE_ROOT}/drivers/cephes/igami.c
-    ${GRAPHITE_ROOT}/drivers/cephes/incbet.c
-    ${GRAPHITE_ROOT}/drivers/cephes/incbi.c
-    ${GRAPHITE_ROOT}/src/math/cephes_support.c
-)
+add_library(cephes STATIC ${GRAPHITE_CEPHES_SOURCES})
 target_compile_definitions(cephes PRIVATE gamma=cephes_gamma erf=cephes_erf erfc=cephes_erfc)
 target_compile_options(cephes PRIVATE -w)
 target_include_directories(cephes PRIVATE ${GRAPHITE_ROOT}/src)
 
-# ---- The shared tree, minus the platform backends and MicroPython ----
-# TEMPORARY. See the header comment: 6.4.1 replaces this.
-set(GRAPHITE_HOST_SPIKE_SOURCES
-    ${GRAPHITE_ROOT}/src/platform/app_registry.cpp
-    ${GRAPHITE_ROOT}/src/platform/sd_apps.cpp
-    ${GRAPHITE_ROOT}/src/platform/sd_app_scan.cpp
-    ${GRAPHITE_ROOT}/src/platform/io_scratch.cpp
-    ${GRAPHITE_ROOT}/src/gfx/font.cpp
-    ${GRAPHITE_ROOT}/src/gfx/framebuffer.cpp
-    ${GRAPHITE_ROOT}/src/ui/screen_manager.cpp
-    ${GRAPHITE_ROOT}/src/ui/input_line.cpp
-    ${GRAPHITE_ROOT}/src/ui/prompt_line.cpp
-    ${GRAPHITE_ROOT}/src/ui/output_log.cpp
-    ${GRAPHITE_ROOT}/src/ui/text_buffer.cpp
-    ${GRAPHITE_ROOT}/src/ui/text_editor_widget.cpp
-    ${GRAPHITE_ROOT}/src/ui/chrome.cpp
-    ${GRAPHITE_ROOT}/src/math/engine.cpp
-    ${GRAPHITE_ROOT}/src/math/functions.cpp
-    ${GRAPHITE_ROOT}/src/math/format.cpp
-    ${GRAPHITE_ROOT}/src/math/frac.cpp
-    ${GRAPHITE_ROOT}/src/math/autoclose.cpp
-    ${GRAPHITE_ROOT}/src/math/catalog.cpp
-    ${GRAPHITE_ROOT}/src/math/scratch.cpp
-    ${GRAPHITE_ROOT}/src/math/array.cpp
-    ${GRAPHITE_ROOT}/src/math/lists.cpp
-    ${GRAPHITE_ROOT}/src/math/lists_persist.cpp
-    ${GRAPHITE_ROOT}/src/math/named_lists.cpp
-    ${GRAPHITE_ROOT}/src/math/named_lists_persist.cpp
-    ${GRAPHITE_ROOT}/src/math/list_ops.cpp
-    ${GRAPHITE_ROOT}/src/math/stats.cpp
-    ${GRAPHITE_ROOT}/src/math/dist.cpp
-    ${GRAPHITE_ROOT}/src/math/infer.cpp
-    ${GRAPHITE_ROOT}/src/math/matrix.cpp
-    ${GRAPHITE_ROOT}/src/math/matrices_persist.cpp
-    ${GRAPHITE_ROOT}/src/math/numeric_solve.cpp
-    ${GRAPHITE_ROOT}/src/math/solve_expr.cpp
-    ${GRAPHITE_ROOT}/src/math/complex.cpp
-    ${GRAPHITE_ROOT}/src/math/unified_compile.cpp
-    ${GRAPHITE_ROOT}/src/math/unified_vm.cpp
-    ${GRAPHITE_ROOT}/src/math/unified_home.cpp
-    ${GRAPHITE_ROOT}/src/math/array_format.cpp
-    ${GRAPHITE_ROOT}/src/math/seq_expr.cpp
-    ${GRAPHITE_ROOT}/src/math/units.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/expr.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/parser.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/serialize.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/simplify.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/derivative.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/expand.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/poly.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/solve.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/factor.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/integrate.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/cas_eval.cpp
-    ${GRAPHITE_ROOT}/src/math/cas/exact.cpp
-    ${GRAPHITE_ROOT}/src/math/var_store.cpp
-    ${GRAPHITE_ROOT}/src/scripting/calc_canvas.cpp
-    ${GRAPHITE_ROOT}/src/render/pool.cpp
-    ${GRAPHITE_ROOT}/src/render/layout_builder.cpp
-    ${GRAPHITE_ROOT}/src/render/layout_render.cpp
-    ${GRAPHITE_ROOT}/src/graph/viewport.cpp
-    ${GRAPHITE_ROOT}/src/graph/plotter.cpp
-    ${GRAPHITE_ROOT}/src/graph/graph_mode.cpp
-    ${GRAPHITE_ROOT}/src/graph/graph_state.cpp
-    ${GRAPHITE_ROOT}/src/graph/graph_persist.cpp
-    ${GRAPHITE_ROOT}/src/graph/function_source.cpp
-    ${GRAPHITE_ROOT}/src/graph/parametric_source.cpp
-    ${GRAPHITE_ROOT}/src/graph/polar_source.cpp
-    ${GRAPHITE_ROOT}/src/graph/seq_points.cpp
-    ${GRAPHITE_ROOT}/src/graph/stat_plot.cpp
-    ${GRAPHITE_ROOT}/src/graph/trace.cpp
-    ${GRAPHITE_ROOT}/src/graph/analysis.cpp
-    ${GRAPHITE_ROOT}/src/graph/analysis_cursor.cpp
-    ${GRAPHITE_ROOT}/src/apps/nav.cpp
-    ${GRAPHITE_ROOT}/src/apps/launcher_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/notepad_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/program_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/home_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/const_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/settings_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/file_list.cpp
-    ${GRAPHITE_ROOT}/src/apps/files_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/list_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/calc_menu.cpp
-    ${GRAPHITE_ROOT}/src/apps/cas_menu.cpp
-    ${GRAPHITE_ROOT}/src/apps/matrix_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/solver_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/stats_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/dist_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/infer_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/plot_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/graph_model.cpp
-    ${GRAPHITE_ROOT}/src/apps/slot_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/y_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/param_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/polar_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/seq_editor.cpp
-    ${GRAPHITE_ROOT}/src/apps/graph_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/window_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/mode_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/help_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/table_model.cpp
-    ${GRAPHITE_ROOT}/src/apps/table_setup.cpp
-    ${GRAPHITE_ROOT}/src/apps/table_screen.cpp
-    ${GRAPHITE_ROOT}/src/apps/split_screen.cpp
+# ---- The shared tree ----
+# The MicroPython glue is host-clean at the include level -- that was
+# measured, 136 of 136 embed files compile natively with
+# MICROPY_GCREGS_SETJMP=1 (D96). What it still needs is the library to
+# link against, and generating the embed tree is 6.4.3. Until then these
+# four come out, and host/scripting_stub.cpp answers for them.
+#
+# DELETE THIS BLOCK in 6.4.3. It is the one place where host/ knows a
+# src/ path by name, which is exactly what D92 is trying to avoid, so it
+# should not outlive the reason for it.
+set(GRAPHITE_HOST_SOURCES ${GRAPHITE_PORTABLE_SOURCES})
+list(REMOVE_ITEM GRAPHITE_HOST_SOURCES
+    ${GRAPHITE_ROOT}/src/scripting/mp_port.c
+    ${GRAPHITE_ROOT}/src/scripting/micropython_embed.cpp
+    ${GRAPHITE_ROOT}/src/scripting/calc_api.cpp
+    ${GRAPHITE_ROOT}/src/scripting/mp_calc_module.c
 )
+list(LENGTH GRAPHITE_PORTABLE_SOURCES _n_portable)
+list(LENGTH GRAPHITE_HOST_SOURCES _n_host)
+math(EXPR _removed "${_n_portable} - ${_n_host}")
+if(NOT _removed EQUAL 4)
+    # A silent no-op here would mean a renamed file quietly comes back into
+    # the build and fails to link with a wall of MicroPython symbols.
+    message(FATAL_ERROR
+        "expected to drop 4 MicroPython sources, dropped ${_removed} -- "
+        "has a path in cmake/graphite-sources.cmake been renamed?")
+endif()
 
 add_executable(graphite-shot
-    ${GRAPHITE_HOST_SPIKE_SOURCES}
+    ${GRAPHITE_HOST_SOURCES}
     main_host.cpp
     platform_host.cpp
     display_headless.cpp

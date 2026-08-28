@@ -41,6 +41,10 @@ add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
 )
 
+# Every source list this project compiles, shared with the desktop build
+# (D92). Add new files there, not here.
+include(cmake/graphite-sources.cmake)
+
 # ---- Vendored drivers (read-only, see drivers/README.md) ----
 add_subdirectory(drivers/i2ckbd)
 add_subdirectory(drivers/lcdspi)
@@ -57,7 +61,7 @@ target_include_directories(fatfs PUBLIC drivers/fatfs)
 target_link_libraries(fatfs PUBLIC pico_stdlib)
 
 # tinyexpr (C99). TE_POW_FROM_RIGHT: TI-style right-associative '^'.
-add_library(tinyexpr STATIC drivers/tinyexpr/tinyexpr.c)
+add_library(tinyexpr STATIC ${GRAPHITE_TINYEXPR_SOURCES})
 target_include_directories(tinyexpr PUBLIC drivers/tinyexpr)
 target_compile_definitions(tinyexpr PUBLIC TE_POW_FROM_RIGHT)
 
@@ -134,145 +138,16 @@ target_compile_options(micropython PRIVATE -w)
 # Symbols that exist in libm are renamed at compile time so the two can
 # never collide; math::dist declares the cephes_* names extern "C".
 add_library(cephes STATIC
-    drivers/cephes/const.c
-    drivers/cephes/polevl.c
-    drivers/cephes/mtherr.c
-    drivers/cephes/gamma.c
-    drivers/cephes/ndtr.c
-    drivers/cephes/expx2.c
-    drivers/cephes/ndtri.c
-    drivers/cephes/igam.c
-    drivers/cephes/igami.c
-    drivers/cephes/incbet.c
-    drivers/cephes/incbi.c
-    src/math/cephes_support.c
+    ${GRAPHITE_CEPHES_SOURCES}
 )
 target_compile_definitions(cephes PRIVATE gamma=cephes_gamma erf=cephes_erf erfc=cephes_erfc)
 target_compile_options(cephes PRIVATE -w)
 
 # ---- Main executable ----
+# Source list: cmake/graphite-sources.cmake (D92).
 add_executable(picocalc_graphcalc
-    # Firmware-only: the platform:: backends that talk to the board,
-    # plus its entry point. These are what host/ replaces.
-    src/main.cpp
-    src/platform/display.cpp
-    src/platform/fault.cpp
-    src/platform/keyboard.cpp
-    src/platform/platform.cpp
-    src/platform/psram.cpp
-    src/platform/sd_card.cpp
-    src/platform/sd_diskio.cpp
-    src/platform/storage.cpp
-    src/platform/system.cpp
-    src/platform/power.cpp
-    src/math/array_backend_pico.cpp
-    # Target-agnostic. Every one of these compiles on a desktop too.
-    src/platform/app_registry.cpp
-    src/platform/sd_apps.cpp
-    src/platform/sd_app_scan.cpp
-    src/platform/io_scratch.cpp
-    src/gfx/font.cpp
-    src/gfx/framebuffer.cpp
-    src/ui/screen_manager.cpp
-    src/ui/input_line.cpp
-    src/ui/prompt_line.cpp
-    src/ui/output_log.cpp
-    src/ui/text_buffer.cpp
-    src/ui/text_editor_widget.cpp
-    src/ui/chrome.cpp
-    src/math/engine.cpp
-    src/math/functions.cpp
-    src/math/format.cpp
-    src/math/frac.cpp
-    src/math/autoclose.cpp
-    src/math/catalog.cpp
-    src/math/scratch.cpp
-    src/math/array.cpp
-    src/math/lists.cpp
-    src/math/lists_persist.cpp
-    src/math/named_lists.cpp
-    src/math/named_lists_persist.cpp
-    src/math/list_ops.cpp
-    src/math/stats.cpp
-    src/math/dist.cpp
-    src/math/infer.cpp
-    src/math/matrix.cpp
-    src/math/matrices_persist.cpp
-    src/math/numeric_solve.cpp
-    src/math/solve_expr.cpp
-    src/math/complex.cpp
-    src/math/unified_compile.cpp
-    src/math/unified_vm.cpp
-    src/math/unified_home.cpp
-    src/math/array_format.cpp
-    src/math/seq_expr.cpp
-    src/math/units.cpp
-    src/math/cas/expr.cpp
-    src/math/cas/parser.cpp
-    src/math/cas/serialize.cpp
-    src/math/cas/simplify.cpp
-    src/math/cas/derivative.cpp
-    src/math/cas/expand.cpp
-    src/math/cas/poly.cpp
-    src/math/cas/solve.cpp
-    src/math/cas/factor.cpp
-    src/math/cas/integrate.cpp
-    src/math/cas/cas_eval.cpp
-    src/math/cas/exact.cpp
-    src/math/var_store.cpp
-    src/scripting/mp_port.c
-    src/scripting/micropython_embed.cpp
-    src/scripting/calc_api.cpp
-    src/scripting/calc_canvas.cpp
-    src/scripting/mp_calc_module.c
-    src/render/pool.cpp
-    src/render/layout_builder.cpp
-    src/render/layout_render.cpp
-    src/graph/viewport.cpp
-    src/graph/plotter.cpp
-    src/graph/graph_mode.cpp
-    src/graph/graph_state.cpp
-    src/graph/graph_persist.cpp
-    src/graph/function_source.cpp
-    src/graph/parametric_source.cpp
-    src/graph/polar_source.cpp
-    src/graph/seq_points.cpp
-    src/graph/stat_plot.cpp
-    src/graph/trace.cpp
-    src/graph/analysis.cpp
-    src/graph/analysis_cursor.cpp
-    src/apps/nav.cpp
-    src/apps/launcher_screen.cpp
-    src/apps/notepad_screen.cpp
-    src/apps/program_screen.cpp
-    src/apps/home_screen.cpp
-    src/apps/const_screen.cpp
-    src/apps/settings_screen.cpp
-    src/apps/file_list.cpp
-    src/apps/files_screen.cpp
-    src/apps/list_editor.cpp
-    src/apps/calc_menu.cpp
-    src/apps/cas_menu.cpp
-    src/apps/matrix_editor.cpp
-    src/apps/solver_screen.cpp
-    src/apps/stats_screen.cpp
-    src/apps/dist_screen.cpp
-    src/apps/infer_screen.cpp
-    src/apps/plot_screen.cpp
-    src/apps/graph_model.cpp
-    src/apps/slot_editor.cpp
-    src/apps/y_editor.cpp
-    src/apps/param_editor.cpp
-    src/apps/polar_editor.cpp
-    src/apps/seq_editor.cpp
-    src/apps/graph_screen.cpp
-    src/apps/window_screen.cpp
-    src/apps/mode_screen.cpp
-    src/apps/help_screen.cpp
-    src/apps/table_model.cpp
-    src/apps/table_setup.cpp
-    src/apps/table_screen.cpp
-    src/apps/split_screen.cpp
+    ${GRAPHITE_PICO_SOURCES}
+    ${GRAPHITE_PORTABLE_SOURCES}
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE
