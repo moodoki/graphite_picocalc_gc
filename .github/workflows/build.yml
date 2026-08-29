@@ -85,14 +85,111 @@ jobs:
       - name: Install clang-format (pinned to match local dev)
         run: |
           pip install "$(grep '^clang-format==' requirements-dev.txt | cut -d' ' -f1)"
+      # Mirrors scripts/lint.sh's file selection. host/ is included as of
+      # Phase 6.4 -- if these two ever disagree, the local check and CI
+      # disagree, and the one people trust is whichever last passed.
       - name: Check formatting
         run: |
           if [ -d src ] && [ -n "$(find src -name '*.cpp' -o -name '*.hpp' 2>/dev/null)" ]; then
-            find src -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \) \
+            find src host -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \) \
               | xargs clang-format --dry-run --Werror
           else
             echo "No source files yet, skipping format check."
           fi
+
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    # 22 suites, ~3,400 checks, and until Phase 6.4 CI never ran one of
+    # them. That is not a small gap: the spec's central anti-drift argument
+    # is "CI on every PR makes breakage loud immediately", and a suite
+    # nothing runs makes nothing loud. It needs no toolchain and no SDK --
+    # scripts/host-tests.sh compiles a hand-picked subset of src/ with the
+    # system compiler.
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the host suite
+        run: ./scripts/host-tests.sh
+
+  host-render:
+    name: Host renderer (Linux)
+    runs-on: ubuntu-latest
+    # Pulled forward from 6.4.6, because 6.4.0's gate is "a PPM on macOS AND
+    # Linux" and the development machine is macOS only. Without this the
+    # Linux half would be an assumption wearing a checkbox.
+    #
+    # No SDL, no apt packages beyond what the runner ships. That is D93's
+    # ordering paying off: the headless renderer was built first precisely
+    # so nothing would stand between CI and a docs image.
+    #
+    # Split from host-images on 2026-08-29 so it can join the release gate.
+    # What is left here is a FIRMWARE check wearing a docs hat -- it proves
+    # the shared src/ tree still renders and still renders deterministically,
+    # and shipping a tag past a render path that produces a flat colour is
+    # exactly what a gate is for. The drift check, which fails for a stale
+    # screenshot, stays out of the gate in host-images below.
+    steps:
+      # submodules: MicroPython is one, and as of 6.4.3 the host build
+      # generates its embed tree the same way the firmware does. Without
+      # this the job fails at configure -- clearly, because the generator
+      # guard the firmware build already had says exactly what is missing.
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      # Duplicated verbatim in host-images. Two self-contained jobs beat one
+      # job feeding the other an artifact: they report independently, so a
+      # broken render path and a stale image are two facts rather than one,
+      # and a native binary through upload-artifact loses its exec bit. If
+      # these two ever disagree, the gated build and the image build are not
+      # the same build -- keep them identical.
+      #
+      # --parallel is safe despite MicroPython: cmake/graphite-micropython.cmake
+      # generates the embed tree with execute_process at CONFIGURE time, so
+      # the sources all exist before the build graph is walked.
+      - name: Build graphite-shot
+        run: |
+          cmake -B build/host -S host
+          cmake --build build/host --parallel
+      - name: Render the home screen
+        run: ./build/host/graphite-shot --shot home.ppm
+      # Python rather than shell so this runs identically on a Mac, where it
+      # can actually be tried before being trusted. The od/wc spelling of it
+      # was GNU-only and unverifiable on the development machine.
+      - name: Check the image is a real 320x320 frame
+        run: python3 scripts/check-ppm.py home.ppm
+      - name: Determinism -- a re-run must be byte-identical
+        run: |
+          ./build/host/graphite-shot --shot home2.ppm
+          cmp home.ppm home2.ppm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: home-screen-linux
+          path: home.ppm
+
+  host-images:
+    name: Doc images (drift check)
+    runs-on: ubuntu-latest
+    # D98: the committed images must still match the firmware. Same shape
+    # as the Docs workflow's check-reference job, and the same lesson --
+    # that one worked, nobody read the red badge, and the wiki served a
+    # calculator with no apps for eight days. A drift check is only worth
+    # having if its failure is loud.
+    #
+    # Deliberately NOT in the release gate: this fails when a screenshot is
+    # stale, and blocking a firmware tag on a stale screenshot would be the
+    # wrong trade in the wrong direction. It runs on tag pushes regardless,
+    # so the badge is there to read.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      # Keep identical to host-render's -- see the note there.
+      - name: Build graphite-shot
+        run: |
+          cmake -B build/host -S host
+          cmake --build build/host --parallel
+      - name: Doc images match the firmware
+        run: python3 scripts/gen-doc-images.py --check
 
   validate-docs:
     name: Validate docs
@@ -116,7 +213,17 @@ jobs:
 
   release:
     name: Publish release artifacts
-    needs: [build, lint, validate-docs]
+    # host-tests joins the gate: it exercises the firmware's own maths and
+    # UI logic, so shipping a release past a failing suite is exactly the
+    # thing a gate is for. host-render joins it for the same reason -- it
+    # proves the shared src/ tree still renders, and a flat-colour frame is
+    # a firmware fault, not a docs one. Free in wall-clock: it finishes well
+    # inside the firmware builds this already waits on.
+    #
+    # host-images deliberately does NOT -- it is a docs job, and blocking a
+    # firmware release because a screenshot drifted would be the wrong trade
+    # in the wrong direction. That was the whole reason to split the two.
+    needs: [build, lint, validate-docs, host-tests, host-render]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

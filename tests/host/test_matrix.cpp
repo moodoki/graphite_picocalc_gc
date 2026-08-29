@@ -35,6 +35,13 @@ void check_near(double got, double expected, const char* what, double tol = 1e-9
     }
 }
 
+// NB: call the operation on its OWN line and pass the result in, never
+// check_err(matops::foo(..., &err), err, ...). The call writes `err` and
+// the next argument reads it, and argument evaluation order is
+// UNSPECIFIED in C++ -- so that spelling asks the compiler which it feels
+// like doing. It passed under clang and failed all 20 of these checks
+// under GCC, and went unnoticed for as long as it did because CI never ran
+// this suite (fixed in Phase 6.4.6).
 void check_err(bool ok, const char* err, const char* expected, const char* what) {
     ++g_checks;
     if (ok || err == nullptr || std::strcmp(err, expected) != 0) {
@@ -100,6 +107,7 @@ void test_arithmetic() {
     Array b;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
 
     const double va[6] = {1, 2, 3, 4, 5, 6};
     const double vb[6] = {10, 20, 30, 40, 50, 60};
@@ -131,14 +139,17 @@ void test_arithmetic() {
 
     // Dim mismatches
     err = nullptr;
-    check_err(matops::add(a, c, out, &err), err, "Dim mismatch", "add dim mismatch");
+    ok = matops::add(a, c, out, &err);
+    check_err(ok, err, "Dim mismatch", "add dim mismatch");
     err = nullptr;
-    check_err(matops::mul(a, b, out, &err), err, "Dim mismatch", "mul dim mismatch");
+    ok = matops::mul(a, b, out, &err);
+    check_err(ok, err, "Dim mismatch", "mul dim mismatch");
 
     // Empty operand
     Array e;
     err = nullptr;
-    check_err(matops::add(e, b, out, &err), err, "Not a matrix", "add empty");
+    ok = matops::add(e, b, out, &err);
+    check_err(ok, err, "Not a matrix", "add empty");
 }
 
 void test_identity_augment() {
@@ -147,6 +158,7 @@ void test_identity_augment() {
     Array b;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
 
     check(matops::identity(3, out, &err), "identity ok");
     const double vi[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
@@ -163,7 +175,8 @@ void test_identity_augment() {
     const double vc[3] = {1, 2, 3};
     check(fill(c, 3, 1, vc), "fill 3x1");
     err = nullptr;
-    check_err(matops::augment(a, c, out, &err), err, "Dim mismatch", "augment row mismatch");
+    ok = matops::augment(a, c, out, &err);
+    check_err(ok, err, "Dim mismatch", "augment row mismatch");
 }
 
 void test_determinant() {
@@ -171,6 +184,7 @@ void test_determinant() {
     Array a;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
     calc_t det = 0;
 
     check(matops::identity(5, out, &err) && matops::determinant(out, &det, &err),
@@ -203,7 +217,8 @@ void test_determinant() {
     const double vr[6] = {1, 2, 3, 4, 5, 6};
     check(fill(a, 2, 3, vr), "fill 2x3");
     err = nullptr;
-    check_err(matops::determinant(a, &det, &err), err, "Not square", "det non-square");
+    ok = matops::determinant(a, &det, &err);
+    check_err(ok, err, "Not square", "det non-square");
 }
 
 void test_inverse() {
@@ -212,6 +227,7 @@ void test_inverse() {
     Array inv;
     Array prod;
     const char* err = nullptr;
+    bool ok = false;
 
     const double v3[9] = {2, -1, 0, -1, 2, -1, 0, -1, 2};
     check(fill(a, 3, 3, v3), "fill spd 3x3");
@@ -229,7 +245,8 @@ void test_inverse() {
     const double vs[4] = {1, 2, 2, 4};
     check(fill(a, 2, 2, vs), "fill singular 2x2");
     err = nullptr;
-    check_err(matops::inverse(a, inv, &err), err, "Singular matrix", "inverse singular");
+    ok = matops::inverse(a, inv, &err);
+    check_err(ok, err, "Singular matrix", "inverse singular");
 }
 
 void test_rref_rank() {
@@ -265,6 +282,7 @@ void test_reshape() {
     Array a;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
 
     const double v[6] = {1, 2, 3, 4, 5, 6};
     check(fill(a, 2, 3, v), "reshape fill 2x3");
@@ -286,9 +304,11 @@ void test_reshape() {
     check_matrix(out, 2, 2, vz, "reshape from empty zeros");
 
     err = nullptr;
-    check_err(matops::reshape(a, 0, 3, out, &err), err, "Dim mismatch", "reshape zero rows");
+    ok = matops::reshape(a, 0, 3, out, &err);
+    check_err(ok, err, "Dim mismatch", "reshape zero rows");
     err = nullptr;
-    check_err(matops::reshape(a, 100, 3, out, &err), err, "Dim mismatch", "reshape over cap");
+    ok = matops::reshape(a, 100, 3, out, &err);
+    check_err(ok, err, "Dim mismatch", "reshape over cap");
 }
 
 void test_power() {
@@ -296,6 +316,7 @@ void test_power() {
     Array a;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
 
     const double v[4] = {1, 1, 0, 1};
     check(fill(a, 2, 2, v), "fill shear");
@@ -308,13 +329,15 @@ void test_power() {
     check_matrix(out, 2, 2, v5, "shear^5");
 
     err = nullptr;
-    check_err(matops::power(a, 101, out, &err), err, "Exponent out of range", "power cap");
+    ok = matops::power(a, 101, out, &err);
+    check_err(ok, err, "Exponent out of range", "power cap");
 
     Array r;
     const double vr[6] = {1, 2, 3, 4, 5, 6};
     check(fill(r, 2, 3, vr), "fill 2x3");
     err = nullptr;
-    check_err(matops::power(r, 2, out, &err), err, "Not square", "power non-square");
+    ok = matops::power(r, 2, out, &err);
+    check_err(ok, err, "Not square", "power non-square");
 }
 
 void test_eigenvalues() {
@@ -322,6 +345,7 @@ void test_eigenvalues() {
     Array a;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
 
     // Diagonal: eigenvalues are the diagonal, sorted descending.
     const double vd[9] = {3, 0, 0, 0, 7, 0, 0, 0, -2};
@@ -358,7 +382,8 @@ void test_eigenvalues() {
     const double vrot[4] = {0, -1, 1, 0};
     check(fill(a, 2, 2, vrot), "fill rotation");
     err = nullptr;
-    check_err(matops::eigenvalues(a, out, &err), err, "Complex eigenvalues", "eigen complex");
+    ok = matops::eigenvalues(a, out, &err);
+    check_err(ok, err, "Complex eigenvalues", "eigen complex");
 
     // 5x5 with a complex pair buried in a real spectrum: block diag
     // of rotation(embedded) and diag(1,2,3) -> still an error.
@@ -366,7 +391,8 @@ void test_eigenvalues() {
                            0, 0,  0, 0, 0, 2, 0,  0, 0, 0, 0, 3};
     check(fill(a, 5, 5, v5), "fill mixed 5x5");
     err = nullptr;
-    check_err(matops::eigenvalues(a, out, &err), err, "Complex eigenvalues", "eigen mixed complex");
+    ok = matops::eigenvalues(a, out, &err);
+    check_err(ok, err, "Complex eigenvalues", "eigen mixed complex");
 
     // eigenvalues_complex (Phase 4C, D30/P4-7): the full spectrum,
     // conjugate pairs included, on the same fixtures above.
@@ -413,7 +439,8 @@ void test_eigenvalues() {
     Array big;
     check(big.resize(11, 11), "resize 11x11");
     err = nullptr;
-    check_err(matops::eigenvalues(big, out, &err), err, "Eigen limit is 10x10", "eigen cap");
+    ok = matops::eigenvalues(big, out, &err);
+    check_err(ok, err, "Eigen limit is 10x10", "eigen cap");
 
     // 1x1
     const double v1[1] = {42};
@@ -887,6 +914,7 @@ void test_complex_matops() {
     Array b;
     Array out;
     const char* err = nullptr;
+    bool ok = false;
 
     // A = [[1+i, 2],[3, 4-i]]
     const Complex va[4] = {{1, 1}, {2, 0}, {3, 0}, {4, -1}};
@@ -900,7 +928,8 @@ void test_complex_matops() {
     // The real-only det entry point refuses complex input (D37).
     calc_t rd = 0;
     err = nullptr;
-    check_err(matops::determinant(a, &rd, &err), err, "Non-real matrix", "real det on complex");
+    ok = matops::determinant(a, &rd, &err);
+    check_err(ok, err, "Non-real matrix", "real det on complex");
 
     // A * A^-1 = I
     check(matops::inverse(a, out, &err), "complex inverse ok");
@@ -958,16 +987,19 @@ void test_complex_matops() {
     check(matops::determinant(b, &d, &err), "singular complex det ok");
     check_cnear(d, 0, 0, "singular complex det 0");
     err = nullptr;
-    check_err(matops::inverse(b, out, &err), err, "Singular matrix", "complex singular inverse");
+    ok = matops::inverse(b, out, &err);
+    check_err(ok, err, "Singular matrix", "complex singular inverse");
 
     // Eigen stays real-input (D37).
     Array eout;
     err = nullptr;
-    check_err(matops::eigenvalues(b, eout, &err), err, "Non-real matrix", "eigenvalues complex");
+    ok = matops::eigenvalues(b, eout, &err);
+    check_err(ok, err, "Non-real matrix", "eigenvalues complex");
     Complex ce[matops::kMaxEigen];
     int cnt = 0;
     err = nullptr;
-    check_err(matops::eigenvalues_complex(b, ce, &cnt, &err), err, "Non-real matrix",
+    ok = matops::eigenvalues_complex(b, ce, &cnt, &err);
+    check_err(ok, err, "Non-real matrix",
               "eigenvalues_complex complex");
 
     // copy adopts the source dtype.
@@ -1179,6 +1211,7 @@ void test_eigenvectors() {
     Array a;
     Array v;
     const char* err = nullptr;
+    bool ok = false;
 
     // Diagonal: eigenvalues {3, 1} -> columns e1, e2.
     const double vd[4] = {3, 0, 0, 1};
@@ -1218,17 +1251,20 @@ void test_eigenvectors() {
     const double vj[4] = {2, 1, 0, 2};
     check(fill(a, 2, 2, vj), "evec fill jordan");
     err = nullptr;
-    check_err(matops::eigenvectors(a, v, &err), err, "No unique eigenvector", "evec defective");
+    ok = matops::eigenvectors(a, v, &err);
+    check_err(ok, err, "No unique eigenvector", "evec defective");
     const double vi[4] = {1, 0, 0, 1};
     check(fill(a, 2, 2, vi), "evec fill identity");
     err = nullptr;
-    check_err(matops::eigenvectors(a, v, &err), err, "No unique eigenvector", "evec repeated");
+    ok = matops::eigenvectors(a, v, &err);
+    check_err(ok, err, "No unique eigenvector", "evec repeated");
 
     // Rotation: complex pair refuses.
     const double vr[4] = {0, -1, 1, 0};
     check(fill(a, 2, 2, vr), "evec fill rotation");
     err = nullptr;
-    check_err(matops::eigenvectors(a, v, &err), err, "Complex eigenvalues", "evec complex");
+    ok = matops::eigenvectors(a, v, &err);
+    check_err(ok, err, "Complex eigenvalues", "evec complex");
 
     // matexpr exposure: composable matrix result.
     check(fill(matrices().matrix(8), 2, 2, vd), "evec fill [I]");

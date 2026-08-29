@@ -18,6 +18,329 @@ Format:
 
 ---
 
+## D99: macOS coverage of the host build is local, not a CI runner
+
+**Date**: 2026-08-29
+**Status**: Accepted
+**Context**: 6.4.6's row says "build `graphite-shot` on Linux **and** macOS
+runners". Every job in all three workflows is `ubuntu-latest`, so as written
+the task could not close. The two-OS requirement is not decoration: §3.5 calls
+the host build a development instrument rather than an emulator, the two
+platforms compile the shared tree with different compilers, and D96 exists
+because one of them rejected a GCC-only asm-register declaration. Today
+`host-images` failed on Linux over a MicroPython heap figure macOS and Linux
+do not agree on — a real divergence, invisible until Linux ran.
+**Decision**: Linux is covered by CI on every pull request. **macOS is covered
+by the developer's own machine**, and a local pass counts as satisfying the
+gate. No macOS runner is added.
+**Rationale**: The development machine *is* macOS, so every change is built
+and run there before it is pushed — the coverage exists, it is just not
+reported by a badge. A macOS runner would re-do work that has already
+happened, on the slowest and most expensive runner class GitHub offers, to
+produce a second green tick for a platform no user ships on: the firmware
+targets RP2040 and RP2350, and the desktop build is a tool. The asymmetry is
+also the right way round — the platform that gets automated coverage is the
+one nobody is watching.
+**Tradeoffs**: A macOS-only regression is caught by a human remembering to
+build, not by CI, so it can reach `main` if someone pushes without building.
+That is a real hole and it is accepted knowingly: the same is already true of
+`./scripts/build-all.sh` for the two firmware targets, and the failure mode is
+a developer-facing tool breaking, not a shipped binary. It also means "green
+on GitHub" is not by itself the full gate for anything touching `host/`.
+**Revisit when**: A second developer joins, or `graphite-desktop` (6.4.5)
+ships as something users install rather than something the project builds —
+at which point macOS stops being a build convenience and starts being a
+platform with users on it.
+
+---
+
+## D98: generated doc images are committed *and* regenerated in CI, with a drift check
+
+**Date**: 2026-08-28
+**Status**: Accepted (2026-08-28)
+**Context**: 6.4.4 produces the first machine-generated images this repo has
+had. Two consumers want opposite things.
+[#33](https://github.com/moodoki/graphite_picocalc_gc/issues/33) wants them
+committed, because the README has to render on GitHub and on the wiki with no
+build step and no toolchain. §5.1 wants them regenerable and checked, because
+an image set that silently stops matching the firmware is exactly the drift
+this phase exists to prevent — and a stale screenshot is worse than a
+photograph, since it looks authoritative.
+**Decision**: Both. Committed PNGs under `docs-site/images/`, produced by
+`scripts/gen-doc-images.py` driving `graphite-shot`, with a CI job that
+regenerates the set and fails the build if the working tree differs — the same
+shape `scripts/gen-doc-reference.py` and the Docs workflow's `check-reference`
+job already use for `docs-site/reference/`. Generation must be deterministic:
+a re-run on the same commit is byte-identical, on both host OSes.
+**Rationale**: The constraints only looked opposed. This exact pattern is
+already load-bearing in the repo for generated *text*, so extending it to
+images adds a job, not a mechanism, and the reviewer's mental model does not
+change. The alternative — build-dir images published only to the wiki — breaks
+#33's actual requirement (GitHub's README renderer runs no build) and would
+mean the most-read page in the project is the one page the drift check cannot
+see.
+**Tradeoffs**: Binary files in git history, which grow it monotonically and
+diff as "changed". Kept tolerable by 1-bit-ish 320x320 PNGs and by there being
+tens of them, not hundreds. Determinism is a real constraint on the renderer —
+anything time-, RNG- or uninitialised-memory-dependent in a rendered screen
+becomes a CI flake, and finding those is a cost this decision imports.
+**Revisit when**: the image set outgrows a few hundred KB, or determinism
+turns out to cost more than the drift check is worth — at which point
+build-dir-plus-wiki is the fallback, and #33 would have to be reopened.
+
+---
+
+## D97: scripted input is a key script shared by both host executables, with stdin on the desktop
+
+**Date**: 2026-08-28
+**Status**: Accepted (2026-08-28)
+**Context**: The 6.4 draft left two questions open about host input: whether
+`graphite-desktop` needs the fork's `--uart-inject` equivalent, and whether the
+headless target should grow a key-script format so a doc image can be any
+screen reached by *navigation* rather than only one that can be constructed
+directly. The 2026-08-23 session answered the value question sideways:
+`PICOCALC_SERIAL_INJECT` on the firmware turned out to be a full remote —
+enough to push a 10 KB file to the SD card in chunked calls, enumerate the
+card and read scripts back, with no card removal and no keypresses.
+**Decision**: One mechanism, in `host/keyscript.cpp`, linked into **both**
+executables: a text file of key names — the same names `platform::Key` already
+resolves for `key_held` and for 6B's `KeyEvent::name` (D87) — replayed into the
+key queue, with the screen dumped on demand. `graphite-desktop` additionally
+reads stdin lines and submits them to the home screen, mirroring the
+firmware's serial injection. It lands in **6.4.4, not 6.4.0**.
+**Rationale**: Scripted input is the more valuable of the two paths, so it
+belongs to the headless target that CI runs, not to the window. Reusing the
+existing name table is the same anti-drift argument D87 made: two tables that
+answer "which key is this" will diverge, and here the divergence would be
+silent, because a wrong name in a key script produces a *plausible* screenshot.
+The 6.4.4 timing is forced by 6.4.7 and 6.4.8 — #52's truncated softkey row is
+reached by navigating into the file manager, and the chrome sweep needs modal
+and flag states (a cut armed, 2nd held, a subsystem unhealthy) that are
+nothing *but* key sequences. Without key scripts the instrument cannot
+photograph the bug it was built to look at, let alone the rest of the chrome. Keeping it out of 6.4.0 preserves
+that spike's job, which is to fail fast on two OSes.
+**Tradeoffs**: A key script is a second input format to keep working, and it
+can only reach screens reachable by keys — a state that needs a specific SD
+card or a specific variable still has to be set up out of band. Neither
+executable gets an interactive host REPL out of this, which was never asked
+for. Stdin on the desktop overlaps with the key script and is kept because it
+is nearly free, not because it is needed.
+**Revisit when**: key scripts start encoding long navigation paths that break
+whenever a menu is reordered — the fix then is named entry points into
+screens, not a richer script format.
+
+---
+
+## D96: MicroPython's host build uses the setjmp GC register scan
+
+**Date**: 2026-08-23
+**Status**: Accepted (2026-08-28)
+**Context**: 6B's MicroPython embed build had never been compiled for anything
+but `arm-none-eabi`. Generating the embed tree with `CC=clang` and compiling it
+natively on macOS arm64: 135 of 136 files clean. The one failure is
+`shared/runtime/gchelper_generic.c`, whose aarch64 register-scan path declares
+`const register long x19 asm ("x19")` — a GCC extension for arch-specific
+register capture that clang rejects outright.
+**Decision**: Define `MICROPY_GCREGS_SETJMP=1` for the host build only. The
+firmware build is untouched. 136/136 compile with it set.
+**Rationale**: This is MicroPython's own documented escape hatch for exactly
+this situation — `setjmp` spills callee-saved registers to a buffer the GC can
+then scan portably, which is why the option exists. The alternative, requiring
+GCC on host, would make the macOS build depend on a non-default compiler to
+work around a portability flag that already exists. Patching vendored
+MicroPython was never a candidate: `drivers/README.md` treats it as a submodule
+precisely because it is too actively maintained to carry local changes.
+**Tradeoffs**: The setjmp scan is marginally slower and marginally more
+conservative than the register-specific path — irrelevant on a desktop, and it
+never reaches the firmware. It also means host and firmware differ in one more
+place, so a GC-timing-sensitive bug could in principle reproduce on one and not
+the other. Filed under §3.5's general warning rather than treated as special.
+**Revisit when**: MicroPython upstream makes `gchelper_generic.c`'s aarch64
+path clang-compatible, or the host build stops using clang.
+
+---
+
+## D95: desktop sound goes through SDL_audio, not ALSA
+
+**Date**: 2026-08-23
+**Status**: Accepted (2026-08-28)
+**Context**: The downstream Luckfox fork's host port is portable in every file
+but one. `display_sdl`, `keyboard_sdl`, `storage_posix`, `psram_arena`,
+`power_stub`, `fault_stub` and even the misleadingly-named `system_linux.cpp`
+(which includes only `<ctime>`, `<cstdio>`, `<cstring>`) all build on macOS as
+written. `sound_alsa.cpp` does not: it `dlopen`s `libasound` and drives it from
+a pthread, against the shared `platform::Sound` interface 6.4 inherits.
+**Decision**: Implement `sound_sdl.cpp` against `SDL_audio` instead of porting
+the ALSA backend or writing a CoreAudio sibling. The headless target links a
+silent stub and needs no audio library at all.
+**Rationale**: `SDL_audio` already abstracts ALSA, PulseAudio and CoreAudio
+behind one API, and SDL2 is the desktop target's dependency regardless — so
+this adds nothing new to the dependency set while deleting the `dlopen` and
+pthread machinery rather than duplicating it per platform. A CoreAudio backend
+would mean two non-portable files where the fork has one.
+**Tradeoffs**: Diverges from the fork, so that file cannot be taken as-is and
+the two trees will not converge here. Accepted: it is ~220 lines, and the
+`platform::Sound` seam it implements is shared either way. SDL's audio latency
+is also higher than raw ALSA — immaterial for calculator beeps.
+**Revisit when**: The desktop target needs audio behaviour SDL cannot express,
+or 6.2's PCM sampler engine lands and has its own latency requirements.
+
+**Amended 2026-08-28: the premise was wrong. There is no `platform::Sound`, so
+6.4.5 has to build the seam before it can back it.**
+
+The Context above says the fork's backend runs "against the shared
+`platform::Sound` interface 6.4 inherits", and §2.1 of the spec says we "since
+carry anyway" the `src/platform/sound.{hpp,cpp}` the fork added. Neither is
+true: no sound abstraction exists in this repo. `drivers/pwm_sound` is built and
+linked (`CMakeLists.txt:47`, `:401`) and has **zero callers in `src/`** — the
+calculator has never made a sound. The claim came from reading the fork's file
+list and assuming a file we would obviously have; nobody grepped for a caller.
+
+The decision itself survives — when a seam exists, SDL_audio is still the right
+thing behind it, and the reasoning about ALSA and CoreAudio is unaffected. What
+changes is the cost: 6.4.5 now has to define `platform::Sound`, wire the
+firmware side to `pwm_sound`, *and* write the host backend, on a task already
+marked separable. It got more separable, not less. Nothing above 6.4.5 depends
+on this, and the headless renderer needs no audio at all.
+
+The same check found `commands_file.cpp` has nothing to implement either: there
+is no commands seam, only an inline `#if PICOCALC_SERIAL_INJECT` block in
+`src/main.cpp:757-846`. It leaves the spec's file list.
+
+**Amended 2026-08-29: the firmware half is built, not proven.** Developer's
+call, and it follows from the zero callers above — a seam nothing invokes
+cannot be exercised except by writing a test caller, and a test caller written
+only to make a beep audible is scaffolding that outlives its reason. So 6.4.5
+defines `platform::Sound`, wires it to `pwm_sound`, and stops there on the
+firmware side: it compiles, it is reviewed, it is not flashed and listened to.
+The desktop backend *is* verified, because `graphite-desktop` can be run. The
+first feature that genuinely wants audio is what verifies the board path, with
+a real caller to verify it against. This narrows the gate, not the work — the
+implementation was always the bulk of the 10 hrs.
+
+---
+
+## D94: host coupling is marked with `#if !PICOCALC_HOST` guards, not hidden behind shim headers
+
+**Date**: 2026-08-23
+**Status**: Accepted (2026-08-28)
+**Context**: Compiling the tree natively found exactly three files that do not
+build on host, each on a single include: `gfx/framebuffer.cpp`
+(`pico/multicore.h`, the core-1 display service), `apps/mode_screen.cpp`
+(`pico/bootrom.h`, reboot-to-BOOTSEL) and `apps/graph_screen.cpp`
+(`pico/time.h`). 98 of 101 other sources compiled clean with no shims at all.
+Two ways to close the gap: guard the three files, or put a directory of fake
+`pico/*.h` headers on the host include path.
+**Decision**: Guards, in the downstream fork's style — `#if !PICOCALC_HOST`
+with the host branch declaring what it needs from a backend. No shim headers.
+**Rationale**: The shim approach needs zero `src/` edits, which is exactly the
+appeal and exactly the objection: **the guard count is the coupling metric.**
+Three is a number that can be watched in review and defended in a diff. A shim
+directory absorbs new Pico includes silently, so coupling grows without anyone
+deciding to add it, and the day a shim cannot fake the semantics (not just the
+symbol) the debt surfaces all at once. §5.1 already identifies drift as this
+phase's main risk; this keeps one axis of it visible by construction.
+**Tradeoffs**: Every new Pico-coupled file in a shared directory now needs a
+guard written by hand, which is friction on firmware work — a small tax paid by
+people not working on the host target. That is the intended signal, not a side
+effect: it asks whether the coupling belongs in a shared file at all, or behind
+`platform::`.
+**Revisit when**: The guard count passes roughly a dozen, which would mean the
+`platform::` seam has stopped doing its job and the answer is to fix the seam,
+not to switch to shims.
+
+**Amended 2026-08-28, on reading the three files before writing the guards: the
+count is two, not three, and one of the two is wider than the include table
+said.**
+
+`apps/graph_screen.cpp` never needed a guard. Its whole coupling is two
+`time_us_64()` calls timing `recompute()` (`:338`, `:359`), and
+`platform::uptime_us()` has existed the entire time
+(`src/platform/system.hpp:28`) — `home_screen.cpp:194,391` measures a duration
+with it in exactly the same shape. So that file is a house-style cleanup that
+brings it in line with the rest of the tree, not conditional compilation. The
+original survey read includes and stopped there; reading the *uses* is what
+found it. **That is the guard count doing its job on its first outing** — the
+number is meant to make someone ask whether the coupling belongs, and asking
+deleted a third of it.
+
+`gfx/framebuffer.cpp` is correspondingly worse than recorded. It includes
+`pico/stdlib.h` as well as `pico/multicore.h`, and — the part that matters — it
+gates the frame buffer and the entire full-frame render body on the raw macro
+`#if PICOCALC_PICO2` (`:16`, `:91`, `:237`), not on `config::kUseFullFramebuffer`.
+D92's `config.hpp` fold alone therefore produces a host build that compiles,
+links, runs and **draws nothing**, with no diagnostic anywhere. Those three
+`#if`s are widened to `PICOCALC_PICO2 || PICOCALC_HOST` as part of the same
+change. The general lesson is worth more than the fix: a `constexpr bool` and a
+preprocessor macro that are supposed to mean the same thing, and are read in
+different places, will eventually disagree — and the failure is silent by
+construction, because the preprocessor deletes the code rather than complaining
+about it.
+
+---
+
+## D93: two display backends, and the headless one lands first
+
+**Date**: 2026-08-23
+**Status**: Accepted (2026-08-28)
+**Context**: #42 asks for a desktop emulator; #33 asks for a host-side renderer
+for docs images. Both bottom out at the same seam —
+`platform::Display::push_rect(x, y, w, h, buf)` — but they want different
+things from it, and #33 was written believing it could only ever cover the
+natural math display because `framebuffer.cpp` was not host-clean. D94 removes
+that constraint, so a host renderer now reaches every screen.
+**Decision**: Two backends over one source list, built as two executables.
+`display_headless.cpp` composites to an RGB565 buffer and writes PPM, with no
+external dependency; `display_sdl.cpp` is the interactive window. `graphite-shot`
+(headless) is built and CI-wired **before** `graphite-desktop` (SDL).
+**Rationale**: Ordering is the whole decision. The headless target closes #33
+outright, needs nothing installed on a CI runner, and is the shortest path to
+looking at #52 — a bug the text-fits lint gate structurally cannot see, since
+`draw_softkeys` truncates to 6 chars a cell by design. Making the render check
+depend on SDL would put an external package between CI and a docs image for no
+gain, and would let a macOS `SDL_main` snag block #33.
+**Tradeoffs**: Two backends to maintain against one interface, and the headless
+one has no way to exercise input, so screens reachable only by navigation need
+§6's key-script question answered before they can be captured. PPM is
+dependency-free but not web-usable; a conversion step is assumed.
+**Revisit when**: The key-script format lands and the two targets' input paths
+start to converge.
+
+---
+
+## D92: the desktop target is a separate CMake project, over a source list shared with the firmware
+
+**Date**: 2026-08-23
+**Status**: Accepted (2026-08-28)
+**Context**: #42 asks for "a third build target (alongside Pico 1 and Pico 2)".
+The downstream fork instead made `host/` its own `project()` referencing
+`../src`, and that fork is now 29 files stale after one phase — its
+`host/CMakeLists.txt` source list predates every app, scripting and
+text-editor file added in Phase 6.
+**Decision**: Keep the fork's separate-project shape, and fix the thing that
+made it rot. `host/CMakeLists.txt` stays its own project; a new
+`cmake/graphite-sources.cmake` defines `GRAPHITE_PORTABLE_SOURCES` and
+`GRAPHITE_PICO_SOURCES`, and **both** the root project and `host/` `include()`
+it. `config.hpp` folds `PICOCALC_HOST` into the existing Pico 2 branch (full
+framebuffer, synchronous push), as the fork does.
+**Rationale**: The root `CMakeLists.txt` is bound to the Pico SDK from its
+first lines — `pico_sdk_init()`, the SDK toolchain file, `pico_add_extra_outputs`,
+`pico_enable_stdio_usb`, the MicroPython embed cross-build. A third target
+inside it shares no toolchain, no linker script and no output format, so
+literal-#42 would mean guarding nearly every line of that file. Splitting the
+projects but sharing the *list* takes the fork's structural win without its
+maintenance flaw: a new file lands in one place and both targets see it. The
+fork's 29-file drift is the evidence, not a hypothetical.
+**Tradeoffs**: Departs from #42's literal wording, so `cmake --build build/host`
+will not sit alongside `build/pico` and `build/pico2` and one more build
+invocation has to be learned. The shared list also becomes a coupling point:
+reordering or restructuring it now touches three builds at once, and the
+firmware builds must be verified unchanged when 6.4.1 converts them.
+**Revisit when**: CMake's Pico SDK integration stops requiring a toolchain file
+at project scope, which would make a genuine third target cheap.
+
+---
+
 ## D91: third-party `.uf2`s run on the Pico 2 by address translation, and are delegated on the Pico 1
 
 **Date**: 2026-08-16

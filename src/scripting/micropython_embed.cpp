@@ -5,6 +5,7 @@
 
 #include "config.hpp"
 #include "platform/fault.hpp"
+#include "platform/key_names.hpp"
 #include "platform/keyboard.hpp"
 #include "platform/storage.hpp"
 #include "platform/system.hpp"
@@ -18,16 +19,6 @@
 #include "scripting/calc_api.h"
 #include "scripting/mp_port.h"
 
-// Linker-provided top of core 0's stack (SCRATCH_Y). Absolute symbol, so
-// the address *is* the value — hence the array-typed extern, and hence
-// file scope: inside an anonymous namespace it picks up internal linkage
-// and no longer resolves. Same shape as src/platform/fault.cpp, which
-// documents this at length. The reserved double-underscore name is the
-// linker script's, not ours.
-// NOLINTBEGIN(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
-extern "C" char __StackTop[];
-// NOLINTEND(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
-
 namespace scripting {
 
 namespace {
@@ -38,7 +29,8 @@ namespace {
 alignas(8) std::uint8_t g_heap[config::kPythonHeapSize];
 
 // How much of core 0's 4 KB stack is kept BACK from MicroPython, measured
-// down from __StackTop. It has to cover two things the interpreter cannot
+// down from platform::stack_top(). It has to cover two things the
+// interpreter cannot
 // see: the UI frames already below us when a script runs (main loop ->
 // screen manager -> on_key -> run), and an interrupt frame landing on top
 // at any moment. 1 KB is the starting figure; the real one comes off
@@ -118,52 +110,12 @@ constexpr int kEscForceQuit = 2;
 bool g_capture_esc = false;
 int g_esc_unconsumed = 0;
 
-// Names resolved HERE, where platform::Key is visible. A table of hardcoded
-// enumerator values in calc_api.cpp would go quietly wrong the first time the
-// enum gained a member.
-//
-// ONE table, read in both directions: script_key_held() looks a name up, and
-// queue_push() looks a key's name up on the way out. Two tables would let
-// `ev["name"] == "up"` and `calc.key_held("up")` disagree, which is precisely
-// the sort of thing that is never noticed until an app behaves differently
-// depending on which of the two it happened to use.
-struct NamedKey {
-    const char* name;
-    platform::Key key;
-};
-constexpr NamedKey kNamedKeys[] = {
-    {"up", platform::Key::kUp},
-    {"down", platform::Key::kDown},
-    {"left", platform::Key::kLeft},
-    {"right", platform::Key::kRight},
-    {"enter", platform::Key::kEnter},
-    {"esc", platform::Key::kEscape},
-    {"space", platform::Key::kSpace},
-    {"tab", platform::Key::kTab},
-    {"back", platform::Key::kBackspace},
-    {"del", platform::Key::kDel},
-    {"home", platform::Key::kHome},
-    // The function keys are here because an app drawing its own softkey bar
-    // has no other way to read them: they carry no character, so `ch` is 0.
-    {"f1", platform::Key::kF1},
-    {"f2", platform::Key::kF2},
-    {"f3", platform::Key::kF3},
-    {"f4", platform::Key::kF4},
-    {"f5", platform::Key::kF5},
-    {"f6", platform::Key::kF6},
-};
-
-// "" rather than null for a key with no name, so a script can compare without
-// a None check first. Static storage in every case — the name outlives the
-// queued event by construction.
-const char* key_name(platform::Key key) {
-    for (const NamedKey& n : kNamedKeys) {
-        if (n.key == key) {
-            return n.name;
-        }
-    }
-    return "";
-}
+// The key-name table moved to platform/key_names.hpp in Phase 6.4.4, when
+// a third consumer appeared (host key scripts). Its own reason for
+// existing -- two tables would let ev["name"] and calc.key_held() disagree,
+// and nobody would notice until an app behaved differently depending on
+// which it used -- only got stronger with one more reader, so it moved
+// next to the enum it describes rather than growing a second copy.
 
 // The driver fills KeyEvent::ch for printable ASCII only (keyboard.hpp) —
 // Enter, Backspace, Tab and Del all arrive as 0. A Python script has nothing
@@ -194,7 +146,7 @@ void queue_push(const platform::KeyEvent& ev) {
     CalcKeyEvent e;
     e.code = static_cast<int>(ev.key);
     e.ch = static_cast<unsigned char>(control_char(ev.key, ev.ch));
-    e.name = key_name(ev.key);
+    e.name = platform::key_name(ev.key);
     e.shift = ev.shift_held ? 1 : 0;
     e.ctrl = ev.ctrl_held ? 1 : 0;
     e.alt = ev.alt_held ? 1 : 0;
@@ -251,28 +203,15 @@ int script_key_poll(CalcKeyEvent* out) {
 
 int script_key_held(const char* name) {
     using platform::Key;
-    for (const NamedKey& n : kNamedKeys) {
-        if (std::strcmp(name, n.name) == 0) {
-            return platform::keyboard().is_held(n.key) ? 1 : 0;
-        }
-    }
+    Key key = platform::key_from_name(name);
     // A single letter or digit names itself.
-    if (name[0] != 0 && name[1] == 0) {
-        const char c = name[0];
-        if (c >= 'a' && c <= 'z') {
-            return platform::keyboard().is_held(
-                       static_cast<Key>(static_cast<int>(Key::kA) + (c - 'a')))
-                       ? 1
-                       : 0;
-        }
-        if (c >= '0' && c <= '9') {
-            return platform::keyboard().is_held(
-                       static_cast<Key>(static_cast<int>(Key::k0) + (c - '0')))
-                       ? 1
-                       : 0;
+    if (key == Key::kNone && name[0] != 0 && name[1] == 0) {
+        key = platform::key_from_char(name[0]);
+        if (key == Key::kPrintable) {
+            return 0;  // Punctuation has no enumerator to hold.
         }
     }
-    return 0;
+    return key != Key::kNone && platform::keyboard().is_held(key) ? 1 : 0;
 }
 
 // ---- 6B.10: file I/O, over platform::Storage ----
@@ -346,7 +285,7 @@ constexpr CalcFileOps kFileOps = {file_size,   file_read,   file_write,
 
 // Is there room below us for a path that needs `need` bytes? A local's
 // address is the current stack pointer to within a few bytes, and the floor
-// is __StackTop minus the bank size — the same absolute floor
+// is platform::stack_top() minus the bank size — the same absolute floor
 // picocalc_mp_init hands MicroPython, so the two agree.
 //
 // This exists because the calculator's evaluator has deeper frames than
@@ -358,7 +297,8 @@ constexpr CalcFileOps kFileOps = {file_size,   file_read,   file_write,
 int stack_room(std::size_t need) {
     const char probe = 0;
     const auto sp = reinterpret_cast<std::uintptr_t>(&probe);
-    const auto floor = reinterpret_cast<std::uintptr_t>(__StackTop) - platform::stack_total();
+    const auto floor =
+        reinterpret_cast<std::uintptr_t>(platform::stack_top()) - platform::stack_total();
 #if PICOCALC_STACK_PROBE
     std::printf("py-stack: free %u, need %u\n", static_cast<unsigned>(sp - floor),
                 static_cast<unsigned>(need));
@@ -384,7 +324,7 @@ bool PythonInterpreter::init(std::size_t heap_bytes) {
     if (heap_bytes == 0 || heap_bytes > sizeof(g_heap)) {
         heap_bytes = sizeof(g_heap);
     }
-    picocalc_mp_init(g_heap, heap_bytes, __StackTop, stack_limit());
+    picocalc_mp_init(g_heap, heap_bytes, platform::stack_top(), stack_limit());
     calc_api_set_persist_hook(&persist_state);
     calc_api_set_stack_hook(&stack_room);
     calc_api_set_key_hooks(&script_key_poll, &script_key_held);

@@ -2,7 +2,15 @@
 
 #include <cstdio>
 
+#if !PICOCALC_HOST
 #include "pico/bootrom.h"
+#else
+namespace host {
+// Defined by main_host.cpp. There is no bootloader to reboot into, so the
+// menu row does the nearest honest thing and leaves the application.
+void request_exit();
+}  // namespace host
+#endif
 
 #include "gfx/font.hpp"
 #include "ui/chrome.hpp"
@@ -107,7 +115,11 @@ bool ModeScreen::on_key(const platform::KeyEvent& ev) {
             if (selected_ == kRowReboot) {
                 // Reboot into the RP2 USB bootloader (BOOTSEL) so a new
                 // UF2 can be dropped without touching the board button.
+#if !PICOCALC_HOST
                 reset_usb_boot(0, 0);
+#else
+                host::request_exit();
+#endif
             } else {
                 adjust(+1);
             }

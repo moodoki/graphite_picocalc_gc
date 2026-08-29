@@ -29,6 +29,24 @@ else()
     message(STATUS "Building for PicoCalc with Pico 1 H (RP2040)")
 endif()
 
+# ---- Reproducible builds ----
+# The Pico SDK bakes __DATE__ into every binary (pico_standard_binary_info),
+# so two builds of identical source on different days differ -- found the
+# hard way at midnight during 6.4.3, when a comparison that had passed
+# hours earlier started failing with nothing changed but the calendar.
+#
+# That is now the SECOND thing that silently invalidates a before/after
+# .uf2 comparison, after PICOCALC_BUILD_ID's git hash, and 6.4.1's gate is
+# exactly such a comparison. Pin both when comparing binaries:
+#
+#   cmake -DPICOCALC_BUILD_ID=fixed -DPICOCALC_BUILD_DATE="Jan  1 2000" ...
+#
+# Global rather than target-scoped: the macro is read inside the SDK's own
+# library, which a target_compile_definitions here would never reach.
+if(PICOCALC_BUILD_DATE)
+    add_compile_definitions(PICO_PROGRAM_BUILD_DATE="${PICOCALC_BUILD_DATE}")
+endif()
+
 # ---- Common compile flags ----
 add_compile_options(
     -Wall
@@ -40,6 +58,10 @@ add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
     $<$<COMPILE_LANGUAGE:CXX>:-fno-threadsafe-statics>
 )
+
+# Every source list this project compiles, shared with the desktop build
+# (D92). Add new files there, not here.
+include(cmake/graphite-sources.cmake)
 
 # ---- Vendored drivers (read-only, see drivers/README.md) ----
 add_subdirectory(drivers/i2ckbd)
@@ -57,219 +79,29 @@ target_include_directories(fatfs PUBLIC drivers/fatfs)
 target_link_libraries(fatfs PUBLIC pico_stdlib)
 
 # tinyexpr (C99). TE_POW_FROM_RIGHT: TI-style right-associative '^'.
-add_library(tinyexpr STATIC drivers/tinyexpr/tinyexpr.c)
+add_library(tinyexpr STATIC ${GRAPHITE_TINYEXPR_SOURCES})
 target_include_directories(tinyexpr PUBLIC drivers/tinyexpr)
 target_compile_definitions(tinyexpr PUBLIC TE_POW_FROM_RIGHT)
 
 # ---- MicroPython (Phase 6B) ----
-# MicroPython is a git submodule (drivers/micropython), not a vendored copy:
-# it is far too large and too actively maintained to hand-port, and it is the
-# first dependency of that kind here — see drivers/README.md.
-#
-# It has no build system we can call directly. Upstream's embed port instead
-# GENERATES a self-contained tree of .c/.h, which we then compile ourselves.
-# That has to happen at CONFIGURE time, because CMake needs the source list
-# before it can define a target. The generator needs `make` and a HOST
-# compiler (it preprocesses to collect qstrs); the arm toolchain is not
-# involved until the add_library below.
-set(MPY_PORT_DIR    ${CMAKE_SOURCE_DIR}/drivers/micropython_port)
-set(MPY_EMBED_DIR   ${CMAKE_BINARY_DIR}/micropython_embed)
-
-if(NOT EXISTS ${CMAKE_SOURCE_DIR}/drivers/micropython/py/mkenv.mk)
-    message(FATAL_ERROR
-        "drivers/micropython is empty — run: git submodule update --init --recursive")
-endif()
-
-message(STATUS "Generating MicroPython embed package -> ${MPY_EMBED_DIR}")
-# From scratch, every time. The generator's incremental path leaves stale
-# per-module fragments in genhdr/module/, so turning a feature OFF in
-# mpconfigport.h still emitted its MP_REGISTER_MODULE entry and the link
-# failed on a symbol nothing compiled any more. Configure is rare; a
-# silently wrong qstr/module table is not worth the seconds saved.
-file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/micropython_embed_build ${MPY_EMBED_DIR})
-execute_process(
-    COMMAND make -f micropython_embed.mk
-            BUILD=${CMAKE_BINARY_DIR}/micropython_embed_build
-            PACKAGE_DIR=${MPY_EMBED_DIR}
-    WORKING_DIRECTORY ${MPY_PORT_DIR}   # embed.mk puts -I. on CFLAGS: this is
-    RESULT_VARIABLE MPY_GEN_RESULT      # how it finds our mpconfigport.h
-    OUTPUT_VARIABLE MPY_GEN_LOG
-    ERROR_VARIABLE  MPY_GEN_LOG
-)
-if(NOT MPY_GEN_RESULT EQUAL 0)
-    message(FATAL_ERROR "MicroPython embed generation failed:\n${MPY_GEN_LOG}")
-endif()
-
-# Editing the port config must regenerate the tree — the qstr pool and the
-# module table are baked in at generation time, so a stale package would
-# silently disagree with the config it was built from.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    ${MPY_PORT_DIR}/mpconfigport.h
-    ${MPY_PORT_DIR}/micropython_embed.mk
-    # Our own module (6B.3): the generator scans it for MP_QSTR_* and
-    # MP_REGISTER_MODULE, so adding a binding means regenerating the qstr pool
-    # even though CMake compiles the file itself as ordinary firmware source.
-    ${CMAKE_SOURCE_DIR}/src/scripting/mp_calc_module.c
-)
-
-# Globbing is normally a smell; here the sources are generated, so there is no
-# hand-maintained list for it to drift from.
-file(GLOB_RECURSE MPY_SOURCES ${MPY_EMBED_DIR}/*.c)
-# Upstream's mphalport.c sends stdout straight to printf. We need it to reach
-# the on-device output pane as well, so ours replaces it (src/scripting/).
-list(REMOVE_ITEM MPY_SOURCES ${MPY_EMBED_DIR}/port/mphalport.c)
-
-add_library(micropython STATIC ${MPY_SOURCES})
-# SYSTEM: our own src/scripting/*.c include py/*.h, and those headers do not
-# survive this project's -Wall -Wextra -Wpedantic (zero-size arrays, unused
-# parameters, ISO C complaints). -isystem silences third-party headers without
-# lowering the bar for the file including them, which is the whole point.
-target_include_directories(micropython SYSTEM PUBLIC ${MPY_EMBED_DIR} ${MPY_PORT_DIR})
-set_target_properties(micropython PROPERTIES C_STANDARD 99)
-# Third-party C against this project's -Wall -Wextra -Wshadow -Wpedantic:
-# same treatment as the cephes target below, for the same reason.
-target_compile_options(micropython PRIVATE -w)
+# Shared with the desktop build (D92) -- see the file for why generation
+# happens at configure time.
+include(cmake/graphite-micropython.cmake)
 
 # Cephes special functions (Phase 3C distributions — drivers/cephes/README.md).
 # Symbols that exist in libm are renamed at compile time so the two can
 # never collide; math::dist declares the cephes_* names extern "C".
 add_library(cephes STATIC
-    drivers/cephes/const.c
-    drivers/cephes/polevl.c
-    drivers/cephes/mtherr.c
-    drivers/cephes/gamma.c
-    drivers/cephes/ndtr.c
-    drivers/cephes/expx2.c
-    drivers/cephes/ndtri.c
-    drivers/cephes/igam.c
-    drivers/cephes/igami.c
-    drivers/cephes/incbet.c
-    drivers/cephes/incbi.c
-    src/math/cephes_support.c
+    ${GRAPHITE_CEPHES_SOURCES}
 )
 target_compile_definitions(cephes PRIVATE gamma=cephes_gamma erf=cephes_erf erfc=cephes_erfc)
 target_compile_options(cephes PRIVATE -w)
 
 # ---- Main executable ----
+# Source list: cmake/graphite-sources.cmake (D92).
 add_executable(picocalc_graphcalc
-    src/main.cpp
-    src/platform/app_registry.cpp
-    src/platform/sd_apps.cpp
-    src/platform/sd_app_scan.cpp
-    src/platform/display.cpp
-    src/platform/fault.cpp
-    src/platform/io_scratch.cpp
-    src/platform/keyboard.cpp
-    src/platform/platform.cpp
-    src/platform/psram.cpp
-    src/platform/sd_card.cpp
-    src/platform/sd_diskio.cpp
-    src/platform/storage.cpp
-    src/platform/system.cpp
-    src/platform/power.cpp
-    src/gfx/font.cpp
-    src/gfx/framebuffer.cpp
-    src/ui/screen_manager.cpp
-    src/ui/input_line.cpp
-    src/ui/prompt_line.cpp
-    src/ui/output_log.cpp
-    src/ui/text_buffer.cpp
-    src/ui/text_editor_widget.cpp
-    src/ui/chrome.cpp
-    src/math/engine.cpp
-    src/math/functions.cpp
-    src/math/format.cpp
-    src/math/frac.cpp
-    src/math/autoclose.cpp
-    src/math/catalog.cpp
-    src/math/scratch.cpp
-    src/math/array.cpp
-    src/math/array_backend_pico.cpp
-    src/math/lists.cpp
-    src/math/lists_persist.cpp
-    src/math/named_lists.cpp
-    src/math/named_lists_persist.cpp
-    src/math/list_ops.cpp
-    src/math/stats.cpp
-    src/math/dist.cpp
-    src/math/infer.cpp
-    src/math/matrix.cpp
-    src/math/matrices_persist.cpp
-    src/math/numeric_solve.cpp
-    src/math/solve_expr.cpp
-    src/math/complex.cpp
-    src/math/unified_compile.cpp
-    src/math/unified_vm.cpp
-    src/math/unified_home.cpp
-    src/math/array_format.cpp
-    src/math/seq_expr.cpp
-    src/math/units.cpp
-    src/math/cas/expr.cpp
-    src/math/cas/parser.cpp
-    src/math/cas/serialize.cpp
-    src/math/cas/simplify.cpp
-    src/math/cas/derivative.cpp
-    src/math/cas/expand.cpp
-    src/math/cas/poly.cpp
-    src/math/cas/solve.cpp
-    src/math/cas/factor.cpp
-    src/math/cas/integrate.cpp
-    src/math/cas/cas_eval.cpp
-    src/math/cas/exact.cpp
-    src/math/var_store.cpp
-    src/scripting/mp_port.c
-    src/scripting/micropython_embed.cpp
-    src/scripting/calc_api.cpp
-    src/scripting/calc_canvas.cpp
-    src/scripting/mp_calc_module.c
-    src/render/pool.cpp
-    src/render/layout_builder.cpp
-    src/render/layout_render.cpp
-    src/graph/viewport.cpp
-    src/graph/plotter.cpp
-    src/graph/graph_mode.cpp
-    src/graph/graph_state.cpp
-    src/graph/graph_persist.cpp
-    src/graph/function_source.cpp
-    src/graph/parametric_source.cpp
-    src/graph/polar_source.cpp
-    src/graph/seq_points.cpp
-    src/graph/stat_plot.cpp
-    src/graph/trace.cpp
-    src/graph/analysis.cpp
-    src/graph/analysis_cursor.cpp
-    src/apps/nav.cpp
-    src/apps/launcher_screen.cpp
-    src/apps/notepad_screen.cpp
-    src/apps/program_screen.cpp
-    src/apps/home_screen.cpp
-    src/apps/const_screen.cpp
-    src/apps/settings_screen.cpp
-    src/apps/file_list.cpp
-    src/apps/files_screen.cpp
-    src/apps/list_editor.cpp
-    src/apps/calc_menu.cpp
-    src/apps/cas_menu.cpp
-    src/apps/matrix_editor.cpp
-    src/apps/solver_screen.cpp
-    src/apps/stats_screen.cpp
-    src/apps/dist_screen.cpp
-    src/apps/infer_screen.cpp
-    src/apps/plot_screen.cpp
-    src/apps/graph_model.cpp
-    src/apps/slot_editor.cpp
-    src/apps/y_editor.cpp
-    src/apps/param_editor.cpp
-    src/apps/polar_editor.cpp
-    src/apps/seq_editor.cpp
-    src/apps/graph_screen.cpp
-    src/apps/window_screen.cpp
-    src/apps/mode_screen.cpp
-    src/apps/help_screen.cpp
-    src/apps/table_model.cpp
-    src/apps/table_setup.cpp
-    src/apps/table_screen.cpp
-    src/apps/split_screen.cpp
+    ${GRAPHITE_PICO_SOURCES}
+    ${GRAPHITE_PORTABLE_SOURCES}
 )
 
 target_include_directories(picocalc_graphcalc PRIVATE
@@ -299,10 +131,17 @@ execute_process(
 if(NOT GIT_HASH)
     set(GIT_HASH "nogit")
 endif()
-if(GIT_DIRTY)
-    set(PICOCALC_BUILD_ID "${GIT_HASH}-dev")
-else()
-    set(PICOCALC_BUILD_ID "${GIT_HASH}")
+# Overridable with -DPICOCALC_BUILD_ID=..., and that is not a convenience:
+# the id is compiled into the binary, so any before/after comparison of the
+# .uf2 across a commit differs on the git hash alone. Phase 6.4.1's gate is
+# exactly such a comparison (both .uf2s byte-identical across the source-list
+# extraction), and it is unrunnable without a way to hold this fixed.
+if(NOT PICOCALC_BUILD_ID)
+    if(GIT_DIRTY)
+        set(PICOCALC_BUILD_ID "${GIT_HASH}-dev")
+    else()
+        set(PICOCALC_BUILD_ID "${GIT_HASH}")
+    endif()
 endif()
 message(STATUS "Build id: ${PICOCALC_BUILD_ID}")
 

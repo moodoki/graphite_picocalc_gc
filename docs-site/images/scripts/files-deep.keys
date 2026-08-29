@@ -1,0 +1,7 @@
+# A deep directory, for the status-bar title with no clamp (#61). The
+# file manager title is "FILES <cur_dir_>" in a char[40], and nothing
+# stops it running into the right-aligned block.
+#
+# Files is launcher row 3; then documents, 2026, statements.
+f6 down down enter
+down enter enter enter

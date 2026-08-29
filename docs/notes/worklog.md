@@ -305,6 +305,175 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-29 — Phase 6.4: the calculator runs on a desktop, and #52 is not just photographed but explained
+
+**`phase-6.4`, 18 commits, PR #60 open and green — nothing merged.** Two
+sessions' work on one branch; this entry covers both. No firmware behaviour
+changed: the guiding constraint was that the host target must cost the
+device nothing, and the byte-identity gate says it cost exactly nothing.
+
+**D92-D98 accepted (2026-08-28), two of them amended by reading the source
+before writing any code.** Both amendments made the decisions smaller:
+
+- **D94** — the guard count is **two, not three**. `graph_screen.cpp` never
+  needed one; its only Pico use was two `time_us_64()` calls, and
+  `platform::uptime_us()` already existed and was already used this way
+  elsewhere. A guard would have been house-style drift dressed as porting
+  work. `grep -rn PICOCALC_HOST src/ | wc -l` is the coupling metric and it
+  reads 2.
+- **D95** — **the premise was wrong.** D95 said we would "carry anyway" the
+  fork's sound abstraction. There is no `platform::Sound`. `drivers/pwm_sound`
+  is compiled and linked into every release (`CMakeLists.txt:47,401`) with
+  **zero callers in `src/`**. So 6.4.5 does not port a seam, it builds one
+  first — which is why its estimate went 8 -> 10 hrs.
+
+**Done: 6.4.0-6.4.4, 6.4.7, most of 6.4.6 and 6.4.9.** `graphite-shot` renders
+the shared tree headless to a PPM on macOS and Linux, with POSIX storage,
+MicroPython, key scripts, and a committed set of doc images that CI
+regenerates and diffs. **6.4.1's hard gate held**: both `.uf2`s are
+byte-identical across the source-list extraction, on both boards.
+
+**Two ways a byte-identical comparison lies**, both found the hard way. The
+git short hash is baked in at configure time (`PICOCALC_BUILD_ID`), and the
+SDK bakes `__DATE__` via `pico_standard_binary_info` — the latter surfaced as
+a false alarm when the date rolled over at midnight mid-comparison. Both are
+now overridable knobs, which is what makes the gate trustworthy rather than
+lucky.
+
+**The bug haul, and the pattern in it.** Three of four host-side bugs were
+**a stub returning a tidy answer instead of a true one**: `stack_total()`
+returned 0, which made MicroPython raise a recursion-depth error at the first
+call; `stack_top()` was captured lazily from a lambda frame that had already
+returned, so the GC would have scanned upward from an address below the live
+stack; a script's output was doubled because the MicroPython hook already
+printed and the added callback printed again. A stub that fails loudly would
+have cost minutes; each of these cost an hour.
+
+**One real bug, in the firmware's own test suite.** CI ran `host-tests.sh`
+for the first time in this phase — 22 suites, ~3,400 checks that nothing had
+ever executed automatically — and 20 matrix checks failed on GCC only.
+`check_err(matops::add(..., &err), err, ...)` relies on **unspecified
+argument evaluation order**: clang happened to evaluate left-to-right, GCC did
+not, so the tests had been passing by luck. The firmware was never affected.
+Fixed by sequencing (`f6634b4`).
+
+**#52 is now diagnosed, not just photographed.** `draw_softkeys` computes
+`max_chars = (320/6 - 2) / 8 = 6` and then truncates the string it has
+already prefixed with `"%d:"` — so the **label** budget is 4, not 6. `CUT`,
+`MOVE` and `REN` fit; `MKDIR` never could. The comment at
+`files_screen.cpp:589` asserting both labels are "within `draw_softkeys`'
+6-character cell" counts the label and forgets the prefix it does not
+control. **The fix belongs to the sweep, not here** — 6.4.8 files, it does
+not fix.
+
+**Left:** 6.4.8 (the chrome sweep, unblocked, plan already in the spec),
+6.4.5 (SDL, now including the sound seam), and clang-tidy, still not in CI
+and still unable to see `host/` because it replays the arm-none-eabi
+compile database. Three items are held for the developer on purpose:
+commenting the #52 image onto the issue, whether `host-shot` joins the
+release gate, and a go-ahead before 6.4.8 opens several `area:ui` issues on
+a public repo.
+
+**Worth its own issue, unrelated to 6.4:** `drivers/pwm_sound` has shipped in
+every release with no callers.
+
+**Two of the three came back the same day.** The #52 image is now a comment on
+the issue, carrying the 4-character finding — and correcting the issue's own
+Option 1, which states the label budget as 6 when 6 is the budget for the whole
+cell string and `"%d:"` spends two of it. Same off-by-prefix slip as the
+caller's comment; the issue and the code were wrong in the same direction.
+
+The gate question was answered by **splitting the job rather than choosing**.
+`host-shot` did two unrelated things: steps 1-5 prove the shared tree renders
+and renders deterministically, which is a firmware check, and the D98 drift
+check fails when a screenshot is stale, which is a docs one. Now `host-render`
+(gated) and `host-images` (not). Two facts that made the call easy: the job
+takes 127s against the pico2 build's 224s, so joining the gate is free in
+wall-clock; and on a tag push the whole workflow already runs, so today a
+broken render path ships with a red badge nobody has to look at — the same
+shape as the 2026-08-15 wiki outage the drift check exists to prevent. Both
+jobs build `graphite-shot` rather than passing one, which costs a duplicated
+build and buys independent reporting plus no exec-bit games through
+`upload-artifact`. `--parallel` is safe here because
+`cmake/graphite-micropython.cmake` generates the embed tree with
+`execute_process` at *configure* time, so nothing races in the build graph.
+
+**Then 6.4.8 ran, and the sweep's value was not where the plan put it.** The
+static scan in the spec predicted a pile of truncated softkey labels and
+found none beyond #52 — every other label in `src/` fits the 4-character
+budget. What the images found instead, five issues' worth:
+
+- **#61** confirmed the one prediction that held. A 23-character SD app name
+  — the most `SdAppManifest::name` holds, written by hand in `app.txt` —
+  overdraws the mode block and takes D26's `SD`/`PSRAM` indicators with it.
+- **#62** is the one no static reading could have produced, because it is
+  about the screens that *do not* call `draw_status_bar`. Eight of them
+  hand-roll the first two lines of it: the four `SlotEditorScreen`
+  subclasses, `table_screen`, `table_setup`, `window_screen`, `help_screen`.
+  They therefore cannot show D26's health indicators. A failing card is
+  invisible on the Y= editor.
+- **#63**: `StatusFlags` has exactly one occurrence in `src/` — its own
+  definition. `Key::kSecond` and `Key::kAlpha` have none. The `[2nd] [A]`
+  indicators cannot appear, and the right block is always 7 characters, not
+  the 13 the spec's own arithmetic assumed.
+- **#64**: the graph's empty-plot hint is drawn at a hardcoded `x=40` on the
+  axis with no background fill, so gridlines and axis labels print through
+  the glyphs; the parametric variant is 5 characters longer and reaches the
+  last pixel column. Invisible to `check-text-fits.py` for the same reason
+  #52 is — nothing lands out of bounds.
+- **#65**, cosmetic: softkey dividers sit below the empty-label `continue`,
+  so the bar's grid changes shape between modal states.
+
+**CI added a rule nobody had written down.** #61's evidence was originally
+the program screen with a long SD app name, and `host-images` failed on
+Linux — that screen prints the MicroPython heap figure, and macOS and Linux
+do not agree on it. No UI defect; the number is a property of the build. So:
+**a screen showing an interpreter's heap cannot be in a byte-identical drift
+set**, and the same goes for anything the host and the board may legitimately
+disagree about. Swapped to the file manager, which is the better
+demonstration anyway — `char[40]` of title against `char[24]`, no
+interpreter, and all it takes is a folder. Note which job caught it:
+`host-images`, the half deliberately kept out of the release gate, failing
+on an unreproducible docs image with no firmware defect behind it. The split
+was tested the same day it was made.
+
+**Two things the sweep taught about the instrument.** It needed exactly one
+new lever, `graphite-shot --unhealthy`, because D26's state means a hardware
+fault and no key sequence reaches it — everything else was navigation, which
+is D97 paying off. And *generating* the set found a flaw in the generator
+that reading it had not: one fixture per run, but the calculator persists
+`history.txt` and `variables.dat` into that root as it goes, so every image
+inherited what the images before it had typed. `chrome-unhealthy` was showing
+`natural-math`'s radicals. It stayed reproducible only while nobody reordered
+`IMAGES`. Rebuilt per image now. Looking at the pictures beat reading the
+script, again.
+
+**6.4.6 closed too, and mostly by inventory.** Three of its four pieces had
+already landed under other task numbers: the Linux build and render came
+forward into 6.4.0, the drift check is `host-images`, and `host-tests.sh` has
+been a CI job since the split. The row's fourth piece was a macOS runner that
+has never existed — settled as **D99**, Linux in CI and macOS on the
+developer's machine, which is the right way round because the platform with
+automated coverage should be the one nobody is watching.
+
+That left §7's two deliberate tests, and both are now satisfied by having been
+watched rather than by being asserted. The drift one happened without being
+staged: `host-images` went red during 6.4.8 on the MicroPython heap figure.
+The host-suite one was staged — `one_var n` changed from 8 to 9, pushed to a
+throwaway branch, dispatched, `FAIL: one_var n` / `122 checks, 1 failures` /
+exit 1, **six other jobs green**, branch deleted without ever touching PR #60.
+The isolation is half the point: a red job that takes the whole workflow with
+it teaches nothing about which gate fired.
+
+**And 6.4.5's sound work was scoped**: the seam and the desktop backend are the
+deliverable; the firmware half is written and reviewed, not flashed and
+listened to. It follows from the zero callers above — verifying it means
+writing a caller that exists only to make a beep, which is scaffolding that
+outlives its reason. The first feature that genuinely wants audio brings a real
+caller and verifies it then.
+
+---
+
 ## 2026-08-23 (later) — a desktop target scoped from measurement, and the docs caught up with v0.5.0
 
 **PR #58 (docs) merged the same day; `phase-6.4` (spec + D92-D96) is still

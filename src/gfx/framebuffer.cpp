@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cstring>
 
+#if !PICOCALC_HOST
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
+#endif
 
 namespace gfx {
 
@@ -13,7 +15,12 @@ namespace {
 // Render buffers. Full mode (Pico 2): one whole frame, pushed
 // synchronously on core 0. Strip mode (Pico 1): two ping-pong strip
 // buffers so core 0 can render strip N+1 while core 1 DMAs strip N.
-#if PICOCALC_PICO2
+// The host build takes this branch too, via config::kUseFullFramebuffer
+// (D92). It must be spelled out at each of the three sites below: the
+// constant and the macro are read in different places, so if they are
+// allowed to disagree the preprocessor silently deletes the render body
+// and the build draws nothing (D94 amendment, 2026-08-28).
+#if PICOCALC_PICO2 || PICOCALC_HOST
 uint16_t frame_buf[platform::kScreenW * platform::kScreenH];
 #endif
 uint16_t strip_buf[2][platform::kScreenW * config::kStripHeight];
@@ -34,6 +41,7 @@ int outstanding = 0;
 // than submitting jobs to a service that can't drain them.
 bool service_running = false;
 
+#if !PICOCALC_HOST
 void submit(PushJob* job) {
     multicore_fifo_push_blocking(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(job)));
     ++outstanding;
@@ -43,6 +51,18 @@ void wait_one_ack() {
     (void)multicore_fifo_pop_blocking();
     --outstanding;
 }
+#else
+// No second core to hand the strip to, so "submit" is the push itself and
+// nothing is ever outstanding. That last part is what matters: it leaves
+// drain_acks a no-op loop and needs no guard of its own, and it keeps
+// service_running false below, so render_frame takes its existing
+// synchronous fallbacks unedited.
+void submit(PushJob* job) {
+    platform::display().push_rect(job->x, job->y, job->w, job->h, job->px);
+}
+
+void wait_one_ack() {}
+#endif
 
 void drain_acks() {
     while (outstanding > 0) {
@@ -58,6 +78,7 @@ void drain_acks() {
 // contends with core 0's USB stack and hard-faults. That XIP contention,
 // not the FIFO handshake, was the 2026-07-10 "stall on frame 1"; see the
 // D10 decision addendum + the 2026-07-25 worklog.
+#if !PICOCALC_HOST
 void display_service_main() {
     while (true) {
         // The inter-core FIFO is a 32-bit mailbox; passing the job
@@ -79,6 +100,15 @@ void start_display_service() {
         service_running = true;
     }
 }
+#else
+// Both still have to link: framebuffer.hpp declares them and main_host.cpp
+// calls start_display_service(), so that the host's startup sequence stays
+// readable against the firmware's. service_running is deliberately left
+// false -- see submit() above.
+void display_service_main() {}
+
+void start_display_service() {}
+#endif
 
 void Framebuffer::render_frame(RenderFn render, void* ctx, int dirty_y0, int dirty_y1) {
     dirty_y0 = std::max(dirty_y0, 0);
@@ -88,7 +118,7 @@ void Framebuffer::render_frame(RenderFn render, void* ctx, int dirty_y0, int dir
     }
 
     if (config::kUseFullFramebuffer) {
-#if PICOCALC_PICO2
+#if PICOCALC_PICO2 || PICOCALC_HOST
         // One buffer-sized "strip": the band renders at the top of
         // frame_buf (row() offsets by clip_y0_), so the buffer is
         // scratch, not a persistent frame image.
@@ -234,7 +264,7 @@ void display_wait_idle() {
 }
 
 uint16_t* scratch_pixels() {
-#if PICOCALC_PICO2
+#if PICOCALC_PICO2 || PICOCALC_HOST
     // The full framebuffer. Idle outside render_frame like the strips are,
     // and render_frame redraws the whole of it every pass, so scribbling in
     // it between frames costs nothing.

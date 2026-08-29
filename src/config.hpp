@@ -15,7 +15,13 @@ constexpr int kScreenWidth = 320;
 constexpr int kScreenHeight = 320;
 
 // ---- Memory layout ----
-#ifdef PICOCALC_PICO2
+// The host build (Phase 6.4, D92) folds in here rather than getting a branch
+// of its own: a desktop has an address space and an FPU, so the Pico 2's
+// answers are the right ones. It is NOT told it is a Pico 2 — defining that
+// macro would make every future board branch silently apply to the host too.
+// gfx/framebuffer.cpp reads the same distinction at three preprocessor sites
+// and has to name PICOCALC_HOST at each of them; see the D94 amendment.
+#if defined(PICOCALC_PICO2) || defined(PICOCALC_HOST)
 // Pico 2 has 520 KB SRAM and a hardware FPU.
 // Comfortable headroom — full SRAM framebuffer is fine.
 constexpr bool kUseFullFramebuffer = true;
