@@ -305,6 +305,75 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-30 — the sweep's six bugs fixed, Phase 6.4 merged, and a regression that was never there
+
+**Everything is on `main`.** PR #60 (Phase 6.4, 28 commits) and PR #66 (the
+chrome fixes, 3 commits) both merged. No new tag; `v0.5.0` is still the
+release. The ROADMAP row was two tasks stale on the way in and now names what
+is *left* rather than what is done, so it stops going stale every time a task
+lands.
+
+**All six sweep issues fixed and closed** — #52, #61, #62, #63, #64, #65.
+
+The one worth remembering is **#62**, because of how it was found. Eight
+screens hand-rolled the first two lines of `draw_status_bar` and so could not
+show D26's `SD`/`PSRAM` indicators at all — a failing card was invisible on
+the Y= editor, the table, window settings and help. **No reading of
+`draw_status_bar`'s call sites could have produced it**, because the finding
+is in the screens that do not call it. It took photographing every bar and
+looking at what was missing.
+
+Two of the eight needed a decision rather than a substitution, exactly as the
+issue predicted. `table_screen` converts only in full screen — `draw_status_bar`
+draws at `y=0` and the split pane starts at `top_`, so the plain strip stays
+there, the same guard `graph_screen` already had. `help_screen` genuinely
+could not fit tabs, the right-hand block and the health indicators in one bar,
+so the tabs and the scroll counter moved to their own row. `kTopY` 24 → 36 and
+**no help line was lost**: 36 + 16*16 = 292, still clear of the softkey band.
+
+For **#61** the ordering is the fix: measure the battery, the mode block and
+the health indicators first, then give the title what is left. The health
+block is subtracted from the title's budget rather than the other way round —
+a truncated title costs a user characters they can usually infer, a missing SD
+indicator costs them the reason their files stopped saving.
+
+`gfx::fit_text` was promoted out of `const_screen.cpp`, which held the only
+copy. `slot_editor.cpp` has a third variant; left alone, since it clamps to a
+checkbox rather than a computed budget. Three copies of "make this text fit"
+is how one of them ends up being the one that does not.
+
+**#63 was not a defect, and D100 says why.** `StatusFlags` was never a
+half-built feature. 2nd and ALPHA are a TI keyboard convention solving a
+hardware problem this calculator does not have: TI overloads ~50 keys to reach
+several hundred functions and must show which layer is live, while the PicoCalc
+has a full QWERTY keyboard, so there is no second layer for an indicator to
+report. Removed as inherited shape, relabelled `type:chore`, and the reasoning
+written down so the absence reads as a choice rather than a gap.
+
+**Firmware, measured with the build id pinned rather than estimated.** Phase
+6.4 added **+112 bytes** (Pico 1) / **+48** (Pico 2), which reconciles exactly
+with §4.2's accounting for the two `platform::` seams taken instead of guards.
+The chrome fixes gave back **−664** / **−632**. Both together against pre-6.4
+`main`: **−552 / −584 bytes of flash, SRAM unchanged on both boards.**
+
+**And a regression that never existed.** "Free SRAM has dropped 1.2 KB since
+v0.5.0" was raised twice and is **false**. Building `v0.5.0` and `main` side by
+side with `PICOCALC_BUILD_ID` pinned gives **byte-identical** static SRAM —
+246,836 (Pico 1) and 499,404 (Pico 2). What differed was the arithmetic, and
+it is worth knowing because it will happen again: `scripts/size-report.sh`
+measures against the **main bank** and **truncates**, so Pico 1's 15,308 free
+bytes = 14.95 KB print as "14 KB", while older notes say 15.2 KB. The Pico 2
+figure is the sharper lesson — notes say 32.6 KB, the report says 24 KB, and
+the difference is entirely the denominator: the RP2350's full **520 KB**
+against its **512 KB main bank**, 8 KB apart, quoted in the same sentence as
+the Pico 1 number that used the other convention. **Compare used-bytes. It is
+the only figure with a single meaning.**
+
+The cost of not having done that: a session's chosen work item turned out to
+be a measurement artifact. The check that settled it took two builds.
+
+---
+
 ## 2026-08-29 — Phase 6.4: the calculator runs on a desktop, and #52 is not just photographed but explained
 
 **`phase-6.4`, 18 commits, PR #60 open and green — nothing merged.** Two
