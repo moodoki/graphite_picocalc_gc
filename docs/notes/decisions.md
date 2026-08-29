@@ -171,6 +171,17 @@ The same check found `commands_file.cpp` has nothing to implement either: there
 is no commands seam, only an inline `#if PICOCALC_SERIAL_INJECT` block in
 `src/main.cpp:757-846`. It leaves the spec's file list.
 
+**Amended 2026-08-29: the firmware half is built, not proven.** Developer's
+call, and it follows from the zero callers above — a seam nothing invokes
+cannot be exercised except by writing a test caller, and a test caller written
+only to make a beep audible is scaffolding that outlives its reason. So 6.4.5
+defines `platform::Sound`, wires it to `pwm_sound`, and stops there on the
+firmware side: it compiles, it is reviewed, it is not flashed and listened to.
+The desktop backend *is* verified, because `graphite-desktop` can be run. The
+first feature that genuinely wants audio is what verifies the board path, with
+a real caller to verify it against. This narrows the gate, not the work — the
+implementation was always the bulk of the 10 hrs.
+
 ---
 
 ## D94: host coupling is marked with `#if !PICOCALC_HOST` guards, not hidden behind shim headers

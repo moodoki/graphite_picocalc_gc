@@ -160,7 +160,12 @@ the §2 table missed.
 `drivers/pwm_sound` is linked (`CMakeLists.txt:47`, `:401`) with **zero callers
 in `src/`** — this calculator has never made a sound. So 6.4.5 must define the
 seam and wire the firmware side before a host backend means anything, which is
-why its estimate moves. Likewise `commands_file.cpp` has nothing to implement:
+why its estimate moves. **How far it has to go was scoped on 2026-08-29**: since
+nothing in the calculator asks for a sound, the firmware mapping is written to
+be correct by construction and left unverified on hardware — the seam and the
+desktop backend are the deliverable, a beep on the board is not. The first
+feature that actually wants audio verifies it then, against a real caller.
+Likewise `commands_file.cpp` has nothing to implement:
 serial injection is an inline `#if PICOCALC_SERIAL_INJECT` block in
 `src/main.cpp:757-846`, not a `platform::` interface. It leaves §3.7's list.
 
@@ -331,7 +336,7 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 | 6.4.2 ✅ | **Platform backends, non-graphical** — `storage_posix`, `psram_arena`, `system_host`, `power_stub`, `fault_stub`, `commands_file`, ported from the fork against current `main` | 5 | The calculator runs headless end to end: an expression evaluates, a variable persists across a restart via `~/.picocalc`, and an SD app manifest under `~/.picocalc/apps/` appears as a launcher tile (§3.6) |
 | 6.4.3 ✅ | **MicroPython on host** — `MICROPY_GCREGS_SETJMP=1` (D96), host heap and stack sizing, the `picocalc_mp_init` call site | 5 | `py` at the home screen runs a script and `print()` reaches stdout; `examples/apps/periodic/` — the largest script we have — loads and draws |
 | 6.4.4 ✅ | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
-| 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, the `graphite-desktop` executable, stdin injection (D97). **Plus the sound seam itself**: §2.2 found `platform::Sound` does not exist, so this defines it, wires the firmware side to `drivers/pwm_sound` (which has had no caller ever) and only then writes `sound_sdl` (D95). **Closes #42** | 10 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays **on the board as well as on the desktop**, and stdin drives it too. **Separable** — everything above closes #33 without it |
+| 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, the `graphite-desktop` executable, stdin injection (D97). **Plus the sound seam itself**: §2.2 found `platform::Sound` does not exist, so this defines it, wires the firmware side to `drivers/pwm_sound` (which has had no caller ever) and only then writes `sound_sdl` (D95). **Closes #42** | 10 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays on the desktop, and stdin drives it too. The firmware side of the seam compiles and is wired to `pwm_sound`, but is **not** hardware-verified — see §2.2, nothing calls it yet. **Separable** — everything above closes #33 without it |
 | 6.4.6 | **CI.** Build `graphite-shot` on Linux and macOS runners; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
 | 6.4.7 ✅ | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
 | 6.4.8 | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
@@ -392,7 +397,9 @@ above:
   the softkey row reads `2:CUT  4:REN  5:MKDI`. §4.1's static reading was
   right on every detail, which is worth knowing about the *method* as much as
   the bug — but it took the renderer to turn arithmetic into evidence.
-  **6.4.8 is unblocked.**
+  **6.4.8 is unblocked.** The image and the 4-character finding were posted to
+  the issue on 2026-08-29, which completes 6.4.7's gate; the comment also
+  corrects the issue's own Option 1, which states the budget as 6.
 - **Two self-inflicted faults, both from a stub returning a tidy answer
   rather than a true one.** `stack_total()` returned 0 "so a screenshot would
   not claim SRAM the host lacks", and MicroPython — which derives its
@@ -578,7 +585,8 @@ stating rather than assuming:
 - `graphite-shot` renders the committed image set on **both macOS and Linux**,
   and a re-run is byte-identical on each.
 - `graphite-desktop` opens, takes keyboard input and plays a tone on both OSes
-  (6.4.5 only).
+  (6.4.5 only). The firmware half of the sound seam is verified by compiling
+  and by review, not by listening — §2.2.
 - **A deliberate drift test**: change a rendered screen, do not regenerate,
   confirm CI goes red. This is the one check that would have caught the
   2026-08-15 wiki outage, and it is not satisfied by the job merely existing —

@@ -20,11 +20,12 @@ commits on `phase-6.4`, all checks green.
 > has to build the sound seam (see below). And clang-tidy, still not in CI
 > and still unable to see `host/`.
 >
-> Three things were left for the developer to decide, deliberately:
-> whether to comment the #52 image onto the issue, whether `host-shot`
-> should join the release gate (it currently does not — blocking a firmware
-> release on a screenshot seemed the wrong trade), and a go-ahead before
-> 6.4.8 opens several `area:ui` issues on a public repo.
+> Three things were left for the developer to decide, deliberately. One is
+> settled: the **#52 image is posted** (comment `5461573497`), with the
+> 4-character finding, which completes 6.4.7's gate. Still open: whether
+> `host-shot` should join the release gate (it currently does not —
+> blocking a firmware release on a screenshot seemed the wrong trade), and
+> a go-ahead before 6.4.8 opens several `area:ui` issues on a public repo.
 
 > ## Read this before trusting anything the host build says
 >
@@ -83,7 +84,11 @@ commits on `phase-6.4`, all checks green.
 >   abstraction the fork added; we do not, and `drivers/pwm_sound` has
 >   **zero callers** — this calculator has never made a sound. 6.4.5 must
 >   build the seam and wire the firmware side first, so it moved 8 → 10 hrs
->   and got *more* separable, not less.
+>   and got *more* separable, not less. **Scoped 2026-08-29**: the firmware
+>   half is written and reviewed, **not** flashed and listened to. Nothing
+>   calls it, so there is nothing to verify it against; the first feature
+>   that wants audio brings its own caller and verifies it then. The
+>   desktop backend is still verified, because it can be run.
 >
 > The guard count stayed at 2 through the whole phase. Twice more a third
 > guard was the obvious move and twice the answer was to put it behind
