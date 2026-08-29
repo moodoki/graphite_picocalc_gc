@@ -377,6 +377,34 @@ a public repo.
 **Worth its own issue, unrelated to 6.4:** `drivers/pwm_sound` has shipped in
 every release with no callers.
 
+**Two of the three came back the same day.** The #52 image is now a comment on
+the issue, carrying the 4-character finding — and correcting the issue's own
+Option 1, which states the label budget as 6 when 6 is the budget for the whole
+cell string and `"%d:"` spends two of it. Same off-by-prefix slip as the
+caller's comment; the issue and the code were wrong in the same direction.
+
+The gate question was answered by **splitting the job rather than choosing**.
+`host-shot` did two unrelated things: steps 1-5 prove the shared tree renders
+and renders deterministically, which is a firmware check, and the D98 drift
+check fails when a screenshot is stale, which is a docs one. Now `host-render`
+(gated) and `host-images` (not). Two facts that made the call easy: the job
+takes 127s against the pico2 build's 224s, so joining the gate is free in
+wall-clock; and on a tag push the whole workflow already runs, so today a
+broken render path ships with a red badge nobody has to look at — the same
+shape as the 2026-08-15 wiki outage the drift check exists to prevent. Both
+jobs build `graphite-shot` rather than passing one, which costs a duplicated
+build and buys independent reporting plus no exec-bit games through
+`upload-artifact`. `--parallel` is safe here because
+`cmake/graphite-micropython.cmake` generates the embed tree with
+`execute_process` at *configure* time, so nothing races in the build graph.
+
+**And 6.4.5's sound work was scoped**: the seam and the desktop backend are the
+deliverable; the firmware half is written and reviewed, not flashed and
+listened to. It follows from the zero callers above — verifying it means
+writing a caller that exists only to make a beep, which is scaffolding that
+outlives its reason. The first feature that genuinely wants audio brings a real
+caller and verifies it then.
+
 ---
 
 ## 2026-08-23 (later) — a desktop target scoped from measurement, and the docs caught up with v0.5.0

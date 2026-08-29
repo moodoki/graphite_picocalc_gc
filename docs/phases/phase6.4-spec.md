@@ -385,10 +385,21 @@ worth resisting: 6.4.5 is the fun task and the least load-bearing.
   depends on it exists.
 
 **Not yet done from 6.4.0's gate**: nothing. The Linux half is met by the
-`host-shot` CI job, pulled forward from 6.4.6 — it builds `graphite-shot` on
+`host-render` CI job, pulled forward from 6.4.6 — it builds `graphite-shot` on
 `ubuntu-latest`, renders, checks the frame is not a flat colour, and requires a
-re-run to be byte-identical. CI still does not run the host test suite or
-clang-tidy; both stay in 6.4.6 and stay named as missing.
+re-run to be byte-identical. CI still does not run clang-tidy; it stays in
+6.4.6 and stays named as missing.
+
+**The job was split in two on 2026-08-29**, and the reason is a distinction
+worth keeping: `host-render` is a *firmware* check wearing a docs hat — it
+proves the shared tree still renders and still renders deterministically — so
+it **joins the release gate**. `host-images`, the D98 drift check, fails when a
+screenshot is stale, which should not block a firmware tag, so it stays out.
+Both build `graphite-shot`, and that duplication is deliberate: two
+self-contained jobs report independently, so a broken render path and a stale
+image arrive as two facts rather than one. The split costs nothing in
+wall-clock — either half finishes well inside the firmware builds `release`
+already waits on.
 
 **6.4.2, 6.4.3, 6.4.4 and 6.4.7 landed 2026-08-29.** Additions to the list
 above:

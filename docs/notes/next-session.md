@@ -20,12 +20,18 @@ commits on `phase-6.4`, all checks green.
 > has to build the sound seam (see below). And clang-tidy, still not in CI
 > and still unable to see `host/`.
 >
-> Three things were left for the developer to decide, deliberately. One is
-> settled: the **#52 image is posted** (comment `5461573497`), with the
-> 4-character finding, which completes 6.4.7's gate. Still open: whether
-> `host-shot` should join the release gate (it currently does not —
-> blocking a firmware release on a screenshot seemed the wrong trade), and
-> a go-ahead before 6.4.8 opens several `area:ui` issues on a public repo.
+> Three things were left for the developer to decide, deliberately. Two
+> are settled. The **#52 image is posted** (comment `5461573497`), with the
+> 4-character finding, which completes 6.4.7's gate. And **`host-shot` was
+> split in two** rather than answered yes or no: `host-render` (build,
+> render, flat-colour check, determinism) **joins the release gate**,
+> because a frame of one colour is a firmware fault; `host-images` (the
+> D98 drift check) **stays out**, because a stale screenshot should not
+> block a firmware tag. The split is free in wall-clock — either half
+> finishes well inside the firmware builds `release` already waits on.
+>
+> Still open: a go-ahead before 6.4.8 opens several `area:ui` issues on a
+> public repo.
 
 > ## Read this before trusting anything the host build says
 >
@@ -57,7 +63,8 @@ commits on `phase-6.4`, all checks green.
 > - The `host-shot` CI job had **no `submodules: recursive`** — correct
 >   when written in 6.4.0, wrong the moment 6.4.3 made MicroPython a
 >   dependency. Impossible to catch locally, where the submodule is
->   already checked out.
+>   already checked out. (That job is now `host-render` + `host-images`;
+>   both carry the submodule checkout.)
 >
 > The fourth was months old: **20 `test_matrix` error checks relied on
 > unspecified argument evaluation order** —
