@@ -339,7 +339,7 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 | 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, the `graphite-desktop` executable, stdin injection (D97). **Plus the sound seam itself**: §2.2 found `platform::Sound` does not exist, so this defines it, wires the firmware side to `drivers/pwm_sound` (which has had no caller ever) and only then writes `sound_sdl` (D95). **Closes #42** | 10 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays on the desktop, and stdin drives it too. The firmware side of the seam compiles and is wired to `pwm_sound`, but is **not** hardware-verified — see §2.2, nothing calls it yet. **Separable** — everything above closes #33 without it |
 | 6.4.6 | **CI.** Build `graphite-shot` on Linux and macOS runners; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
 | 6.4.7 ✅ | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
-| 6.4.8 | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
+| 6.4.8 ✅ | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
 | 6.4.9 | **Docs and close** — README section carrying §3.5's warning verbatim, `ROADMAP.md` row, `dependencies.md` (SDL2 is a developer dependency, never a firmware one), a developer-facing `docs/host-build.md` | 3 | §7's checklist complete |
 
 **Total ~50 hrs**, or **~40 without 6.4.5**, which is separable and drops the
@@ -427,6 +427,50 @@ above:
   key-name table became `platform/key_names.*` (96/16 bytes, no bss). Both
   are the D94 amendment's pattern — the metric prompts the question, and the
   answer keeps turning out to be "this belongs behind the seam".
+
+**6.4.8 landed 2026-08-29** — 30 images, five issues, no fixes.
+
+- **The static scan in §4.1 was right about the mechanism and wrong about
+  the target.** It named `program_screen`'s `app_name_` as the prime suspect
+  and it was: a 23-character SD app name overdraws the mode block and takes
+  D26's indicators with it (**#61**). But the scan predicted a *pile of
+  truncations* and there were none — #52 remains the only one. The bugs the
+  images actually found were things arithmetic could not have reached.
+- **Eight screens do not use the shared status bar at all** (**#62**), which
+  no reading of `draw_status_bar`'s call sites could show, because the
+  finding is in the screens that *do not* call it. `slot_editor.cpp` (the Y=,
+  parametric, polar and sequence editors), `table_screen`, `table_setup`,
+  `window_screen` and `help_screen` each hand-roll the first two lines of it.
+  The consequence is the serious one: on those screens D26's health
+  indicators cannot appear, so a failing card is invisible exactly where a
+  user might be working.
+- **The `[2nd] [A]` indicators are dead code** (**#63**). `StatusFlags` has
+  one occurrence in all of `src/` — its own definition — and `Key::kSecond`
+  and `Key::kAlpha` have none. §4.1 planned to sweep "the flag states"; the
+  finding is that they have no states. It also corrects §4.1's own arithmetic:
+  the right block is always 7 characters, never the 13 the prefix implies.
+- **The graph's empty-plot hint is drawn on the axis** (**#64**), at a
+  hardcoded `x=40` with no background, so gridlines and axis labels print
+  through the glyphs — and the parametric variant, 5 characters longer,
+  reaches the last pixel column. Neither is out of bounds, so
+  `check-text-fits.py` cannot see it. Same blind spot as #52.
+- **Softkey dividers are tied to label presence** (**#65**, cosmetic): the
+  `draw_vline` sits below the empty-label `continue`, so the bar's grid
+  changes shape between modal states.
+
+**What the instrument cost, and what it found by being used.** The sweep
+needed one new lever — `graphite-shot --unhealthy`, because D26's state means
+a hardware fault and no key sequence reaches it. Everything else was
+navigation. And generating the set found a flaw in the generator that reading
+it had not: the fixture was built once per run, but the calculator persists
+`history.txt` and `variables.dat` into that same root as it goes, so each
+image inherited whatever the images before it had typed. `chrome-unhealthy`
+was showing `natural-math`'s radicals. Reproducible only while nobody
+reordered `IMAGES` — a trap, not a property. The fixture is now rebuilt
+before every image.
+
+**The images stay.** All 30 are in `--check`, so every screen above fails CI
+if its chrome moves. That is the difference between this and an audit.
 
 ### 4.1 What the sweep already has a list of
 

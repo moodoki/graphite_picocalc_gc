@@ -14,11 +14,18 @@ commits on `phase-6.4`, all checks green.
 > **6.4.4** (images + key scripts, **closes #33**), **6.4.7** (#52
 > verified), most of **6.4.6** (CI) and **6.4.9** (docs).
 >
-> Left: **6.4.8**, the chrome sweep — unblocked and ready, and the plan is
-> already written in the spec. It files every defect as an issue and fixes
-> none; the fixes are a separate session. **6.4.5**, SDL, which now also
-> has to build the sound seam (see below). And clang-tidy, still not in CI
-> and still unable to see `host/`.
+> **6.4.8 landed 2026-08-29**: 30 images, five issues (**#61-#65**), no
+> fixes. The haul is not what the static scan predicted — #52 is still the
+> only truncating label, and the real finds were things arithmetic could
+> not reach. **#62** is the one to read first: eight screens hand-roll the
+> status bar and therefore cannot show D26's health indicators, so a
+> failing card is invisible on the Y= editor, the table and four others.
+> **#61** is the user-triggerable one, from a name in `app.txt`.
+>
+> Left: **6.4.5**, SDL, which now also has to build the sound seam (see
+> below, and it is scoped — firmware half reviewed, not listened to). And
+> clang-tidy, still not in CI and still unable to see `host/`. The five
+> chrome fixes are a separate session by design.
 >
 > Three things were left for the developer to decide, deliberately. Two
 > are settled. The **#52 image is posted** (comment `5461573497`), with the
@@ -30,8 +37,8 @@ commits on `phase-6.4`, all checks green.
 > block a firmware tag. The split is free in wall-clock — either half
 > finishes well inside the firmware builds `release` already waits on.
 >
-> Still open: a go-ahead before 6.4.8 opens several `area:ui` issues on a
-> public repo.
+> The third was the go-ahead for 6.4.8, given the same day; it filed
+> #61-#65.
 
 > ## Read this before trusting anything the host build says
 >

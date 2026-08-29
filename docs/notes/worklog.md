@@ -398,6 +398,43 @@ build and buys independent reporting plus no exec-bit games through
 `cmake/graphite-micropython.cmake` generates the embed tree with
 `execute_process` at *configure* time, so nothing races in the build graph.
 
+**Then 6.4.8 ran, and the sweep's value was not where the plan put it.** The
+static scan in the spec predicted a pile of truncated softkey labels and
+found none beyond #52 — every other label in `src/` fits the 4-character
+budget. What the images found instead, five issues' worth:
+
+- **#61** confirmed the one prediction that held. A 23-character SD app name
+  — the most `SdAppManifest::name` holds, written by hand in `app.txt` —
+  overdraws the mode block and takes D26's `SD`/`PSRAM` indicators with it.
+- **#62** is the one no static reading could have produced, because it is
+  about the screens that *do not* call `draw_status_bar`. Eight of them
+  hand-roll the first two lines of it: the four `SlotEditorScreen`
+  subclasses, `table_screen`, `table_setup`, `window_screen`, `help_screen`.
+  They therefore cannot show D26's health indicators. A failing card is
+  invisible on the Y= editor.
+- **#63**: `StatusFlags` has exactly one occurrence in `src/` — its own
+  definition. `Key::kSecond` and `Key::kAlpha` have none. The `[2nd] [A]`
+  indicators cannot appear, and the right block is always 7 characters, not
+  the 13 the spec's own arithmetic assumed.
+- **#64**: the graph's empty-plot hint is drawn at a hardcoded `x=40` on the
+  axis with no background fill, so gridlines and axis labels print through
+  the glyphs; the parametric variant is 5 characters longer and reaches the
+  last pixel column. Invisible to `check-text-fits.py` for the same reason
+  #52 is — nothing lands out of bounds.
+- **#65**, cosmetic: softkey dividers sit below the empty-label `continue`,
+  so the bar's grid changes shape between modal states.
+
+**Two things the sweep taught about the instrument.** It needed exactly one
+new lever, `graphite-shot --unhealthy`, because D26's state means a hardware
+fault and no key sequence reaches it — everything else was navigation, which
+is D97 paying off. And *generating* the set found a flaw in the generator
+that reading it had not: one fixture per run, but the calculator persists
+`history.txt` and `variables.dat` into that root as it goes, so every image
+inherited what the images before it had typed. `chrome-unhealthy` was showing
+`natural-math`'s radicals. It stayed reproducible only while nobody reordered
+`IMAGES`. Rebuilt per image now. Looking at the pictures beat reading the
+script, again.
+
 **And 6.4.5's sound work was scoped**: the seam and the desktop backend are the
 deliverable; the firmware half is written and reviewed, not flashed and
 listened to. It follows from the zero callers above — verifying it means
