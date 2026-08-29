@@ -18,6 +18,42 @@ Format:
 
 ---
 
+## D99: macOS coverage of the host build is local, not a CI runner
+
+**Date**: 2026-08-29
+**Status**: Accepted
+**Context**: 6.4.6's row says "build `graphite-shot` on Linux **and** macOS
+runners". Every job in all three workflows is `ubuntu-latest`, so as written
+the task could not close. The two-OS requirement is not decoration: §3.5 calls
+the host build a development instrument rather than an emulator, the two
+platforms compile the shared tree with different compilers, and D96 exists
+because one of them rejected a GCC-only asm-register declaration. Today
+`host-images` failed on Linux over a MicroPython heap figure macOS and Linux
+do not agree on — a real divergence, invisible until Linux ran.
+**Decision**: Linux is covered by CI on every pull request. **macOS is covered
+by the developer's own machine**, and a local pass counts as satisfying the
+gate. No macOS runner is added.
+**Rationale**: The development machine *is* macOS, so every change is built
+and run there before it is pushed — the coverage exists, it is just not
+reported by a badge. A macOS runner would re-do work that has already
+happened, on the slowest and most expensive runner class GitHub offers, to
+produce a second green tick for a platform no user ships on: the firmware
+targets RP2040 and RP2350, and the desktop build is a tool. The asymmetry is
+also the right way round — the platform that gets automated coverage is the
+one nobody is watching.
+**Tradeoffs**: A macOS-only regression is caught by a human remembering to
+build, not by CI, so it can reach `main` if someone pushes without building.
+That is a real hole and it is accepted knowingly: the same is already true of
+`./scripts/build-all.sh` for the two firmware targets, and the failure mode is
+a developer-facing tool breaking, not a shipped binary. It also means "green
+on GitHub" is not by itself the full gate for anything touching `host/`.
+**Revisit when**: A second developer joins, or `graphite-desktop` (6.4.5)
+ships as something users install rather than something the project builds —
+at which point macOS stops being a build convenience and starts being a
+platform with users on it.
+
+---
+
 ## D98: generated doc images are committed *and* regenerated in CI, with a drift check
 
 **Date**: 2026-08-28

@@ -22,10 +22,19 @@ commits on `phase-6.4`, all checks green.
 > failing card is invisible on the Y= editor, the table and four others.
 > **#61** is the user-triggerable one, from a name in `app.txt`.
 >
+> **6.4.6 closed the same day**, mostly by having already happened — three
+> of its four pieces landed out of order in earlier tasks. What it took was
+> **D99** (macOS is covered locally, not by a runner; there has never been
+> one, and the row asked for it) and §7's two deliberate tests. Both are now
+> satisfied by observation: the drift check went red by itself during 6.4.8,
+> and the host suite was broken on purpose on a throwaway branch —
+> `FAIL: one_var n`, other six jobs green, branch deleted.
+>
 > Left: **6.4.5**, SDL, which now also has to build the sound seam (see
-> below, and it is scoped — firmware half reviewed, not listened to). And
-> clang-tidy, still not in CI and still unable to see `host/`. The five
-> chrome fixes are a separate session by design.
+> below, and it is scoped — firmware half reviewed, not listened to), and
+> **6.4.9**, docs and close. clang-tidy is still not in CI and still cannot
+> see `host/`, which is **out of 6.4.6's scope on purpose** — named, not
+> assigned. The five chrome fixes are a separate session by design.
 >
 > Three things were left for the developer to decide, deliberately. Two
 > are settled. The **#52 image is posted** (comment `5461573497`), with the

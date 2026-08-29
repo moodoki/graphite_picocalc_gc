@@ -337,7 +337,7 @@ already answered by compiling what 6.3.0 has to answer by flashing.
 | 6.4.3 ✅ | **MicroPython on host** — `MICROPY_GCREGS_SETJMP=1` (D96), host heap and stack sizing, the `picocalc_mp_init` call site | 5 | `py` at the home screen runs a script and `print()` reaches stdout; `examples/apps/periodic/` — the largest script we have — loads and draws |
 | 6.4.4 ✅ | **Screenshot manifest + key scripts.** `scripts/gen-doc-images.py`, expression/screen → filename, `keyscript.cpp` (D97) so an image can be any screen reachable by navigation. PPM → PNG on the way out. **Closes #33** | 7 | One command regenerates the whole committed image set; a re-run is byte-identical; at least one image is of a screen reached by a key script rather than constructed directly |
 | 6.4.5 | **SDL backends** — `display_sdl`, `keyboard_sdl`, the `graphite-desktop` executable, stdin injection (D97). **Plus the sound seam itself**: §2.2 found `platform::Sound` does not exist, so this defines it, wires the firmware side to `drivers/pwm_sound` (which has had no caller ever) and only then writes `sound_sdl` (D95). **Closes #42** | 10 | A window opens on macOS and Linux, the keyboard drives the calculator, a tone plays on the desktop, and stdin drives it too. The firmware side of the seam compiles and is wired to `pwm_sound`, but is **not** hardware-verified — see §2.2, nothing calls it yet. **Separable** — everything above closes #33 without it |
-| 6.4.6 | **CI.** Build `graphite-shot` on Linux and macOS runners; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
+| 6.4.6 ✅ | **CI.** Build `graphite-shot` on Linux; regenerate the image set and fail on drift (D98). **Also lands `./scripts/host-tests.sh` in CI**, since §5.1's mitigation is worthless if CI does not actually run. **macOS is covered locally, not by a runner (D99)** — the row originally said "Linux and macOS runners" and no macOS runner exists | 4 | A PR that changes a rendered screen without regenerating fails; a PR that breaks the host suite fails. clang-tidy stays out of scope and stays named as still missing |
 | 6.4.7 ✅ | **Verify the instrument — #52.** Not a fix; a screenshot of the file manager's softkey row. **Gates 6.4.8** | 2 | The truncation is visible in a committed image, and #52 carries it as a comment. If it is *not* visible, that is a finding about the instrument, 6.4.8 does not start, and it goes in the phase's notes |
 | 6.4.8 ✅ | **Sweep every chrome bar** (§4.1) — a manifest entry per softkey set and per status-bar title, including the modal variants and the D26 unhealthy state. **Every defect found is filed as an issue, not fixed here** — they are addressed in a separate bugfix session | 5 | Every `draw_softkeys` and `draw_status_bar` call site in `src/` has a committed image, and every defect the images show is an open issue labelled `area:ui`. **The images stay in the set**, so D98's drift check turns this into a permanent regression gate rather than a one-off audit |
 | 6.4.9 | **Docs and close** — README section carrying §3.5's warning verbatim, `ROADMAP.md` row, `dependencies.md` (SDL2 is a developer dependency, never a firmware one), a developer-facing `docs/host-build.md` | 3 | §7's checklist complete |
@@ -387,8 +387,9 @@ worth resisting: 6.4.5 is the fun task and the least load-bearing.
 **Not yet done from 6.4.0's gate**: nothing. The Linux half is met by the
 `host-render` CI job, pulled forward from 6.4.6 — it builds `graphite-shot` on
 `ubuntu-latest`, renders, checks the frame is not a flat colour, and requires a
-re-run to be byte-identical. CI still does not run clang-tidy; it stays in
-6.4.6 and stays named as missing.
+re-run to be byte-identical. CI still does not run clang-tidy, which is
+**out of 6.4.6's scope on purpose** and stays named as missing rather than
+being anybody's task yet.
 
 **The job was split in two on 2026-08-29**, and the reason is a distinction
 worth keeping: `host-render` is a *firmware* check wearing a docs hat — it
@@ -487,6 +488,34 @@ split made on the same day paid for itself the first time it was tested.
 
 **The images stay.** All 30 are in `--check`, so every screen above fails CI
 if its chrome moves. That is the difference between this and an audit.
+
+**6.4.6 closed 2026-08-29**, mostly by having already happened. Three of its
+four pieces landed out of order — the Linux build and render was pulled
+forward into 6.4.0 (now `host-render`), the drift check is `host-images`, and
+`./scripts/host-tests.sh` runs as `host-tests`, 22 suites in ~47 s. What
+closing it actually took was two things:
+
+- **D99**: the row asked for a macOS runner and there has never been one. The
+  gate is now Linux in CI, macOS on the developer's machine. The asymmetry is
+  the right way round — the platform with automated coverage is the one nobody
+  is watching.
+- **§7's two deliberate tests, both now satisfied by observation rather than
+  by assertion.** The drift test happened by itself: `host-images` went red on
+  the MicroPython heap figure during 6.4.8, on a real image that could not be
+  reproduced. The host-suite test was staged on purpose — one digit changed in
+  `test_stats.cpp` (`one_var n`, 8 asserted as 9), pushed to a throwaway
+  branch and dispatched. CI reported `FAIL: one_var n`, `122 checks, 1
+  failures`, exit 1, and **the other six jobs stayed green**, so the failure
+  was isolated and said what broke. Branch deleted; it was never merged and
+  never touched PR #60.
+
+A gate that has never been seen failing is an assumption, and the 2026-08-15
+wiki outage is the price of that assumption — a check that worked, a red badge
+nobody read, and eight days of a wiki showing a calculator with no apps.
+
+**clang-tidy is still not in CI and still cannot see `host/`** (it replays the
+arm-none-eabi `compile_commands.json`). That is out of 6.4.6's scope on
+purpose and is named here rather than being anybody's task.
 
 ### 4.1 What the sweep already has a list of
 

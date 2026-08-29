@@ -448,6 +448,23 @@ inherited what the images before it had typed. `chrome-unhealthy` was showing
 `IMAGES`. Rebuilt per image now. Looking at the pictures beat reading the
 script, again.
 
+**6.4.6 closed too, and mostly by inventory.** Three of its four pieces had
+already landed under other task numbers: the Linux build and render came
+forward into 6.4.0, the drift check is `host-images`, and `host-tests.sh` has
+been a CI job since the split. The row's fourth piece was a macOS runner that
+has never existed — settled as **D99**, Linux in CI and macOS on the
+developer's machine, which is the right way round because the platform with
+automated coverage should be the one nobody is watching.
+
+That left §7's two deliberate tests, and both are now satisfied by having been
+watched rather than by being asserted. The drift one happened without being
+staged: `host-images` went red during 6.4.8 on the MicroPython heap figure.
+The host-suite one was staged — `one_var n` changed from 8 to 9, pushed to a
+throwaway branch, dispatched, `FAIL: one_var n` / `122 checks, 1 failures` /
+exit 1, **six other jobs green**, branch deleted without ever touching PR #60.
+The isolation is half the point: a red job that takes the whole workflow with
+it teaches nothing about which gate fired.
+
 **And 6.4.5's sound work was scoped**: the seam and the desktop backend are the
 deliverable; the firmware half is written and reviewed, not flashed and
 listened to. It follows from the zero callers above — verifying it means
