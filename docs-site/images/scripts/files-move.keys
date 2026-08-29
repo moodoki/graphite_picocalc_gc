@@ -1,0 +1,3 @@
+# The file manager with a cut armed, which is the only way the MOVE
+# label in F3 ever appears (#52 sweep, 6.4.8).
+f6 down down enter f2

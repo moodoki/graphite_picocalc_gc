@@ -23,6 +23,7 @@
 #include "platform/power.hpp"
 #include "platform/sd_apps.hpp"
 #include "gfx/framebuffer.hpp"
+#include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/lists.hpp"
 #include "math/matrix.hpp"
@@ -101,22 +102,24 @@ void launch_sd_app(const platform::AppEntry& self) {
 }
 
 void usage(const char* argv0) {
-    std::fprintf(
-        stderr,
-        "usage: %s [--eval <e>] [--key <k>] [--keyscript <f>] [--run <s.py>] --shot <out.ppm>\n"
-        "\n"
-        "  --eval   submit a line to the home screen before rendering,\n"
-        "           exactly as PICOCALC_SERIAL_INJECT does on the board.\n"
-        "           Repeatable; order is preserved.\n"
-        "  --run    run a Python file through the same exec_file() the\n"
-        "           program screen uses for an SD app.\n"
-        "  --key    queue one key (a name like up/enter/esc/f1, or a\n"
-        "           single character). Repeatable; order is preserved.\n"
-        "  --keyscript  replay a file of key names (D97). Same names,\n"
-        "           whitespace-separated, # comments to end of line.\n"
-        "\n"
-        "Storage root: $PICOCALC_HOME, else $HOME/.picocalc\n",
-        argv0);
+    std::fprintf(stderr,
+                 "usage: %s [--eval <e>] [--key <k>] [--keyscript <f>] [--run <s.py>]\n"
+                 "          [--unhealthy sd,psram] --shot <out.ppm>\n"
+                 "\n"
+                 "  --eval   submit a line to the home screen before rendering,\n"
+                 "           exactly as PICOCALC_SERIAL_INJECT does on the board.\n"
+                 "           Repeatable; order is preserved.\n"
+                 "  --run    run a Python file through the same exec_file() the\n"
+                 "           program screen uses for an SD app.\n"
+                 "  --key    queue one key (a name like up/enter/esc/f1, or a\n"
+                 "           single character). Repeatable; order is preserved.\n"
+                 "  --keyscript  replay a file of key names (D97). Same names,\n"
+                 "           whitespace-separated, # comments to end of line.\n"
+                 "  --unhealthy  mark subsystems down for D26's red status-bar\n"
+                 "           indicators: sd, psram, or both (comma-separated).\n"
+                 "\n"
+                 "Storage root: $PICOCALC_HOME, else $HOME/.picocalc\n",
+                 argv0);
 }
 
 }  // namespace
@@ -132,6 +135,15 @@ int main(int argc, char** argv) {
     const char* shot_path = nullptr;
     std::vector<const char*> eval_lines;
     const char* run_script = nullptr;
+    // D26's red SD/PSRAM indicators appear only while a subsystem is down,
+    // which on a board means a fault and here means nothing at all -- the
+    // host has no card and its PSRAM is a malloc that does not fail. So the
+    // one state the user most needs to be able to read is the one state no
+    // key sequence reaches. This flag is the sweep's way in (6.4.8); it sets
+    // exactly what the firmware's retry heartbeat sets, through the same
+    // ui::set_health_flags, so the screenshot is of the real code path.
+    bool sd_ok = true;
+    bool psram_ok = true;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {
             shot_path = argv[++i];
@@ -142,6 +154,23 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--keyscript") == 0 && i + 1 < argc) {
             if (!host::run_keyscript(argv[++i])) {
                 return 1;
+            }
+        } else if (std::strcmp(argv[i], "--unhealthy") == 0 && i + 1 < argc) {
+            const char* spec = argv[++i];
+            for (const char* tok = spec; tok != nullptr;) {
+                const char* comma = std::strchr(tok, ',');
+                const std::size_t n =
+                    comma != nullptr ? static_cast<std::size_t>(comma - tok) : std::strlen(tok);
+                if (n == 2 && std::strncmp(tok, "sd", 2) == 0) {
+                    sd_ok = false;
+                } else if (n == 5 && std::strncmp(tok, "psram", 5) == 0) {
+                    psram_ok = false;
+                } else {
+                    std::fprintf(stderr, "--unhealthy: expected sd or psram, got \"%.*s\"\n",
+                                 static_cast<int>(n), tok);
+                    return 2;
+                }
+                tok = comma != nullptr ? comma + 1 : nullptr;
             }
         } else if (std::strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
             if (!host::queue_key(argv[++i])) {
@@ -182,6 +211,11 @@ int main(int argc, char** argv) {
     // reachable -- SD app loading is the newest code in the tree and the
     // hardest to exercise, because it needs a card prepared by hand.
     const int sd_apps = platform::scan_sd_apps(&launch_sd_app);
+
+    // After the scan, because a real board sets these from what init and
+    // the retry heartbeat found -- and before the first render, because the
+    // status bar reads them at draw time.
+    ui::set_health_flags(sd_ok, psram_ok);
 
     auto& mgr = ui::screen_manager();
     mgr.push(&apps::home_screen());

@@ -29,6 +29,22 @@ reached by evaluating an expression — the file manager, for instance. The
 key names are the ones `platform::key_names` defines, shared with the
 MicroPython bindings so the two cannot drift apart.
 
+## The chrome sweep set
+
+The `chrome-*.png` images are not documentation. They are a regression
+gate: one image per `ui::draw_softkeys` and `ui::draw_status_bar` call
+site in `src/`, in its modal and flag variants, committed by Phase 6.4.8.
+Because `--check` runs in CI, a change that moves any of those bars fails
+the build instead of being noticed later — which is the difference between
+an audit and a gate. They stay in the set even where they show nothing
+wrong; the value is the diff on the day something does.
+
+Two of them (`chrome-unhealthy*`) use `graphite-shot --unhealthy`, which
+sets D26's storage-health flags through the same `ui::set_health_flags`
+the firmware's retry heartbeat calls. That state means a real fault on a
+board, so it is the one state a user most needs to be able to read and the
+one no key sequence reaches.
+
 ## Adding an image
 
 Add an entry to `IMAGES` in `scripts/gen-doc-images.py`, run it, and commit

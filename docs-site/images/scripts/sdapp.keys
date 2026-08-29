@@ -1,0 +1,3 @@
+# The fixture SD app, launcher row 4 (after Notepad, Python, Files).
+# Its 23-character name goes straight into the status bar.
+f6 down down down enter

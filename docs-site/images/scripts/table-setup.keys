@@ -1,0 +1,3 @@
+# The table setup screen (F5, F5, then F2 = SETP). One of the screens
+# that hand-rolls its own title bar instead of ui::draw_status_bar.
+f5 f5 f2

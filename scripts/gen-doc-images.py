@@ -68,6 +68,162 @@ IMAGES: list[dict] = [
         "caption": "The file manager. Note the truncated softkey label (#52).",
         "keys": "files-softkeys.keys",
     },
+
+    # ---- The chrome sweep (6.4.8) ----
+    #
+    # One entry per draw_softkeys / draw_status_bar call site in src/, in
+    # its modal and flag variants. These are NOT documentation images --
+    # they are a regression gate. D98's drift check turns the set into a
+    # permanent one: a chrome change that moves any of these bars fails CI
+    # rather than being noticed later, or not at all.
+    #
+    # Keep them even where they show nothing wrong. The value is the diff
+    # on the day something does.
+
+    # -- softkey bars --
+    {
+        "name": "chrome-yeq",
+        "caption": "The Y= editor's softkey bar (F1 from home).",
+        "key": "f1",
+    },
+    {
+        "name": "chrome-window",
+        "caption": "The WINDOW screen (F2 from home).",
+        "key": "f2",
+    },
+    {
+        "name": "chrome-mode",
+        "caption": "The MODE screen's softkey bar (F3 from home).",
+        "key": "f3",
+    },
+    {
+        "name": "chrome-graph",
+        "caption": "The graph screen's softkey bar (F5 from home).",
+        "key": "f5",
+    },
+    {
+        "name": "chrome-table",
+        "caption": "The table screen's softkey bar (F5, F5 from home).",
+        "keys": "table.keys",
+    },
+    {
+        "name": "chrome-launcher",
+        "caption": "The app launcher (F6 from home), including a tier-2 SD app.",
+        "key": "f6",
+    },
+    {
+        "name": "chrome-notepad",
+        "caption": "The text editor widget's softkey bar, via Notepad.",
+        "keys": "notepad.keys",
+    },
+    {
+        "name": "chrome-python",
+        "caption": "The Python editor's softkey bar (EDIT/BACK modal variant).",
+        "keys": "python.keys",
+    },
+    {
+        "name": "chrome-files-move",
+        "caption": "The file manager with a cut armed: the MOVE label appears in F3.",
+        "keys": "files-move.keys",
+    },
+    {
+        "name": "chrome-settings",
+        "caption": "The SETTINGS screen's softkey bar.",
+        "eval": ["settings"],
+    },
+
+    # -- status-bar titles --
+    #
+    # draw_status_bar puts the title at x=4 and the right-aligned block at
+    # a computed rx, with NOTHING clamping one against the other. Every
+    # static title in src/ is here so that the day one of them grows, the
+    # diff says so.
+    {
+        "name": "chrome-stats",
+        "caption": "Status bar: STATS.",
+        "eval": ["stats"],
+    },
+    {
+        "name": "chrome-lists",
+        "caption": "Status bar: LISTS.",
+        "eval": ["lists"],
+    },
+    {
+        "name": "chrome-matrix",
+        "caption": "Status bar: MATRIX.",
+        "eval": ["matrix"],
+    },
+    {
+        "name": "chrome-const",
+        "caption": "Status bar: CONSTANTS.",
+        "eval": ["const"],
+    },
+    {
+        "name": "chrome-dist",
+        "caption": "Status bar: DIST.",
+        "eval": ["dist"],
+    },
+    {
+        "name": "chrome-test",
+        "caption": "Status bar: TEST.",
+        "eval": ["test"],
+    },
+    {
+        "name": "chrome-plots",
+        "caption": "Status bar: STAT PLOTS -- the longest static title, at 10.",
+        "eval": ["plot"],
+    },
+    {
+        "name": "chrome-cas",
+        "caption": "Status bar: CAS.",
+        "eval": ["cas"],
+    },
+    {
+        "name": "chrome-solver",
+        "caption": "Status bar: SOLVER.",
+        "eval": ["solve"],
+    },
+    {
+        "name": "chrome-analyze",
+        "caption": "Status bar: ANALYZE, over the graph screen.",
+        "eval": ["analyze"],
+    },
+
+    {
+        "name": "chrome-help",
+        "caption": "The HELP screen, whose title bar is hand-rolled rather than shared.",
+        "eval": ["help"],
+    },
+    {
+        "name": "chrome-table-setup",
+        "caption": "Table setup (F5, F5, F2) -- another hand-rolled title bar.",
+        "keys": "table-setup.keys",
+    },
+
+    # -- the states a user cannot reach on purpose --
+    {
+        "name": "chrome-unhealthy",
+        "caption": "D26: SD and PSRAM reported down, on the home screen.",
+        "args": ["--unhealthy", "sd,psram"],
+    },
+    {
+        "name": "chrome-unhealthy-plots",
+        "caption": "D26 indicators after the longest static title (STAT PLOTS).",
+        "eval": ["plot"],
+        "args": ["--unhealthy", "sd,psram"],
+    },
+    {
+        "name": "chrome-sdapp-longname",
+        "caption": "A 23-character SD app name in the status bar -- the length "
+                   "SdAppManifest::name allows, written by hand in app.txt.",
+        "keys": "sdapp.keys",
+    },
+    {
+        "name": "chrome-sdapp-unhealthy",
+        "caption": "The same long app name with D26's indicators alongside it.",
+        "keys": "sdapp.keys",
+        "args": ["--unhealthy", "sd,psram"],
+    },
 ]
 
 # Files placed in the fixture storage root, so any screen showing the card
@@ -75,6 +231,13 @@ IMAGES: list[dict] = [
 FIXTURE_FILES: dict[str, str] = {
     "readme.txt": "GraphCalc documentation fixture.\n",
     "notes/todo.txt": "buy milk\n",
+    # A tier-2 SD app whose name is the longest SdAppManifest::name can
+    # hold (char[24]). Nothing about this is exotic -- it is a file a user
+    # writes by hand -- and the status bar draws it with no clamp against
+    # the right-aligned block. That makes it 6.4.8's prime suspect, and
+    # the reason the sweep needs a fixture app at all.
+    "apps/longname/app.txt": "name=Mortgage Amortizer 2026\n",
+    "apps/longname/main.py": "print('fixture app')\n",
 }
 
 
@@ -122,7 +285,18 @@ def read_ppm(path: Path) -> tuple[int, int, bytes]:
 
 
 def build_fixture() -> None:
-    """A storage root with fixed contents, rebuilt from scratch each run."""
+    """A storage root with fixed contents, rebuilt before EVERY image.
+
+    Per-image, not per-run, and that distinction was found by looking at
+    the pictures. The calculator persists as it goes -- history.txt,
+    variables.dat, graphstate.dat -- into the same root, so with one
+    fixture per run each image inherited whatever the images before it had
+    typed. The home screen in chrome-unhealthy.png was showing
+    natural-math.png's radicals. The set stayed reproducible only as long
+    as nobody reordered IMAGES, which is a trap rather than a property:
+    every entry now renders from the same starting state, so an entry
+    means what it says on its own.
+    """
     if FIXTURE.exists():
         shutil.rmtree(FIXTURE)
     for rel, text in FIXTURE_FILES.items():
@@ -136,10 +310,16 @@ def render(entry: dict, ppm_path: Path) -> None:
     argv = [str(SHOT)]
     for line in entry.get("eval", []):
         argv += ["--eval", line]
+    if "key" in entry:
+        argv += ["--key", entry["key"]]
     if "keys" in entry:
         argv += ["--keyscript", str(SCRIPT_DIR / entry["keys"])]
     if "run" in entry:
         argv += ["--run", entry["run"]]
+    # Escape hatch for state the UI cannot be driven into: --unhealthy is
+    # the only user so far (6.4.8). Deliberately raw argv rather than a
+    # per-flag key, so a lever added to graphite-shot needs no change here.
+    argv += entry.get("args", [])
     argv += ["--shot", str(ppm_path)]
 
     result = subprocess.run(
@@ -175,12 +355,12 @@ def main() -> int:
         return 1
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    build_fixture()
     SCRATCH.mkdir(parents=True, exist_ok=True)
     tmp_ppm = SCRATCH / "shot.ppm"
 
     stale: list[str] = []
     for entry in IMAGES:
+        build_fixture()
         render(entry, tmp_ppm)
         width, height, rgb = read_ppm(tmp_ppm)
         target = OUT_DIR / f"{entry['name']}.png"
