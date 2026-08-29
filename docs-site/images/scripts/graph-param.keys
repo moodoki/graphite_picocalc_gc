@@ -1,0 +1,4 @@
+# Parametric graph mode: the F1 softkey reads PAR instead of Y=, and the
+# empty-graph message is the longer of the two variants. MODE (F3), down
+# to "Graph mode", right to PAR, back, then graph.
+f3 down down down right esc f5

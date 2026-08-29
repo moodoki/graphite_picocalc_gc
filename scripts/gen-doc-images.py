@@ -102,6 +102,12 @@ IMAGES: list[dict] = [
         "key": "f5",
     },
     {
+        "name": "chrome-graph-param",
+        "caption": "Parametric mode: F1 reads PAR, and the empty-graph message "
+                   "is the longer variant.",
+        "keys": "graph-param.keys",
+    },
+    {
         "name": "chrome-table",
         "caption": "The table screen's softkey bar (F5, F5 from home).",
         "keys": "table.keys",
