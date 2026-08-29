@@ -218,16 +218,30 @@ IMAGES: list[dict] = [
         "eval": ["plot"],
         "args": ["--unhealthy", "sd,psram"],
     },
+    # #61's evidence. This was originally the SD app screen, whose status
+    # bar shows a 23-character app name -- and CI rejected it, correctly:
+    # the program screen also prints the MicroPython heap figure, which is
+    # not the same on Linux and macOS. Nothing in the UI is wrong there;
+    # the number is a property of the build. So the rule the sweep learned
+    # is that a screen showing an interpreter's heap cannot be in a
+    # byte-identical drift set, and the rule generalises -- anything the
+    # host and the board can legitimately disagree about does not belong
+    # in these images.
+    #
+    # The file manager makes the same point better anyway. It needs no
+    # interpreter, the title is longer (char[40] against char[24]), and it
+    # takes nothing but a folder a user made.
     {
-        "name": "chrome-sdapp-longname",
-        "caption": "A 23-character SD app name in the status bar -- the length "
-                   "SdAppManifest::name allows, written by hand in app.txt.",
-        "keys": "sdapp.keys",
+        "name": "chrome-files-deep",
+        "caption": "A deep directory: the file manager's title runs straight "
+                   "into the right-aligned block (#61).",
+        "keys": "files-deep.keys",
     },
     {
-        "name": "chrome-sdapp-unhealthy",
-        "caption": "The same long app name with D26's indicators alongside it.",
-        "keys": "sdapp.keys",
+        "name": "chrome-files-deep-unhealthy",
+        "caption": "The same title with D26's SD and PSRAM indicators, which "
+                   "it pushes into the block as well.",
+        "keys": "files-deep.keys",
         "args": ["--unhealthy", "sd,psram"],
     },
 ]
@@ -237,13 +251,17 @@ IMAGES: list[dict] = [
 FIXTURE_FILES: dict[str, str] = {
     "readme.txt": "GraphCalc documentation fixture.\n",
     "notes/todo.txt": "buy milk\n",
-    # A tier-2 SD app whose name is the longest SdAppManifest::name can
-    # hold (char[24]). Nothing about this is exotic -- it is a file a user
-    # writes by hand -- and the status bar draws it with no clamp against
-    # the right-aligned block. That makes it 6.4.8's prime suspect, and
-    # the reason the sweep needs a fixture app at all.
+    # A tier-2 SD app, so the launcher has a row that is not built in.
+    # Its name is the longest SdAppManifest::name holds (char[24]), which
+    # is also the shape of #61 -- but the image that DEMONSTRATES #61 is
+    # the file manager below, not this app. See the note on
+    # chrome-files-deep for why.
     "apps/longname/app.txt": "name=Mortgage Amortizer 2026\n",
     "apps/longname/main.py": "print('fixture app')\n",
+    # A deep directory. The file manager's title is "FILES <cur_dir_>" in
+    # a char[40] and nothing clamps it against the right-aligned block, so
+    # walking down here is all it takes to make the status bar unreadable.
+    "documents/2026/statements/jan.txt": "fixture\n",
 }
 
 
