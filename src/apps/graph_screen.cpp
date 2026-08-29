@@ -1539,7 +1539,18 @@ void GraphScreen::render(gfx::Framebuffer& fb) {
     if (!any) {
         const char* hint = param_style() ? "No curves. Press F1 for the editor."
                                          : "No functions. Press F1 for Y=.";
-        font.draw_string(fb, 40, top_ + height_ / 2, hint, kGrayLine);
+        // Centred and on a cleared strip. It used to be drawn at a
+        // hardcoded x=40 straight onto the plot, so the gridlines and the
+        // axis end labels printed through the glyphs -- the x-axis "0"
+        // landed inside the "o" of "functions" (#64). The parametric
+        // variant is 5 characters longer and reached the last pixel
+        // column, which is what a constant left-margin does when the
+        // string it was chosen for is not the only string.
+        const int hint_w = font.text_width(hint);
+        const int hint_x = (platform::kScreenW - hint_w) / 2;
+        const int hint_y = top_ + height_ / 2;
+        fb.fill_rect(hint_x - 4, hint_y - 2, hint_w + 8, font.height() + 4, kBlack);
+        font.draw_string(fb, hint_x, hint_y, hint, kGrayLine);
     }
 
     fb.set_pane_clip(pane_x0, pane_y0, pane_x1, pane_y1);

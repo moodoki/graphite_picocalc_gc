@@ -232,6 +232,17 @@ IMAGES: list[dict] = [
     # interpreter, the title is longer (char[40] against char[24]), and it
     # takes nothing but a folder a user made.
     {
+        # The proof for #62. Before the fix this screen hand-rolled its
+        # title bar and could not show these at all, which is the whole
+        # of that bug: a failing card was invisible on the screen a user
+        # was most likely to be sitting on.
+        "name": "chrome-yeq-unhealthy",
+        "caption": "The Y= editor with SD and PSRAM down -- indicators it "
+                   "could not show before #62.",
+        "key": "f1",
+        "args": ["--unhealthy", "sd,psram"],
+    },
+    {
         "name": "chrome-files-deep",
         "caption": "A deep directory: the file manager's title runs straight "
                    "into the right-aligned block (#61).",

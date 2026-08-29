@@ -274,8 +274,18 @@ void TableScreen::render(gfx::Framebuffer& fb) {
     sel_ = std::max(0, std::min(sel_, kVisibleRows - 1));
 
     fb.clear(kBlack);
-    fb.fill_rect(0, top_, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, top_ + 2, ask_mode() ? "TABLE (ASK)" : "TABLE", kGrayLine);
+    // Full screen gets the shared bar, which is what carries D26's health
+    // indicators (#62). Inside a split pane it cannot: draw_status_bar
+    // draws at y=0 and this pane starts at top_, so the plain strip stays
+    // there -- the split's graph half is the one with the chrome, exactly
+    // as graph_screen guards its own.
+    const char* const table_title = ask_mode() ? "TABLE (ASK)" : "TABLE";
+    if (top_ == 0) {
+        ui::draw_status_bar(fb, table_title);
+    } else {
+        fb.fill_rect(0, top_, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
+        font.draw_string(fb, 4, top_ + 2, table_title, kGrayLine);
+    }
 
     // Header: independent label + visible dependent columns.
     font.draw_string(fb, 8, top_ + kHeaderOff, table_independent_label(st), kGreen);

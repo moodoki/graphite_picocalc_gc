@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "gfx/framebuffer.hpp"
@@ -52,6 +53,17 @@ constexpr char kGlyphEllipsis = '\x8a';    // 138 horizontal ellipsis (U+2026)
 constexpr char kGlyphSuperTwo = '\x8b';    // 139 superscript two (U+00B2)
 constexpr char kGlyphSqrt = '\x8c';        // 140 square-root radical (U+221A)
 constexpr char kGlyphSubX = '\x8d';        // 141 subscript x (U+2093, 4D.4)
+
+// Copy `src` into `dst`, truncating with kGlyphEllipsis when the drawn
+// width would exceed `max_px`, so text never spills past the space it was
+// given. Always NUL-terminates; `cap` bounds the write, so a small buffer
+// truncates further than `max_px` would.
+//
+// Shared rather than per-screen because it was already written twice —
+// const_screen.cpp's picker column and slot_editor.cpp's expression
+// column — and #61 wanted a third. Three copies of "make this text fit"
+// is how one of them ends up being the one that does not.
+void fit_text(const Font& font, const char* src, int max_px, char* dst, size_t cap);
 
 // Main text font: Spleen 8x16 (D9 — replaced the interim Coyote 8x12).
 const Font& main_font();

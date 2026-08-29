@@ -10,15 +10,19 @@ namespace ui {
 constexpr int kStatusBarH = 16;
 constexpr int kSoftkeyBarH = 20;
 
-// Modifier flags shown in the status bar.
-struct StatusFlags {
-    bool second = false;
-    bool alpha = false;
-};
-
-// Draw the top status bar: title (left) and, right-aligned, the 2nd /
-// ALPHA indicators, the angle mode (RAD/DEG), and the display mode.
-void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags = {});
+// Draw the top status bar: title (left, truncated with an ellipsis if it
+// would reach the right-hand block) and, right-aligned, the angle mode
+// (RAD/DEG) and the display mode.
+//
+// There was a StatusFlags parameter here carrying `second` and `alpha`,
+// and a `[2nd] [A]` prefix on the right-hand block. Nothing ever passed
+// it: `Key::kSecond` and `Key::kAlpha` are declared but referenced
+// nowhere, so the calculator has no 2nd mode and no alpha mode, and the
+// indicators could not appear (#63). Removed rather than documented,
+// because dead code that reads as live code is what made #61's budget
+// look 6 characters wider than it is. If 2nd/alpha is ever built, this
+// comes back with a caller.
+void draw_status_bar(gfx::Framebuffer& fb, const char* title);
 
 // Storage-health indicators (D26): while SD or PSRAM is down, the
 // status bar shows a red "SD" / "PSRAM" after the title; they clear
