@@ -18,6 +18,39 @@ Format:
 
 ---
 
+## D100: no 2nd/ALPHA modifier modes — a TI convention a QWERTY keyboard does not need
+
+**Date**: 2026-08-30
+**Status**: Accepted
+**Context**: `ui::StatusFlags` carried `second` and `alpha` and the status bar
+rendered a `[2nd] [A]` prefix for them. Phase 6.4.8's chrome sweep found the
+struct had exactly one occurrence in `src/` — its own definition — and that
+`Key::kSecond` and `Key::kAlpha` are declared in `keyboard.hpp` and referenced
+nowhere. Filed as #63, initially as a bug.
+**Decision**: **It is not a bug and there is nothing to build.** 2nd and ALPHA
+are not adopted, now or as a planned feature. The indicators are removed; this
+entry is the record of why, so the absence reads as a choice rather than a
+gap.
+**Rationale**: TI's modifier modes exist to solve a hardware problem we do not
+have. A TI-84 has around 50 keys and needs to reach several hundred functions,
+so it overloads every key twice and shows the user which layer is live. **The
+PicoCalc has a full QWERTY keyboard**: a letter is the letter key, and a
+function is typed by its name into an expression the parser reads (D24's typed
+commands, and the catalog behind `help`). There is no second layer to be in,
+so an indicator for which layer you are in has nothing to report. Carrying the
+UI for it was inherited shape, not a requirement — the calculator is
+TI-*shaped* in its screens and its F-key scheme, and that resemblance is worth
+having only where it earns its keep.
+**Tradeoffs**: A user arriving from a TI-84 will look for 2nd and not find it,
+and some TI muscle memory does not transfer. Accepted: the thing it would give
+them is already available more directly by typing. If a feature ever does want
+a transient modal prefix — a one-shot vector or unit entry, say — it can
+reintroduce a flag then, with a caller and a reason, rather than inheriting one.
+**Revisit when**: A feature genuinely needs a sticky modifier, or the project
+targets a keypad without letters, where TI's problem becomes ours.
+
+---
+
 ## D99: macOS coverage of the host build is local, not a CI runner
 
 **Date**: 2026-08-29

@@ -16,12 +16,18 @@ constexpr int kSoftkeyBarH = 20;
 //
 // There was a StatusFlags parameter here carrying `second` and `alpha`,
 // and a `[2nd] [A]` prefix on the right-hand block. Nothing ever passed
-// it: `Key::kSecond` and `Key::kAlpha` are declared but referenced
-// nowhere, so the calculator has no 2nd mode and no alpha mode, and the
-// indicators could not appear (#63). Removed rather than documented,
-// because dead code that reads as live code is what made #61's budget
-// look 6 characters wider than it is. If 2nd/alpha is ever built, this
-// comes back with a caller.
+// it, and nothing was ever going to: **2nd and ALPHA are a TI keyboard
+// convention this calculator has no need for** (D100). A TI-84 has ~50
+// keys and reaches several hundred functions by prefixing them; the
+// PicoCalc has a full QWERTY keyboard, so a letter is the letter key and
+// a function is typed by name. The modifier that buys TI its key count
+// buys us nothing.
+//
+// So this was never a missing feature, and #63 was never a defect --
+// only an indicator for a mode that does not exist, taking up budget in
+// a bar that turned out to be short of it (#61). If some future feature
+// does want a modal prefix, it comes back here with a caller and with a
+// reason of its own.
 void draw_status_bar(gfx::Framebuffer& fb, const char* title);
 
 // Storage-health indicators (D26): while SD or PSRAM is down, the
