@@ -65,7 +65,7 @@ IMAGES: list[dict] = [
     },
     {
         "name": "files-softkeys",
-        "caption": "The file manager. Note the truncated softkey label (#52).",
+        "caption": "The file manager. Its softkey labels fit since #52 -- MKDR, not MKDIR.",
         "keys": "files-softkeys.keys",
     },
 

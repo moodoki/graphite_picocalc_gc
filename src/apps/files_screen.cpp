@@ -586,9 +586,16 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
 
     // MOVE appears only while something is armed, which is what tells
     // the user a cut is still pending after walking to another folder.
-    // Both labels are within draw_softkeys' 6-character cell (#52).
-    const char* const keys[6] = {"",    "CUT",   pending_move_[0] != 0 ? "MOVE" : "",
-                                 "REN", "MKDIR", ""};
+    //
+    // Four characters, not six (#52). draw_softkeys renders "%d:%s" and
+    // truncates the RESULT to the 6 characters a 53 px cell holds, so the
+    // "n:" prefix -- which no caller controls -- spends two of them. The
+    // comment that used to sit here counted the label against the cell's
+    // budget and concluded MKDIR fit; it rendered as "5:MKDI" for as long
+    // as that comment was here. Every one of these is now photographed in
+    // docs-site/images, so the next label that overruns is a CI diff
+    // rather than something noticed on a device.
+    const char* const keys[6] = {"", "CUT", pending_move_[0] != 0 ? "MOVE" : "", "REN", "MKDR", ""};
     ui::draw_softkeys(fb, keys);
 
     // Position counter in the (unbound) F6 cell. It used to be drawn at
@@ -605,7 +612,7 @@ void FileBrowserScreen::render(gfx::Framebuffer& fb) {
     if (status_[0] != 0) {
         // Transient text sits to the left of the counter, on a repainted
         // strip: it is wider than one softkey cell and would otherwise
-        // print over the REN/MKDIR labels it overlaps.
+        // print over the REN/MKDR labels it overlaps.
         const int sx = status_right - font.text_width(status_);
         fb.fill_rect(sx - 2, bar_y, status_right - sx + 4, ui::kSoftkeyBarH,
                      platform::Color::from_rgb(30, 30, 30));
