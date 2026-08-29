@@ -15,7 +15,14 @@ namespace {
 constexpr int kTabCount = 3;
 const char* const kTabNames[kTabCount] = {"FUNC", "KEYS", "SYNTAX"};
 
-constexpr int kTopY = 24;
+// Content starts below BOTH the shared status bar (0..16) and the tab
+// row (16..34). The tabs used to live inside the title bar; they moved
+// down when this screen stopped hand-rolling that bar (#62), because the
+// bar's own right-hand block and D26's health indicators leave no room
+// for a tab strip beside them. 36 + 16*16 = 292, still clear of the
+// softkey band at 300, so no help line was lost to the change.
+constexpr int kTopY = 36;
+constexpr int kTabY = 18;
 constexpr int kLineH = 16;
 constexpr int kVisibleLines = 16;  // kTopY + 16*16 = 280, above softkeys
 
@@ -318,16 +325,16 @@ void HelpScreen::render(gfx::Framebuffer& fb) {
 
     fb.clear(kBlack);
 
-    // Title bar with tabs; the active one is highlighted.
-    fb.fill_rect(0, 0, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, 2, "HELP", kGrayLine);
-    int tx = 4 + 6 * font.width();
+    ui::draw_status_bar(fb, "HELP");
+
+    // Tabs on their own row; the active one is highlighted.
+    int tx = 4;
     for (int t = 0; t < kTabCount; ++t) {
         const int w = font.text_width(kTabNames[t]);
         if (t == tab_) {
-            fb.fill_rect(tx - 2, 0, w + 4, 16, platform::Color::from_rgb(0, 0, 90));
+            fb.fill_rect(tx - 2, kTabY - 2, w + 4, 16, platform::Color::from_rgb(0, 0, 90));
         }
-        font.draw_string(fb, tx, 2, kTabNames[t], t == tab_ ? kWhite : kGrayLine);
+        font.draw_string(fb, tx, kTabY, kTabNames[t], t == tab_ ? kWhite : kGrayLine);
         tx += w + 12;
     }
 
@@ -352,11 +359,12 @@ void HelpScreen::render(gfx::Framebuffer& fb) {
         }
     }
 
-    // Scroll indicator when content overflows (right end of the title bar).
+    // Scroll indicator when content overflows. It followed the tabs down
+    // out of the title bar: the right end of that bar is the battery's.
     if (max_scroll() > 0) {
         char pos[16];
         std::snprintf(pos, sizeof(pos), "%d/%d", scroll_ + 1, max_scroll() + 1);
-        font.draw_string(fb, platform::kScreenW - 4 - font.text_width(pos), 2, pos, kGrayLine);
+        font.draw_string(fb, platform::kScreenW - 4 - font.text_width(pos), kTabY, pos, kGrayLine);
     }
 
     const int sk = platform::kScreenH - 20;

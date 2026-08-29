@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "gfx/font.hpp"
+#include "ui/chrome.hpp"
 #include "ui/screen_manager.hpp"
 #include "math/engine.hpp"
 #include "math/format.hpp"
@@ -117,8 +118,11 @@ void TableSetupScreen::render(gfx::Framebuffer& fb) {
     const auto& t = graph::state().table;
 
     fb.clear(kBlack);
-    fb.fill_rect(0, 0, platform::kScreenW, 16, platform::Color::from_rgb(30, 30, 30));
-    font.draw_string(fb, 4, 2, "TABLE SETUP", kGrayLine);
+    // The shared bar, not a local copy of its first two lines. Five files
+    // had grown that copy and every one of them silently dropped D26's
+    // SD/PSRAM health indicators (#62) -- so a failing card was invisible
+    // on exactly the screens a user might be sitting on.
+    ui::draw_status_bar(fb, "TABLE SETUP");
 
     const char* const names[kNumRows] = {"Start", "Step", "Independent"};
     for (int i = 0; i < kNumRows; ++i) {

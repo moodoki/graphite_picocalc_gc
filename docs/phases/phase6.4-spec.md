@@ -445,11 +445,17 @@ above:
   The consequence is the serious one: on those screens D26's health
   indicators cannot appear, so a failing card is invisible exactly where a
   user might be working.
-- **The `[2nd] [A]` indicators are dead code** (**#63**). `StatusFlags` has
-  one occurrence in all of `src/` — its own definition — and `Key::kSecond`
-  and `Key::kAlpha` have none. §4.1 planned to sweep "the flag states"; the
-  finding is that they have no states. It also corrects §4.1's own arithmetic:
-  the right block is always 7 characters, never the 13 the prefix implies.
+- **The `[2nd] [A]` indicators are dead code** (**#63**) — and, on review,
+  **not a defect**. `StatusFlags` has one occurrence in all of `src/` — its
+  own definition — and `Key::kSecond` and `Key::kAlpha` have none. §4.1
+  planned to sweep "the flag states"; the finding is that they have no states,
+  because **2nd and ALPHA are a TI keyboard convention this calculator has no
+  need for** (D100). TI overloads ~50 keys to reach several hundred functions
+  and has to show which layer is live; the PicoCalc has a full QWERTY
+  keyboard, so there is no second layer. The indicators are removed as
+  inherited shape rather than fixed as a bug. It does correct §4.1's own
+  arithmetic either way: the right block is always 7 characters, never the 13
+  the prefix implies.
 - **The graph's empty-plot hint is drawn on the axis** (**#64**), at a
   hardcoded `x=40` with no background, so gridlines and axis labels print
   through the glyphs — and the parametric variant, 5 characters longer,

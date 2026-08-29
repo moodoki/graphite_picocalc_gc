@@ -47,35 +47,6 @@ void format_value_short(double v, char* dst, size_t cap) {
     std::snprintf(dst, cap, "%se%ld", tmp, exp);
 }
 
-// Copy src into dst, truncating with math::kEllipsisGlyph when the drawn
-// width would exceed max_px, so text never spills past its column.
-void fit_text(const gfx::Font& font, const char* src, int max_px, char* dst, size_t cap) {
-    if (cap == 0) {
-        return;
-    }
-    if (font.text_width(src) <= max_px) {
-        std::snprintf(dst, cap, "%s", src);
-        return;
-    }
-    const char ell[2] = {math::kEllipsisGlyph, 0};
-    const int ell_w = font.text_width(ell);
-    size_t n = 0;
-    int w = 0;
-    while (src[n] != '\0' && n + 2 < cap) {
-        const char ch[2] = {src[n], 0};
-        const int cw = font.text_width(ch);
-        if (w + cw + ell_w > max_px) {
-            break;
-        }
-        w += cw;
-        ++n;
-    }
-    for (size_t k = 0; k < n; ++k) {
-        dst[k] = src[k];
-    }
-    dst[n] = math::kEllipsisGlyph;
-    dst[n + 1] = 0;
-}
 }  // namespace
 
 void ConstScreen::on_activate() {
@@ -166,7 +137,7 @@ void ConstScreen::render(gfx::Framebuffer& fb) {
         if (i == selected_ && desc_scroll_ > 0) {
             desc += desc_scroll_;  // left/right horizontal scroll (selected row)
         }
-        fit_text(font, desc, platform::kScreenW - 4 - kSummaryX, summary, sizeof(summary));
+        gfx::fit_text(font, desc, platform::kScreenW - 4 - kSummaryX, summary, sizeof(summary));
         font.draw_string(fb, kSummaryX, y, summary, kGrayLine);
     }
 

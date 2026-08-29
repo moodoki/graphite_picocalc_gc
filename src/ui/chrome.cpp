@@ -83,35 +83,54 @@ void set_health_flags(bool sd_ok, bool psram_ok) {
     g_psram_ok = psram_ok;
 }
 
-void draw_status_bar(gfx::Framebuffer& fb, const char* title, StatusFlags flags) {
+void draw_status_bar(gfx::Framebuffer& fb, const char* title) {
     using namespace platform::colors;
     const auto& font = gfx::main_font();
 
     fb.fill_rect(0, 0, platform::kScreenW, kStatusBarH, kBarBg);
-    font.draw_string(fb, 4, 2, title, kGrayLine);
+
+    // Right-hand side FIRST, because it is what the title has to fit
+    // inside. It used to be drawn last and simply painted over a long
+    // title (#61), which made the failure silent: the bar looked fine
+    // until a runtime title -- a file manager path, an SD app's name --
+    // happened to be long enough.
+    const int batt_x = draw_battery(fb, font);
+
+    // Right-aligned indicators: RAD/DEG and FLT/FIX/SCI/ENG.
+    char right[16];
+    const char* angle = math::angle_mode() == math::AngleMode::kRadians ? "RAD" : "DEG";
+    std::snprintf(right, sizeof(right), "%s %s", angle, display_mode_label());
+    const int rx = batt_x - 6 - font.text_width(right);
+    font.draw_string(fb, rx, 2, right, kGreen);
 
     // D26: red subsystem indicators while SD/PSRAM are unhealthy
     // (retries keep running; these clear on recovery).
-    int hx = 4 + font.text_width(title) + 10;
-    if (!g_sd_ok) {
-        font.draw_string(fb, hx, 2, "SD", kRed);
-        hx += font.text_width("SD") + 8;
+    //
+    // Measured before the title and subtracted from its budget, because
+    // between the two the health state is the one that must not be lost.
+    // A truncated title costs the user a few characters they can usually
+    // infer; a missing SD indicator costs them the reason their files
+    // stopped saving.
+    char health[16] = {0};
+    if (!g_sd_ok && !g_psram_ok) {
+        std::snprintf(health, sizeof(health), "SD PSRAM");
+    } else if (!g_sd_ok) {
+        std::snprintf(health, sizeof(health), "SD");
+    } else if (!g_psram_ok) {
+        std::snprintf(health, sizeof(health), "PSRAM");
     }
-    if (!g_psram_ok) {
-        font.draw_string(fb, hx, 2, "PSRAM", kRed);
+    const int health_w = health[0] != 0 ? font.text_width(health) + 10 : 0;
+
+    // What is left for the title, with 6 px of air before the right block
+    // so a full-width title does not touch it.
+    char shown[40];
+    const int title_budget = rx - 6 - health_w - 4;
+    gfx::fit_text(font, title, title_budget, shown, sizeof(shown));
+    font.draw_string(fb, 4, 2, shown, kGrayLine);
+
+    if (health[0] != 0) {
+        font.draw_string(fb, 4 + font.text_width(shown) + 10, 2, health, kRed);
     }
-
-    // Battery, rightmost; other indicators right-align to its left edge.
-    const int batt_x = draw_battery(fb, font);
-
-    // Right-aligned indicators: [2nd] [A] RAD/DEG FLT/FIX/SCI/ENG
-    char right[32];
-    const char* angle = math::angle_mode() == math::AngleMode::kRadians ? "RAD" : "DEG";
-    const char* disp = display_mode_label();
-    std::snprintf(right, sizeof(right), "%s%s%s %s", flags.second ? "2nd " : "",
-                  flags.alpha ? "A " : "", angle, disp);
-    const int rx = batt_x - 6 - font.text_width(right);
-    font.draw_string(fb, rx, 2, right, kGreen);
 }
 
 void draw_softkeys(gfx::Framebuffer& fb, const char* const labels[6]) {
@@ -123,6 +142,14 @@ void draw_softkeys(gfx::Framebuffer& fb, const char* const labels[6]) {
 
     const int cell = platform::kScreenW / 6;
     for (int i = 0; i < 6; ++i) {
+        // Divider first, and outside the empty-label check. It used to sit
+        // below the `continue`, so a cell with no label lost its left edge
+        // and the bar's grid changed shape with its contents (#65) -- the
+        // file manager's CUT and REN visibly merged into one wide cell
+        // whenever no cut was armed to put MOVE between them.
+        if (i > 0) {
+            fb.draw_vline(i * cell, y, kSoftkeyBarH, kBlack);
+        }
         if (labels[i] == nullptr || labels[i][0] == 0) {
             continue;
         }
@@ -134,9 +161,6 @@ void draw_softkeys(gfx::Framebuffer& fb, const char* const labels[6]) {
             cell_text[max_chars] = 0;
         }
         font.draw_string(fb, i * cell + 2, y + 4, cell_text, kGrayLine);
-        if (i > 0) {
-            fb.draw_vline(i * cell, y, kSoftkeyBarH, kBlack);
-        }
     }
 }
 

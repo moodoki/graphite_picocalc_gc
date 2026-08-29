@@ -1,5 +1,6 @@
 #include "gfx/font.hpp"
 
+#include <cstdio>
 #include <cstring>
 
 // Font data (const arrays => internal linkage; include in this TU only).
@@ -96,6 +97,41 @@ const Font& main_font() {
     static const Font font(spleen8x16);
 #endif
     return font;
+}
+
+void fit_text(const Font& font, const char* src, int max_px, char* dst, size_t cap) {
+    if (cap == 0) {
+        return;
+    }
+    if (font.text_width(src) <= max_px) {
+        std::snprintf(dst, cap, "%s", src);
+        return;
+    }
+    const char ell[2] = {kGlyphEllipsis, 0};
+    const int ell_w = font.text_width(ell);
+    size_t n = 0;
+    int w = 0;
+    while (src[n] != '\0' && n + 2 < cap) {
+        const char ch[2] = {src[n], 0};
+        const int cw = font.text_width(ch);
+        if (w + cw + ell_w > max_px) {
+            break;
+        }
+        w += cw;
+        ++n;
+    }
+    // Even the ellipsis alone may not fit; an empty string is the honest
+    // answer there, and the caller has already decided this text is
+    // optional by giving it a budget.
+    if (n == 0 && ell_w > max_px) {
+        dst[0] = 0;
+        return;
+    }
+    for (size_t k = 0; k < n; ++k) {
+        dst[k] = src[k];
+    }
+    dst[n] = kGlyphEllipsis;
+    dst[n + 1] = 0;
 }
 
 const Font& small_font() {
