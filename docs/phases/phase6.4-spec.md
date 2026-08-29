@@ -469,6 +469,22 @@ was showing `natural-math`'s radicals. Reproducible only while nobody
 reordered `IMAGES` — a trap, not a property. The fixture is now rebuilt
 before every image.
 
+**And CI found the rule the sweep had not thought of.** The first version of
+#61's evidence was the program screen showing a long SD app name, and
+`host-images` failed on Linux: that screen also prints the MicroPython heap
+figure, which macOS and Linux do not agree on. Nothing in the UI was wrong —
+the number is a property of the build. **A screen showing an interpreter's
+heap cannot sit in a byte-identical drift set**, and the rule generalises to
+anything the host and the board may legitimately disagree about. The file
+manager replaced it and is the better demonstration anyway: `char[40]` of
+title against `SdAppManifest::name`'s `char[24]`, no interpreter, and the
+trigger is making a folder.
+
+Worth noting *which* job caught it. `host-images` is outside the release
+gate by design, and this is exactly the failure that belongs there — a docs
+image that could not be reproduced, with no firmware defect behind it. The
+split made on the same day paid for itself the first time it was tested.
+
 **The images stay.** All 30 are in `--check`, so every screen above fails CI
 if its chrome moves. That is the difference between this and an audit.
 

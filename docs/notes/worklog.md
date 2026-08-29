@@ -424,6 +424,19 @@ budget. What the images found instead, five issues' worth:
 - **#65**, cosmetic: softkey dividers sit below the empty-label `continue`,
   so the bar's grid changes shape between modal states.
 
+**CI added a rule nobody had written down.** #61's evidence was originally
+the program screen with a long SD app name, and `host-images` failed on
+Linux — that screen prints the MicroPython heap figure, and macOS and Linux
+do not agree on it. No UI defect; the number is a property of the build. So:
+**a screen showing an interpreter's heap cannot be in a byte-identical drift
+set**, and the same goes for anything the host and the board may legitimately
+disagree about. Swapped to the file manager, which is the better
+demonstration anyway — `char[40]` of title against `char[24]`, no
+interpreter, and all it takes is a folder. Note which job caught it:
+`host-images`, the half deliberately kept out of the release gate, failing
+on an unreproducible docs image with no firmware defect behind it. The split
+was tested the same day it was made.
+
 **Two things the sweep taught about the instrument.** It needed exactly one
 new lever, `graphite-shot --unhealthy`, because D26's state means a hardware
 fault and no key sequence reaches it — everything else was navigation, which
