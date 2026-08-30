@@ -1,9 +1,70 @@
 # Start here — next session
 
-**Last session:** 2026-08-30 (later) — **a hardware session on the Pico 1 that
+**Last session:** 2026-08-30 (later still) — **the wedge recurred, and it
+localized the fault to before the watchdog was armed.** D101 amended and the
+ordering corrected; still **soaking, deliberately not merged.** Branch
+`fix/boot-wedge-diagnostics`.
+
+> ## What the second occurrence settled
+>
+> Trigger: **powered off shortly after power on.** The state, measured before
+> anything disturbed it: **no USB device of any kind** — not BOOTSEL, not CDC —
+> yet holding BOOTSEL and reconnecting mounts `RPI-RP2` fine.
+>
+> That combination is decisive. `stdio_init_all()` is the first line of
+> `main()` and TinyUSB runs off a timer IRQ, so a wedge *past* it still
+> enumerates and merely goes quiet. The hardware watchdog is immune to hung
+> code, so had `boot_trace_begin()` run, the board would have rebooted every
+> 5 s. Neither happened ⇒ **the wedge is before the watchdog is armed**, and
+> the first cut armed it *after* `stdio_init_all()`.
+>
+> **Both earlier candidates are retired — each predicted a USB device.** A
+> bootrom rejecting boot2 shows `RPI-RP2` unprompted; a wedge past stdio
+> enumerates as CDC. And the PMIC/STM32 power-sequencing theory, promoted to
+> leading candidate one message before the probe, is wrong: the Pico has power
+> and the bootrom is healthy.
+>
+> **Do not trust the backlight as a signal.** It is STM32 register 0x05 and the
+> STM32 sits on `MCU_3V3`, which a normal power-off does not drop — so it holds
+> the last level we wrote across a completely dead Pico. The "lit means we got
+> past display init" reasoning written up earlier is wrong.
+>
+> ## What landed on top
+>
+> - `boot_trace_begin()` first in `main()`, ahead of `stdio_init_all()`.
+> - New `kStdio` stage with its own skip escape.
+> - `show_wedge_banner()` — stage and streak on the panel for 5 s before any
+>   UI, because **the stage most worth reporting is the one that takes serial
+>   away**.
+>
+> Costs no further SRAM (246,864, unchanged; +28 on the pre-D101 baseline).
+> Stack high-water 1,692 → 1,836 of 4,096.
+>
+> **Pre-`main()` is still uncovered, deliberately.** Runtime init and static
+> constructors run before any watchdog can be armed. **If the next wedge hangs
+> with no reboot and no banner, that silence is the bisection result** — it
+> localizes the fault there, and the next step would be arming in a
+> high-priority constructor or bringing up UART stdio on GP0/1 (unclaimed by
+> this firmware, but wired to on-board debug circuitry).
+>
+> ## Still true, still the open question
+>
+> **Root cause is not attributed.** Everything so far is instrumentation. What
+> is known: the stuck state is volatile, decays with a long power-off, and the
+> reflash never fixed anything. What is new: it happens before USB comes up,
+> and a fast power-off shortly after power-on provokes it.
+>
+> ## Gotcha worth not re-deriving
+>
+> A Pico on USB power with the **calculator switched off** boots fine but shows
+> no `battery:` line, no PSRAM and no SD. It reads as a triple hardware failure
+> and is just an unpowered mainboard. Cost 20 minutes once.
+
+---
+
+**Previous session:** 2026-08-30 (later) — **a hardware session on the Pico 1 that
 would not boot. It was never bricked, and the reflash was never the fix.**
-Three diagnostic changes landed (**D101**) and are **soaking on hardware** —
-deliberately not merged yet. Branch `fix/boot-wedge-diagnostics`.
+Three diagnostic changes landed (**D101**).
 
 > ## The finding, and it overturns how the failure was described
 >

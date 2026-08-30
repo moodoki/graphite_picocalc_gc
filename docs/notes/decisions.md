@@ -59,6 +59,24 @@ also reads 1 after a wedge reboot — read it alongside the wedge line printed
 just above it. **The mechanism was proven on hardware** with a temporary
 injected hang: three ~5 s reboot cycles, then the escape, then `boot: previous
 boot wedged at stage psram, streak 3`.
+**Amended 2026-08-30 (second occurrence)**: the first cut armed the watchdog
+**after** `stdio_init_all()`, which left the one stage that most needs it
+uncovered. A wedge inside USB bring-up has no serial to report itself and, with
+the watchdog armed later, nothing to cut it short — the board just stops. The
+signature is diagnostic on its own: **no USB device of any kind, yet BOOTSEL
+still mounts.** That also retires both earlier candidates, because each
+predicted a USB device — a bootrom that rejected boot2 would have shown
+`RPI-RP2` unprompted, and a wedge past stdio would have enumerated as CDC and
+gone quiet. `boot_trace_begin()` now runs first in `main()`; a new `kStdio`
+stage carries its own skip escape; and because skipping stdio costs the serial
+console, `show_wedge_banner()` paints the stage and streak on the panel for 5 s
+before any UI. **Pre-`main()` — runtime init and static constructors — remains
+uncovered on purpose**: a hang that survives this change without rebooting
+localizes itself there, which is a bisection result rather than a dead end.
+Verified with a hang injected before `stdio_init_all()`: no USB at any point,
+three ~5 s reboots, escape, panel reading `BOOT WEDGED AT: stdio`. Costs no
+further SRAM (246,864, unchanged); core-0 stack high-water 1,692 → 1,836.
+
 **Revisit when**: The trace attributes a real occurrence and the cause is
 known — at which point the skip escape may become the wrong shape, or the
 guarded window may want to move. Also if `Psram::reinit()` ever gains a caller

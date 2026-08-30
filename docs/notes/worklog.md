@@ -305,6 +305,65 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-30 (later still) — the wedge recurred, and the instrumentation was watching the wrong side of one line
+
+**Second occurrence, with a new trigger: powered off shortly after power on.**
+The instrumentation from earlier the same day reported nothing, and the reason
+it reported nothing is the finding.
+
+**The state, measured before disturbing it: no USB device of any kind.** Not
+BOOTSEL, not CDC. That is decisive, because `stdio_init_all()` is the first
+line of `main()` and TinyUSB is serviced from a timer IRQ — a board wedged
+anywhere *past* that point still enumerates as a serial port and merely goes
+silent. And the hardware watchdog is immune to hung code, so if
+`boot_trace_begin()` had run, the board would have been rebooting every 5 s,
+which in the injected-hang test made USB visibly appear and disappear each
+cycle. Neither happened. **The wedge was before the watchdog was armed** — and
+`boot_trace_begin()` sat *after* `stdio_init_all()`.
+
+**Both earlier candidates are retired, because each predicted a USB device.** A
+bootrom that rejected boot2 would have dropped to USB mode and shown `RPI-RP2`
+unprompted; a wedge past stdio would have enumerated as CDC. The developer's
+BOOTSEL probe closed it: hold BOOTSEL, reconnect, and `RPI-RP2` mounts — so the
+Pico has power and the bootrom is healthy. The PMIC/STM32 power-sequencing
+theory, which had just been promoted to leading candidate, is wrong.
+
+**"Backlight seems on" turned out to carry no information.** The backlight is
+STM32 register 0x05, and the STM32 runs off `MCU_3V3`, a rail a normal
+power-off does not drop — so it holds the last level we wrote across a
+completely dead Pico. The backlight change from earlier the same day is much
+weaker as a signal than it was written up to be. Recorded rather than quietly
+dropped, because the next person will reach for it too.
+
+Three changes, amending **D101**: `boot_trace_begin()` runs first in `main()`,
+ahead of `stdio_init_all()`; a new `kStdio` stage with its own skip escape; and
+`show_wedge_banner()`, which paints the stage and streak on the panel for 5 s
+before any UI. That last one exists because **the stage most worth reporting is
+the one that takes the serial console away** — on a stdio wedge the panel is
+the only channel left.
+
+**Pre-`main()` is still uncovered, on purpose and now documented.** Runtime init
+and static constructors run before anything can arm a watchdog. If a future
+wedge hangs with no reboot and no banner, that silence localizes it there.
+
+**Verified end to end** with a hang injected before `stdio_init_all()`: no USB
+at any point, three ~5 s reboot cycles, then the escape booted and the panel
+read `BOOT WEDGED AT: stdio` with the calculator usable afterwards. The test
+reproduced the reported signature exactly — which is the part worth trusting,
+since it means the mechanism was exercised in the configuration that actually
+failed, not a convenient one.
+
+Banner text goes through `render_frame`'s `ctx` rather than statics, so the
+whole second round costs **no additional SRAM**: 246,864 bytes, unchanged from
+the first cut and +28 on the pre-D101 baseline. Core-0 stack high-water 1,692 →
+1,836 of 4,096 — the banner frame is reserved in `main()` whether or not the
+branch is taken. Both boards build, lint and format pass, 22 host suites / 0
+failures.
+
+**Also learned, and easy to misread:** a Pico running on USB power with the
+calculator switched off boots fine but shows no battery line, no PSRAM and no
+SD. It looks like a triple hardware failure and is just an unpowered mainboard.
+
 ## 2026-08-30 (later) — the Pico 1 that would not boot: not a brick, and the reflash was never the fix
 
 A hardware session, no feature work. The Pico 1 had twice powered off and then
