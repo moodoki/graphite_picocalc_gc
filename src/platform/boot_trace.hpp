@@ -36,6 +36,7 @@ namespace platform {
 // "wedged at kStorage", and that distinction is the whole point.
 enum class BootStage : uint32_t {
     kEntry = 0,  // main() reached; nothing initialized yet
+    kStdio,      // stdio_init_all() -- USB CDC bring-up
     kKeyboard,   // keyboard().init() -- brings up the STM32 I2C bus
     kDisplay,    // display().init() -- panel, then backlight on
     kPsram,      // psram().init() -- the unbounded-wait suspect
@@ -47,10 +48,23 @@ enum class BootStage : uint32_t {
 
 const char* boot_stage_name(BootStage stage);
 
-// Call once, first thing in main(), before anything can re-arm the watchdog
-// or overwrite the record -- the same ordering rule take_prior_fault()
-// already established. Captures the previous boot's verdict, then arms the
-// boot watchdog and marks this boot kEntry.
+// Call once, first thing in main() -- ahead of stdio_init_all(), not after it.
+//
+// That ordering was wrong in the first cut and hardware said so (2026-08-30,
+// second occurrence). A wedge inside USB bring-up leaves no serial to report
+// itself *and*, with the watchdog armed later, nothing to cut it short: the
+// board simply stops. The signature is unmistakable once you know it -- no USB
+// device of any kind, yet BOOTSEL still mounts, because the bootrom is fine
+// and it is our first few instructions that are not. Arming here means every
+// line of main() is covered.
+//
+// Still not covered: anything before main() -- runtime init and static
+// constructors. If a hang ever survives this change without rebooting, that
+// absence is itself the bisection result.
+//
+// Captures the previous boot's verdict first (reading the reason bits before
+// anything can consume them, the rule take_prior_fault() established), then
+// arms the boot watchdog and marks this boot kEntry.
 void boot_trace_begin();
 
 // Advance the trace and pet the watchdog. Two stores and a register write.
@@ -69,6 +83,12 @@ void boot_trace_end();
 // last boot was cut short by the boot watchdog; *stage receives where it
 // died, *streak how many consecutive boots have died there.
 bool prior_boot_wedged(BootStage* stage, uint32_t* streak);
+
+// True when USB stdio bring-up has wedged on enough consecutive boots that
+// this one should skip it. Skipping costs the serial console for that boot --
+// which is why prior_boot_wedged() is also reported on the panel, the only
+// channel left when this is the stage that failed.
+bool skip_stdio_this_boot();
 
 // True when PSRAM bring-up has wedged on enough consecutive boots that this
 // one should skip it. PSRAM is optional and the status bar already shows it

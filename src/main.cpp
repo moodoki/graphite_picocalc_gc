@@ -171,6 +171,48 @@ void run_psram_bulk_test() {
            static_cast<unsigned long>(g_bulk_write_us), static_cast<unsigned long>(g_bulk_read_us));
 }
 
+// Paints the previous boot's wedge verdict on the panel and holds it long
+// enough to read (2026-08-30). Serial is the better channel and is used too --
+// but the stage most worth reporting is kStdio, and on that boot there is no
+// serial at all. The panel is the only thing left.
+//
+// Boot-only and rare: it costs nothing on a healthy boot, and a few seconds on
+// one that follows a wedge.
+// Carried through render_frame's ctx rather than held in statics: this is a
+// boot-only, once-per-wedge banner, and two static buffers would cost 96 bytes
+// of SRAM permanently to serve it. render_frame pushes before it returns, so a
+// stack buffer outlives the use.
+struct WedgeBanner {
+    char line[32];
+    char sub[32];
+};
+
+void show_wedge_banner(platform::BootStage stage, uint32_t streak) {
+    WedgeBanner banner = {};
+    std::snprintf(banner.line, sizeof(banner.line), "BOOT WEDGED AT: %s",
+                  platform::boot_stage_name(stage));
+    std::snprintf(banner.sub, sizeof(banner.sub), "consecutive: %lu",
+                  static_cast<unsigned long>(streak));
+
+    gfx::framebuffer().render_frame(
+        [](gfx::Framebuffer& fb, void* ctx) {
+            const auto* b = static_cast<const WedgeBanner*>(ctx);
+            const auto& font = gfx::main_font();
+            fb.clear(platform::colors::kBlack);
+            font.draw_string(fb, 8, 60, b->line, platform::colors::kRed);
+            font.draw_string(fb, 8, 84, b->sub, platform::colors::kWhite);
+            font.draw_string(fb, 8, 124, "Previous boot did not finish.",
+                             platform::colors::kGrayLine);
+            font.draw_string(fb, 8, 148, "Report this stage name.", platform::colors::kGrayLine);
+        },
+        &banner);
+
+    const uint32_t until = platform::uptime_ms() + 5'000;
+    while (platform::uptime_ms() < until) {
+        tight_loop_contents();
+    }
+}
+
 void run_self_tests() {
     // Both tests are skipped once green: with the D26 retry-forever
     // heartbeat this runs indefinitely while *either* subsystem is
@@ -384,17 +426,25 @@ void launch_sd_app(const platform::AppEntry& self) {
 }  // namespace
 
 int main() {
-    stdio_init_all();
-
+    // Ahead of stdio_init_all(), not after it (corrected 2026-08-30, on the
+    // second occurrence). A wedge inside USB bring-up has no serial to report
+    // itself, and with the watchdog armed after it there was nothing to cut
+    // it short either -- the board just stopped, showing no USB device at all
+    // while BOOTSEL still mounted. Every line of main() is covered from here.
+    //
     // Before anything else can consume the watchdog reboot cause — a
     // fault-triggered reboot looks like any other to run_self_tests().
     g_prior_fault = platform::take_prior_fault(&g_fault);
     g_watchdog_caused_reboot = watchdog_caused_reboot();
-    // Same ordering rule as the two captures above: read the previous boot's
-    // verdict before arming anything. From here until boot_trace_end(), a
-    // stall of more than a few seconds reboots the board instead of hanging
-    // it -- psram().init() below has waits that cannot time out on their own.
     platform::boot_trace_begin();
+
+    platform::boot_stage(platform::BootStage::kStdio);
+    // Skipped only after this stage has wedged repeatedly: the board then
+    // boots with no serial console at all, which is why the wedge report is
+    // also painted on the panel below.
+    if (!platform::skip_stdio_this_boot()) {
+        stdio_init_all();
+    }
     // Paint the unused stack now, while it is shallow, so the heartbeat
     // below can report how deep anything has actually gone (D47).
     platform::paint_stack();
@@ -415,6 +465,16 @@ int main() {
     // render_frame below. The D10 stall was XIP flash contention with
     // core 0's USB stack, fixed by RAM-residency — see the D10 addendum.
     gfx::start_display_service();
+
+    // Before any UI paints over it. The serial copy still goes out on the
+    // heartbeat for the boots where serial exists.
+    {
+        platform::BootStage wedge_stage = platform::BootStage::kEntry;
+        uint32_t wedge_streak = 0;
+        if (platform::prior_boot_wedged(&wedge_stage, &wedge_streak)) {
+            show_wedge_banner(wedge_stage, wedge_streak);
+        }
+    }
 
     apps::home_screen().load_state();
     apps::load_graph_state();

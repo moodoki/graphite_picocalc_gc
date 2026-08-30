@@ -48,6 +48,8 @@ const char* boot_stage_name(BootStage stage) {
     switch (stage) {
         case BootStage::kEntry:
             return "entry";
+        case BootStage::kStdio:
+            return "stdio";
         case BootStage::kKeyboard:
             return "keyboard";
         case BootStage::kDisplay:
@@ -97,8 +99,11 @@ void boot_stage(BootStage stage) {
     }
     // The optimistic half of the report: on a boot that goes on to wedge,
     // USB has not enumerated yet and nobody sees this. prior_boot_wedged()
-    // on the next boot's heartbeat is the half that survives.
-    printf("boot: stage %s\n", boot_stage_name(stage));
+    // on the next boot's heartbeat -- and on the panel -- is the half that
+    // survives. Nothing before kStdio can print at all, so do not pretend to.
+    if (stage > BootStage::kStdio) {
+        printf("boot: stage %s\n", boot_stage_name(stage));
+    }
 }
 
 void boot_trace_end() {
@@ -120,6 +125,11 @@ bool prior_boot_wedged(BootStage* stage, uint32_t* streak) {
         *streak = g_prior_streak;
     }
     return true;
+}
+
+bool skip_stdio_this_boot() {
+    return g_prior_wedge && g_prior_stage == BootStage::kStdio &&
+           g_prior_streak >= kWedgesBeforeSkip;
 }
 
 bool skip_psram_this_boot() {
