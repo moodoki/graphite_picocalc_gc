@@ -18,6 +18,55 @@ Format:
 
 ---
 
+## D101: a boot watchdog and a stage trace, because a wedge in bring-up is indistinguishable from a dead board
+
+**Date**: 2026-08-30
+**Status**: Accepted
+**Context**: A Pico 1 powered off and then would not come back, twice, and was
+recovered both times by a BOOTSEL reflash. Investigation ruled out every
+non-volatile cause: the firmware never writes its own flash (no
+`flash_range_*` anywhere in `src/`), MicroPython has no flash VFS here, the SD
+block layer is deadline-guarded throughout, and the persisted-state loaders
+validate magic, dtype and count. The developer then left the unit long enough
+to drain and it booted normally **without a reflash** — so the reflash had
+never been the fix, and the stuck state was volatile with a decay time longer
+than a normal power-off. `3V3_OUT` is the Pico module's own regulator output
+and feeds the QSPI flash, the PSRAM (U301) and the SD card; a chip on it left
+un-reset while the RP2040 does reset fits every observation.
+**Decision**: Instrument rather than guess. Three changes: the backlight comes
+on inside `platform::init()` right after `display().init()` instead of after
+the self-tests; a new firmware-only `platform/boot_trace.{hpp,cpp}` records
+the bring-up stage in `__uninitialized_ram` and reports a previous boot's
+wedge on the 30 s heartbeat; and a 5 s watchdog is armed across
+`platform::init()` and `run_self_tests()`, disarmed at `kStateLoad`.
+**Rationale**: The failure could not be attributed because bring-up is silent.
+A wedge inside `platform::init()` looks exactly like a board that never
+started — dark panel, dead keys, and no serial, since boot printfs race USB
+enumeration by ~2 s and are lost on precisely the boot worth seeing. The one
+stretch that can block forever is `psram_spi_init()`'s PIO and DMA waits,
+which have no timeout at all (`drivers/rp2040-psram/psram_spi.h`); the bulk
+test's watchdog arms later, inside `run_self_tests()`, so nothing was covering
+them. Lit-but-blank is a diagnosis; dark is not.
+**Tradeoffs**: The watchdog turns a permanent hang into a reboot loop, which
+needs its own escape — after 3 consecutive wedges at `kPsram`, bring-up skips
+PSRAM and the calculator comes up with a red indicator, the same shape as
+`fault.cpp`'s `kFaultsBeforeBootsel`. The guarded window deliberately stops
+before the state loads: those go through FatFs, where a slow card legitimately
+takes seconds, and guarding them would trade a hang we can already bound for a
+reboot loop we could not. Cost is **+28 bytes of static SRAM** (246,864 vs
+246,836) and one more source of `boot: watchdog_caused_reboot=1`, which now
+also reads 1 after a wedge reboot — read it alongside the wedge line printed
+just above it. **The mechanism was proven on hardware** with a temporary
+injected hang: three ~5 s reboot cycles, then the escape, then `boot: previous
+boot wedged at stage psram, streak 3`.
+**Revisit when**: The trace attributes a real occurrence and the cause is
+known — at which point the skip escape may become the wrong shape, or the
+guarded window may want to move. Also if `Psram::reinit()` ever gains a caller
+that expects it to work on an unconfigured instance; the `configured_` guard
+this decision added exists because the skip made that path live.
+
+---
+
 ## D100: no 2nd/ALPHA modifier modes — a TI convention a QWERTY keyboard does not need
 
 **Date**: 2026-08-30

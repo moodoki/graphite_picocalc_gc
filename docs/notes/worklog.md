@@ -305,6 +305,74 @@ Still to verify on hardware:
 
 ---
 
+## 2026-08-30 (later) — the Pico 1 that would not boot: not a brick, and the reflash was never the fix
+
+A hardware session, no feature work. The Pico 1 had twice powered off and then
+refused to come back, recovered each time by a BOOTSEL reflash. **Nothing
+non-volatile was ever wrong.** The firmware cannot corrupt its own image —
+there is no `flash_range_erase`, `flash_range_program` or
+`flash_safe_execute` anywhere in `src/`, and MicroPython has no flash VFS in
+this build — the SD block layer is deadline-guarded at every wait
+(`sd_card.cpp:54,178,225`), and the persisted-state loaders validate magic,
+dtype and count and truncate on short reads (`lists_persist.cpp:99-145`). No
+native-app bootstrap exists yet either, so there is no boot slot to jump into.
+
+**The decisive measurement was the developer's**: leave the unit long enough
+to drain, and it boots normally with no reflash. That kills every persistent
+cause at once and reframes the axis. The question was never "power cycle vs.
+reflash" — it is **short power-off vs. long one**. Whatever was stuck was
+volatile, with a decay time longer than a normal power-off. `3V3_OUT` is the
+Pico module's own regulator output and feeds the flash, the PSRAM and the SD
+card; a chip on it left un-reset while the RP2040 does reset fits all three
+observations, and it self-perpetuates, because every retry power-cycle is also
+a short one.
+
+**Why it could not be attributed: bring-up is silent.** A wedge inside
+`platform::init()` looks exactly like a board that never started — dark panel,
+dead keys, no serial. The backlight was not set until after the self-tests, so
+nothing distinguished "hung in init" from "never ran", and boot printfs race
+USB enumeration by ~2 s and are lost on precisely the boot worth seeing. The
+one stretch that can block forever is `psram_spi_init()`'s PIO and DMA waits,
+which have no timeout at all; the bulk test's watchdog arms *later*, inside
+`run_self_tests()`, so nothing covered them.
+
+Three changes, **D101**: backlight on inside `platform::init()` right after
+`display().init()`; a new firmware-only `platform/boot_trace.{hpp,cpp}` that
+records the bring-up stage in `__uninitialized_ram` (fault.cpp's mechanism)
+and reports a previous boot's wedge on the 30 s heartbeat; and a 5 s watchdog
+armed across `platform::init()` and `run_self_tests()`, disarmed at
+`kStateLoad` because the state loads go through FatFs where a slow card
+legitimately takes seconds.
+
+**Hardware found a bug in the escape hatch, which is the point of testing
+one.** The watchdog turns a permanent hang into a reboot loop, so it needed an
+escape: after 3 consecutive wedges at `kPsram`, skip PSRAM and come up with a
+red indicator. Proving that with a temporary injected hang exposed that
+skipping `psram().init()` leaves the PIO/DMA instance unconfigured — and
+`main()`'s late-init loop then calls `reinit()` on it, driving DMA channel 0
+through a null PIO and spinning forever in the wait. The signature was a live
+USB device with a main loop that never turned over: **enumerated, stable, and
+completely silent.** `Psram::reinit()` now refuses an instance `init()` never
+configured. That hole predates this session — `reinit()` has always assumed
+`init()` ran — but the skip made it live.
+
+Re-tested after the fix: the USB node trace shows exactly three ~5 s wedge
+cycles (gone at 0.4 s, 6.0 s, 11.7 s), then the escape fires and the next boot
+prints `boot: previous boot wedged at stage psram, streak 3`. Temporary hang
+removed, real build reflashed, normal boot confirmed — PSRAM up, bulk test OK,
+no wedge report, stack peak unchanged at 1,692 of 4,096.
+
+Both boards build, lint and format pass, **22 host suites / 0 failures**.
+Static SRAM **246,864 bytes, +28** over the documented 246,836 baseline (the
+12-byte record plus three capture globals). One behavioural note worth
+carrying: `boot: watchdog_caused_reboot=1` now has a new source and reads 1
+after a wedge reboot too, so read it alongside the wedge line above it rather
+than as a power-cycle test on its own (D65 still holds for what it measures).
+
+**Not verified: the backlight change visually.** Serial cannot see the panel,
+and the board was driven over USB all session. It wants one glance on a
+physical power-on.
+
 ## 2026-08-30 — the sweep's six bugs fixed, Phase 6.4 merged, and a regression that was never there
 
 **Everything is on `main`.** PR #60 (Phase 6.4, 28 commits) and PR #66 (the

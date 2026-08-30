@@ -1,6 +1,78 @@
 # Start here — next session
 
-**Last session:** 2026-08-30 — **Phase 6.4 is nearly closed, and everything
+**Last session:** 2026-08-30 (later) — **a hardware session on the Pico 1 that
+would not boot. It was never bricked, and the reflash was never the fix.**
+Three diagnostic changes landed (**D101**) and are **soaking on hardware** —
+deliberately not merged yet. Branch `fix/boot-wedge-diagnostics`.
+
+> ## The finding, and it overturns how the failure was described
+>
+> Twice, the Pico 1 powered off and would not come back; a BOOTSEL reflash
+> recovered it both times. **Nothing non-volatile was ever wrong.** The
+> firmware cannot corrupt its own image (no `flash_range_*` anywhere in
+> `src/`, no MicroPython flash VFS), the SD block layer is deadline-guarded
+> at every wait, and the state loaders validate magic/dtype/count.
+>
+> **Then the decisive test: left to drain, it booted normally with no
+> reflash.** So the axis was never "power cycle vs. reflash" — it is **short
+> power-off vs. long one**. The stuck state was volatile, with a decay time
+> longer than a normal power-off. `3V3_OUT` is the Pico module's own
+> regulator output and feeds the flash, the PSRAM and the SD card; a chip on
+> it left un-reset while the RP2040 does reset fits everything, and it
+> self-perpetuates because every retry power-cycle is also short.
+>
+> **Root cause is still not attributed.** That is what the instrumentation is
+> for — the next occurrence should name itself.
+>
+> ## What landed (D101)
+>
+> - Backlight on inside `platform::init()`, right after `display().init()`.
+>   Bring-up used to be silent *and* dark, so a wedge in init was
+>   indistinguishable from a board that never started. Lit-but-blank is a
+>   diagnosis; dark is not.
+> - New firmware-only `platform/boot_trace.{hpp,cpp}`: records the bring-up
+>   stage in `__uninitialized_ram` (fault.cpp's mechanism) and reports a
+>   previous boot's wedge on the 30 s heartbeat.
+> - A 5 s watchdog across `platform::init()` + `run_self_tests()`, disarmed
+>   at `kStateLoad`. It covers `psram_spi_init()`'s PIO/DMA waits, which have
+>   **no timeout at all** and which nothing was covering — the bulk test's
+>   watchdog arms later.
+>
+> Cost: **+28 bytes of static SRAM** (246,864 vs 246,836). Both boards build,
+> lint/format pass, 22 host suites / 0 failures.
+>
+> ## What to watch while it soaks
+>
+> 1. **`boot: previous boot wedged at stage <name>, streak <n>`** on the 30 s
+>    heartbeat. That line is the whole point — it names the stage the failure
+>    happens in, which is what nothing could do before.
+> 2. **The backlight change has not been checked visually.** Serial cannot see
+>    the panel and the board was driven over USB all session. One glance on a
+>    physical power-on settles it.
+> 3. **`boot: watchdog_caused_reboot=1` has a new source** — it reads 1 after a
+>    wedge reboot too. Read it alongside the wedge line above it, not as a
+>    power-cycle test on its own. D65 still holds for what it actually measures.
+> 4. If it wedges three times at `kPsram`, the board comes up **without PSRAM**
+>    and a red indicator rather than reboot-looping. PSRAM then stays down for
+>    that whole boot; the next power cycle retries it.
+>
+> ## The bug hardware caught, worth reusing
+>
+> Testing the escape hatch with a temporary injected hang found a defect in the
+> escape hatch itself. Skipping `psram().init()` left the PIO/DMA instance
+> unconfigured, and `main()`'s late-init loop then called `reinit()` on it —
+> DMA channel 0 through a null PIO, spinning forever. **The signature was a
+> live USB device with a main loop that never turned over: enumerated, stable,
+> completely silent.** Worth recognising, because it reads like a dead board
+> and is not one. `Psram::reinit()` now refuses an instance `init()` never
+> configured.
+>
+> The general form: **an escape hatch that has never been fired is a guess.**
+> Three ~5 s reboot cycles and the correct report only appeared after the fix.
+
+---
+
+**Previous session:** 2026-08-30 — **Phase 6.4 is nearly closed, and everything
 is on `main`.** PR [#60](https://github.com/moodoki/graphite_picocalc_gc/pull/60)
 (the phase, 28 commits) and PR
 [#66](https://github.com/moodoki/graphite_picocalc_gc/pull/66) (the chrome
