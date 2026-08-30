@@ -34,6 +34,7 @@ bool self_test() {
 
 bool Psram::init() {
     g_psram = psram_spi_init(pio1, -1);
+    configured_ = true;
     ok_ = self_test();
     next_ = 0;
     return ok_;
@@ -42,6 +43,9 @@ bool Psram::init() {
 bool Psram::reinit() {
     if (ok_) {
         return true;
+    }
+    if (!configured_) {
+        return false;  // init() was skipped; there is no instance to reset.
     }
     // Re-send reset-enable/reset through the already-configured PIO.
     // Deliberately NOT psram_spi_init(): every call re-adds the PIO

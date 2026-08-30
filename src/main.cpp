@@ -17,6 +17,7 @@
 
 #include "config.hpp"
 #include "platform/app_registry.hpp"
+#include "platform/boot_trace.hpp"
 #include "platform/fault.hpp"
 #include "platform/platform.hpp"
 #include "platform/power.hpp"
@@ -389,16 +390,24 @@ int main() {
     // fault-triggered reboot looks like any other to run_self_tests().
     g_prior_fault = platform::take_prior_fault(&g_fault);
     g_watchdog_caused_reboot = watchdog_caused_reboot();
+    // Same ordering rule as the two captures above: read the previous boot's
+    // verdict before arming anything. From here until boot_trace_end(), a
+    // stall of more than a few seconds reboots the board instead of hanging
+    // it -- psram().init() below has waits that cannot time out on their own.
+    platform::boot_trace_begin();
     // Paint the unused stack now, while it is shallow, so the heartbeat
     // below can report how deep anything has actually gone (D47).
     platform::paint_stack();
 
     g_init_status = platform::init();
+    platform::boot_stage(platform::BootStage::kSelfTest);
     run_self_tests();
+    // Disarms the boot watchdog: the loads below go through FatFs, where a
+    // slow card legitimately takes seconds. The backlight came on back in
+    // platform::init(), where it now lives.
+    platform::boot_stage(platform::BootStage::kStateLoad);
 
     math::fn::seed_rand(get_rand_64());
-
-    platform::display().set_backlight(200);
 
     // Dual-core display pipeline (D10, revived 2026-07-25): core 1 DMAs
     // the current strip while core 0 renders the next. Strip mode (Pico 1)
@@ -471,6 +480,11 @@ int main() {
     // Event-driven rendering: a full-frame push is ~200 ms, so redraw only
     // after input (or the initial frame) instead of every loop iteration.
     bool dirty = true;
+
+    // Boot is over: clear the wedge streak, and make sure nothing left the
+    // boot watchdog armed behind us.
+    platform::boot_trace_end();
+
     while (true) {
         const bool psram_healthy = g_init_status.psram && g_psram_alloc_ok;
         const bool sd_healthy = g_init_status.storage && g_sd_test == SdTest::kOk;
@@ -663,6 +677,24 @@ int main() {
                     static_cast<unsigned long>(g_fault.sp),
                     static_cast<unsigned long>(g_fault.depth),
                     static_cast<unsigned long>(platform::stack_total()));
+            }
+        }
+
+        // Previous boot never reached the main loop (2026-08-30). On the
+        // same 30 s heartbeat as the blocks above and for a sharper version
+        // of the same reason: the boot this reports on is one where nothing
+        // was capturable while it was happening.
+        {
+            static uint32_t last_wedge_report_ms = 0;
+            platform::BootStage wedge_stage = platform::BootStage::kEntry;
+            uint32_t wedge_streak = 0;
+            const uint32_t now_ms = platform::uptime_ms();
+            if (platform::prior_boot_wedged(&wedge_stage, &wedge_streak) && now_ms > 3'000 &&
+                now_ms - last_wedge_report_ms >= 30'000) {
+                last_wedge_report_ms = now_ms;
+                printf("boot: previous boot wedged at stage %s, streak %lu\n",
+                       platform::boot_stage_name(wedge_stage),
+                       static_cast<unsigned long>(wedge_streak));
             }
         }
 

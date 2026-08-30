@@ -20,6 +20,13 @@ public:
     // reset and re-runs the self-test without re-allocating PIO/DMA
     // resources. On a cold Pico 2 power-on the PSRAM needs several
     // seconds of rail settle (D14) — the main loop retries via this.
+    //
+    // Returns false without touching the hardware if init() never ran.
+    // That is not hypothetical: boot_trace's wedge escape skips init()
+    // entirely, and reinit() on an unconfigured instance drives DMA
+    // channel 0 through a null PIO and hangs in the wait — a live board
+    // with USB still enumerating and a main loop that never turns over
+    // (caught on hardware 2026-08-30).
     bool reinit();
 
     bool ok() const { return ok_; }
@@ -47,6 +54,7 @@ public:
 
 private:
     bool ok_ = false;
+    bool configured_ = false;  // psram_spi_init() has claimed PIO + DMA
     uint32_t next_ = 0;
 };
 

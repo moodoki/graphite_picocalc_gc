@@ -24,6 +24,7 @@ set(GRAPHITE_ROOT ${CMAKE_CURRENT_LIST_DIR}/..)
 # is exactly what the two targets do NOT share.
 set(GRAPHITE_PICO_SOURCES
     ${GRAPHITE_ROOT}/src/main.cpp
+    ${GRAPHITE_ROOT}/src/platform/boot_trace.cpp
     ${GRAPHITE_ROOT}/src/platform/display.cpp
     ${GRAPHITE_ROOT}/src/platform/fault.cpp
     ${GRAPHITE_ROOT}/src/platform/keyboard.cpp
