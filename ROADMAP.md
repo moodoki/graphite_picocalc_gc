@@ -25,6 +25,7 @@ significant work that turned up outside them. See
 | 6: Non-calculator functions | **6A, 6B and 6C.1 code-complete** | App launcher, shared text editor, file browser, Notepad, and MicroPython running on the device with a `calc` module for expressions, variables, the CAS, complex numbers, graphing, lists, matrices, drawing, key input and files — plus SD app manifests, so a directory under `/picocalc/apps/` is its own launcher tile. [Spec](docs/phases/phase6-spec.md) |
 | 6.3: Native compiled apps | **Proposed — under review, not committed** | A `.uf2` on the SD card becomes a launcher tile. The calculator chain-loads a separate flash slot it never overwrites, and refuses a wrong-board image before erasing anything. On the Pico 2, stock third-party firmware images run from that slot too, by address translation. Enables a Python-free build that keeps scripting. [Spec](docs/phases/phase6.3-spec.md) |
 | 6.4: Desktop target (Linux + macOS) | **In progress — all but 6.4.5 (SDL) and 6.4.9 (close) done** | The shared `src/` tree built as a native application, in two forms: a headless renderer that writes screens to image files for the docs and for CI, and an SDL window for interactive work. Measured feasible before drafting — 98 of 101 portable sources and 136 of 136 MicroPython files already compile natively. Closes [#33](https://github.com/moodoki/graphite_picocalc_gc/issues/33) and [#42](https://github.com/moodoki/graphite_picocalc_gc/issues/42). [Spec](docs/phases/phase6.4-spec.md) |
+| 6.5: Polish — efficiency, latency, latent traps | **Proposed — recommended before further feature work** | A whole-codebase review turned into 13 independently adoptable packages: CI budget gates, atomic and write-behind persistence, the D53 PSRAM access sweep, Pico 1 strip-render and dirty-band latency, comment-only invariants turned into debug asserts, silent-truncation fixes, shared UI components that unblock #18/#21/#41/#49, and readiness notes for 6.1–6.4.5. [Spec](docs/phases/phase6.5-spec.md) |
 
 Everything marked Complete is hardware-verified on both the Pico 1 H and the
 Pico 2 H. **Phase 6.4's host target does not change that rule** — it is a
@@ -47,6 +48,7 @@ the record of what was agreed:
 - [phase6-spec.md](docs/phases/phase6-spec.md) — app framework and MicroPython
 - [phase6.3-spec.md](docs/phases/phase6.3-spec.md) — native compiled `.uf2` apps
 - [phase6.4-spec.md](docs/phases/phase6.4-spec.md) — desktop target for Linux and macOS
+- [phase6.5-spec.md](docs/phases/phase6.5-spec.md) — polish: efficiency, latency and latent traps (proposed)
 
 ## What Phase 5.2 changed, and why it mattered
 
