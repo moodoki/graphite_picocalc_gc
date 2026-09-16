@@ -1,54 +1,95 @@
 # Start here — next session
 
-**Last session:** 2026-08-29 — **Phase 6.4 is most of the way done.** The
-calculator now builds and runs as a native application, draws its own
-documentation screenshots, and **issue #52 has been photographed and
-root-caused**. Open PR:
-**[#60](https://github.com/moodoki/graphite_picocalc_gc/pull/60)**, 17
-commits on `phase-6.4`, all checks green.
+**Last session:** 2026-08-30 — **Phase 6.4 is nearly closed, and everything
+is on `main`.** PR [#60](https://github.com/moodoki/graphite_picocalc_gc/pull/60)
+(the phase, 28 commits) and PR
+[#66](https://github.com/moodoki/graphite_picocalc_gc/pull/66) (the chrome
+fixes, 3 commits) are both **merged**. **No new tag** — `v0.5.0` is still the
+release. No open PRs; `main` is green.
 
 > ## What is done, and what is left
 >
 > Done: **6.4.0** (spike), **6.4.1** (shared source list, both `.uf2`s
 > byte-identical), **6.4.2** (POSIX storage), **6.4.3** (MicroPython),
-> **6.4.4** (images + key scripts, **closes #33**), **6.4.7** (#52
-> verified), most of **6.4.6** (CI) and **6.4.9** (docs).
+> **6.4.4** (images + key scripts, **closes #33**), **6.4.6** (CI),
+> **6.4.7** (#52 verified), **6.4.8** (the chrome sweep) and most of
+> **6.4.9** (docs).
 >
-> **6.4.8 landed 2026-08-29**: 30 images, five issues (**#61-#65**), no
-> fixes. The haul is not what the static scan predicted — #52 is still the
-> only truncating label, and the real finds were things arithmetic could
-> not reach. **#62** is the one to read first: eight screens hand-roll the
-> status bar and therefore cannot show D26's health indicators, so a
-> failing card is invisible on the Y= editor, the table and four others.
-> **#61** is the user-triggerable one, from a name in `app.txt`.
+> **Left: 6.4.5** (SDL + the sound seam, ~10 hrs, separable — and scoped:
+> the firmware half is written and reviewed, not flashed and listened to,
+> see D95's second amendment) **and 6.4.9's close** (README section,
+> ROADMAP row, `dependencies.md`, §7's checklist). 6.4.9 shrinks if 6.4.5
+> never happens, since the SDL2 dependency entry would be moot — so decide
+> 6.4.5 first, or accept a smaller 6.4.9.
 >
-> **6.4.6 closed the same day**, mostly by having already happened — three
-> of its four pieces landed out of order in earlier tasks. What it took was
-> **D99** (macOS is covered locally, not by a runner; there has never been
-> one, and the row asked for it) and §7's two deliberate tests. Both are now
-> satisfied by observation: the drift check went red by itself during 6.4.8,
-> and the host suite was broken on purpose on a throwaway branch —
-> `FAIL: one_var n`, other six jobs green, branch deleted.
+> clang-tidy is still not in CI and still cannot see `host/` (it replays
+> the arm-none-eabi compile database). That is **out of 6.4.6's scope on
+> purpose** — named, not assigned to anyone.
 >
-> Left: **6.4.5**, SDL, which now also has to build the sound seam (see
-> below, and it is scoped — firmware half reviewed, not listened to), and
-> **6.4.9**, docs and close. clang-tidy is still not in CI and still cannot
-> see `host/`, which is **out of 6.4.6's scope on purpose** — named, not
-> assigned. The five chrome fixes are a separate session by design.
+> ## The chrome sweep, filed and then fixed
 >
-> Three things were left for the developer to decide, deliberately. Two
-> are settled. The **#52 image is posted** (comment `5461573497`), with the
-> 4-character finding, which completes 6.4.7's gate. And **`host-shot` was
-> split in two** rather than answered yes or no: `host-render` (build,
-> render, flat-colour check, determinism) **joins the release gate**,
-> because a frame of one colour is a firmware fault; `host-images` (the
-> D98 drift check) **stays out**, because a stale screenshot should not
-> block a firmware tag. The split is free in wall-clock — either half
-> finishes well inside the firmware builds `release` already waits on.
+> **6.4.8 filed six issues and fixed none, by design; a following session
+> fixed all six.** #52, #61, #62, #63, #64, #65 are closed and on `main`.
 >
-> The third was the go-ahead for 6.4.8, given the same day; it filed
-> #61-#65.
-
+> The haul was not what the static scan predicted. It expected a pile of
+> truncated softkey labels; #52 was the only one. The real finds were
+> things arithmetic could not have reached:
+>
+> - **#62** is the one worth remembering. Eight screens hand-rolled the
+>   first two lines of `draw_status_bar` and so could not show D26's
+>   `SD`/`PSRAM` indicators at all — a failing card was invisible on the Y=
+>   editor, the table, window settings and help. **No reading of
+>   `draw_status_bar`'s call sites could have found it**, because the
+>   finding is in the screens that do not call it.
+> - **#61**: nothing clamped the title against the right-hand block.
+>   Reachable by making a folder deep enough.
+> - **#63 turned out not to be a defect at all** — see D100 below.
+>
+> **31 committed images now gate every chrome bar in `src/`**, in its modal
+> and flag variants. A change that moves any of them fails CI. That is the
+> difference between this and a one-off audit, and it is the thing to lean
+> on rather than re-auditing by hand.
+>
+> Net effect on the firmware, measured with the build id pinned rather than
+> estimated: Phase 6.4 added **+112 bytes** (Pico 1) / **+48** (Pico 2) of
+> `platform::` seams; the chrome fixes gave back **−664** / **−632**. Both
+> together against pre-6.4 `main`: **−552 / −584 bytes of flash, SRAM
+> unchanged.**
+>
+> ## D99 and D100, both recorded rather than assumed
+>
+> **D99 — macOS coverage is local, not a CI runner.** 6.4.6's row asked for
+> a macOS runner and there has never been one. Linux runs in CI on every
+> PR; macOS is the developer's own machine, and a local pass counts. The
+> asymmetry is the right way round: the platform with automated coverage
+> should be the one nobody is watching. The hole is real and named — a
+> macOS-only regression is caught by a human remembering to build.
+>
+> **D100 — no 2nd/ALPHA modes.** #63 was filed as a bug and is not one.
+> `StatusFlags` was never a half-built feature; 2nd and ALPHA are a TI
+> keyboard convention that solves a hardware problem this calculator does
+> not have. TI overloads ~50 keys to reach several hundred functions and
+> must show which layer is live; **the PicoCalc has a full QWERTY
+> keyboard**, so there is no second layer for an indicator to report. The
+> indicators are removed as inherited shape, not fixed as a defect.
+>
+> ## Do not chase the free-SRAM figure again
+>
+> A "1.2 KB regression since v0.5.0" was chased and **does not exist**.
+> `v0.5.0` and `main` were built side by side with `PICOCALC_BUILD_ID`
+> pinned: static SRAM is **byte-identical**, 246,836 (Pico 1) and 499,404
+> (Pico 2).
+>
+> What differed was the arithmetic, and it is a trap worth knowing:
+> `scripts/size-report.sh` measures against the **main bank** (256 KB /
+> 512 KB) and **truncates**, so Pico 1's 15,308 free bytes = 14.95 KB print
+> as "14 KB". Older notes quote 15.2 KB for Pico 1 and 32.6 KB for Pico 2 —
+> and the Pico 2 number used the RP2350's full **520 KB** instead, which is
+> 33,076 bytes = 32.3 KB. Two conventions in one sentence, 8 KB apart.
+>
+> **Compare the used-bytes figure. It is the only number with one
+> meaning.** Headroom is ~15 KB on Pico 1 and has not moved since v0.5.0.
+>
 > ## Read this before trusting anything the host build says
 >
 > `docs/host-build.md` is the guide. The section that matters is the one
@@ -214,23 +255,20 @@ were meant to confirm.
 > cause still unknown; **#24 stays open** and still needs the diagnostic
 > build its own notes describe (~1 hour).
 
-> ## Open bugs — 3
->
-> - **#52** softkey labels truncate: `MKDIR` renders `MKDI`.
->   `draw_softkeys` truncates to 6 chars a cell by design, so the new
->   text-fits lint gate deliberately cannot see it. **Diagnosed 2026-08-29
->   off the generated image:** `max_chars = (320/6 - 2) / 8 = 6` is applied
->   to the string *after* `"%d:"` has been prefixed, so the label budget is
->   **4, not 6**. `CUT`/`MOVE`/`REN` fit, `MKDIR` never could. The comment
->   at `files_screen.cpp:589` claiming both labels are "within
->   `draw_softkeys`' 6-character cell" counts the label and forgets the
->   prefix. Fix belongs to 6.4.8's sweep, which files and does not fix.
+> ## Open bugs — 2
+
 > - **#54** ESC out of an app reports the run as `raised` and prints a
 >   traceback — **extended 2026-08-23** to cover the force-quit unwind: a
 >   deliberate kill still needs a third press to dismiss the wreckage.
 >   `interrupt_pending_` already distinguishes the case at the
 >   `micropython_embed` seam; only the return shape has to carry it.
 > - **#24** D53 root cause. `hw-pending`, `board:pico1`.
+>
+> **#52 closed 2026-08-30.** `MKDIR` → `MKDR`. The label budget is **4, not
+> 6**: `draw_softkeys` renders `"%d:%s"` and truncates the *result* to the
+> six characters a 53 px cell holds, so the `"n:"` prefix no caller controls
+> spends two of them. The comment above the array asserted the opposite and
+> was wrong for as long as the bug lasted.
 
 > ## What's next — genuinely open
 >
